@@ -259,21 +259,28 @@ internal class Braineroid : KillableAlien
 		}
 		else
 		{
+			// Online co-op (card e79bb994): a wrap is a ~800px JUMP, not motion. Unmarked, the
+			// host's finite-difference velocity estimator read it as ~13 px/ms and the joiner's
+			// puppet dead-reckoned across the screen on it. NetNoteTeleport says so on the wire.
 			if ((base.Position.X > 800f + num) & (base.DirectionalVector.X > 0f))
 			{
 				base.Position = new Vector2(0f - num, base.Position.Y);
+				NetNoteTeleport();
 			}
 			if ((base.Position.Y > 600f + num) & (base.DirectionalVector.Y > 0f))
 			{
 				base.Position = new Vector2(base.Position.X, 0f - num);
+				NetNoteTeleport();
 			}
 			if ((base.Position.X < 0f - num) & (base.DirectionalVector.X < 0f))
 			{
 				base.Position = new Vector2(800f + num, base.Position.Y);
+				NetNoteTeleport();
 			}
 			if ((base.Position.Y < 0f - num) & (base.DirectionalVector.Y < 0f))
 			{
 				base.Position = new Vector2(base.Position.X, 600f + num);
+				NetNoteTeleport();
 			}
 		}
 	}

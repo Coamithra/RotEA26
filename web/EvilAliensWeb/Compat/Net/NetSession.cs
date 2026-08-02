@@ -9,7 +9,7 @@ namespace EvilAliensWeb.Compat.Net
     // Distributed authority: each peer owns its OWN ship completely -- local input is read
     // untouched with zero added latency; the wire carries ship STATE (never inputs); the
     // other peer's ship is an interpolated puppet ~InterpDelayMs behind, whose shots spawn
-    // locally from its replicated firing state.
+    // locally from its replicated cumulative shot count.
     //
     // Card 11.2 adds WORLD authority: the host runs the real sim (spawners, level script,
     // enemy AI, score/lives); a join peer suppresses those (GameScene skips its event list,
@@ -67,17 +67,34 @@ namespace EvilAliensWeb.Compat.Net
         // replicated individually. A v9 peer would ignore the beat (unknown event type) AND
         // still expect the per-entity spawns, so it would see empty scenery: a real
         // incompatibility, hence the version move even though no existing layout changed.
-        // v11 (card c1a38ef9): motion parameters on the wire -- LazerDescriptor's state extras
+        // v11 (card f62116b5): EvDying -- the host announces that a deferred death has BEGUN, at
+        // the moment KilledBy returns without removing the component, instead of the joiner
+        // inferring it from hp==0 on that entity's next snapshot turn. A v10 peer would ignore
+        // the event and fall back to the hp==0 trigger, i.e. the pre-card latency rather than a
+        // desync -- so this bump is the cheap-protocol ruling's "put it on the wire and move the
+        // number" rather than a forced incompatibility.
+        // v12 (card a45b78f6): MsgShipState / MsgFriendState carry a cumulative u8 shotCount in
+        // place of the `firing` LEVEL flag. MsgFriendState MISPARSES on a v11 peer -- its b[2] was
+        // the flags byte and is now a raw count, so bit 1 of the count reads as "firing" and every
+        // couch/AI-friend puppet fires at random. MsgShipState degrades more quietly (the count
+        // took the byte after `aim`, which v11 never read, so it would simply see firing=false
+        // forever and the remote ship would never shoot). Either way a mixed pairing is wrong
+        // rather than merely older, which is the bump test.
+        // v13 (card e79bb994): a per-SAMPLE flags byte on every world-snapshot ENTRY
+        // (NetProtocol.NetSnapshotFlags), carrying the host's teleport marker. Like v12 and unlike
+        // the appended event types before it, this MOVED AN EXISTING LAYOUT -- a v12 peer would
+        // mis-parse every snapshot entry it received, so the bump is not a courtesy here, it is
+        // the only thing standing between a stale peer and a garbage world.
+        // v14 (card c1a38ef9): motion parameters on the wire -- LazerDescriptor's state extras
         // grow three sent RATES (6 -> 12 bytes) and FlyingSpiderDescriptor gains a path anchor in
         // its spawn extras (1 -> 5) plus state extras where it had none (0 -> 4).
         // Both blocks are length-guarded, so an older peer degrades to exactly the pre-card
         // behaviour rather than desyncing -- the ca4fd94f bump test, which this passes. The bump
         // is the batch convention rather than a strict requirement; see NetProtocol's header.
-        public const byte ProtocolVersion = 11;
+        public const byte ProtocolVersion = 14;
         public const float InterpDelayMs = 100f;
 
-        // ~30 Hz ship stream. INTERNAL because FiringHoldMsFor's contract is expressed in whole
-        // packets of it, and NetFireTest has to do the same arithmetic to assert that contract.
+        // ~30 Hz ship stream. INTERNAL because NetFireTest scripts its packet cadence against it.
         internal const long StreamIntervalMs = 33;
         // Per-slot HUD state changes far slower than a ship pose (a combo tick, a bar creeping up),
         // and it is a readout rather than something the sim reads back, so a third of the ship
@@ -85,8 +102,17 @@ namespace EvilAliensWeb.Compat.Net
         private const long HudIntervalMs = 100;      // ~10 Hz per-slot HUD state
         internal const long SnapshotIntervalMs = 60;  // ~16.7 Hz world snapshot (host)
 
-        // Ceiling on a believable observed velocity, design px/ms -- the teleport guard's threshold
-        // (card 8dabe812; the reasoning is at the use site in CaptureBaseState).
+        // Ceiling on a believable observed velocity, design px/ms.
+        //
+        // IT IS A DIAGNOSTIC THRESHOLD, NOT A GUARD (card e79bb994). Card 8dabe812 used this as a
+        // plausibility CAP -- a sample above it had its velocity refused -- which was an estimator
+        // with a threshold, kept honest only by the measured gap below. It is now purely the
+        // trip-wire for a reposition site that forgot to call NetNoteTeleport
+        // (NetSession.NoteIfUnmarkedTeleport), and nothing it does can change what goes on the
+        // wire. That inverts its risk: as a cap, a value set too LOW silently clipped a genuinely
+        // fast enemy and recreated the very stutter it existed to remove; as a diagnostic, the
+        // worst it can do is print a spurious line. The measured separation is still what makes
+        // it useful, so the reasoning is kept verbatim:
         //
         // DERIVED FROM A MEASURED GAP, via `eaNetVelScan` (Compat/Net/NetVelocityScan) over
         // Level1/2/3 at Medium and Inzane, ~8 sim-minutes each. That tool reports each replicable
@@ -105,6 +131,9 @@ namespace EvilAliensWeb.Compat.Net
         //
         // 5.0 is the log midpoint of 2.5..11.6: 2.0x above the fastest real mover and 2.3x below
         // the slowest reposition. Well separated in both directions and tuned to neither.
+        // (Those three repositions are all MARKED now, so in a healthy build the diagnostic never
+        // sees them at all -- the right-hand side of the gap is what an UNMARKED one would land
+        // in, and is why the threshold is sited where it is rather than just above 2.5.)
         //
         // THE SEPARATION IS THE POINT, NOT THE PRECISION -- gameplay RNG is unseeded, so a soak
         // samples the MarsBoss entry curve wherever it happens to land and three runs of the same
@@ -156,11 +185,6 @@ namespace EvilAliensWeb.Compat.Net
         // a closed tab still departs instantly via the pagehide 'bye'.
         private const long PausedPeerTimeoutMs = 120000;
         private const long MetricsIntervalMs = 5000;
-        // "Still firing" window after the last FireAt intent -- the CEILING of the hold, not the
-        // hold itself. See FiringHoldMsFor: the far side re-fires through a cadence gate of the
-        // same period we are streaming, so the hold has to stay inside one period. This was the
-        // whole hold until card a5c2a39b, which is what doubled a single tap.
-        private const float FiringHoldMs = 150f;
         private const float RenderClockSnapMs = 250f;
         // Pop detection: a rendered step larger than any plausible ship motion over the same
         // real time (PlayerShip.MaxSpeed is 0.33 px/ms; x2 margin + slack for frame jitter).
@@ -230,6 +254,18 @@ namespace EvilAliensWeb.Compat.Net
         private static long lastScoreSyncTx;
         private static Vector2 lastTxPos = new Vector2(400f, 300f);
         private static float lastTxAim = 4.712389f;
+        // THE COUNT ON THE WIRE BELONGS TO THE SLOT, NOT TO THE SHIP, and that distinction is the
+        // whole reason these are two fields (card a45b78f6). `PlayerShip.NetShotCount` restarts at
+        // 0 with every ship -- it is pooled, so it has to -- while the receiver holds ONE baseline
+        // for as long as it holds a puppet. A ship that died at 252 and respawned at 0 is a
+        // wrapped delta of 4: inside the catch-up bound, so the peer would spawn four bullets
+        // nobody fired. Advancing our own counter by the SHIP's delta, and taking no delta at all
+        // across a ship swap, makes what we send monotone per slot however often the ship behind
+        // it is replaced -- and leaves NetMaxCatchUpShots to mean only what it says, packet loss.
+        // Held across a shipless heartbeat exactly as lastTxPos/lastTxAim are.
+        private static byte lastTxShotCount;
+        private static PlayerShip lastTxShip;
+        private static byte lastTxShipShots;
         private static long lastHudTx;
         private static int snapshotCursor;
         private static readonly byte[] snapshotScratch = new byte[SnapshotScratchBytes];
@@ -584,8 +620,12 @@ namespace EvilAliensWeb.Compat.Net
             grantsAwaitingStream.Clear();
             localJoinSimDone = 0;
             localJoinSimAt = 0;
+            unmarkedTeleportReported.Clear();
             txSeq = 0;
             txEventSeq = 0;
+            lastTxShotCount = 0;
+            lastTxShip = null;   // also drops a stale ship reference from the previous session
+            lastTxShipShots = 0;
             lastStreamTx = 0;
             lastSnapshotTx = 0;
             lastScoreSyncTx = 0;
@@ -835,66 +875,57 @@ namespace EvilAliensWeb.Compat.Net
 
         // ---- local ship -> wire ---------------------------------------------------------
 
-        // How long after the last FireAt intent we keep streaming firing=true (card a5c2a39b).
+        // THE SHIP STREAM CARRIES A CUMULATIVE SHOT COUNT, NOT A FIRE INTENT (card a45b78f6).
         //
-        // THE BUG THIS FIXES. `firing` is a LEVEL on the wire, and the peer re-fires from it
-        // through the REAL FireAt path -- whose cadence gate the peer has already set to OUR
-        // period (NetApplyRemoteState does `shoottimer.Duration = 1000/shotsPerSec` off the
-        // same packet). So the peer spawns `1 + floor(hold / period)` bullets for one tap. The
-        // hold was a flat 150 ms against a 125 ms default period (shotspersec 8), i.e. EXACTLY
-        // TWO bullets for every single tap -- and three at the maxed rate of 18/s (55.6 ms).
-        // Those phantom bullets are real in the peer's world and damage what they hit, which is
-        // what made a tap look like it killed an enemy on one screen and not the other.
+        // WHAT IT REPLACED, because the failure mode is the instructive part. `firing` used to be
+        // a LEVEL on the wire, sampled at packet rate, and the peer re-fired from it through a
+        // cadence gate it set from the SAME packet -- so one tap spawned `1 + floor(window /
+        // period)` bullets over there and the sender had to hold the flag for a window narrower
+        // than one cadence period to keep that at 1 (card a5c2a39b's `FiringHoldMsFor`, `P/2`).
+        // That bound held, but two things could not be fixed inside it: at the top fire rates the
+        // window is one packet wide, so a stream-lane DROP silently lost that bullet on the peer;
+        // and the intent was stamped BEFORE the owner's own gate, so two taps inside one cadence
+        // period were one bullet for the owner and two for the peer.
         //
-        // WHAT THE PEER ACTUALLY SEES IS PACKETS, NOT MILLISECONDS, and that is the whole
-        // subtlety. It holds the NEWEST sample until a newer one arrives (DriveRemoteShip reads
-        // buffer.Newest every tick), so a hold of `H` ms puts firing=true in front of the re-fire
-        // gate for `ceil(H / I) * I` ms over there, where `I` is the REAL send interval. That
-        // product has to stay under one cadence period `P`, and it is not monotone in H alone.
+        // A COUNT HAS NEITHER PROBLEM, and both for the same reason: it is cumulative, so the
+        // wire says WHAT HAPPENED rather than what is happening now. A dropped, reordered or late
+        // packet costs nothing (the next one carries the total); a delta is only ever produced by
+        // a bullet the owner really spawned, because the increment sits beside that bullet inside
+        // FireAt's gate. The receiver spends the delta through PlayerShip's own shot spawn with
+        // NO second gate -- see NetApplyRemoteState -- so there is no rate for either side to
+        // re-derive and nothing left to get wrong at 100 Hz, at 18 shots/sec, or under loss.
         //
-        // `H = P/2` IS THE BOUND, AND IT HOLDS FOR EVERY `I`, WHICH IS THE POINT. If I >= H the
-        // window is exactly I; if I < H then ceil(H/I)*I < H + I < 2H = P. So any send interval
-        // shorter than the cadence period is safe, whatever the frame rate.
+        // SendShipState therefore streams `local.NetShotCount` verbatim and holds no window at
+        // all. NetSession.Friends.cs does the same for couch players and AI friends.
         //
-        // DO NOT DERIVE THIS FROM THE NOMINAL 33 ms INTERVAL -- that was the first attempt and it
-        // is only correct at exactly 60 Hz. `SendShipState` runs off the `now - lastStreamTx >=
-        // StreamIntervalMs` gate, which is evaluated ONCE PER FRAME, so the real interval is the
-        // smallest frame multiple >= 33: 33.3 ms at 60 Hz but 40 ms at 100 Hz, and never 33.0.
-        // Counting whole nominal packets over-fires at 7, 9, 10, 13, 14 and 15 shots/sec on a
-        // 100 Hz display -- ordinary in-play rates, since shotspersec walks 8 -> 18 one FirePower
-        // pickup at a time. A hitched frame is a DOUBLING risk here, not a missed-bullet one:
-        // ceil(H/I)*I GROWS with I.
-        //
-        // TWO RESIDUALS, both at the top of the fire-rate range and both accepted:
-        //   * The floor keeps a tap from expiring between two packets, and from 15/s up it is
-        //     what binds (P/2 falls below one send interval). There the tap rides a SINGLE packet
-        //     with no redundancy, so a stream-lane DROP loses that bullet on the peer -- the kill
-        //     still counts on the owner's screen, where the bullet was real. Exactness under loss
-        //     needs a shot COUNT or a fire EDGE on the wire, i.e. a protocol version, judged not
-        //     worth it for one cosmetic bullet at one end of the range. Revisit if real-network
-        //     playtests show missing tap bullets.
-        //   * A send interval at or past the cadence period (below ~18 fps at the maxed fire
-        //     rate) cannot represent that cadence at all and doubles again. Nothing a level
-        //     encoding can do; the owner is already dropping frames faster than it shoots.
-        //
-        // NOT FIXED HERE, and unchanged by this card: `PlayerShip.FireAt` stamps NetLastFireMs on
-        // the INTENT, before its own cadence gate, so a second tap inside one cadence period
-        // restarts the hold while spawning no local bullet -- two taps ~80 ms apart are one bullet
-        // on the owner and two on the peer. The pre-card 150 ms hold did the same, so this is a
-        // pre-existing residual rather than a regression. Stamping on the actual SHOT instead
-        // would leave the hold uncovered between shots (H < P by construction above), so it
-        // trades this for a stretched sustained cadence; it needs its own card and its own
-        // measurement.
-        internal static float FiringHoldMsFor(int shotsPerSec)
+        // Legacy note for anyone reading a `firing` in an old branch: the flag bit is gone from
+        // NetProtocol (ShipFlagFiring), ShipSample carries ShotCount instead, and there is no
+        // sender-side timing left on this path -- which is also what let eaNetFire grow a real
+        // SENDER leg, the old design's stamp being unreachable without a clock seam on FireAt.
+        // Fold a ship's own shot count into the SLOT's wire counter. A change of ship (a respawn,
+        // or a pooled instance re-seated) contributes nothing: its counter is a fresh sequence,
+        // and any bullets it fired before we first saw it were fired into a life the peer's puppet
+        // was never watching. See the lastTxShotCount comment for why per-slot is the requirement.
+        private static byte AdvanceTxShots(PlayerShip ship, ref PlayerShip lastShip,
+            ref byte lastShipShots, ref byte wireCount)
         {
-            // shotsPerSec arrives from a live ship (Setup seeds 8, FirePower caps at 18), but
-            // guard the divide rather than trust it -- a 0 here would be an infinite hold.
-            float period = 1000f / Math.Max(shotsPerSec, 1);
-            // Floor: a hold below one send interval can expire between two packets and lose the
-            // tap outright. Ceiling: a very low fire rate must not stream firing=true for most of
-            // a second off one tap. Both only ever LOWER the marked-packet count, so neither can
-            // reintroduce the overlap the P/2 bound rules out.
-            return Math.Clamp(period * 0.5f, (float)StreamIntervalMs, FiringHoldMs);
+            bool sameShip = ReferenceEquals(ship, lastShip);
+            lastShip = ship;
+            return AdvanceTxShotCount(sameShip, ship.NetShotCount, ref lastShipShots, ref wireCount);
+        }
+
+        // The arithmetic of the above, with the ship identity already resolved to a bool -- so
+        // eaNetFire can drive a ship swap and a counter restart without needing two live ships.
+        internal static byte AdvanceTxShotCount(bool sameShip, byte shipShots, ref byte lastShipShots,
+            ref byte wireCount)
+        {
+            if (!sameShip)
+            {
+                lastShipShots = shipShots;
+            }
+            wireCount = (byte)(wireCount + (byte)(shipShots - lastShipShots));
+            lastShipShots = shipShots;
+            return wireCount;
         }
 
         private static void SendShipState(long now)
@@ -905,24 +936,24 @@ namespace EvilAliensWeb.Compat.Net
             Vector2 pos = lastTxPos;
             Vector2 vel = Vector2.Zero;
             float aim = lastTxAim;
-            bool firing = false;
+            byte shotCount = lastTxShotCount;
             int shots = 8;
             float bulletLife = 450f;
             if (alive)
             {
                 pos = local.GetPosition();
                 vel = local.NetVelocity;
-                firing = now - local.NetLastFireMs < FiringHoldMsFor(local.NetShotsPerSec);
-                if (firing || local.NetLastFireMs > 0)
-                {
-                    aim = local.NetLastFireAim;
-                }
+                // A ship that has never fired reports NetLastFireAim's own seed (facing up), so
+                // there is no "has it fired yet" test left to get wrong.
+                aim = local.NetLastFireAim;
+                shotCount = AdvanceTxShots(local, ref lastTxShip, ref lastTxShipShots, ref lastTxShotCount);
                 shots = local.NetShotsPerSec;
                 bulletLife = local.NetBulletLife;
                 lastTxPos = pos;
                 lastTxAim = aim;
+                lastTxShotCount = shotCount;
             }
-            transport.SendStream(NetProtocol.EncodeShipState(txSeq++, (uint)(now - sessionStartAt), pos, vel, aim, alive, firing, shots, bulletLife));
+            transport.SendStream(NetProtocol.EncodeShipState(txSeq++, (uint)(now - sessionStartAt), pos, vel, aim, alive, shotCount, shots, bulletLife));
             metrics.StreamTx++;
         }
 
@@ -1125,6 +1156,60 @@ namespace EvilAliensWeb.Compat.Net
             transport.SendReliable(NetProtocol.EncodeFxEvent(txEventSeq++, (byte)kind, netId, param));
             metrics.EventsTx++;
             metrics.BeatsTx++;
+        }
+
+        // "This entity's death has BEGUN and is going to take a while" (card f62116b5). Called
+        // from KillableAlien the moment a KilledBy returns WITHOUT having removed the component
+        // -- the discriminant is `!IsDead`, which is exactly the test the client already makes
+        // to spot the same thing, so the two ends agree by construction. An ordinary type ends
+        // its KilledBy in Die(), so it is dead by then and no beat goes out at all.
+        //
+        // WHY IT IS NOT INFERRED FROM THE SNAPSHOT ANY MORE. hp==0 in a snapshot entry says the
+        // same thing, and it is still the fallback (NetPuppets.ApplyHostKilledFromSnapshot) --
+        // but it only says it on that entity's round-robin turn, which is 60 ms at best and
+        // ~1.2 s in a big world, against a 2.5-5 s animation. This is immediate at any world
+        // size, and it cannot fire a tick early on an ordinary kill the way a sampled hp can.
+        //
+        // An entity with no netId has no puppet on the other screen to release, so there is
+        // nothing to say. Traffic is one 6-byte reliable frame per DEFERRED death, which is a
+        // handful per level.
+        //
+        // NO `NetScene.Current` GATE, unlike OnGameFx and the script beats -- this is an ENTITY
+        // LIFECYCLE event off the NetIdRegistry, like OnHostSpawn/OnHostDeath (further down this
+        // file, in the registry-seam block), and the registry's own enablement is what decides
+        // whether a world exists. Adding one would also make the host leg of eaNetDeathFx
+        // unreachable, since that suite plants real entities from the MENU. The client's rx
+        // handler is scene-gated, exactly as EvDeath's is.
+        //
+        // Named for the HOST side, like OnHostSpawn/OnHostDeath: NetPuppets.OnDeathBegan is the
+        // rx half, and a bare OnDeathBegan in a stack trace would not say which end it is.
+        public static void OnHostDeathBegan(AlienDrawableGameComponent comp)
+        {
+            if (!IsHost || !PeerUp || comp == null)
+            {
+                return;
+            }
+            if (!NetIdRegistry.TryGetByComp((GameComponent)(object)comp, out NetIdRegistry.Entry entry))
+            {
+                return;
+            }
+            OnHostDeathBegan(entry.Id);
+        }
+
+        // The by-id half, for NetIdRegistry.ReplayLive's catch-up: a peer joining mid-animation
+        // needs the beat for a death that began before it arrived.
+        internal static void OnHostDeathBegan(ushort netId)
+        {
+            if (!IsHost || !PeerUp)
+            {
+                return;
+            }
+            transport.SendReliable(NetProtocol.EncodeDyingEvent(txEventSeq++, netId));
+            metrics.EventsTx++;
+            if (NetHost.Current.NetLog)
+            {
+                Console.WriteLine("[net] tx dying id=" + netId);
+            }
         }
 
         public static void OnScriptUnlock(int item, int unlockType, int speech, string text)
@@ -1442,7 +1527,13 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            NetBaseState state = CaptureBaseState(e, NowMs);
+            // The entry flags are DISCARDED here, and that is not an oversight: EvSpawn's payload
+            // is the shared base-state block, which has no flags byte, because a spawn is the
+            // entity's first observation and "this sample is a discontinuity" is meaningless of
+            // it. Consuming the latch is still correct -- CaptureBaseState just advanced this
+            // entity's velocity baseline, so an unspent latch would refuse the FOLLOWING snapshot
+            // turn's velocity for a jump that happened before the entity existed on the wire.
+            NetBaseState state = CaptureBaseState(e, NowMs, out _);
             // Cast back for the descriptor: its extras surface is deliberately still on the
             // concrete type: 2c-iii measured moving it and DECLINED, so this cast is permanent
             // and is safe by construction -- see INetEntity's header for the argument.
@@ -1614,8 +1705,8 @@ namespace EvilAliensWeb.Compat.Net
                     break;
                 }
                 snapshotCursor = (snapshotCursor + 1) % live.Count;
-                NetBaseState state = CaptureBaseState(e, now);
-                NetProtocol.WriteSnapshotEntry(snapshotScratch, ref off, e.Id, e.TypeIdx, state, extraScratch, extraLen);
+                NetBaseState state = CaptureBaseState(e, now, out byte entryFlags);
+                NetProtocol.WriteSnapshotEntry(snapshotScratch, ref off, e.Id, e.TypeIdx, entryFlags, state, extraScratch, extraLen);
                 written++;
             }
             if (written == 0)
@@ -1630,15 +1721,32 @@ namespace EvilAliensWeb.Compat.Net
             metrics.SnapTx++;
         }
 
-        private static NetBaseState CaptureBaseState(NetIdRegistry.Entry e, long now)
+        private static NetBaseState CaptureBaseState(NetIdRegistry.Entry e, long now, out byte entryFlags)
         {
             INetEntity c = e.Comp;
             Vector2 pos = c.Position;
-            Vector2 vel = ResolveBaseVelocity(c.NetSpeedVector, c.NetPathAnchored, pos,
-                e.HasLastPos, e.LastPos, e.LastPosMs, now, out bool guarded);
-            if (guarded)
+            // TELEPORT MARKER (card e79bb994, replacing card 8dabe812's plausibility cap).
+            //
+            // Read-and-CLEAR first, unconditionally: the latch must be spent on this turn whether
+            // or not we go on to differentiate, or a teleport recorded before the entity's first
+            // observation would sit set and refuse a LATER turn's perfectly good velocity.
+            bool teleported = c.NetTakeTeleport();
+            entryFlags = teleported ? NetProtocol.NetSnapshotFlags.Teleported : NetProtocol.NetSnapshotFlags.None;
+
+            bool anchored = c.NetPathAnchored;
+            Vector2 vel = ResolveBaseVelocity(c.NetSpeedVector, anchored, teleported, pos,
+                e.HasLastPos, e.LastPos, e.LastPosMs, now);
+            if (teleported)
             {
-                metrics.VelGuard++;
+                metrics.Teleports++;
+            }
+            else if (!anchored && e.HasLastPos && now > e.LastPosMs)
+            {
+                // ANCHORED TYPES ARE SKIPPED, and it costs nothing: `vel` is the DECLARED vector
+                // for them, not an observed one, so the safety net below would be measuring the
+                // wrong quantity. Neither anchored type repositions (a wasp and a rock fly a
+                // straight line and die off-screen), so there is no reposition site to miss.
+                NoteIfUnmarkedTeleport(c, vel);
             }
             e.LastPos = pos;
             e.LastPosMs = now;
@@ -1655,62 +1763,109 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         // The velocity a snapshot carries, as a PURE decision (the OwnsSlotCore precedent): the
-        // whole of it is unobservable from any frame, and two of its three branches are chosen by
-        // an entity property, so a test that could not table-drive it could not cover it at all.
-        // Measured: a mutation dropping the anchored branch below passed the entire 32-probe
-        // suite and every leg of eaNetMotion until this was split out.
+        // whole of it is unobservable from any frame and all three of its branches are chosen by
+        // something other than the numbers, so a test that could not table-drive it could not
+        // cover it at all. Measured: a mutation dropping the ANCHORED branch passed the whole
+        // probe suite and every other leg of eaNetMotion until this was split out.
         //
         // Observed velocity: differentiate real positions between this entity's snapshot turns --
         // robust for enemies that move Position directly (arcs, easing) where Speed/Direction
-        // would lie. First observation falls back to SpeedVector.
-        internal static Vector2 ResolveBaseVelocity(Vector2 declared, bool anchored, Vector2 pos,
-            bool hasLastPos, Vector2 lastPos, long lastPosMs, long now, out bool guarded)
+        // would lie. THREE things fall back to the declared vector instead:
+        //
+        //   * the FIRST observation, which has nothing to difference against;
+        //   * a marked TELEPORT (card e79bb994) -- a finite difference cannot tell motion from a
+        //     jump, and the SpiderBoss is parked at the far screen edge to start each fly-by;
+        //     differentiating that ~800 px jump stamped 42-57 px/ms onto the wire and the client
+        //     dead-reckoned on it, collidably, killing the local player;
+        //   * an ANCHORED type (card c1a38ef9), whose real position is a linear baseline plus a
+        //     periodic component the client integrates for itself (INetEntity.NetPathOffset). A
+        //     difference taken over a whole snapshot turn describes a CHORD of that periodic
+        //     part rather than the baseline, so the estimate is wrong by construction and worse
+        //     the longer the turn. Here the declared vector is not a fallback at all -- it is the
+        //     baseline, exactly.
+        //
+        // FOR THE FIRST TWO THE DECLARED SPEED IS THE BEST THE HOST HAS, NOT A GOOD ANSWER -- do
+        // not read that fallback as informative. Half the replicable set (the SpiderBoss included)
+        // moves by writing `Position` directly and never assigns `Speed`/`Direction`, so its
+        // NetSpeedVector is ZERO: a marked park sends zero velocity and the puppet stands still
+        // until its next turn, up to ~1.2 s in a big world. That is the correct trade against
+        // flinging it across the screen collidably. Fixing it properly means giving those types
+        // a real motion model -- the anchored branch is what that looks like, and they cannot
+        // take it as they stand, precisely because their declared vector is the thing that lies.
+        //
+        // The CALLER still stamps LastPos/LastPosMs whatever this returns: they are the entity's
+        // observation history and must stay live in case a type ever stops being anchored
+        // mid-life.
+        internal static Vector2 ResolveBaseVelocity(Vector2 declared, bool anchored, bool teleported,
+            Vector2 pos, bool hasLastPos, Vector2 lastPos, long lastPosMs, long now)
         {
-            guarded = false;
-            Vector2 vel = declared;
-            // ANCHORED MOTION (card c1a38ef9): an anchored type keeps that declared value and is
-            // never differentiated. Its real position is a linear baseline plus a periodic
-            // component the client integrates for itself (INetEntity.NetPathOffset), and a finite
-            // difference taken over a whole snapshot turn describes a CHORD of that periodic part
-            // rather than the baseline -- so the estimate is wrong by construction, and worse the
-            // longer the turn. The declared vector is the baseline exactly.
-            //
-            // The caller still stamps LastPos/LastPosMs: they are the entity's observation
-            // history and must stay live in case the type ever stops being anchored mid-life.
-            if (!anchored && hasLastPos && now > lastPosMs)
+            if (anchored || teleported || !hasLastPos || now <= lastPosMs)
             {
-                Vector2 observed = (pos - lastPos) / (now - lastPosMs);
-                // TELEPORT GUARD (card 8dabe812). A finite difference cannot tell motion from a
-                // REPOSITION, and several entities are repositioned outright -- the SpiderBoss is
-                // parked at the far screen edge to start each fly-by. Differentiating that ~800 px
-                // jump over one turn stamps ~13 px/ms onto the wire, and the client then
-                // DEAD-RECKONS on it: it snaps to the new position (correctly -- the error is past
-                // SnapThresholdPx) and then flies onward at teleport speed until the next
-                // correction. Puppets are collidable, so the boss crosses the screen and kills the
-                // local player. Measured in tools/sim/net_puppet_drive_sim.py --smoothness: client
-                // peak 150.8 px/tick unguarded (~9000 px/s, the reported "2-3 frames"), 14.3 px/tick
-                // guarded, with the legitimate snap preserved and one spurious pop removed.
-                //
-                // Falling back to NetSpeedVector is the SAME fallback the first-observation branch
-                // above already uses, and it is the honest answer: for a repositioned entity the
-                // declared speed describes what it will do NEXT, which is what the client needs.
-                //
-                // THE CAP IS MEASURED, NOT GUESSED, and the measurement is the negative test:
-                // NetVelocityScan samples this exact quantity over real play and reports the
-                // fastest genuine mover per type. Clipping a real fast mover would recreate the
-                // stutter this card removes, one type at a time and invisibly -- so if a new type
-                // ever approaches this, RAISE THE CAP, and re-run the scan to say what it now
-                // clears. See tools/headless/probes/net_velguard.txt.
-                if (observed.LengthSquared() <= MaxObservedSpeedPxPerMs * MaxObservedSpeedPxPerMs)
-                {
-                    vel = observed;
-                }
-                else
-                {
-                    guarded = true;
-                }
+                return declared;
             }
-            return vel;
+            return (pos - lastPos) / (now - lastPosMs);
+        }
+
+        // Types already reported as suspected unmarked teleporters, so the console says each name
+        // ONCE. A reposition site fires every fly-by, and this runs inside the snapshot encode.
+        //
+        // Cleared per SESSION (ResetPerSessionState) and per SCAN (NetVelocityScan.Arm), not per
+        // process: a name burned once for the whole process would let a suite that reports a type
+        // on purpose -- NetTeleportTest's unmarked-jump control does exactly that with a UFO --
+        // silence a genuine one hit later in the same run, leaving only a counter to notice it.
+        private static readonly HashSet<string> unmarkedTeleportReported = new HashSet<string>();
+
+        internal static void ClearUnmarkedTeleportReports()
+        {
+            unmarkedTeleportReported.Clear();
+        }
+
+        // THE SAFETY NET FOR A MISSED REPOSITION SITE (card e79bb994).
+        //
+        // The marker is only as good as its call sites, and a missed one fails exactly the way the
+        // pre-card bug did -- silently, on the OTHER player's screen, one type at a time. So the
+        // 5.0 px/ms figure card 8dabe812 measured survives here, DEMOTED: nothing above reads it,
+        // it cannot alter a single byte on the wire, and a wrong value can therefore no longer
+        // clip a legitimately fast mover (which was that cap's own dangerous failure). All it can
+        // do now is name a type.
+        //
+        // Read the line as "add NetNoteTeleport() at this type's reposition site", not as a fault
+        // in the net layer. The ceiling under it is measured -- `eaNetVelScan` reports every
+        // replicable type's SUSTAINED speed and tops out at MarsBoss's 2.404 px/ms entry curve --
+        // and tools/headless/probes/net_velguard.txt asserts BOTH halves: that the threshold still
+        // clears every genuine mover (so this cannot cry wolf), and that a Level-2 soak produces
+        // no line at all (so every reposition site reachable there is marked).
+        private static void NoteIfUnmarkedTeleport(INetEntity c, Vector2 observed)
+        {
+            if (observed.LengthSquared() <= MaxObservedSpeedPxPerMs * MaxObservedSpeedPxPerMs)
+            {
+                return;
+            }
+            metrics.UnmarkedTeleports++;
+            ReportUnmarkedTeleport(c.GetType().Name, observed.Length());
+        }
+
+        // THE ONE PLACE THAT WORDS IT, because there are TWO detectors and they must not drift.
+        // This one (a live host session) is what a real player would hit; NetVelocityScan carries
+        // the other, which needs no session and is therefore the one a headless probe can assert
+        // -- `tools/headless/probes/net_velguard.txt` greps this exact line, so its shape is an
+        // interface. The once-per-type set is shared too: the message names a CODE fact, so
+        // repeating it per fly-by would only bury it.
+        //
+        // **THE METRIC IS NOT BUMPED HERE, deliberately** -- `NetMetrics` has no reset (every
+        // scenario asserts on DELTAS instead), so letting the offline scan bump `tpUnmarked` would
+        // leave a figure from a menu-time audit sitting in the first `[net]` line of an unrelated
+        // session. The caller above owns it, so that counter stays what its comment says: what a
+        // LIVE HOST observed. The scan keeps its own tally and prints it in the velscan table.
+        internal static void ReportUnmarkedTeleport(string typeName, float speedPxPerMs)
+        {
+            if (unmarkedTeleportReported.Add(typeName))
+            {
+                Console.WriteLine("[net] UNMARKED teleport suspected: " + typeName + " at "
+                    + speedPxPerMs.ToString("0.0") + " px/ms (threshold "
+                    + MaxObservedSpeedPxPerMs.ToString("0.0")
+                    + ") -- add NetNoteTeleport() at its reposition site");
+            }
         }
 
         // ---- host score sync ------------------------------------------------------------------
@@ -2853,12 +3008,12 @@ namespace EvilAliensWeb.Compat.Net
             int off = NetProtocol.SnapshotHeaderBytes;
             for (int i = 0; i < count; i++)
             {
-                if (!NetProtocol.TryReadSnapshotEntry(data, ref off, out ushort netId, out byte typeIdx, out NetBaseState state, out int extraOff, out int extraLen))
+                if (!NetProtocol.TryReadSnapshotEntry(data, ref off, out ushort netId, out byte typeIdx, out byte entryFlags, out NetBaseState state, out int extraOff, out int extraLen))
                 {
                     break;
                 }
                 metrics.SnapEntriesRx++;
-                if (NetPuppets.OnSnapshotEntry(netId, typeIdx, state, data, extraOff, extraLen, out bool popped, out SnapUnknownKind kind))
+                if (NetPuppets.OnSnapshotEntry(netId, typeIdx, entryFlags, state, data, extraOff, extraLen, out bool popped, out SnapUnknownKind kind))
                 {
                     if (popped)
                     {
@@ -2949,6 +3104,22 @@ namespace EvilAliensWeb.Compat.Net
                 if (NetHost.Current.NetLog)
                 {
                     Console.WriteLine("[net] rx death id=" + id + " killer=" + killer);
+                }
+                break;
+            }
+            case NetProtocol.EvDying:
+            {
+                // A deferred death has begun on the host (card f62116b5). Scene-gated like every
+                // world message; the settlement still arrives as the EvDeath that follows.
+                if (isHost || NetScene.Current == null
+                    || !NetProtocol.TryDecodeDyingEvent(data, out ushort dyingId))
+                {
+                    return;
+                }
+                NetPuppets.OnDeathBegan(dyingId);
+                if (NetHost.Current.NetLog)
+                {
+                    Console.WriteLine("[net] rx dying id=" + dyingId);
                 }
                 break;
             }
@@ -3625,8 +3796,10 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         // Called from PlayerShip.Update for ControlDevice.Remote ships: position from the
-        // interpolation buffer (~InterpDelayMs behind the newest sample), shots re-fired
-        // locally from the replicated firing state through the real FireAt path.
+        // interpolation buffer (~InterpDelayMs behind the newest sample), shots respawned locally
+        // from the newest sample's cumulative shot COUNT (card a45b78f6). The count comes off
+        // `buffer.Newest` rather than the interpolated pose deliberately -- it is a tally, not a
+        // quantity to lerp, and a stale sample would re-owe shots already fired.
         public static void DriveRemoteShip(PlayerShip ship, GameTime gameTime)
         {
             if (!Active)
@@ -3669,7 +3842,7 @@ namespace EvilAliensWeb.Compat.Net
             hasLastPuppetPos = true;
             metrics.BufferDepthMs = (float)(buffer.NewestMs - renderMs);
             ShipSample newest = buffer.Newest;
-            ship.NetApplyRemoteState(pos, newest.Aim, newest.Firing, remoteShotsPerSec, remoteBulletLife);
+            ship.NetApplyRemoteState(pos, newest.Aim, newest.ShotCount, remoteShotsPerSec, remoteBulletLife);
         }
     }
 }

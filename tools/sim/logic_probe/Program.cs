@@ -172,6 +172,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeHostMenu(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         Console.WriteLine(failures == 0 ? "ALL PASS" : failures + " FAILURE(S)");
         return failures == 0 ? 0 : 1;
     }
@@ -1674,7 +1680,7 @@ internal static class Program
             "4. stream-lane reorder + dedup",
             "5. scaled-i16 motion rates",
         };
-        return RunBrowserSuite(asm, "EvilAliensWeb.Compat.Net.NetWireTest", sections, minAssertions: 82);
+        return RunBrowserSuite(asm, "EvilAliensWeb.Compat.Net.NetWireTest", sections, minAssertions: 85);
     }
 
     // Card 25ad0659 (step 2a) -- the INetHost seam: the clock, the two build/identity
@@ -1982,7 +1988,11 @@ internal static class Program
     // floor on the PASS count, so deleting assertions is a failure rather than a faster pass --
     // the number is the count at the time of writing and is meant to be raised when legs are
     // added, never lowered to make a run green.
-    private static int RunBrowserSuite(Assembly asm, string typeName, string[] sections, int minAssertions)
+    // `card` defaults to 25ad0659, which is where this runner and its first two callers came
+    // from; a suite belonging to a different card passes its own (card 0d6ffe70 -- a heading
+    // naming the wrong card sends the next reader to the wrong write-up).
+    private static int RunBrowserSuite(Assembly asm, string typeName, string[] sections, int minAssertions,
+                                       string card = "25ad0659")
     {
         string shortName = typeName.Substring(typeName.LastIndexOf('.') + 1);
         Type suite = asm.GetType(typeName, true);
@@ -1993,7 +2003,7 @@ internal static class Program
             return 2;
         }
 
-        Console.WriteLine("[logic_probe] Compat/Net/" + shortName + " (card 25ad0659)");
+        Console.WriteLine("[logic_probe] Compat/Net/" + shortName + " (card " + card + ")");
         string report;
         try
         {
@@ -2056,6 +2066,27 @@ internal static class Program
     // running the game is looking at. The sweep is EXHAUSTIVE over the Levels enum, so a level
     // ADDED later is judged too -- it will show up as eligible, and whoever added it has to say
     // whether that is right.
+    // Card 0d6ffe70 -- which rows the host pause menu's "Online Play" submenu offers. The whole
+    // card is a predicate over five booleans that are each expensive to reach in a live game (a
+    // real peer, a real signaling listing, a level, a pause) and free to state as data, so the
+    // suite sweeps all 32 combinations of the REAL NetHostMenu.Entries. Runnable here because it
+    // touches no Game, no ServiceHelper and no clock -- the same property that makes eaNetHost a
+    // case set. Note NetHostMenuTest's sections 1-3 are per-STATE loops, so its assertion count
+    // is dominated by the sweep and a shrunk state space fails the minAssertions floor here.
+    private static int ProbeHostMenu(Assembly asm)
+    {
+        string[] sections =
+        {
+            "1. the exhaustive state sweep",
+            "2. entry 0 is never destructive",
+            "3. Available agrees with Entries",
+            "4. the two shapes never coexist",
+            "5. non-degeneracy + the pre-card control",
+            "6. labels",
+        };
+        return RunBrowserSuite(asm, "EvilAliensWeb.Compat.Net.NetHostMenuTest", sections, minAssertions: 44, card: "0d6ffe70");
+    }
+
     private static int ProbeListingLevels(Assembly asm)
     {
         Type listing = asm.GetType("EvilAliensWeb.Compat.Net.NetListing", true);

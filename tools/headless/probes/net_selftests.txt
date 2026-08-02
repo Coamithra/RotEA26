@@ -23,7 +23,9 @@
 # prints per-check detail and each documents what its failure costs a player. Do NOT "fix" the
 # probe by loosening an expectation: these are all-or-nothing tallies on purpose.
 #
-# TWELVE SUITES, ASSERTED AS TALLIES, never as `expect-not FAIL`. Three reasons, each of which has
+# EVERY SUITE BELOW IS ASSERTED AS A TALLY, never as `expect-not FAIL`. (This said TWELVE; the
+# set has grown since and the number was not being maintained, so the count is gone rather than
+# wrong -- the `eval` lines are the list.) Three reasons, each of which has
 # already cost something in this repo: (a) an `expect-not` passes on a run where the eval never
 # happened, which a renamed DebugInput method silently produces; (b) several of these suites SKIP
 # legs they cannot reach (NetCosmetic's client apply path needs a level, NetKickTest's
@@ -67,6 +69,9 @@ eval TeamSeat
 eval NetSimTest 150 20 60 200
 eval NetScenarios
 eval NetFx
+eval NetTeleport
+eval HostMenuTest
+eval HostMenuLive
 
 # the in-process wire + the wire-level codec round trips (card 25ad0659 step 1)
 # Cards 43e85936 / c146422f raised this 69 -> 77: the EvFx codec (kind/netId/pos/param, its
@@ -75,7 +80,20 @@ eval NetFx
 # THIRD leg is the one to keep: a frame encoded WITHOUT the byte must still decode, as
 # not-short -- which is the whole reason those cards needed no protocol version bump, so if
 # it ever goes red the bump is back on the table.
-expect \[netwire\] 82 passed, 0 failed
+# Card e79bb994 raised it 77 -> 80: the snapshot entry's new per-sample flags byte, asserted PER
+# ENTRY (the two entries in the stride leg now carry different flags, so a codec that read the byte
+# from a fixed offset would report the same value for both), an UNKNOWN flag BIT surviving decode
+# rather than refusing the entry -- NetSnapshotFlags is a bitmask, so masking is the degradation,
+# and a decoder that validated the whole byte would stop correcting that entity the day a later
+# build appends a flag -- and a runt entry one byte short of the base block being refused, which is
+# the boundary the flags byte moved.
+# Card c1a38ef9 raised it 80 -> 85: the scaled-i16 rate field under LazerDescriptor's three
+# sent rates and FlyingSpiderDescriptor's amplitude/phase. Two of its five legs are the ones
+# worth keeping: an over-range value must SATURATE rather than wrap (a wrapping cast flips
+# the sign, turning the miniboss' beam sweep into a counter-sweep), and the two SCALES must
+# stay distinct -- the sweep rate is 7 wire units at the rad scale and 0.7 at the px one, so
+# sharing a scale would leave every swept beam turning 43% wrong, silently.
+expect \[netwire\] 85 passed, 0 failed
 # the INetHost seam: the production mapping + the injected clock (card 25ad0659 step 2a). This one
 # is NOT pre-refactor state -- it is the refactor's own guard, and it is in this file so the same
 # exit code covers "the seam is wired right" and "no decision behind it moved".
@@ -145,6 +163,30 @@ expect \[netscen\] 80 passed, 0 failed
 # the ordering that split depends on: ApplyStateExtra only RECORDS, and the puppet DRIVER is what
 # builds and frees the child.
 expect \[netfx\] 24 passed, 0 failed
+# The teleport marker (card e79bb994), which REPLACED card 8dabe812's observed-velocity cap.
+# Two halves, each with the identical jump left UNMARKED beside it: section 1 runs a real HOST
+# session and reads the snapshot frames the peer RECEIVED (the wire is the only place the host's
+# decision is observable -- a refused sample looks exactly like an entity standing still), and
+# section 2 runs a real CLIENT session and asserts a marked entry SNAPS instead of being blended.
+# The controls carry the weight here: the pre-card code also ended up in the right PLACE, so
+# "the puppet is at the target" passes on the broken build too. What discriminates is the wire's
+# VELOCITY (declared vs the jump's 13 px/ms finite difference), the sub-threshold jump being
+# blended without the marker and snapped with it, and pupPops moving only on the unmarked one.
+# NOTE it deliberately PRINTS `[net] UNMARKED teleport suspected: UFO` -- that is its section-1c
+# control exercising the diagnostic on purpose, not a missed reposition site. The probe that
+# asserts the ABSENCE of that line over real play is net_velguard.txt, which does not run this.
+expect \[nettp\] 25 passed, 0 failed
+# The host pause menu's Online Play decision (card 0d6ffe70), in two halves that fail
+# differently. `hostmenu` is the PURE sweep -- all 32 combinations of the five booleans through
+# the real NetHostMenu.Entries, plus the properties no `if` restates (entry 0 is never a kick,
+# the room and kick shapes never coexist, Available agrees with Entries); it also runs under
+# logic_probe as ProbeHostMenu. `hostmenulive` is what that sweep structurally cannot see:
+# CurrentState() reading the LIVE statics, which could be wired to the wrong ones and leave all
+# 47 of the sweep's assertions green while the row silently never appears for anyone. It pairs a
+# real host session with a scripted peer, then makes the exact KickPeer call the Kick row makes
+# and asserts the EvKick frame reached the peer and the row RETRACTED.
+expect \[hostmenu\] 47 passed, 0 failed
+expect \[hostmenulive\] 18 passed, 0 failed
 # The impairment wrapper's per-lane policy (card 40334a8f) -- the RELIABLE lane takes delay only
 # and its release times are clamped monotone, so jitter can never drop or reorder it. That clamp
 # ONLY bites under jitter, which is why this needs its own leg: eaNetWire.test()'s section 2 runs

@@ -349,8 +349,12 @@ namespace EvilAliensWeb.Compat.Net
         // CaptureBaseState. An anchored client integrates its own periodic component ON TOP of
         // the velocity the host sends, so if the host goes back to differentiating, that periodic
         // part is counted TWICE -- the wasp bobs at double amplitude and the correction fights it
-        // every turn. Measured: a mutation dropping the anchored branch passed the whole 32-probe
+        // every turn. Measured: a mutation dropping the anchored branch passed the whole probe
         // suite and every other leg here, which is why this section exists.
+        //
+        // It shares the decision with card e79bb994's teleport marker, so the two are asserted
+        // TOGETHER -- they are separate reasons to refuse a finite difference and each must keep
+        // working when the other is off.
         private static void SectionHostVelocity(System.Action<string, bool> check)
         {
             // One entity, sampled 100 ms apart, with a DECLARED velocity that deliberately
@@ -360,10 +364,10 @@ namespace EvilAliensWeb.Compat.Net
             Vector2 last = new Vector2(400f, 300f);
             Vector2 now = new Vector2(388f, 320f); // -12 px of X drift, +20 px of swivel
 
-            Vector2 anchored = NetSession.ResolveBaseVelocity(declared, anchored: true, now,
-                hasLastPos: true, last, 0L, 100L, out bool anchoredGuard);
-            Vector2 observed = NetSession.ResolveBaseVelocity(declared, anchored: false, now,
-                hasLastPos: true, last, 0L, 100L, out _);
+            Vector2 anchored = NetSession.ResolveBaseVelocity(
+                declared, anchored: true, teleported: false, now, true, last, 0L, 100L);
+            Vector2 observed = NetSession.ResolveBaseVelocity(
+                declared, anchored: false, teleported: false, now, true, last, 0L, 100L);
 
             check("an ANCHORED entity's velocity is its declared vector, never differenced",
                 anchored == declared);
@@ -372,23 +376,31 @@ namespace EvilAliensWeb.Compat.Net
             // up as Y travel -- the pollution the anchor exists to remove.
             check("...while an ordinary entity IS differenced on the same inputs",
                 observed != declared && Near(observed.Y, 0.2f, 0.001f));
-            check("...and the anchored path never spends the teleport guard", !anchoredGuard);
 
             // The first-observation fallback is the declared vector for BOTH, which is what makes
             // an anchored entity's first snapshot correct rather than a special case.
             check("with no history both paths fall back to the declared vector",
-                NetSession.ResolveBaseVelocity(declared, anchored: true, now,
-                        hasLastPos: false, last, 0L, 100L, out _) == declared
-                    && NetSession.ResolveBaseVelocity(declared, anchored: false, now,
-                        hasLastPos: false, last, 0L, 100L, out _) == declared);
+                NetSession.ResolveBaseVelocity(
+                        declared, anchored: true, teleported: false, now, false, last, 0L, 100L)
+                    == declared
+                    && NetSession.ResolveBaseVelocity(
+                        declared, anchored: false, teleported: false, now, false, last, 0L, 100L)
+                    == declared);
 
-            // The teleport guard (card 8dabe812) still stands on the un-anchored path: an 800 px
-            // reposition over 100 ms is 8 px/ms, past MaxObservedSpeedPxPerMs.
+            // The teleport marker (card e79bb994) is the OTHER reason to refuse a difference, and
+            // it still stands on the un-anchored path -- these two branches share one decision, so
+            // a change to either must leave the other working.
             Vector2 far = new Vector2(1200f, 300f);
-            Vector2 guardedVel = NetSession.ResolveBaseVelocity(declared, anchored: false, far,
-                hasLastPos: true, last, 0L, 100L, out bool guarded);
-            check("the teleport guard still refuses an implausible sample",
-                guarded && guardedVel == declared);
+            check("a MARKED teleport is not differenced either",
+                NetSession.ResolveBaseVelocity(
+                    declared, anchored: false, teleported: true, far, true, last, 0L, 100L)
+                    == declared);
+            // ...with its own control: the identical jump UNMARKED really is differenced, so
+            // neither leg can be passing because the function refuses everything.
+            check("...while the same jump UNMARKED is (the control for both branches)",
+                NetSession.ResolveBaseVelocity(
+                    declared, anchored: false, teleported: false, far, true, last, 0L, 100L)
+                    != declared);
         }
 
         // ---- helpers -----------------------------------------------------------------------

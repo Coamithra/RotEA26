@@ -1,0 +1,58 @@
+# PROBE: the pause menu has NO Online Play row when there is nothing behind it
+#
+# PINS:   card 0d6ffe70's negative half. net_host_menu.txt proves the row appears and works;
+#         this proves it is not simply always there. A row that opens a submenu with only
+#         "Back" in it is worse than no row, and an unconditional one would read as correct in
+#         every screenshot ever taken of the pause menu -- there is nothing to see.
+#
+# WHY A SEPARATE FILE: boot flags are per probe, and the whole point is booting WITHOUT
+# ?netfakelisted=. A plain ?level= boot sets DebugFlags.Active, which NetListing's eligibility
+# predicate refuses, so CouldList is false and no session exists -- the "nothing to offer"
+# state, reached honestly rather than by faking the predicate's answer.
+#
+# THE ASSERTION IS POSITIVE, not an absence. Navigating down 3 from Continue lands on the LAST
+# row of a four-entry pause menu, so Enter must open the exit confirmation. That pins the row
+# count as well as the row's absence: `expect-not NetHostMenu` alone would pass on a run that
+# never opened the pause at all (probes README rule 1), and would also pass if the list had
+# silently grown some OTHER fifth entry.
+#
+# FAILURE MEANS:
+#   * `rows=(none)` missing        -> NetHostMenu.Entries offers something in a state that has
+#                                     no peer and no listing. Read the dump's five booleans.
+#   * `live=ConfirmationMenu`      -> the pause menu is not four entries long here; either the
+#     missing, `live=NetHostMenu`     Online Play row is being built unconditionally (the bug
+#     present                         this probe exists for) or an unrelated entry was added.
+#
+# MUTATION-TESTED: dropping the Available() gate in BuildPauseEntries (always adding the row)
+# turns the census leg red -- and the observed reading is worth knowing, because it is NOT
+# NetHostMenu: Rebuild refuses an empty entry set, so the row does nothing and the census still
+# reads PausedScene. That is the empty-submenu guard working; the probe catches the stale row
+# either way, which is why the assertion names ConfirmationMenu rather than either failure.
+#
+# eahl: --flags "?level=Level2&invuln"
+
+step 400 nodraw
+mark
+
+eval HostMenu
+expect \[hostmenu\] session=False host=False peer=False couldList=False allowJoins=True listed=no available=False rows=\(none\)
+
+eval Press enter 1
+step 10 nodraw
+eval MenuCensus
+expect \[menucensus\] count=1 live=PausedScene
+
+# Continue / Controller Settings / Instructions / >Exit to Main Menu< -- four rows, no fifth.
+eval Press down 1
+step 3 nodraw
+eval Press down 1
+step 3 nodraw
+eval Press down 1
+step 3 nodraw
+eval Press enter 1
+step 10 nodraw
+eval MenuCensus
+expect \[menucensus\] count=1 live=ConfirmationMenu
+expect-not live=NetHostMenu
+
+quit

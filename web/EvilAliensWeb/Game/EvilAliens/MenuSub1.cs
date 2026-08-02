@@ -740,4 +740,33 @@ internal class MenuSub1 : Scene
 		float centreY = curY0 + (visible > 0 ? (visible - 1) / 2f * font.LineSpacing : 0f);
 		return new Vector2(origin.X, centreY);
 	}
+
+	// The design-space Y of a caption line parked just BELOW the last drawn row, for a menu
+	// drawing its list at `yoffset`. Card d1a0559b needed it for the pause menu's "Listed
+	// online" line (which used to sit at a hard-coded y=400, i.e. across the rows); card
+	// 0d6ffe70 needs the same thing for the host menu's status line, so the expression lives
+	// here instead of being copied. Derived from GetListCentre and counting VISIBLE (unlocked)
+	// entries exactly as DrawMenu does, so it tracks a font or entry-count change on its own.
+	//
+	// ASSUMES A STATIC LIST. GetListCentre answers `origin` verbatim under isScrolling (the
+	// selected entry hovers there instead of the list being centred), so adding a half-height to
+	// it means nothing for a scrolling menu; both callers are static lists. A scrolling caller
+	// needs its own expression, not this one.
+	public float GetBelowListY(float yoffset)
+	{
+		if (font == null)
+		{
+			return origin.Y;
+		}
+		int visible = 0;
+		for (int i = 0; i < menuEntries.Count; i++)
+		{
+			if (!unLockableDataEntries[i].isUnlockable || Unlockables.GetInstance().IsUnlocked(unLockableDataEntries[i].item))
+			{
+				visible++;
+			}
+		}
+		float lastRowY = GetListCentre().Y + yoffset + (visible > 0 ? (visible - 1) / 2f * (float)font.LineSpacing : 0f);
+		return lastRowY + (float)font.LineSpacing * 0.9f;
+	}
 }

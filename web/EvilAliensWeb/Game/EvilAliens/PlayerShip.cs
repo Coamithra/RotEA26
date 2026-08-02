@@ -651,6 +651,15 @@ public class PlayerShip : AlienDrawableGameComponent
 		starttimer.Reset();
 		shoottimer.Reset();
 		shoottimer.Stop();
+		// Net fire state (card a45b78f6). PlayerShip is POOLED, so a field initializer would not
+		// re-run -- and a recycled ship inheriting the previous one's counter would make its
+		// puppet's first delta an invented burst. The aim seeds facing UP, the value SendShipState
+		// used to substitute for a ship that had never fired.
+		NetShotCount = 0;
+		NetLastFireAim = 4.712389f;
+		netAppliedShotCount = 0;
+		netShotBaselineSet = false;
+		netShotsPending = 0;
 		base.Initialize();
 		hasWon = false;
 		base.OnDeath += deathEvent;
@@ -779,8 +788,8 @@ public class PlayerShip : AlienDrawableGameComponent
 				}
 				case ControlDevice.Remote:
 					// Online co-op (Stage 11): the OTHER peer's ship. Position comes from the
-					// interpolation buffer (~100ms behind), shots are re-fired locally from the
-					// replicated firing state; direction stays Zero so the Move below is a no-op.
+					// interpolation buffer (~100ms behind), shots are respawned locally from the
+					// replicated shot COUNT; direction stays Zero so the Move below is a no-op.
 					EvilAliensWeb.Compat.Net.NetSession.DriveRemoteShip(this, gameTime);
 					break;
 				case ControlDevice.RemoteFriend:
@@ -857,12 +866,30 @@ public class PlayerShip : AlienDrawableGameComponent
 	// a powerup, or forces it onto the ?aiplayer AI branch.
 	private bool IsNetPuppet => controller == ControlDevice.Remote || controller == ControlDevice.RemoteFriend;
 
-	// Last tick this ship INTENDED to fire (FireAt is called every tick while the trigger is
-	// held, its internal shoottimer does the cadence gating) and the aim it fired along --
-	// exactly the "fire state" the ship stream carries.
-	internal long NetLastFireMs { get; private set; }
+	// The fire state the co-op ship stream carries (card a45b78f6): how many shots this ship has
+	// actually SPAWNED, cumulative and wrapping, plus the aim of the newest one. Both are stamped
+	// inside FireAt's cadence gate, so an increment is a bullet -- never an intent. It is the
+	// DELTA that means anything: the absolute value is meaningless across a ship, and it wraps
+	// every 256 shots by design.
+	internal byte NetShotCount { get; private set; }
 
 	internal float NetLastFireAim { get; private set; }
+
+	// Receive side, for a Remote / RemoteFriend puppet: the last count we have acted on, whether
+	// we have one at all yet, and the shots still owed (a lossy or bursty link can deliver a
+	// delta > 1, which drains one per tick rather than stacking bullets on one point).
+	private byte netAppliedShotCount;
+
+	private bool netShotBaselineSet;
+
+	private int netShotsPending;
+
+	// A delta larger than this is not catch-up, it is a DESYNC -- a peer whose ship respawned
+	// (its counter restarts at 0) or that went silent long enough for the count to run away.
+	// Six shots is ~330 ms of continuous loss even at the maxed 18/s fire rate, well past the
+	// point where "exact" means anything; beyond it the receiver reseeds and fires nothing,
+	// rather than dumping a magazine into the world at once.
+	private const int NetMaxCatchUpShots = 6;
 
 	internal Vector2 NetVelocity => SpeedVector;
 
@@ -877,10 +904,25 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	internal float NetBulletLife => bulletlifetime;
 
+	// How many shots a puppet owes, given the count that just arrived and the last one it acted
+	// on. Pure and static so the whole wrap domain can be swept as a decision (eaNetFire leg 1)
+	// rather than sampled at whatever counts a scripted burst happens to produce.
+	// `resync` = the delta is too big to be catch-up (see NetMaxCatchUpShots): adopt the count,
+	// fire nothing.
+	internal static int NetShotDelta(byte received, byte lastApplied, out bool resync)
+	{
+		int delta = (byte)(received - lastApplied);
+		resync = delta > NetMaxCatchUpShots;
+		return resync ? 0 : delta;
+	}
+
 	// Applied every tick to a ControlDevice.Remote puppet: interpolated position (speed
-	// zeroed -- the buffer is the sole motion source), replicated fire loadout, and shots
-	// re-fired through the real FireAt path so remote bullets are built like local ones.
-	internal void NetApplyRemoteState(Vector2 pos, float aim, bool firing, int shotsPerSec, float bulletLife)
+	// zeroed -- the buffer is the sole motion source), replicated fire loadout, and the owner's
+	// shots respawned through the real bullet construction so remote bullets are built like
+	// local ones. The count is what paces them (card a45b78f6) -- NOT a local cadence gate,
+	// which would re-derive a rate the owner has already measured for us and get it wrong
+	// whenever a packet was lost, late or early.
+	internal void NetApplyRemoteState(Vector2 pos, float aim, byte shotCount, int shotsPerSec, float bulletLife)
 	{
 		base.Position = pos;
 		Speed = 0f;
@@ -891,14 +933,32 @@ public class PlayerShip : AlienDrawableGameComponent
 			shoottimer.Duration = 1000f / (float)shotspersec;
 		}
 		bulletlifetime = MathHelper.Clamp(bulletLife, 450f, 1500f);
-		if (firing)
+		// The first sample only establishes where the owner's counter stands: everything before
+		// it happened before this puppet existed, so none of it is owed.
+		if (!netShotBaselineSet)
 		{
-			FireAt(aim);
+			netShotBaselineSet = true;
+			netAppliedShotCount = shotCount;
 		}
-		else if (shoottimer.Finished)
+		else if (shotCount != netAppliedShotCount)
 		{
-			shoottimer.Stop();
-			shoottimer.Reset();
+			int owed = NetShotDelta(shotCount, netAppliedShotCount, out bool resync);
+			if (resync)
+			{
+				// The counter is no longer continuous with what we were tracking, so neither is
+				// anything still queued from before it: firing that backlog now would put the
+				// previous sequence's bullets in front of this one.
+				netShotsPending = 0;
+			}
+			netShotsPending += owed;
+			netAppliedShotCount = shotCount;
+		}
+		// One per tick: a burst that arrives together still leaves the barrel one bullet at a
+		// time instead of spawning a stack of them on a single point.
+		if (netShotsPending > 0)
+		{
+			netShotsPending--;
+			SpawnShot(aim);
 		}
 	}
 
@@ -2004,29 +2064,44 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private void FireAt(float direction)
 	{
-		// Net seam: record the fire INTENT (called every tick while the trigger is held,
-		// before the cadence gate below) -- this is what the co-op ship stream replicates.
-		NetLastFireMs = Environment.TickCount64;
-		NetLastFireAim = direction;
+		// The pacifist awardment watches the INTENT, so it is reset outside the gate -- holding
+		// the trigger down counts as shooting even on the ticks the cadence swallows.
 		pacifistTimer.Reset();
 		pacifistTimer.Start();
 		if (shoottimer.Finished | !shoottimer.Active)
 		{
 			shoottimer.Start();
-			Bullet bullet = Bullet.NewBullet(collection, base.Game);
-			bullet.Setup(base.Position, direction, bulletlifetime, player);
-			if ((float)RandomHelper.Random.Next(100) < bouncebulletspercentage)
-			{
-				bullet.SetBouncing(bounceamount);
-				bullet.SetSplit(bulletsSplit);
-			}
-			if ((float)RandomHelper.Random.Next(100) < asplodingbulletspercentage)
-			{
-				bullet.SetAsploding(asplodingbulletssize);
-			}
-			collection.Add((GameComponent)(object)bullet);
-			sound.PlayCue("fire");
+			// Net seam (card a45b78f6): the co-op ship stream carries a CUMULATIVE count of the
+			// shots this ship really spawned, and the aim of the newest one. Both are stamped
+			// HERE, inside the cadence gate and beside the Bullet, so "a shot the owner fired"
+			// and "an increment on the wire" are the same event by construction -- which is what
+			// makes two taps inside one cadence period one bullet on BOTH screens. It wraps; the
+			// receiver only ever reads the delta.
+			NetShotCount++;
+			NetLastFireAim = direction;
+			SpawnShot(direction);
 		}
+	}
+
+	// The shot itself, factored out of FireAt so the co-op puppet path can spawn a replicated
+	// shot through the REAL construction (bounce/asplode rolls, cue and all) without also
+	// inheriting the local cadence gate -- the receiver is paced by the owner's counter, and
+	// gating it a second time here is the arithmetic card a45b78f6 deleted.
+	private void SpawnShot(float direction)
+	{
+		Bullet bullet = Bullet.NewBullet(collection, base.Game);
+		bullet.Setup(base.Position, direction, bulletlifetime, player);
+		if ((float)RandomHelper.Random.Next(100) < bouncebulletspercentage)
+		{
+			bullet.SetBouncing(bounceamount);
+			bullet.SetSplit(bulletsSplit);
+		}
+		if ((float)RandomHelper.Random.Next(100) < asplodingbulletspercentage)
+		{
+			bullet.SetAsploding(asplodingbulletssize);
+		}
+		collection.Add((GameComponent)(object)bullet);
+		sound.PlayCue("fire");
 	}
 
 	private void DoSpecial(bool pickup)

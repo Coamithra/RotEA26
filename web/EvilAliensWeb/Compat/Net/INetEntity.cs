@@ -100,6 +100,23 @@ namespace EvilAliensWeb.Compat.Net
         // Claim the award slot before a client-side death path runs (card b0ab09ec).
         void NetSuppressAward();
 
+        // Read-and-CLEAR "this entity was repositioned since you last asked" (card e79bb994).
+        //
+        // The host sets the latch at the reposition itself (NetNoteTeleport, called from the
+        // ~dozen sites that write Position as a JUMP rather than as motion: the SpiderBoss's
+        // fly-by park, a wrapping Braineroid, EvilSkull's respawn, a wrapping Ball).
+        // NetSession.CaptureBaseState consumes it, which is the only production reader (the
+        // offline NetVelocityScan audit is the other) -- so a peer-less game just sets a bool
+        // nothing looks at. A marked sample goes out with the entity's DECLARED speed instead of
+        // a finite difference across the jump; read CaptureBaseState for why that is the best the
+        // host has rather than a good answer.
+        //
+        // READ-AND-CLEAR rather than a plain property because the latch has to survive from
+        // whenever the reposition happened until that entity's next snapshot TURN (up to
+        // ~1.2 s in a big world), and must then be spent exactly once: a latch left set would
+        // refuse the following turn's velocity too, freezing the puppet's dead reckoning.
+        bool NetTakeTeleport();
+
         // Play a one-shot cosmetic beat the host observed (EvFx / NetFxKind). DRAW AND AUDIO
         // ONLY: an implementation must not damage, kill, award, spawn a replicable entity or
         // touch gameplay state, and must be IDEMPOTENT against the client's own simulation --

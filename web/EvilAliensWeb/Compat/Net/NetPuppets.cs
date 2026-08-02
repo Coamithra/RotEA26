@@ -121,6 +121,10 @@ namespace EvilAliensWeb.Compat.Net
             // that follows rebuilds it properly (card de4d5d65) -- the rebuild is a whole new
             // PuppetInfo, so this is never cleared in place, it is replaced by a false one.
             public bool SelfHealed;
+            // A snapshot entry for this puppet has already reported hp==0 once. The fallback
+            // deferred-death trigger needs TWO consecutive such turns -- see
+            // ApplyHostKilledFromSnapshot for why one is not enough now that EvDying exists.
+            public bool SawZeroHp;
         }
 
         private static readonly Dictionary<ushort, PuppetInfo> byId = new Dictionary<ushort, PuppetInfo>();
@@ -378,7 +382,7 @@ namespace EvilAliensWeb.Compat.Net
             return SpawnRejectKind.None;
         }
 
-        public static bool OnSnapshotEntry(ushort netId, byte typeIdx, in NetBaseState state, byte[] buf, int extraOff, int extraLen, out bool popped, out SnapUnknownKind kind)
+        public static bool OnSnapshotEntry(ushort netId, byte typeIdx, byte entryFlags, in NetBaseState state, byte[] buf, int extraOff, int extraLen, out bool popped, out SnapUnknownKind kind)
         {
             popped = false;
             kind = SnapUnknownKind.None;
@@ -421,60 +425,116 @@ namespace EvilAliensWeb.Compat.Net
                 return false;
             }
             INetTypeDescriptor desc = NetTypeRegistry.Get(info.TypeIdx);
-            popped = ApplySnapshotState(info, state, desc, buf, extraOff, extraLen, isSpawn: false);
+            // Unknown bits are ignored, not refused -- see NetProtocol.NetSnapshotFlags for why a
+            // bitmask degrades by masking where a wire ENUM would have to reject.
+            bool teleported = (entryFlags & NetProtocol.NetSnapshotFlags.Teleported) != 0;
+            popped = ApplySnapshotState(info, state, desc, buf, extraOff, extraLen, isSpawn: false, teleported: teleported);
             ApplyHostKilledFromSnapshot(netId, info, state);
             return true;
         }
 
-        // The host's copy of this killable is at ZERO HIT POINTS and still in its world, so its
-        // death has begun and is taking a while -- BattleSkull's 2.5s dying state, MarsBoss's 5s
-        // crash (cards 13aa596c / 303bfb5b). The EvDeath for it does not arrive until that
-        // animation ENDS, so waiting for it means the peer sees an intact enemy and then, seconds
-        // later, one frame of removal.
+        // THE FALLBACK deferred-death trigger, since card f62116b5: the host's copy of this
+        // killable is at ZERO HIT POINTS and still in its world, so its death has begun and is
+        // taking a while -- BattleSkull's 2.5s dying state, MarsBoss's 5s crash and the other
+        // types KillableAlien.NoteDeathBegan censuses (cards 13aa596c / 303bfb5b). The EvDeath for it does not arrive until that animation ENDS, so waiting for
+        // it means the peer sees an intact enemy and then, seconds later, one frame of removal.
         //
-        // NO PROTOCOL CHANGE CARRIES THIS: hp is already in every snapshot entry's base block.
+        // The FAST path is now the host's explicit EvDying beat (NetSession.OnDeathBegan ->
+        // OnDeathBegan below), emitted the moment KilledBy defers. This reads the hp that is
+        // already in every snapshot entry's base block and so still covers what the beat cannot.
+        // NOT packet loss -- EvDying rides the RELIABLE lane, so a lost one is not a case that
+        // exists. What is left is a deferred-death path that reaches its dying state WITHOUT
+        // going through KillableAlien, i.e. nothing today and a cheap safety net tomorrow.
+        // (A peer JOINING IN PROGRESS mid-animation used to be the other one, and it was the
+        // case that made the two-turn rule below expensive: NetIdRegistry.ReplayLive now sends
+        // the beat with the catch-up spawn instead, so that peer is on the fast path too.)
+        //
         // Zero is unambiguous here because the entry belongs to a puppet we know is killable --
         // NetBaseState.Hp is also 0 for a non-killable, which is why the NetKillable
         // discriminant, not the value, is what makes this readable. On a live KillableAlien hit
         // points can never be 0: Initialize floors them at 1, NetApplyHp floors at 1, and HitBy
         // reaches 0 only on the killing blow.
         //
-        // Award-free (NetSuppressAward first): this is the FX only. Who gets paid is settled by
-        // the host's EvDeath when it eventually lands, exactly as before.
-        //
-        // IT ALSO FIRES, RARELY, ON AN ORDINARY INSTANT DEATH, and that is ACCEPTED rather than
-        // engineered around. The host's ComponentBin defers removal, so an entity killed in the
-        // collision phase is still in the NetIdRegistry when that same tick's snapshot is encoded
-        // -- if its round-robin turn happens to land in that ONE tick, hp reads 0 here a tick
-        // before its EvDeath arrives. The consequences are bounded and small: NetKill's own
-        // dead-guard means the FX play exactly ONCE either way, the award still comes off the
-        // wire, and the only difference is that the death runs with the KillerNone scratch agent
-        // and isComboGenerator false rather than the attributed pair. Narrowing it would mean
-        // requiring two consecutive hp==0 turns, which costs the deferred case a whole snapTurn
-        // (up to ~1.2 s of a 2.5 s animation) to remove a one-tick cosmetic difference.
+        // IT NEEDS TWO CONSECUTIVE hp==0 TURNS, and that is what removes the pre-card
+        // one-tick-early residual. The host's ComponentBin defers removal, so an entity killed in
+        // the collision phase is still in the NetIdRegistry when that same tick's snapshot is
+        // encoded -- if its round-robin turn landed in that ONE tick, a single-turn trigger ran
+        // the death here a tick before the attributed EvDeath arrived, with the KillerNone
+        // scratch agent instead of the real killer. That was accepted before because narrowing it
+        // cost the deferred case a whole snapTurn; it does not any more, because EvDying owns the
+        // live case (including the join-in-progress catch-up) and the extra turn is only ever
+        // paid on a path nothing reaches today. An entity really dying stays at hp==0 for every
+        // remaining turn, so the second one always comes.
         private static void ApplyHostKilledFromSnapshot(ushort netId, PuppetInfo info, in NetBaseState state)
         {
-            if (state.Hp > 0 || !(info.Comp.NetKillable is INetKillable killable) || info.Comp.IsDead)
+            if (state.Hp > 0)
             {
+                info.SawZeroHp = false;
                 return;
             }
-            if (killable.NetHitPoints <= 0)
+            if (!(info.Comp.NetKillable is INetKillable killable))
             {
-                return; // a death path has already run here -- ours, or an earlier turn's
+                return; // hp is 0 for every non-killable -- the discriminant, not the value
             }
-            info.Comp.NetSuppressAward();
-            // Never echo this back as a claim -- the host is the one that told us. Same guard
-            // OnRemoteDeath sets, and it is consumed by the same removal seam; ReleaseDyingPuppet
-            // clears it by hand for the branch where that seam early-returns.
-            remoteDeaths.Add((GameComponent)info.Comp);
-            killable.NetKill(KillerAgent(NetProtocol.KillerNone, info.Comp.Position), isComboGenerator: false);
+            if (!info.SawZeroHp)
+            {
+                info.SawZeroHp = true;
+                return;
+            }
+            BeginDeferredDeath(netId, info, killable);
+        }
+
+        // The host has told us -- by an explicit EvDying beat or by two hp==0 snapshot turns --
+        // that this puppet's death has begun. Run the type's real death path for the FX and then
+        // let the puppet GO, so its own Update finishes dying locally.
+        //
+        // Award-free (NetSuppressAward first): this is the FX only. Who gets paid is settled by
+        // the host's EvDeath when it eventually lands, exactly as before.
+        private static void BeginDeferredDeath(ushort netId, PuppetInfo info, INetKillable killable)
+        {
             if (info.Comp.IsDead)
             {
-                // KilledBy ended in Die(), which has already queued the removal -- the ordinary
-                // instant-death types. Nothing to release; the removal seam tidies the maps.
+                return; // already gone; the removal seam owns it from here
+            }
+            if (killable.NetHitPoints > 0)
+            {
+                info.Comp.NetSuppressAward();
+                // Never echo this back as a claim -- the host is the one that told us. Same guard
+                // OnRemoteDeath sets, and it is consumed by the same removal seam;
+                // ReleaseDyingPuppet clears it by hand for the branch where that seam
+                // early-returns.
+                remoteDeaths.Add((GameComponent)info.Comp);
+                killable.NetKill(KillerAgent(NetProtocol.KillerNone, info.Comp.Position), isComboGenerator: false);
+                if (info.Comp.IsDead)
+                {
+                    // KilledBy ended in Die(), which has already queued the removal -- the
+                    // ordinary instant-death types. Nothing to release; the removal seam tidies
+                    // the maps. (Only reachable from the fallback: the host does not send EvDying
+                    // for a death that removed its own component.)
+                    return;
+                }
+            }
+            // ...else a death path has ALREADY run on this puppet -- WE killed it locally with
+            // our own bullet -- and it is still in the world, so its KilledBy deferred too and
+            // the puppet has been standing frozen mid-animation ever since. Same answer, and
+            // running NetKill again would be a no-op anyway (KillableAlien guards on `dead`).
+            ReleaseDyingPuppet(netId, info);
+        }
+
+        // The host's explicit "this death has begun" beat (card f62116b5), which replaces
+        // inferring it from a snapshot's hp and so lands on the tick the host's KilledBy
+        // deferred, not up to a round-robin turn later. Unknown id = the puppet is already
+        // released or was never built; nothing to do.
+        public static void OnDeathBegan(ushort netId)
+        {
+            if (!enabled || !byId.TryGetValue(netId, out PuppetInfo info))
+            {
                 return;
             }
-            ReleaseDyingPuppet(netId, info);
+            if (info.Comp.NetKillable is INetKillable killable)
+            {
+                BeginDeferredDeath(netId, info, killable);
+            }
         }
 
         private static bool IsRecentlyRemoved(ushort netId)
@@ -534,13 +594,21 @@ namespace EvilAliensWeb.Compat.Net
             return MathHelper.Max(CorrectionWindowMs, 2f * NetSession.SnapshotTurnMs(liveCount));
         }
 
-        private static bool ApplySnapshotState(PuppetInfo info, in NetBaseState state, INetTypeDescriptor desc, byte[] buf, int extraOff, int extraLen, bool isSpawn)
+        private static bool ApplySnapshotState(PuppetInfo info, in NetBaseState state, INetTypeDescriptor desc, byte[] buf, int extraOff, int extraLen, bool isSpawn, bool teleported = false)
         {
             bool popped = false;
             INetEntity comp = info.Comp;
-            if (isSpawn || !info.HasSnapshot)
+            // A TELEPORT SNAPS, WHATEVER THE ERROR (card e79bb994). The host marked this sample as
+            // a discontinuity, so blending it would slide the entity across the gap -- which is
+            // what a jump SHORTER than SnapThresholdPx used to do (EvilSkull respawns at a random
+            // point, so plenty of its jumps are under 100 px). Snapping an explained jump is not a
+            // pop, either: `pupPops` means "an error the layer could not account for", and every
+            // SpiderBoss fly-by used to inflate it.
+            if (isSpawn || !info.HasSnapshot || teleported)
             {
                 comp.Position = state.Pos;
+                info.Correction = Vector2.Zero;
+                info.CorrectionMsLeft = 0f;
             }
             else
             {

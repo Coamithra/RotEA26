@@ -434,7 +434,12 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			if (base.Position.X < -345f && stateTimer.Finished)
 			{
 				state = SpiderBossState.flyright;
+				// THE CARD (8dabe812 -> e79bb994). The boss is PARKED to start each fly-by --
+				// here the lane Y jumps outright. Unmarked, the host differentiated the jump and
+				// stamped 42-57 px/ms onto the wire; the joiner's puppet then crossed the screen
+				// at teleport speed, collidably, and killed the local player.
 				base.Position = new Vector2(-345f, randomYPosition());
+				NetNoteTeleport();
 				ResetTimer(4f);
 				sfxplayed = false;
 				AnimatedMessage animatedMessage = AnimatedMessage.NewAnimatedMessage(collection, base.Game);
@@ -488,7 +493,9 @@ internal class SpiderBoss : AlienDrawableGameComponent
 					"Danger!", (int)SoundManager.Texts.Danger,
 					(int)AnimatedMessage.MessageType.redwarning, warningDirection, isShort: true);
 				state = SpiderBossState.land;
+				// Parked for the landing: an ~800px jump back across the screen (card e79bb994).
 				base.Position = new Vector2(600f, -345f);
+				NetNoteTeleport();
 				waittimer.Duration = landWarningLeadMs;
 				waittimer.Reset();
 				waittimer.Start();
@@ -500,7 +507,9 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			{
 				state = SpiderBossState.flyleft;
 				sfxplayed = false;
+				// Parked at the right edge for the next sweep -- both axes jump (card e79bb994).
 				base.Position = new Vector2(1145f, randomYPosition());
+				NetNoteTeleport();
 				ResetTimer(4f);
 				AnimatedMessage animatedMessage = AnimatedMessage.NewAnimatedMessage(collection, base.Game);
 				animatedMessage.Setup("Danger!", SoundManager.Texts.Danger, AnimatedMessage.MessageType.redwarning);

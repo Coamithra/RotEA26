@@ -186,6 +186,10 @@ public class Powerup : AlienDrawableGameComponent, EvilAliensWeb.Compat.Net.INet
 		color = new Color((color).R, (color).G, (color).B, (byte)204);
 		base.Collides = true;
 		taken = false;
+		// AI bench denominator (card ada9e839). Here rather than in Setup because Initialize is
+		// what runs on every Add, recycled instances included -- the same reason `taken` is reset
+		// here. No-op unless ?aibench.
+		EvilAliensWeb.Compat.AiBench.NotePowerupSpawned();
 	}
 
 	public override void Draw(GameTime gameTime)

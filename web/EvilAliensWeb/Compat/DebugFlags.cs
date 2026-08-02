@@ -1287,6 +1287,21 @@ namespace EvilAliensWeb.Compat
 
 		public static float? AiParkDemand { get; private set; }
 
+		// ?aiseekpowerup=<w>    the pull toward a POWERUP the bot has chosen to fetch, and
+		// ?aiseekapproach=<w>   the pull toward a destination it COMMITS to -- a halting boss's
+		//                       standoff point, a partner to dock with, a blastable cluster.
+		//                       Both sit above SteerParkDemand; the idle station keeps the
+		//                       weaker SeekWeight and its parking behaviour.
+		// ?aipowerupreach=<px>  how far out a powerup exerts its own direct pull, on top of
+		//                       being eligible as that chosen target.
+		// All card ada9e839 -- see PlayerShip.DefaultSeekPowerupWeight for why one shared seek
+		// weight made every deliberate destination unreachable, and why there are now two.
+		public static float? AiSeekPowerupWeight { get; private set; }
+
+		public static float? AiSeekApproachWeight { get; private set; }
+
+		public static float? AiPowerupReachPx { get; private set; }
+
 		public static float? AiThreatFieldPx { get; private set; }
 
 		public static float? AiThreatFieldSize { get; private set; }
@@ -2631,6 +2646,39 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(AiParkDemand ?? EvilAliens.PlayerShip.DefaultSteerParkDemand));
+					}
+					break;
+				case "aiseekpowerup":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aisp) && aisp >= 0f)
+					{
+						AiSeekPowerupWeight = MathHelper.Min(aisp, 20f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiSeekPowerupWeight ?? EvilAliens.PlayerShip.DefaultSeekPowerupWeight));
+					}
+					break;
+				case "aiseekapproach":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aisa) && aisa >= 0f)
+					{
+						AiSeekApproachWeight = MathHelper.Min(aisa, 20f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiSeekApproachWeight ?? EvilAliens.PlayerShip.DefaultSeekApproachWeight));
+					}
+					break;
+				case "aipowerupreach":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aipr) && aipr >= 0f)
+					{
+						AiPowerupReachPx = MathHelper.Min(aipr, 1000f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiPowerupReachPx ?? EvilAliens.PlayerShip.DefaultPowerupReachPx));
 					}
 					break;
 				case "aifieldpx":

@@ -1,0 +1,66 @@
+# PROBE: the AI's level-halting-boss approach term is LIVE, not parked
+#
+# PINS:   card 31ceb6ff. The term itself was added by card f4d1721f and was correct code the
+#         whole time -- but it expresses "close on that boss" by writing `steerTarget`, and every
+#         steerTarget vote used to weigh SeekWeight 0.8 against a SteerParkDemand of 0.95. So
+#         DoAIMove's last act zeroed it, and the ship never went. Card 31ceb6ff gives the
+#         standoff its own weight (DefaultSeekApproachWeight 1.1) above that park.
+#
+# WHY A PROBE AND NOT A SCREENSHOT: the failure is a ship that does not move, on a rig where a
+# dozen other terms are also pushing, so a frame shows nothing and `deaths`/`prog` move for
+# unrelated reasons. What the card is about is DISTANCE, so `AiBench.NoteBossApproach` counts it
+# where the term acts and the run prints `boss=<meanpx> bossfar=<pct>`.
+#
+# THE ASSERTION IS POSITIVE, and deliberately weak on the number. `bossfar` is asserted to be
+# high, which sounds backwards until you know the standing result below -- what is actually
+# pinned is that the counters EXIST and the boss was seen at all. A dead term and a live one
+# differ here by ~10px of mean distance, which is far inside this rig's run-to-run spread, so an
+# assertion tight enough to catch the regression would be flaky. The regression is caught by
+# logic_probe's ProbeAiSeekWeights instead (the weight-vs-park ordering, which is the mechanism);
+# this probe's job is to prove that ordering is WIRED to a real boss, which logic_probe cannot do.
+#
+# STANDING RESULT, so the numbers below are readable (eahl, Very_Hard, ?invuln, 180 sim-s):
+#   `bossfar` is ~99% at BOTH weights -- the ship essentially never reaches its standoff radius
+#   on the BrainBoss, because the boss sits at the top of the screen and TopEdgeAvoidStrength
+#   (20) permanently out-votes the approach (1.1). That is not a bug: the top band is where UFOs
+#   spawn and being pinned there is a death. The approach still buys ~10px of mean closing and
+#   a drop in `idle%` (ticks with a shootable target and no shot fired -- the card's original
+#   symptom).
+#
+# FAILURE MEANS:
+#   * `boss=` / `bossfar=` missing  -> NoteBossApproach is no longer called, i.e. the haltingBoss
+#                                      branch of DoAIMove was removed or its predicate
+#                                      (IsAiPriorityTarget) stopped matching BrainBoss. The term
+#                                      is gone, not merely mistuned.
+#   * `boss=0px`                    -> the branch runs but the boss is never on screen; the
+#                                      ?brainboss fast-boot changed, not the AI.
+#   * `pickups=` missing            -> AiBench's counters were reshaped; see card ada9e839.
+#
+# MUTATION-TESTED: deleting the AiBench.NoteBossApproach call drops both fields and turns the
+# boss legs red while every other line still passes. Setting DefaultSeekApproachWeight back to
+# SeekWeight (the pre-card bug) does NOT turn this probe red -- by design, see above; that
+# mutation is caught by logic_probe, which was mutation-tested against it.
+#
+# eahl: --flags "?level=Level3&brainboss&aiplayer&aibench&difficulty=Very_Hard&invuln"
+
+step 150 nodraw
+mark
+
+# 180 sim-seconds of real bot against the boss.
+eval AiBenchRun 60
+eval AiBenchRun 60
+eval AiBenchRun 60
+
+eval AiBench
+
+# The run got where it claims: a live level, the bot steering, the boss seen.
+expect \[aibench\].*Level3
+expect \[aibench\].*ticks=[1-9][0-9][0-9][0-9]
+expect \[aibench\].*boss=[1-9][0-9]+px
+expect \[aibench\].*bossfar=[0-9]+%
+
+# The powerup counters ride the same report (card ada9e839) -- if they vanish, the histogram
+# reshaped and the matrix runner's Row() contract is the next thing to check.
+expect \[aibench\].*pickups=[0-9]+/[0-9]+\([0-9]+%\)
+
+quit

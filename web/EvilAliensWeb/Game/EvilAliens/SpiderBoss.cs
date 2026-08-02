@@ -862,6 +862,12 @@ internal class SpiderBoss : AlienDrawableGameComponent
 	// not merely "away". The climb has no sweep and either side works.
 	internal bool AiLandingSweep => state == SpiderBossState.land;
 
+	// Parked between manoeuvres -- it does not move at all here, so nothing in the AI's movement
+	// prediction sees it and only the distance field keeps the ship off it. Read by AiBench so a
+	// death to a STATIONARY boss is a separate row from a death to a sweep (card b56633fb): the
+	// two are opposite failures and `deaths` alone cannot tell them apart.
+	internal bool AiStanding => state == SpiderBossState.standing;
+
 	internal float AiSweepLaneCentreY
 	{
 		get

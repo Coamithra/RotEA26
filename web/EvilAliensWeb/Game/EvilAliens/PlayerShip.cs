@@ -226,6 +226,63 @@ public class PlayerShip : AlienDrawableGameComponent
 	// Kept at the 2008 weight so the seek still loses to threat avoidance exactly as before.
 	private const float SeekWeight = 0.8f;
 
+	// ---- seek weights for a target the bot CHOSE (cards ada9e839 / 31ceb6ff) ----------------
+	//
+	// THE BUG THESE FIX. SeekWeight sits BELOW SteerParkDemand on purpose -- that is what makes an
+	// idle ship coast to a stop instead of fidgeting around an arbitrary spot. But every
+	// deliberate destination in DoAIMove also rides `steerTarget`: a powerup, a level-halting
+	// boss's standoff point, a partner to dock with, a blastable cluster. They all inherited the
+	// station's weight, so the park zeroed them too and the ship simply did not go, unless
+	// something ELSE happened to be pushing that same tick. That is the whole of "the AI is
+	// uninterested in powerups" -- and it is also why the boss-approach term added by card
+	// f4d1721f could never be seen to do anything: it was correct code the park deleted.
+	//
+	// WHAT ACTUALLY SHIPPED, AND WHY IT IS ONE DESTINATION AND NOT ALL OF THEM. Raising the seek
+	// for EVERY steerTarget was the first shape tried and it is measurably wrong: a level-halting
+	// boss is a COMMITMENT (nothing advances until it dies, so paying safety for it is the
+	// point), while a powerup, a blastable cluster and a Linker rendezvous are DETOURS whose
+	// value has to beat their risk -- and it does not. So only the boss standoff below gets a
+	// weight above the park. Everything else still rides SeekWeight and is still parked, exactly
+	// as before this card. The full measurement, including the two rigs that disagree about what
+	// a good pickup rate even is, is on card ada9e839.
+
+	// POWERUPS -- the DECLINED half, kept as a seam rather than a fix (card ada9e839, which
+	// returns to the backlog carrying the numbers). Baked AT SeekWeight, so it is inert and the
+	// shipped bot is unchanged here; ?aiseekpowerup= is what reproduces the tables.
+	// MEASURED (eahl, Very_Hard, N=16). Level 1 ?invuln, share of spawned powerups taken:
+	// 0.8 -> 69%, 1.1 -> 89%, 1.6 -> 95%. Level 1 ?invuln OFF: deaths 3.88 -> 5.44 (at 1.1) /
+	// 5.75 (at 1.6, with the standoff held down, so this is the DETOUR's own cost). And the
+	// gate it fails, SpaceDodge (600 s cap, N=8, VICTORIES): 6/8 -> 2/8 at 1.1, 4/8 at 1.6,
+	// deaths 14.9 -> 28.4 / 20.0. Its powerups sit in an asteroid field where a LOW pickup rate
+	// is correct play, so no single scalar satisfies both levels. The researched next design is
+	// a threat-aware seek (suppress the detour while any threat field is pushing), not a
+	// different number here.
+	public const float DefaultSeekPowerupWeight = SeekWeight;
+
+	// THE LEVEL-HALTING BOSS STANDOFF (card 31ceb6ff). Judged on the challenge-level COMPLETION
+	// MATRIX, not on deaths: eight of the nine challenge levels run with score.Lives = -1, so a
+	// death there is free and the failure that matters is a level that never finishes. Closing on
+	// a boss costs deaths by design.
+	// Deliberately LOW but still clear of SteerParkDemand (0.95). That floor is not tunable: at
+	// or below it the park zeroes this vote again and card 31ceb6ff regresses to inert code,
+	// which is the exact defect being fixed. Pinned by logic_probe's ProbeAiSeekWeights.
+	public const float DefaultSeekApproachWeight = 1.1f;
+
+	private static float SeekPowerupWeight => EvilAliensWeb.Compat.DebugFlags.AiSeekPowerupWeight ?? DefaultSeekPowerupWeight;
+
+	private static float SeekApproachWeight => EvilAliensWeb.Compat.DebugFlags.AiSeekApproachWeight ?? DefaultSeekApproachWeight;
+
+	// How far out a powerup exerts its own direct pull. The 2008 code reused `steerRange`, which
+	// is really the screen-EDGE margin -- two unrelated quantities that happened to be equal, so
+	// retuning either silently moved the other. Named separately for that reason, and BAKED AT
+	// THE 2008 VALUE: widening it to 300 was tried as the other half of card ada9e839's fix and
+	// MEASURED INERT (Level 1, N=16: 95% collected at 150 vs 94% at 300 -- the seek above already
+	// takes the ship there, and this term only shapes the last stretch of the approach). Left as a
+	// knob rather than folded back into steerRange so the next person can sweep it honestly.
+	public const float DefaultPowerupReachPx = 150f;
+
+	private static float PowerupReachPx => EvilAliensWeb.Compat.DebugFlags.AiPowerupReachPx ?? DefaultPowerupReachPx;
+
 	// Fraction of a wall tile across which co-op AI ships fan out inside their shared gap.
 	private const float GapSeatSpreadFraction = 0.5f;
 
@@ -1227,6 +1284,12 @@ public class PlayerShip : AlienDrawableGameComponent
 		float minSteerStrength = 0f;
 		float maxSteerStrength = 4f;
 		Vector2 steerTarget = new Vector2(float.MaxValue, float.MaxValue);
+		// How hard to pull toward whatever steerTarget ends up being. It carries the WEIGHT rather
+		// than a flag because the answer is not two-valued: the idle station and every DETOUR park
+		// (SeekWeight, as before this card), while a level-halting boss's standoff point has to
+		// clear the park or it is dead code. Assigned beside the steerTarget assignments that
+		// differ; everything else, the two station fallbacks included, keeps this default.
+		float steerTargetWeight = SeekWeight;
 		float dodgeAngle = 0f;
 		if (player == 0)
 		{
@@ -1468,13 +1531,18 @@ public class PlayerShip : AlienDrawableGameComponent
 			if (distToPowerup < (toTarget).Length())
 			{
 				steerTarget = powerup.Position;
+				steerTargetWeight = SeekPowerupWeight;
 			}
-			if (distToPowerup <= steerRange)
+			// PowerupReachPx, not the 150px `steerRange` the 2008 code shared with the screen-edge
+			// margin -- see the const. Beyond this the powerup is still the steerTarget above, so
+			// the ship heads for it; this term only shapes the approach.
+			float powerupReach = PowerupReachPx;
+			if (distToPowerup <= powerupReach)
 			{
-				float pull = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, distToPowerup / steerRange);
+				float pull = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, distToPowerup / powerupReach);
 				if (altSteering)
 				{
-					pull = MathHelper.Lerp(maxSteerStrength, minSteerStrength, distToPowerup / steerRange);
+					pull = MathHelper.Lerp(maxSteerStrength, minSteerStrength, distToPowerup / powerupReach);
 				}
 				direction += pull * MyMath.AngleToVector(MyMath.VectorToAngle(toPowerup));
 			}
@@ -1497,9 +1565,11 @@ public class PlayerShip : AlienDrawableGameComponent
 			Vector2 fromBoss = base.Position - haltingBoss.Position;
 			float bossDist = (fromBoss).Length();
 			float standoff = MathHelper.Clamp(gunRange * BossStandoffFraction, BossStandoffMinPx, BossStandoffMaxPx);
+			EvilAliensWeb.Compat.AiBench.NoteBossApproach(this, bossDist, standoff);
 			if (bossDist > standoff && bossDist > 0.001f)
 			{
 				steerTarget = haltingBoss.Position + (fromBoss / bossDist) * standoff;
+				steerTargetWeight = SeekApproachWeight;
 			}
 		}
 		foreach (PlayerShip ship in oracle.GetShips())
@@ -1560,7 +1630,11 @@ public class PlayerShip : AlienDrawableGameComponent
 				// which is most of a boss fight. That measured coast 28% -> 59% and 24 -> 70 deaths:
 				// the bot was being held at a standstill and could not accelerate out of trouble.
 				// Widening the deadzone kills the fidget without ever opposing a real manoeuvre.
-				direction += SeekWeight * MyMath.AngleToVector(MyMath.VectorToAngle(steerTarget - base.Position));
+				// The weight was chosen where the target was (card ada9e839): a chosen objective
+				// has to clear SteerParkDemand or the park zeroes the only vote asking for it,
+				// while the idle station must stay below it or the fidget comes back.
+				direction += steerTargetWeight
+					* MyMath.AngleToVector(MyMath.VectorToAngle(steerTarget - base.Position));
 			}
 		}
 		float edgeMargin = steerRange;
@@ -2282,6 +2356,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		// it from the local player's world with no way to reconcile.
 		if (other is Powerup && !((Powerup)other).taken && !IsNetPuppet)
 		{
+			EvilAliensWeb.Compat.AiBench.NotePickup(this);
 			currentPower = ((Powerup)other).type;
 			Score.SetPowerup(currentPower, player);
 			haspower = true;
@@ -2372,7 +2447,9 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private void AsplodeWall()
 	{
-		EvilAliensWeb.Compat.AiBench.NoteDeath(this);
+		// The causer is not carried through this path (CollidesWith calls it directly for a
+		// Wall, without queueing), so name the killer from the path itself.
+		EvilAliensWeb.Compat.AiBench.NoteDeath(this, asplosionCauser ?? (object)"Wall");
 		// Game juice: the player's own death is the biggest impact in the game — a real
 		// freeze-frame + extra trauma on top of what the two explosions below add.
 		EvilAliensWeb.Compat.Juice.AddHitStop(DeathHitStopSeconds);
@@ -2393,7 +2470,7 @@ public class PlayerShip : AlienDrawableGameComponent
 	{
 		if (!base.IsDead)
 		{
-			EvilAliensWeb.Compat.AiBench.NoteDeath(this);
+			EvilAliensWeb.Compat.AiBench.NoteDeath(this, asplosionCauser);
 			// Game juice: same death punch as AsplodeWall — freeze-frame + extra trauma on
 			// top of the two explosions' own shake.
 			EvilAliensWeb.Compat.Juice.AddHitStop(DeathHitStopSeconds);

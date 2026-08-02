@@ -60,6 +60,21 @@ internal static class AiBench
 		// nothing while the boss it can't see gates the level" signature.
 		public long IdleWithTargetTicks;
 		public long TicksWithTarget;
+		// Powerups this ship actually collected (card ada9e839). Read against the run-wide
+		// PowerupsSpawned below: a pickup COUNT alone cannot tell "the bot ignores powerups"
+		// from "this run dropped two".
+		public int Pickups;
+		// The boss-approach term (card 31ceb6ff), measured where it acts. `idle%` and `prog` are
+		// both too far downstream to see it: a boss fight has a dozen other things pushing, so
+		// the outcome moves for reasons that have nothing to do with whether the ship CLOSED.
+		// What the card is about is distance, so distance is what is counted.
+		public long BossTicks;
+		public double BossDistTotal;
+		public long BossOutOfRangeTicks;
+		// What killed it, by type name (card b56633fb). `Deaths` alone cannot answer "does the
+		// bot still fly into the grounded spider boss" — a death to a stray bullet and a death
+		// to the boss are the same number, which is why that report was unverifiable.
+		public readonly Dictionary<string, int> Killers = new Dictionary<string, int>();
 	}
 
 	private static readonly Dictionary<int, ShipRec> ships = new Dictionary<int, ShipRec>();
@@ -69,6 +84,10 @@ internal static class AiBench
 	private static string verdict;
 	private static double verdictMs;
 	private static int peakEventPos;
+	// Powerups that ENTERED the world this run, whoever (if anyone) took them. The denominator
+	// for the per-ship Pickups counter — spawns are stochastic, so a raw pickup count between
+	// two builds is not a comparison.
+	private static int powerupsSpawned;
 
 	private static GameScene lastScene;
 
@@ -82,6 +101,7 @@ internal static class AiBench
 		verdict = null;
 		verdictMs = 0.0;
 		peakEventPos = 0;
+		powerupsSpawned = 0;
 		headlessTotal = TimeSpan.Zero;
 		lastScene = null;
 	}
@@ -160,13 +180,66 @@ internal static class AiBench
 		}
 	}
 
-	internal static void NoteDeath(PlayerShip ship)
+	// `killer` is whatever the ship recorded as the cause (PlayerShip.asplosionCauser for a
+	// queued asplosion, null for a scripted/forced kill such as eaKillShips). Typed as object so
+	// this stays a diagnostic and not another type list to keep in sync with IsAiThreat -- and a
+	// plain STRING is taken as the name verbatim, for the one path (AsplodeWall) that knows what
+	// killed the ship without holding a reference to it.
+	internal static void NoteDeath(PlayerShip ship, object killer)
 	{
 		if (!Enabled)
 		{
 			return;
 		}
-		Rec(ship).Deaths++;
+		ShipRec rec = Rec(ship);
+		rec.Deaths++;
+		// The ONE type split out by state, because card b56633fb's whole claim is about which
+		// state: flying into a screen-wide sweep is a dodge that lost, while walking into a
+		// PARKED boss is the bot not seeing something that has not moved in seconds.
+		string name = (killer is SpiderBoss boss)
+			? (boss.AiStanding ? "SpiderBoss(standing)" : "SpiderBoss")
+			: ((killer as string) ?? ((killer != null) ? killer.GetType().Name : "unknown"));
+		rec.Killers[name] = (rec.Killers.TryGetValue(name, out int n) ? n : 0) + 1;
+	}
+
+	// DoAIMove, once per tick per AI ship while a level-HALTING boss is on screen. `standoff` is
+	// the radius the ship is asking to reach, so `dist > standoff` is precisely "the term is
+	// currently trying to move me" -- and the share of such ticks is the metric that separates a
+	// live approach from a parked one.
+	internal static void NoteBossApproach(PlayerShip ship, float dist, float standoff)
+	{
+		if (!Enabled)
+		{
+			return;
+		}
+		ShipRec rec = Rec(ship);
+		rec.BossTicks++;
+		rec.BossDistTotal += dist;
+		if (dist > standoff)
+		{
+			rec.BossOutOfRangeTicks++;
+		}
+	}
+
+	// PlayerShip.CollidesWith, the `other is Powerup` branch — the ship actually took one.
+	internal static void NotePickup(PlayerShip ship)
+	{
+		if (!Enabled)
+		{
+			return;
+		}
+		Rec(ship).Pickups++;
+	}
+
+	// Powerup.Initialize — a pickup entered the world. Run-wide rather than per ship: nothing
+	// about a spawn belongs to a slot, and both ships compete for the same drop.
+	internal static void NotePowerupSpawned()
+	{
+		if (!Enabled)
+		{
+			return;
+		}
+		powerupsSpawned++;
 	}
 
 	// DoAIFire, once per tick per AI ship: did it have something worth shooting, and did it shoot?
@@ -278,6 +351,46 @@ internal static class AiBench
 			{
 				sb.Append(" idle=").Append(Fmt(100.0 * (double)r.IdleWithTargetTicks / (double)r.TicksWithTarget, 0)).Append('%');
 			}
+			// Always printed, both halves: a bare "pickups=0" reads as a bug, and "0 of 0" reads
+			// as the run the level never dropped one — which is the difference the card is about.
+			// The PERCENTAGE is what a probe can assert -- `expect` matches a regex per line and
+			// cannot divide two capture groups, so a ratio printed only as `n/m` is unassertable.
+			// Both halves stay, because the rate alone hides "0 of 0".
+			sb.Append(" pickups=").Append(r.Pickups).Append('/').Append(powerupsSpawned)
+				.Append('(').Append(Fmt((powerupsSpawned > 0) ? (100.0 * r.Pickups / powerupsSpawned) : 0.0, 0)).Append("%)");
+			if (r.BossTicks > 0)
+			{
+				sb.Append(" boss=").Append(Fmt(r.BossDistTotal / r.BossTicks, 0)).Append("px");
+				sb.Append(" bossfar=").Append(Fmt(100.0 * r.BossOutOfRangeTicks / r.BossTicks, 0)).Append('%');
+			}
+			if (r.Killers.Count > 0)
+			{
+				sb.Append(" killers=").Append(KillerHistogram(r));
+			}
+		}
+		return sb.ToString();
+	}
+
+	// `Type:count` pairs, commonest killer first, comma-separated and SPACE-FREE — the Row()
+	// contract (see there: a value with a space truncated the verdict column once already).
+	// A CLR type name cannot contain a space, so the shape is safe by construction; the sort is
+	// so the answer to "what is killing this bot" is the first token rather than a hunt.
+	private static string KillerHistogram(ShipRec rec)
+	{
+		List<KeyValuePair<string, int>> pairs = new List<KeyValuePair<string, int>>(rec.Killers);
+		pairs.Sort(delegate (KeyValuePair<string, int> a, KeyValuePair<string, int> b)
+		{
+			int byCount = b.Value.CompareTo(a.Value);
+			return (byCount != 0) ? byCount : string.CompareOrdinal(a.Key, b.Key);
+		});
+		StringBuilder sb = new StringBuilder();
+		foreach (KeyValuePair<string, int> kv in pairs)
+		{
+			if (sb.Length > 0)
+			{
+				sb.Append(',');
+			}
+			sb.Append(kv.Key).Append(':').Append(kv.Value);
 		}
 		return sb.ToString();
 	}
@@ -422,6 +535,14 @@ internal static class AiBench
 		sb.Append(" idle=").Append(Fmt((r.TicksWithTarget > 0L)
 			? (100.0 * (double)r.IdleWithTargetTicks / (double)r.TicksWithTarget)
 			: 0.0, 0));
+		// APPEND-ONLY: eaAiBench.matrix's parseRow is `split(' ')` then the first '=', so a new
+		// key is free and a value containing a space is what breaks it. `none` rather than an
+		// omitted key, so a consumer never has to tell "no deaths" from "old build".
+		sb.Append(" pickups=").Append(r.Pickups);
+		sb.Append(" poffered=").Append(powerupsSpawned);
+		sb.Append(" boss=").Append(Fmt((r.BossTicks > 0L) ? (r.BossDistTotal / r.BossTicks) : 0.0, 0));
+		sb.Append(" bossfar=").Append(Fmt((r.BossTicks > 0L) ? (100.0 * r.BossOutOfRangeTicks / r.BossTicks) : 0.0, 0));
+		sb.Append(" killers=").Append((r.Killers.Count > 0) ? KillerHistogram(r) : "none");
 		return sb.ToString();
 	}
 

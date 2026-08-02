@@ -1682,6 +1682,62 @@ the rest are tier-independent.
   idle-fidget symptom and are documented in place as REVERTED -- don't re-derive them: a
   velocity-damped "arrive" at the station (it contains `-SpeedVector`, so it brakes every real
   manoeuvre: coast 28% -> 59%, spider-boss deaths 24 -> 70) and a tighter deadzone alone.
+- **THE PARK ZEROES EVERY 0.8-WEIGHT SEEK, AND THAT SILENTLY DELETED A WHOLE BEHAVIOUR**
+  (cards 31ceb6ff / ada9e839). `DoAIMove` expresses every deliberate destination -- the idle
+  station, a powerup, a level-halting boss's standoff point, a Linker rendezvous, a blastable
+  cluster -- as ONE `steerTarget` carrying ONE weight, `SeekWeight` 0.8. The park's threshold is
+  `DefaultSteerParkDemand` 0.95. So unless something ELSE happened to be pushing that same tick,
+  the last line of `DoAIMove` set `direction = Vector2.Zero` and the ship did not go. That is not
+  a mistuning: it means the boss-approach term card f4d1721f added was **correct code the park
+  deleted**, and it never showed up in review because the park and the seek live 300 lines apart
+  and each is individually right.
+  - **The fix is a per-destination weight (`steerTargetWeight`), not a lower park.** Lowering the
+    park or raising `SeekWeight` brings back the idle fidget the park exists to stop. Only the
+    halting-boss standoff got a weight above it (`DefaultSeekApproachWeight` **1.1**); the idle
+    station and every DETOUR still ride 0.8 and still park, i.e. are byte-unchanged.
+  - **Measured (eahl, `?level=Level3&brainboss&aiplayer&aibench&difficulty=Very_Hard&invuln`,
+    180 sim-s, N=26 per arm): `idle%` 36.6 -> 26.7** (sd ~12.5, p ~ 0.006) -- `idle%` being ticks
+    with a shootable target and no shot fired, which is the symptom the original report described.
+  - **`bossfar` reads ~99% at BOTH weights and that is NOT the fix failing.** The BrainBoss sits
+    at the top of the screen and `TopEdgeAvoidStrength` (20) permanently out-votes the approach
+    (1.1), so the ship essentially never reaches its standoff radius; what the weight buys is
+    ~10px of mean closing and the idle-rate drop above. The top band is where UFOs spawn and being
+    pinned there is a death, so the approach term SHOULD lose that argument.
+  - **Powerup attraction was measured and DECLINED -- do not "finish the job" by raising
+    `DefaultSeekPowerupWeight`** (it is baked at `SeekWeight`, i.e. inert, purely as a seam). It
+    works on the level it was reported on and breaks a different one, which is why no scalar
+    ships. Level 1 (`?invuln`, N=16, share of spawned powerups collected): 0.8 -> **69%**,
+    1.1 -> 89%, 1.6 -> **95%**. Level 1 without `?invuln` (N=16): deaths **3.88 -> 5.44** (1.1) /
+    5.75 (1.6 with the standoff held down, so that is the DETOUR's own cost), progress 30.1 ->
+    ~24.6 of 64. And the completion-matrix gate, SpaceDodge (600 s cap, N=8, VICTORIES):
+    **6/8 -> 2/8** at 1.1 and 4/8 at 1.6, deaths 14.9 -> 28.4 / 20.0. SpaceDodge's powerups sit in
+    an asteroid field where a LOW pickup rate is correct play, so the two rigs disagree about what
+    a good number even is. **The researched next design is a threat-aware seek** (suppress the
+    detour while any threat field is pushing), not another value.
+  - Widening the powerup's own pull range 150 -> 300px was measured **INERT** (95% vs 94%); it is
+    named `DefaultPowerupReachPx` now only so it stops secretly being the screen-edge margin.
+  - **Falloff was measured and DECLINED too.** `?aifieldfall=` 3 -> 2 (i.e. flee earlier) was the
+    candidate for "the AI only dodges bullets when they are very close": CrazyGame deaths 6.19 ->
+    7.75 and victories 12 -> 11 of 16, spider boss deaths flat (6.06 -> 5.69) but
+    `SpiderBoss(standing)` deaths **41 -> 53**, i.e. worse on the exact metric it was meant to fix.
+    The current falloff is behaving as designed.
+  - Flags: `?aiseekapproach=<w>` `?aiseekpowerup=<w>` `?aipowerupreach=<px>`. Pinned by
+    `logic_probe`'s **`ProbeAiSeekWeights`** (the weight-vs-park ORDERING, with the pre-card
+    configuration as the negative control -- this is the regression guard, because the failure is
+    a bot that quietly stops going places) and `tools/headless/probes/ai_boss_approach.txt` (the
+    wiring, which logic_probe cannot reach).
+- **`AiBench` answers "what is killing it" and "does it collect anything" now** (same cards).
+  `killers=<Type>:<n>` is a histogram taken where the ship actually dies (`asplosionCauser`), and
+  **`SpiderBoss` is split by state** -- `SpiderBoss(standing)` vs `SpiderBoss` -- because walking
+  into a PARKED boss and losing a dodge against a screen-wide sweep are opposite failures that
+  `deaths` alone cannot tell apart. `pickups=<n>/<spawned>(<pct>%)` is the powerup rate, with the
+  denominator so "the bot ignores powerups" and "this run dropped two" are distinguishable, and
+  `boss=<px> bossfar=<pct>` is the approach term measured where it acts.
+  **Standing result worth knowing: on `?level=Level2&spiderboss` (Very_Hard, no `?invuln`, 180
+  sim-s, N=16) `SpiderBoss(standing)` is 39 of 101 deaths -- the largest single killer, and more
+  than double the moving boss's 25.** So "the AI happily runs into the spider boss when it is
+  stationary" (card b56633fb) REPRODUCES, and it is a REPULSION problem: the seek fix above moves
+  it not at all (deaths 6.31 -> 5.88, standing 39 -> 39).
 - **The SpiderBoss fight is scripted, so its counters are too** (unashamedly special-cased -- it
   is a set-piece with fixed choreography). Only a `Lazer` hurts it and a big UFO fires one AT THE
   PLAYER, so the AI spares the single big UFO furthest from every ship and lets the boss walk
@@ -1780,9 +1836,9 @@ the rest are tier-independent.
     `effective=Easy` to `effective=Hard` as `Demo1` starts.
 - Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aipark= ?aireact=
   ?aigapmargin= ?aiscanrows= ?aicrosspenalty= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx=
-  ?aifieldsize= ?aifieldfall=`
+  ?aifieldsize= ?aifieldfall= ?aiseekapproach= ?aiseekpowerup= ?aipowerupreach=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
-  A malformed value on any of the 14 is REPORTED and ignored, never swallowed, per the file-wide
+  A malformed value on any of the 17 is REPORTED and ignored, never swallowed, per the file-wide
   value-carrying-flag convention (see "Debug flags & tuning conventions" above; cards 48b7c6b1 +
   4e401005). The one wrinkle specific to this family: `?aiaim`/`?aifieldpx` name "the per-tier
   skill row" as the in-force setting when no override stands. Pinned by `ProbeAiFlagRejection`.

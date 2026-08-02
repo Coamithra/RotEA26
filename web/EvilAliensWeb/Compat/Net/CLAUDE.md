@@ -510,6 +510,19 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
 
 ## Protocol, NetIds & the replicable set
 
+- **PROTOCOL CHANGES ARE CHEAP -- never contort a design to avoid wire bytes (user ruling,
+  2026-08-02).** The game is in active development and the build-hash handshake already refuses
+  any mismatched pairing, so backward compatibility across builds is a non-goal: if the clean
+  design wants a new event type, a state-extra field or a spawn-extra anchor, put it on the wire.
+  The conventions below (append-only indices, decode-boundary validators, a version bump when an
+  old peer would misbehave) still apply -- they are about correctness and dev-tab sanity, not
+  compatibility. Two shipped designs were bent around avoiding the wire by a one-batch
+  coordination rule and carry their straighter replacements as card comments: the Lazer
+  observed-rate estimator (card 0108d1fc -- send the growth/angle rates instead) and the
+  periodic-mover dead reckoning (card 0dfc4495 -- anchor the deterministic path in spawn extras).
+  Serializing WHO edits `NetProtocol.cs` in a parallel batch is an orchestration concern; it must
+  not shape the design.
+
 - **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v10):** the 3
   layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim,
   alive|firing flags, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (see the

@@ -594,6 +594,19 @@ internal class MenuScene : Scene
 			if (!EvilAliensWeb.Compat.Net.NetSession.IsHost || !EvilAliensWeb.Compat.Net.NetSession.PeerUp)
 			{
 				sender.Remove();
+				// The session died between the level pick and the difficulty pick, so the launch
+				// is aborted and NetUpdate's notice branch redraws the flow on a later tick --
+				// but ONLY if a notice is actually pending. With no session AND no notice coming,
+				// removing this menu leaves NOTHING on screen (mainMenu went away at Start,
+				// the selector at levelSelected): a reload-only dead end, the worst failure class
+				// in a browser game. Card c337222a; MenuNotice is peeked, never taken, so the
+				// notice branch still gets it.
+				if (!EvilAliensWeb.Compat.Net.NetSession.Active
+					&& EvilAliensWeb.Compat.Net.NetSession.MenuNotice == null)
+				{
+					netMode = false;
+					mainMenu.Show();
+				}
 				return;
 			}
 			EvilAliensWeb.Compat.Net.NetSession.SendLaunch(selectedLevel, Settings.GetInstance().CurrentDifficulty);
@@ -1142,15 +1155,84 @@ internal class MenuScene : Scene
 		EvilAliensWeb.Compat.Net.WebRtcInterop.ClosePrompt();
 	}
 
-	// Test seam (card 72143c11): put this scene into the state a lobby co-op match END leaves
-	// behind, which is netMode TRUE while mainMenu is live -- nothing clears netMode across a
-	// level launch, and Initialize re-adds mainMenu on the way back. Reaching it for real needs
-	// a paired peer and a level, so it is the one precondition of that bug a headless probe
-	// cannot produce; everything downstream of it (NetUpdate's notice branch) is then the real
-	// code. It only writes the flag -- no menu is shown or hidden here.
+	// The net-flow UI state is MENU-NAVIGATION state, and its lifetime is ONE visit to this
+	// scene (card c337222a). MenuScene is a singleton -- Game1 builds it once and re-ADDS it to
+	// the collection on every return from a level, re-running Initialize -- so every field on it
+	// is process-lifetime unless something clears it, and nothing cleared these four. A lobby
+	// co-op match that ended therefore came back to a main menu still holding netMode, and every
+	// reader of it was then reading a lie:
+	//   - difficultyMenu_difficultySelected silently ABORTED the next ordinary launch (no host,
+	//     no peer) after mainMenu and the selector were already gone -- a reload-only dead end;
+	//   - levelSelector_OnExit / challengeSelector_OnExit backed out to netPickMenu, a lobby
+	//     menu with no session behind it;
+	//   - challengeSelector_levelSelected refused WebcamAliens offline, with the carousel
+	//     showing the co-op explanation for it;
+	//   - NetUpdate ran the lobby pump.
+	// Until now the ONLY thing clearing it was acknowledging a session-ending notice, which is a
+	// coincidence of today's match-end semantics rather than a lifecycle.
+	// SESSION-FREE on purpose: no NetLobby.Cancel, no NetGameBrowser.Stop -- a caller that comes
+	// back to the menus with a live session (card 3b6c12e7's level-end -> lobby flow) must be
+	// able to re-enter deliberately via EnterNetLobby, and this must not tear its session down.
+	// The three siblings ride along because they are the same bug class on the same object with
+	// the same lifetime: a stale browsingGames parks NetUpdate in the browse branch forever, a
+	// stale netNoticeUp kills the lobby pump, and a stale netStatusShown desyncs the panel from
+	// what is on screen. Each is individually near-unreachable today -- which is the argument for
+	// one lifecycle rather than four near-misses.
+	private void ResetNetFlowState()
+	{
+		HideNetStatus();
+		netMode = false;
+		netNoticeUp = false;
+		browsingGames = false;
+	}
+
+	// Programmatic entry into the net-lobby menu state (card c337222a), for a caller that returns
+	// to the menus with a session STILL UP -- the level-end -> lobby flow of card 3b6c12e7, where
+	// the host picks the next level and both peers carry on. It is the counterpart of
+	// ResetNetFlowState: menu entry now clears netMode, so "come back as if freshly connected"
+	// has to be ASKED for rather than inherited from a flag that happened to survive a launch.
+	// Mirrors the lobby's own Connected branch in NetUpdate -- host to the level pick, client to
+	// the waiting panel -- so there is one definition of what that state looks like.
+	// mainMenu.RemoveInstantly() is unconditional and a no-op when it is not shown, per the rule
+	// card 72143c11 established in the notice branch.
+	internal void EnterNetLobby()
+	{
+		netMode = true;
+		netNoticeUp = false;
+		mainMenu.RemoveInstantly();
+		if (EvilAliensWeb.Compat.Net.NetSession.IsHost)
+		{
+			HideNetStatus();
+			netPickMenu.Show();
+		}
+		else
+		{
+			ShowNetStatus("Connected!\nThe host is choosing a mission...");
+		}
+	}
+
+	// Test seam (card 72143c11): put this scene into the state a lobby co-op match END used to
+	// leave behind, which is netMode TRUE while mainMenu is live. Reaching it for real needs a
+	// paired peer and a level, so it is the one precondition of that bug a headless probe cannot
+	// produce; everything downstream of it (NetUpdate's notice branch) is then the real code.
+	// It only writes the flag -- no menu is shown or hidden here.
+	// Card c337222a cleared that flag at menu entry, so this no longer reproduces a state the
+	// game can reach on its own -- it is now purely the notice probe's precondition, and it is
+	// also what lets net_menumode_reset.txt plant the stale flag its round trip must clear.
 	internal void NetDebugForceNetMode()
 	{
 		netMode = true;
+	}
+
+	// Read the net-flow UI state back (card c337222a). All four fields are private and NONE of
+	// them is visible in a frame -- netMode changes no pixel at all, and NetStatusMenu draws its
+	// own 50% darken, so a menu live underneath it merely looks dim. So this is the observable a
+	// probe asserts the reset on; eaMenuCensus answers the neighbouring question (which menus are
+	// live, i.e. which are taking input) and cannot answer this one.
+	internal string NetDebugStateLine()
+	{
+		return "netMode=" + netMode + " noticeUp=" + netNoticeUp
+			+ " statusShown=" + netStatusShown + " browsing=" + browsingGames;
 	}
 
 	// Per-tick lobby pump: drains the JS-side phase queue, keeps the status panel's text
@@ -1165,12 +1247,14 @@ internal class MenuScene : Scene
 			{
 				CloseNetFlowMenus();
 			}
-			// Card 72143c11: the main menu is closed on BOTH paths, and the netMode branch
-			// above is exactly why it has to be. `netMode` lives on this long-lived scene and
-			// NOTHING clears it across a level launch, so a lobby co-op match that ends in-level
-			// comes back here with it still true -- while Initialize has already re-added
-			// mainMenu. CloseNetFlowMenus does not touch mainMenu, so the notice used to land on
-			// top of a live main menu: its text overlapped the rows, and since MenuSub1 has no
+			// Card 72143c11: the main menu is closed on BOTH paths, and it still has to be --
+			// card c337222a changed WHICH path a post-level notice arrives on, not whether the
+			// branch is needed. A lobby co-op match that ends in-level now comes back with
+			// netMode FALSE (Initialize clears it) and mainMenu live, i.e. straight down the
+			// else-less path below, so this is the case that closes it. Before that card the
+			// stale flag sent the same situation through CloseNetFlowMenus, which does not touch
+			// mainMenu, so the notice landed on top of a live main menu: its text overlapped the
+			// rows, and since MenuSub1 has no
 			// modality at all, BOTH menus ran HandleInput every tick -- arrows moved two
 			// selections and Enter invoked two entries. Removing it unconditionally is what makes
 			// the notice the only thing on screen and the only thing taking input.
@@ -1422,6 +1506,10 @@ internal class MenuScene : Scene
 		backdrop = content.Load<Texture2D>("GFX/Menu/planet");
 		currentBackdropSize = MathHelper.Max(800f / (float)backdrop.LogicalWidth(), 600f / (float)backdrop.LogicalHeight());
 		originalBackdropSize = currentBackdropSize;
+		// Card c337222a: the net-flow UI state dies with the visit to this scene, exactly like the
+		// ring's dart timestamps above. Placed BEFORE the ?gamebrowser block so that branch's own
+		// netMode = true still wins on a boot that asks for the carousel.
+		ResetNetFlowState();
 		if (DebugFlags.GameBrowser)
 		{
 			// ?gamebrowser: boot straight into the online-game carousel with injected fake

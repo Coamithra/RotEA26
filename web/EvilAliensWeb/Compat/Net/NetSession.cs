@@ -799,41 +799,55 @@ namespace EvilAliensWeb.Compat.Net
         // Those phantom bullets are real in the peer's world and damage what they hit, which is
         // what made a tap look like it killed an enemy on one screen and not the other.
         //
-        // THE UNIT IS PACKETS, NOT MILLISECONDS, and that is the whole subtlety. The peer holds
-        // the NEWEST sample until a newer one arrives (DriveRemoteShip reads buffer.Newest every
-        // tick), so N packets marked firing=true put firing=true in front of the re-fire gate for
-        // N SEND INTERVALS there -- not for `hold` ms. A hold expressed in ms therefore has to be
-        // read back as "how many sends land inside it", and the answer jumps in whole packets.
-        // A plain fraction-of-the-period hold is NOT enough: 0.6 * the 62.5 ms period at 16
-        // shots/s is 37.5 ms, which still catches TWO sends 33 ms apart -- 66 ms of firing=true
-        // against a 62.5 ms gate, i.e. the same doubled tap this card is about, just at a rate
-        // nobody tested. So derive the packet count first and convert back.
+        // WHAT THE PEER ACTUALLY SEES IS PACKETS, NOT MILLISECONDS, and that is the whole
+        // subtlety. It holds the NEWEST sample until a newer one arrives (DriveRemoteShip reads
+        // buffer.Newest every tick), so a hold of `H` ms puts firing=true in front of the re-fire
+        // gate for `ceil(H / I) * I` ms over there, where `I` is the REAL send interval. That
+        // product has to stay under one cadence period `P`, and it is not monotone in H alone.
         //
-        // Sends are >= StreamIntervalMs apart BY CONSTRUCTION (the `now - lastStreamTx >=
-        // StreamIntervalMs` gate above), and a hold of exactly `n * StreamIntervalMs` therefore
-        // marks exactly n of them wherever the tap falls between two sends -- n >= 1 always, so a
-        // tap can never slip through unsent. Using the NOMINAL interval is conservative in the
-        // right direction: a hitched frame makes the real interval LONGER, which marks fewer
-        // packets (a possible missed bullet), never more (a doubled one).
+        // `H = P/2` IS THE BOUND, AND IT HOLDS FOR EVERY `I`, WHICH IS THE POINT. If I >= H the
+        // window is exactly I; if I < H then ceil(H/I)*I < H + I < 2H = P. So any send interval
+        // shorter than the cadence period is safe, whatever the frame rate.
         //
-        // RESIDUAL, at the top of the fire-rate range only: from 16/s up the period only fits one
-        // packet, so a tap rides a single packet with no redundancy -- if the stream lane DROPS
-        // it, that bullet goes missing on the peer (the kill still counts on the owner's screen,
-        // where the bullet was real). Exactness under loss needs a shot COUNT or a fire EDGE on
-        // the wire, i.e. a protocol version, which is not worth it for one cosmetic bullet at one
-        // end of the range. Revisit if real-network playtests show missing tap bullets.
+        // DO NOT DERIVE THIS FROM THE NOMINAL 33 ms INTERVAL -- that was the first attempt and it
+        // is only correct at exactly 60 Hz. `SendShipState` runs off the `now - lastStreamTx >=
+        // StreamIntervalMs` gate, which is evaluated ONCE PER FRAME, so the real interval is the
+        // smallest frame multiple >= 33: 33.3 ms at 60 Hz but 40 ms at 100 Hz, and never 33.0.
+        // Counting whole nominal packets over-fires at 7, 9, 10, 13, 14 and 15 shots/sec on a
+        // 100 Hz display -- ordinary in-play rates, since shotspersec walks 8 -> 18 one FirePower
+        // pickup at a time. A hitched frame is a DOUBLING risk here, not a missed-bullet one:
+        // ceil(H/I)*I GROWS with I.
+        //
+        // TWO RESIDUALS, both at the top of the fire-rate range and both accepted:
+        //   * The floor keeps a tap from expiring between two packets, and from 15/s up it is
+        //     what binds (P/2 falls below one send interval). There the tap rides a SINGLE packet
+        //     with no redundancy, so a stream-lane DROP loses that bullet on the peer -- the kill
+        //     still counts on the owner's screen, where the bullet was real. Exactness under loss
+        //     needs a shot COUNT or a fire EDGE on the wire, i.e. a protocol version, judged not
+        //     worth it for one cosmetic bullet at one end of the range. Revisit if real-network
+        //     playtests show missing tap bullets.
+        //   * A send interval at or past the cadence period (below ~18 fps at the maxed fire
+        //     rate) cannot represent that cadence at all and doubles again. Nothing a level
+        //     encoding can do; the owner is already dropping frames faster than it shoots.
+        //
+        // NOT FIXED HERE, and unchanged by this card: `PlayerShip.FireAt` stamps NetLastFireMs on
+        // the INTENT, before its own cadence gate, so a second tap inside one cadence period
+        // restarts the hold while spawning no local bullet -- two taps ~80 ms apart are one bullet
+        // on the owner and two on the peer. The pre-card 150 ms hold did the same, so this is a
+        // pre-existing residual rather than a regression. Stamping on the actual SHOT instead
+        // would leave the hold uncovered between shots (H < P by construction above), so it
+        // trades this for a stretched sustained cadence; it needs its own card and its own
+        // measurement.
         internal static float FiringHoldMsFor(int shotsPerSec)
         {
             // shotsPerSec arrives from a live ship (Setup seeds 8, FirePower caps at 18), but
             // guard the divide rather than trust it -- a 0 here would be an infinite hold.
             float period = 1000f / Math.Max(shotsPerSec, 1);
-            // The most packets whose combined window still fits INSIDE one cadence period, floored
-            // at one so the intent is always sent at least once.
-            int packets = Math.Max(1, (int)Math.Ceiling(period / StreamIntervalMs) - 1);
-            // The ceiling keeps a very low fire rate from streaming firing=true for most of a
-            // second off one tap; it only ever LOWERS the packet count, so it cannot reintroduce
-            // the overlap above.
-            return Math.Min(packets * (float)StreamIntervalMs, FiringHoldMs);
+            // Floor: a hold below one send interval can expire between two packets and lose the
+            // tap outright. Ceiling: a very low fire rate must not stream firing=true for most of
+            // a second off one tap. Both only ever LOWER the marked-packet count, so neither can
+            // reintroduce the overlap the P/2 bound rules out.
+            return Math.Clamp(period * 0.5f, (float)StreamIntervalMs, FiringHoldMs);
         }
 
         private static void SendShipState(long now)

@@ -10,11 +10,15 @@
 # an enemy on P2's screen that is alive on P1's".
 #
 # WHAT IT ASSERTS (Compat/Net/NetFireTest.cs carries the full reasoning):
-#   1. The contract as a PURE DECISION, over every reachable fire rate: the worst-case number of
-#      packets a hold marks, times the send interval, must stay under one cadence period. The
-#      pre-card flat 150 ms hold is computed beside it and must VIOLATE that, so a predicate
-#      that had degenerated into "always true" cannot pass. Plus the other half of the trade --
-#      every rate still marks at least one packet, so no tap goes unsent.
+#   1. The contract as a PURE DECISION, over every reachable fire rate CROSSED WITH every send
+#      interval a real frame rate produces: the worst-case number of packets a hold marks, times
+#      that interval, must stay under one cadence period. Sweeping the INTERVAL is the part that
+#      earns its keep -- the send gate is evaluated once per frame, so the real interval is 33.3 ms
+#      at 60 Hz but 40 ms at 100 Hz, and a hold derived from the nominal 33 passes at 60 Hz while
+#      over-firing at 7, 9, 10, 13, 14 and 15 shots/sec on a 100 Hz display. The pre-card flat
+#      150 ms hold is computed beside it and must VIOLATE the bound, so a predicate that had
+#      degenerated into "always true" cannot pass. Plus the other half of the trade -- every rate
+#      still holds for at least one send interval, so no tap goes unsent.
 #   2. The symptom END TO END over a real NetWire: a scripted peer taps once, the real remote
 #      puppet is driven at 60 Hz, and the bullets it spawns are COUNTED. Exactly 1.
 #   3. The same at the maxed fire rate (18/s, a 55.6 ms period) -- where the fix has least room.
@@ -25,14 +29,17 @@
 #      8/s), not one bullet per packet (30) and not zero. Without it, "always 1 bullet" -- a
 #      re-fire that had stopped working entirely -- would pass legs 2-4.
 #
-# MUTATION-TESTED TWO WAYS, and the second one is why leg 1 is not redundant:
-#   * the pre-card flat 150 ms hold restored -> leg 1 fails (first violation at 7/s), leg 2
-#     reports 2 and leg 3 reports 3. Leg 4 still passes, as an independent control should.
-#   * a 0.6-fraction-of-the-period hold (this card's first attempt; 37.5 ms against the 62.5 ms
-#     period at 16 shots/sec) -> leg 1 fails at 16/s and EVERY end-to-end leg passes. The rig
-#     aligns packets to tick boundaries, so legs 2-5 sample one phase of the alignment and a
-#     marginally-too-long hold can land on the safe side of it. Leg 1 is what covers the top of
-#     the range; do not read a green leg 3 as doing so.
+# MUTATION-TESTED THREE WAYS, and only the first is visible end to end -- which is the whole
+# argument for leg 1:
+#   * the pre-card flat 150 ms hold -> leg 1 fails (first violation 7/s at 33.33 ms sends), leg 2
+#     reports 2 bullets and leg 3 reports 3. Leg 4 still passes, as an independent control should.
+#   * whole NOMINAL 33 ms packets counted against the period (this card's SECOND attempt, and what
+#     the first commit shipped) -> leg 1 fails at 7/s ON 40 ms SENDS ONLY; every end-to-end leg
+#     passes, because the rig sends at 60 Hz. This is the one that would have shipped a bug.
+#   * a 0.6-fraction-of-the-period hold (the FIRST attempt; 37.5 ms against the 62.5 ms period at
+#     16 shots/sec) -> leg 1 fails at 16/s, every end-to-end leg passes.
+# Legs 2-5 sample ONE phase at ONE send cadence. Do not read a green leg 3 as covering the top of
+# the fire-rate range, or any of them as covering a non-60 Hz sender; leg 1 covers both.
 #
 # DESTRUCTIVE, so it gets a process to itself (the runner gives every probe one anyway): it pairs
 # a real host session onto the live level, seats a Remote puppet and fires real bullets into the
@@ -52,7 +59,7 @@ eval NetFire
 
 expect \[net\] session start role=host .* transport=InMemory
 expect \[netfire\] single-tap bullet count
-expect 1\. the hold-window contract over every reachable fire rate
+expect 1\. the hold-window contract over every fire rate AND every send interval
 expect 2\. rig -- a real HOST session, a scripted peer and its ship puppet
 expect 3\. the same tap at the maxed fire rate
 expect 4\. NEGATIVE -- the pre-card packet pattern

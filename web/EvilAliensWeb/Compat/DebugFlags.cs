@@ -337,6 +337,19 @@ namespace EvilAliensWeb.Compat
 			RipplePhase = phase;
 		}
 
+		// ?brainoverlayphase=<0..1>: park EVERY BrainBoss overlay patch at that point in its
+		// ping-pong cycle and hold it there (card 9f90978c). The eye rests on frame 0 -- the
+		// untouched crop, i.e. closed -- and only opens on a ~15 s random roll, so without this
+		// there is no way to screenshot it open on demand; the exhaust pods likewise only run
+		// while the boss is venting. Pair with ?harness=brainboss or a live ?brainboss boot.
+		// Negative => not parked (the eaRipple/?ripplephase convention).
+		public static float? BrainOverlayPhase { get; private set; }
+
+		// ?brainhitflash: force the BrainBoss to draw as if it had just been hit, so the
+		// hit-flash brighten can be captured without landing a real shot inside the 35 ms
+		// hittimer window. Draw-side only -- no hitpoints change, nothing is damaged.
+		public static bool BrainHitFlash { get; private set; }
+
 		// Master multiplier on the trauma-based screen shake (Compat/Juice.cs). 1 = the
 		// shipped feel, 0 = off, >1 exaggerates while tuning (?shake=, clamped 0..3).
 		// A pure camera/render look, so — like MetalScore/SlowmoTrail — kept OUT of `Active`.
@@ -1660,6 +1673,20 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "ripplecenter":
 					ParseRippleCenter(key, val);
+					break;
+				case "brainoverlayphase":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var bop))
+					{
+						BrainOverlayPhase = (bop < 0f) ? (float?)null : (bop > 1f) ? 1f : bop;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number 0..1, or negative for live",
+							InForce(BrainOverlayPhase));
+					}
+					break;
+				case "brainhitflash":
+					BrainHitFlash = IsOn(val);
 					break;
 				case "blastactive":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ba))

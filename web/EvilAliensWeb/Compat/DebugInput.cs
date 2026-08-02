@@ -291,6 +291,51 @@ namespace EvilAliensWeb.Compat
 			return EvilAliens.FlyingSpiderCensus.Report();
 		}
 
+		// eaBraineroidGlowBatch(on): flip the Braineroid glow draw between the batched driver
+		// (on, the shipped path) and the pre-card per-brain path (off). The appearance A/B --
+		// flip it between two screenshots with NO tick in between so both paths draw the SAME
+		// world; gameplay RNG is unseeded, so two boots are not comparable. See BraineroidGlows.
+		[JSInvokable("debugBraineroidGlowBatch")]
+		public static string BraineroidGlowBatch(bool on)
+		{
+			EvilAliens.BraineroidGlows.Suppressed = !on;
+			return "[braineroidglow] batched=" + (on ? "true" : "false")
+				+ " driving=" + (EvilAliens.BraineroidGlows.Active ? "true" : "false");
+		}
+
+		// eaCollisionBench(n, iters): the pinned collision broad-phase bench + its behaviour-
+		// neutrality check against the pre-card algorithm (card 391e11d2). MENU-only; see
+		// Compat/CollisionBench.cs. Args are passed through VERBATIM, exactly like
+		// debugNetPuppetBench: the defaults live in the JS facade and apply only when an argument
+		// is OMITTED, so a supplied 0 reaches the C# guard and is reported rather than swallowed.
+		// (`eval` binds on arity, so both args are always required headlessly.)
+		[JSInvokable("debugCollisionBench")]
+		public static string CollisionBench(int n, int iters)
+		{
+			return EvilAliensWeb.Compat.CollisionBench.Run(n, iters);
+		}
+
+		// eaWorldCensus(on?): batches opened per frame + the live component population by type.
+		// The FPS HUD says WHERE the time goes; this says what produced it. Arming clears the
+		// window, so call it once, let the scene settle, then call it again to read.
+		[JSInvokable("debugWorldCensus")]
+		public static string Census(bool on)
+		{
+			if (on && !WorldCensus.Enabled)
+			{
+				WorldCensus.SetEnabled(true);
+				return "[census] armed";
+			}
+			if (!on)
+			{
+				WorldCensus.SetEnabled(false);
+				return "[census] off";
+			}
+			Microsoft.Xna.Framework.Game game =
+				EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>()?.ComponentBin?.Game;
+			return WorldCensus.Report(game);
+		}
+
 		// JS bridge for the dev-build FPS HUD (eaFps in wwwroot/index.html; card 22e655b5).
 		// FpsProfile(on) arms the per-phase accumulators, FpsStats() returns the HUD's JSON
 		// payload and FpsStatsLine() the one-line console form. Same polling contract as the

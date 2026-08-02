@@ -1,0 +1,73 @@
+# PROBE: the collision broad phase still agrees, callback for callback, with its pre-card form.
+#
+# PINS: card 391e11d2 -- three broad-phase changes in CollisionHandler.DetectCollisions, all
+# claimed to be BEHAVIOUR-NEUTRAL and none of them visible in any frame:
+#   * entities with Collides == false are skipped entirely (the final boss's brainz wave runs up
+#     to 93 live BloodExplosions, and Explosion / MiniExplosion / SmokeDrawer / FloatingText are
+#     permanently non-colliding too);
+#   * the candidate gather dedupes with an O(1) per-pass stamp instead of List.Contains;
+#   * GetCollisionType() is snapshotted once per collidable per pass instead of being re-read by
+#     each `is` test in the dispatch chain and again inside the fill.
+#
+# WHY A PROBE AND NOT A SCREENSHOT: a broken broad phase does not draw wrong, it MISSES or
+# DOUBLES a hit -- a bullet that passes through an alien, or an asteroid nudged twice in a frame.
+# That is invisible in a still, intermittent in play, and would be found by a player long before
+# it was found here. eaCollisionBench runs the real DetectCollisions over a scripted probe
+# population and diffs the resulting callback list against a verbatim transcription of the
+# PRE-CARD algorithm (references in the cells, Contains dedupe, per-access GetCollisionType,
+# nothing skipped) -- so the comparison is against the old CODE, not against a restatement of the
+# new one. See Compat/CollisionBench.cs.
+#
+# FAILURE MEANS: read the FAIL line, which names the first differing pair as
+# "<receiver>-><other>". "live is missing callback" = the broad phase has stopped finding a hit
+# it used to find (the dangerous direction). "live has extra callback" = something is now
+# reported twice, which is the double-nudge class perf batch 2 fixed. Either way the diff is in
+# DetectCollisions, not in the bench.
+#
+# MUTATION-TESTED before committing, both directions:
+#   * dropping the `seen[occupant] != stamp` dedupe -> FAIL, 420 callbacks against 276.
+#   * inverting CanCollide -> FAIL, "live is missing callback 1->25", 0 callbacks against 276.
+#
+# WHAT THIS PROBE DOES *NOT* COVER, stated so nobody reads a green tick as more than it is:
+# state that survives BETWEEN passes. A first cut of the dedupe stamped with the resolution
+# index, so an entity read its own previous-pass stamp back and silently dropped a candidate --
+# and this probe stayed green through it, because the bench's grid is dense enough that some
+# earlier entity overwrites the stale stamp first. `net_selftests.txt` (eaBinTest scenario 8,
+# a two-collidable world) is what caught that and is the guard for that class.
+#
+# THE POSITIVE ASSERTIONS ARE NOT DECORATION. An empty callback list matches an empty callback
+# list, so the bench fails ITSELF as `FAIL vacuous` if the probe grid stops overlapping, and
+# again if the timed passes produced no collisions -- both of which really happened while this
+# was being written, and both of which a bare "no FAIL" check would have read as a pass. The
+# `expect PASS behaviour-neutral` line below is what makes a green run mean the comparison
+# actually ran; `expect-not` alone would pass on a SKIP.
+#
+# MENU-ONLY, and the probe boots to the menu for that reason: the bench adds hundreds of probe
+# collidables to the world, which inside a live level would collide with real entities and drive
+# real gameplay reactions. It is leave-no-trace (every probe is removed and the death list
+# flushed before it returns), which is why the second run below can assert the same thing.
+#
+# eahl: --flags "?menu&noattract"
+
+step 200 nodraw
+mark
+
+# 160 collidables, 120 of them colliding, on a grid whose pitch is smaller than a probe's extent.
+eval CollisionBench 160 200
+expect PASS behaviour-neutral
+expect-not FAIL
+expect-not SKIP
+expect-not ABORT
+
+# A SECOND run in the same process. This is the leave-no-trace assertion: the bench's population
+# precondition aborts if the first run's probes are still in the world, so a run that leaked
+# would report "ABORT only 320 of 160 probes reached the collision handler" here rather than
+# quietly measuring twice the population it claims. (Observed, before ComponentBin.Update() was
+# called on the way out -- removals are queued and a bench runs inside a single eval, with no
+# tick boundary to flush them.)
+mark
+eval CollisionBench 160 200
+expect PASS behaviour-neutral
+expect-not ABORT
+
+quit

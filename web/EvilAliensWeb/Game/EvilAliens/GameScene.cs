@@ -1112,6 +1112,10 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		}
 	}
 
+	// The one-batch Braineroid glow driver (card 391e11d2). Built lazily and kept across plays
+	// like the scene itself, which is a re-added singleton.
+	private BraineroidGlows[] braineroidGlows;
+
 	public override void Initialize()
 	{
 		Settings.GetInstance().AdaptiveDifficulty = false;
@@ -1153,6 +1157,23 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		score.Save();
 		score.Lives = -1;
 		Collection.Add((GameComponent)(object)score);
+		// One additive batch for every Braineroid glow on screen, instead of two blend flips per
+		// brain (card 391e11d2). Owned here rather than by a level because four different
+		// spawners across several levels produce Braineroids, and every one of them runs inside a
+		// GameScene. Removed in Terminate -- level scenes are re-added singletons, so a drawable
+		// left in the bin would draw over later scenes.
+		if (braineroidGlows == null)
+		{
+			braineroidGlows = new BraineroidGlows[BraineroidGlows.Bands.Length];
+			for (int i = 0; i < braineroidGlows.Length; i++)
+			{
+				braineroidGlows[i] = new BraineroidGlows(base.Game, BraineroidGlows.Bands[i]);
+			}
+		}
+		for (int i = 0; i < braineroidGlows.Length; i++)
+		{
+			Collection.Add((GameComponent)(object)braineroidGlows[i]);
+		}
 		Settings.GetInstance().ResetDifficulty();
 		if (oracle.DeviceIsPlaying(ControlDevice.Keyboard))
 		{
@@ -1863,6 +1884,13 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		}
 		Collection.Remove((GameComponent)(object)Background);
 		Collection.Remove((GameComponent)(object)score);
+		if (braineroidGlows != null)
+		{
+			for (int i = 0; i < braineroidGlows.Length; i++)
+			{
+				Collection.Remove((GameComponent)(object)braineroidGlows[i]);
+			}
+		}
 		Collection.Remove((GameComponent)(object)this);
 		if (snapshotMadeThisSession)
 		{

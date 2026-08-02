@@ -210,9 +210,22 @@ internal sealed class BrainBossOverlays
         float sx = bossTexW / RefW;
         float sy = bossTexH / RefH;
         SpriteBlendMode savedBlend = sb.BlendMode;
+        // ?brainoverlayphase=<0..1>: pin every patch at a chosen point in its cycle instead of
+        // advancing it (card 9f90978c). The eye rests CLOSED on frame 0 and opens only on a ~15 s
+        // random roll, so it is otherwise unreachable for a screenshot; the pods only run while
+        // the boss vents. Draw-side only -- nothing about the boss's state changes.
+        float? parkPhase = DebugFlags.BrainOverlayPhase;
         foreach (Overlay ov in _overlays)
         {
-            AdvanceClock(ov, dt, gameTime, spawnActive);
+            if (parkPhase.HasValue)
+            {
+                ov.Playing = true;
+                ov.Clock = parkPhase.Value * ov.CycleSeconds;
+            }
+            else
+            {
+                AdvanceClock(ov, dt, gameTime, spawnActive);
+            }
             FramePair(ov, out int f0, out int f1, out float frac);
             Rectangle r0 = CellRect(ov, f0);
             Rectangle r1 = CellRect(ov, f1);

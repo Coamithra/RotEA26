@@ -34,11 +34,21 @@ internal class BloodExplosion : AlienDrawableGameComponent
 		}
 	}
 
+	// Supersample divisors, resolved ONCE. SuperSampleFactor is a string-keyed dictionary lookup
+	// and Draw calls it per PARTICLE (up to 34 each): the final boss's brainz wave runs ~93 live
+	// BloodExplosions, i.e. thousands of hashes per frame for three constants (card 391e11d2).
+	private float dropDivisor = 1f;
+	private float greenDivisor = 1f;
+	private float gooDivisor = 1f;
+
 	protected override void LoadContent()
 	{
 		base.LoadContent();
 		goo = content.Load<Texture2D>("GFX/Sprites/braingoo");
 		greenblood = content.Load<Texture2D>("GFX/Sprites/blooddrop_green");
+		dropDivisor = SuperSampleFactor("GFX/Sprites/blooddrop", texture.LogicalWidth());
+		greenDivisor = SuperSampleFactor("GFX/Sprites/blooddrop_green", greenblood.LogicalWidth());
+		gooDivisor = SuperSampleFactor("GFX/Sprites/braingoo", goo.LogicalWidth());
 	}
 
 	public BloodExplosion(Game game)
@@ -111,11 +121,11 @@ internal class BloodExplosion : AlienDrawableGameComponent
 				Color tint = new Color(new Vector4(1f, 1f, 1f, alpha));
 				if (green)
 				{
-					spriteBatch.Draw(greenblood, base.Position + particle.position, particle.rotation, particle.scale / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/blooddrop_green", greenblood.LogicalWidth()), center: true, tint);
+					spriteBatch.Draw(greenblood, base.Position + particle.position, particle.rotation, particle.scale / greenDivisor, center: true, tint);
 				}
 				else
 				{
-					spriteBatch.Draw(texture, base.Position + particle.position, particle.rotation, particle.scale / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/blooddrop", texture.LogicalWidth()), center: true, tint);
+					spriteBatch.Draw(texture, base.Position + particle.position, particle.rotation, particle.scale / dropDivisor, center: true, tint);
 				}
 			}
 		}
@@ -126,7 +136,7 @@ internal class BloodExplosion : AlienDrawableGameComponent
 			{
 				float alpha = 4f * particle.normalizedLifetime * (1f - particle.normalizedLifetime);
 				Color tint = new Color(new Vector4(1f, 1f, 1f, alpha));
-				spriteBatch.Draw(goo, base.Position + particle.position, particle.rotation, particle.scale * 0.2f / AlienDrawableGameComponent.SuperSampleFactor("GFX/Sprites/braingoo", goo.LogicalWidth()), center: true, tint);
+				spriteBatch.Draw(goo, base.Position + particle.position, particle.rotation, particle.scale * 0.2f / gooDivisor, center: true, tint);
 			}
 		}
 	}

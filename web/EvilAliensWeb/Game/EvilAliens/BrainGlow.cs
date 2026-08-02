@@ -40,6 +40,18 @@ internal static class BrainGlow
 	internal static void Draw(SpriteBatchWrapper spriteBatch, Texture2D glowTexture, Vector2 position,
 		float rotation, float drawScale, float phase, GameTime gameTime, SpriteBlendMode blendMode)
 	{
+		spriteBatch.BlendMode = (SpriteBlendMode)2;
+		DrawCore(spriteBatch, glowTexture, position, rotation, drawScale, phase, gameTime);
+		spriteBatch.BlendMode = blendMode;
+	}
+
+	// The same draw with NO blend-state change, for a caller that has set additive ONCE for a whole
+	// population instead of twice per brain (BraineroidGlows, card 391e11d2). Kept as the one body
+	// so the two paths cannot drift -- the batched path has to be pixel-identical to the per-brain
+	// one or the A/B seam it ships with would be comparing two different glows.
+	internal static void DrawCore(SpriteBatchWrapper spriteBatch, Texture2D glowTexture, Vector2 position,
+		float rotation, float drawScale, float phase, GameTime gameTime)
+	{
 		if (glowTexture == null)
 		{
 			return;
@@ -48,8 +60,6 @@ internal static class BrainGlow
 		float s = (float)Math.Sin(t * Omega + phase);
 		float glowScale = drawScale * ScaleBase * (1f + ScaleShimmer * s);
 		float alpha = AlphaBase + AlphaShimmer * s;
-		spriteBatch.BlendMode = (SpriteBlendMode)2;
 		spriteBatch.Draw(glowTexture, position, rotation, glowScale, center: true, new Color(new Vector4(1f, 1f, 1f, alpha)));
-		spriteBatch.BlendMode = blendMode;
 	}
 }

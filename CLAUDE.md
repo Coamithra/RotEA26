@@ -288,6 +288,15 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   (`eval RippleFire` / `RipplePark` / `RippleState` under `eahl`). `?ripplepower=<0..4>` gives
   the parked ring a bomb powerup level (a maxed bomb is 1.88x the amplitude). Details: web
   CLAUDE.md.
+- **BrainBoss overlay rigs** (cards 391e11d2 / 9f90978c): **`?brainoverlayphase=<0..1>`** parks
+  every animated overlay patch (the shipped pair: the eye and the exhaust pods) at a chosen point in
+  its cycle and holds it there -- the eye rests CLOSED on frame 0 and opens only on a ~15 s random
+  roll, so it is otherwise unreachable for a screenshot. Negative = live, the `?ripplephase=`
+  convention. **It is also the only way to get a REPEATABLE frame out of the boss at all**: the
+  overlays advance on Draw time, so two `shot`s with no `step` between them are not identical
+  without it. **`?brainhitflash`** forces the hit-flash brighten on (draw-side only, nothing is
+  damaged), which no rig can time inside the real 35 ms hittimer window. e.g.
+  `?harness=brainboss&brainoverlayphase=0.5&brainhitflash`.
 - **Post-level text crawl** (card bee8f0e0): the crawl now tapers like a Star Wars opening.
   **`?creditsshot=<1|2|3>`** boots straight into it for that level (otherwise reachable only by
   finishing a level or `?level=N&win`), **`?crawlpos=<designY>`** parks the scroll for a

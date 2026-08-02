@@ -46,6 +46,28 @@ eahl --flags "?level=Level2&flyspiders&invuln" --frames 3600 --nodraw --jscalls
 HUD lives in `index.html`, so it does not exist here — which is why captures are never contaminated
 by it.
 
+## Profiling headlessly
+
+`FrameProfiler`'s per-phase brackets live inside `Game1`, so they already run here — but a sample
+only enters its window on `EndFrame()`, which in the browser is called from `Pages/Index.razor.cs`,
+code this host does not run. So the profiler used to report a permanently stale window headlessly.
+The step loop now times each tick and calls it, which makes the FPS HUD's numbers available with no
+Chrome:
+
+```sh
+eahl --flags "?level=Level3&brainboss&invuln" --repl
+> eval FpsProfile true
+> step 300
+> eval FpsStatsLine      # ms/frame + the per-phase split (components / collision / net / scene / …)
+> eval Census true       # SpriteBatch batches per frame + live components by type
+```
+
+**Treat the ms as RELATIVE, never absolute** — this is desktop CLR on desktop GL, which is far
+faster than WASM on WebGL, and `--present` is off by default so GPU execution is not in the tick at
+all. What it answers well is *which phase and which wave is hot*. `glCalls` reads 0: that counter is
+patched into the JS WebGL prototypes and there is no JS here — `eval Census true` is the headless
+stand-in, counting the batches the wrapper opens.
+
 ## REPL mode — boot once, then drive it
 
 Boot costs ~1 s, so for anything interactive pay it once:

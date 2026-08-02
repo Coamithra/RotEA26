@@ -139,9 +139,18 @@ namespace EvilAliensWeb.Headless
                 HeadlessAudio.Pump();
                 _total += _step;
                 var gt = new GameTime(_total, _step);
+                // FrameProfiler's per-phase brackets live inside Game1 and so already run here,
+                // but the sample only ENTERS the ring on EndFrame -- which in the browser is
+                // called from Index.razor.cs, i.e. code this host does not run. Without this the
+                // headless profiler reports a permanently stale window and `eval FpsStatsLine`
+                // is useless. One stopwatch, same contract as the browser's tick timer.
+                long tickStart = FrameProfiler.Enabled ? Stopwatch.GetTimestamp() : 0L;
                 _game.UpdateFrame(gt);
                 if (draw)
                     _game.DrawFrame(gt);
+                if (tickStart != 0L)
+                    FrameProfiler.EndFrame(
+                        (Stopwatch.GetTimestamp() - tickStart) * 1000.0 / Stopwatch.Frequency);
             }
         }
 

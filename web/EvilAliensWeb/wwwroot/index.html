@@ -669,6 +669,33 @@
             catch (e) { console.warn('[debug] eaNetPuppetBench failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: the collision broad-phase bench + its behaviour-neutrality check against the
+        // pre-card algorithm (card 391e11d2). MENU-only. Defaults n=160 / iters=400, applied
+        // ONLY when the argument is omitted — a supplied 0 is passed through so the C# guard can
+        // report it, the value-carrying-flag convention.
+        window.eaCollisionBench = (n, iters) => {
+            const N = (n === undefined) ? 160 : (n | 0);
+            const I = (iters === undefined) ? 400 : (iters | 0);
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugCollisionBench', N, I)); }
+            catch (e) { console.warn('[debug] eaCollisionBench failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: batches opened per frame + the live component population by type (card
+        // 391e11d2). The FPS HUD says WHERE the frame time goes; this says what produced it.
+        // Arming clears the window — call once, let the scene settle, call again to read.
+        window.eaWorldCensus = (on) => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugWorldCensus', on !== false)); }
+            catch (e) { console.warn('[debug] eaWorldCensus failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: flip the Braineroid glow draw between the batched driver (default) and the
+        // pre-card per-brain path (card 391e11d2). The appearance A/B — flip it between two
+        // screenshots with NO tick in between, so both paths draw the SAME world.
+        window.eaBraineroidGlowBatch = (on) => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugBraineroidGlowBatch', on !== false)); }
+            catch (e) { console.warn('[debug] eaBraineroidGlowBatch failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: the online co-op primary-slot negotiation (card c0229c57) — what the client
         // does with a grant (DecideSlotAdopt), what the host grants once it can see the
         // joiner's roster (FirstMutuallyFreeSlot + its convergence), the v8 handshake codec,

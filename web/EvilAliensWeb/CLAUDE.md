@@ -512,7 +512,14 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   busy-ness heuristic and two timers, which put `ScreenshotSaver.SaveScreenShot` -- and the alpha
   seal in it -- out of reach of a cheap check. Needs a Draw between the two calls, and prints
   `[shot] <Level> 300x225 alphaMin=<n>` under `?loadlog`, where 255 is the pass. **DESTRUCTIVE**
-  like `eaNetResetSpawn`: it overwrites the level's real saved `.dat`, so use a throwaway boot).
+  like `eaNetResetSpawn`: it overwrites the level's real saved `.dat`, so use a throwaway boot),
+  `eaWorldCensus()` (SpriteBatch batches opened per frame + the live component population by
+  type -- what PRODUCED the frame cost the FPS HUD only locates; arm once, let the scene settle,
+  call again to read),
+  `eaCollisionBench(n, iters)` (the collision broad-phase cost in absolute us PLUS its
+  behaviour-neutrality check against the pre-card algorithm -- MENU-only; card 391e11d2),
+  `eaBraineroidGlowBatch(on)` (flip the Braineroid glow draw between the batched driver and the
+  pre-card per-brain path, for a same-frame appearance A/B).
 
 ### Frame profiler / FPS HUD (`Compat/FrameProfiler.cs` + `eaFps` in index.html, card 22e655b5)
 
@@ -568,6 +575,101 @@ draws for the tower pass; the two agree on the same fight.)
   synthetic series through the real accumulator and asserts the vsync trap itself: `work` ms every
   `interval` ms must read `1000/interval` fps and `1000/work` headroom. A profiler that reported
   the work rate as "fps" fails it loudly. (The `eaNetSim.test` idiom; a python mirror would drift.)
+
+### Frame cost: what the profiler CANNOT tell you (`Compat/WorldCensus.cs`, card 391e11d2)
+
+The FPS HUD answers **where** the time goes (per-phase ms). It cannot answer **why**: a frame that
+costs 8 ms because 400 sprites are alive and one that costs 8 ms because 40 sprites each open their
+own GL batch have identical phase rows. `eaWorldCensus()` / `eval Census true` supplies the missing
+half -- **SpriteBatch batches opened per frame** (counted at `SpriteBatchWrapper._beginDrawing`, the
+one place the wrapper opens a content batch) and the **live component population by type**. Arm it,
+let the scene settle, call again to read; arming clears the window.
+
+- **Batches are the number to watch, because BlazorGL's cost is per-CALL.** `_beginDrawing` flushes
+  whenever the effect or blend state changes, so any per-sprite state write costs a draw call.
+  Measured on the final boss: 7 batches/frame idle, **93** in the ufoz and brainz waves.
+- **The two shapes that fragment a batch, and only one of them is fixable.** A component that flips
+  `BlendMode` mid-draw and back (the old `Braineroid.DrawGlow`, `Explosion`) can be batched by
+  hoisting the flip into a driver component -- see `BraineroidGlows`. A component drawn through
+  `drawWithInterpolation` cannot: `Settings.Interpolate` is true, so every animated sprite writes
+  its own `InterpOffset`/`InterpDelta`/`FadeValue` and is necessarily its own batch. That is
+  ~1 call per animated enemy (58 UFOs -> 58 batches) and is **reported, not fixed** -- closing it
+  means a sprite-sorting / state-batching layer in `SpriteBatchWrapper`, an architectural change
+  rather than a tuning one.
+- It also works under `eahl`, which is where it belongs -- a rendered browser frame rate is
+  vsync-capped and cannot see any of this. See `tools/headless/README.md` -> "Profiling headlessly".
+
+### Collision broad phase (`CollisionHandler`, card 391e11d2)
+
+`DetectCollisions` was the single hottest phase of a busy boss wave (**43%** of the tick in the
+ufoz wave, 204 collidables). Three changes, all behaviour-neutral, all pinned:
+
+- **Entities that cannot collide are not gridded.** All three `ICollidable` implementors gate on the
+  ADC's `Collides` (`ADC.DetectCollision`'s own `if (Collides)`, and `Floor`/`Floorbottom`'s
+  `!(other is ADC) || ((ADC)other).Collides`), so a `Collides == false` entity can neither hit nor
+  be hit -- and that is the BULK of a busy frame (up to 93 live `BloodExplosion`s on the brainz
+  wave, plus `Explosion`, `MiniExplosion`, `SmokeDrawer`, `FloatingText`).
+  **`CanCollide` is read ONCE per pass, and that is only sound because `Collides` is never SET from
+  inside a collision callback** -- every write reachable from a `CollidesWith`/`KilledBy` is
+  `= false`. **Add a `Collides = true` inside a collision callback and this hoist breaks** (that
+  entity would wait a frame for its first hit).
+- **Cells hold INDICES, and the candidate gather dedupes with an O(1) stamp** instead of
+  `List.Contains`, which was O(k^2) per entity in a cluster -- and a boss wave is one big cluster.
+  **The stamp is a MONOTONIC counter, not the resolution index.** The index looks equivalent and is
+  not: after a pass `seen[j]` holds the stamp of the last entity that had j as a candidate, so the
+  next pass's entity with that index reads its own stamp back and silently DROPS a real candidate.
+  Caught by `eaBinTest` scenario 8; `eaCollisionBench` did NOT catch it (its grid is dense enough
+  that an earlier entity overwrites the stale stamp first), so `net_selftests.txt` is the guard for
+  that class.
+- **`GetCollisionType()` is snapshotted once per collidable per pass.** It was evaluated up to four
+  times per entity in the fill alone (once per `is` test in the dispatch chain, then again inside
+  `FillCollisionMatrix*`), and every ADC evaluation runs `retrieveBoundsFromTexture` -- which now
+  memoises its cell dimensions, so it is two `Vector2` writes instead of two `ConditionalWeakTable`
+  lookups plus arithmetic. **The NARROW phase still recomputes**, through
+  `ICollidable.DetectCollision`; widening that signature is a proposed follow-up, not done here.
+
+**Verify with `eaCollisionBench(n, iters)`** (`Compat/CollisionBench.cs`), MENU-only. Its
+correctness half diffs the real pass's callback list against `ReferencePass`, a verbatim
+transcription of the PRE-CARD algorithm -- the negative control, in the `eaNetScore.test` idiom. It
+fails ITSELF as `FAIL vacuous` if the probe grid stops overlapping or the timed passes found
+nothing, because an empty callback list matches an empty callback list. Committed as
+`tools/headless/probes/collision_broadphase.txt`; mutation-tested three ways.
+
+### BrainBoss: the hit flash and the overlay patches (card 9f90978c)
+
+`KillableAlien.Draw` brackets `spriteBatch.lightenEffect` around `base.Draw` **only**.
+`BrainBoss.Draw` calls `base.Draw` and THEN `overlays.Draw`, so the animated patches (the shipped
+pair: `eye_reveal` and `pods_flicker`) sat outside the bracket and stayed unlit while the brain
+under them flashed white.
+`BrainBoss.Draw` now re-opens the bracket around the overlay draw. No shader work was needed --
+`EffectHandler` already compiles both variants the overlay's two branches resolve to (`lighten` for
+the plain one, whose tint still rides the vertex colour, and `lighten_interpolate_fade` for the
+interpolated one, which already enables fade with the same tint).
+
+**Rig: `?brainoverlayphase=<0..1>` + `?brainhitflash`** (root CLAUDE.md). The phase park is also
+what makes ANY BrainBoss screenshot repeatable -- the overlays advance on Draw time, so two `shot`s
+with no `step` between them differ by ~15 000 px without it, which reads exactly like a real change
+and will waste an hour if you let it.
+
+### Braineroid glows draw as one batch per band (`BraineroidGlows`, card 391e11d2)
+
+Each `Braineroid` used to flip `BlendMode` to Additive for its glow and back for its brain, so a
+brain and its glow could never share a batch with the next braineroid's: 29 brains cost 58.6
+batches. A driver component now draws every glow in one additive batch. Measured on the same rig at
+20 brains: **43.8 -> 29.0 batches/frame**, i.e. ~1.84 -> ~1.10 batches per Braineroid. (The brains
+themselves stay one batch each -- the interpolation-shader half above.)
+
+- **TWO INSTANCES, ONE PER DrawOrder BAND, and that is correctness rather than tidiness.**
+  `Braineroid.Initialize` puts huge/medium brains at DrawOrder 20 and **SMALL ones at 800**, so a
+  small brain's glow drew above the BrainBoss, the walls and everything up to 800. A single
+  low-DrawOrder driver dragged those glows under the boss, where its opaque cables hid them:
+  measured 7419 px, peak 129/255, one-directional dimming. `BraineroidGlows.Bands` is the list;
+  **a new Braineroid size drawing at a new DrawOrder must be added to it** or its glow silently
+  changes layer.
+- **Verify with `eaBraineroidGlowBatch(on)` between two `shot`s and NO `step`.** Gameplay RNG is
+  unseeded, so two boots of a level never reach the same world state and a cross-boot pixel diff
+  measures the wave, not the change (the bomb-ripple card's lesson). Pair it with
+  `?brainoverlayphase=` or the boss overlays alone drift ~15 000 px between the two frames.
 
 ## Component lifecycle (`ComponentBin`) — the spawn/death contract
 

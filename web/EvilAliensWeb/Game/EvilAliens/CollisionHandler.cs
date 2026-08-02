@@ -30,7 +30,10 @@ public class CollisionHandler
 	// no-op.
 	private const int maxLineSteps = 128;
 
-	private List<ICollidable>[,] fieldMatrix = new List<ICollidable>[10, 8];
+	// Cells hold INDICES into `collidables`, not references (card 391e11d2). That is what lets the
+	// candidate gather below dedupe with an O(1) stamp instead of List.Contains' linear scan --
+	// which was O(k^2) per entity in a cluster, and a boss wave IS one big cluster.
+	private List<int>[,] fieldMatrix = new List<int>[10, 8];
 
 	private List<ICollidable> collidables = new List<ICollidable>();
 
@@ -38,7 +41,19 @@ public class CollisionHandler
 
 	private List<List<BoxInfo>> boxes = new List<List<BoxInfo>>();
 
-	private List<ICollidable> colliders = new List<ICollidable>();
+	private List<int> colliders = new List<int>();
+
+	// Dedupe stamp for the candidate gather: `seen[i] == stamp` means collidable i is already in
+	// `colliders` for the entity being resolved.
+	//
+	// The stamp is a MONOTONIC counter, bumped once per resolved entity, NOT the resolution index.
+	// Using the index looks equivalent and is not: after a pass, seen[j] holds the stamp of the
+	// LAST entity that had j as a candidate, so the next pass's entity with that same index reads
+	// its own stamp back and silently SKIPS a real candidate -- a collision quietly dropped every
+	// few frames. Caught by eaBinTest scenario 8, which is what that suite is for.
+	private int[] seen = new int[0];
+
+	private int stampCounter;
 
 	private const long growthReportIntervalMs = 2000;
 
@@ -62,7 +77,7 @@ public class CollisionHandler
 		{
 			for (int j = 0; j < 8; j++)
 			{
-				fieldMatrix[i, j] = new List<ICollidable>();
+				fieldMatrix[i, j] = new List<int>();
 			}
 		}
 		this.game = game;
@@ -98,6 +113,27 @@ public class CollisionHandler
 		return gc.Enabled || EvilAliensWeb.Compat.Net.NetPuppets.CollidableOverride(gc);
 	}
 
+	// Perf batch 3 (card 391e11d2): can this entity take part in a collision AT ALL this pass?
+	// An AlienDrawableGameComponent with Collides == false cannot, IN EITHER DIRECTION -- all three
+	// ICollidable implementors gate on it (ADC.DetectCollision's own `if (Collides)`, and
+	// Floor/Floorbottom's `!(other is ADC) || ((ADC)other).Collides`), so such an entity neither
+	// hits nor is hit. Keeping it out of the broad phase is therefore behaviour-neutral, and it is
+	// the bulk of a busy frame: the final boss's brainz wave runs 93 live BloodExplosions, and
+	// Explosion / MiniExplosion / SmokeDrawer / FloatingText are all permanently non-colliding too.
+	//
+	// It is read ONCE per pass, at fill time, which is sound because Collides can only ever be
+	// CLEARED from inside a collision callback, never set: every write reachable from a
+	// CollidesWith/KilledBy is `= false` (Bullet, ParatrooperBrain, SpiderBoss, and the four
+	// bosses' KilledBy). The `= true` writes all live in Initialize/Setup/Update, i.e. outside the
+	// pass -- and a component born mid-pass joins the NEXT one anyway (the frozen count above).
+	// **If you ever add a `Collides = true` inside a collision callback, this hoist stops being
+	// sound** -- an entity would have to wait a frame for its first hit.
+	// Non-ADC collidables (Floor, Floorbottom) have no Collides and always take part.
+	private static bool CanCollide(ICollidable collidable)
+	{
+		return !(collidable is AlienDrawableGameComponent adc) || adc.Collides;
+	}
+
 	public void DetectCollisions()
 	{
 		// The whole pass runs over a FROZEN count. Bin adds are instant (card 02d9ad67), so a
@@ -129,17 +165,36 @@ public class CollisionHandler
 				fieldMatrix[j, k].Clear();
 			}
 		}
+		if (seen.Length < count)
+		{
+			seen = new int[count + 64];
+		}
 		for (int l = 0; l < count; l++)
 		{
 			ICollidable collidable = collidables[l];
-			if (collidable.GetCollisionType() is CollisionBox)
+			// Non-colliding entities are left out of the grid entirely -- see CanCollide. Their
+			// `boxes[l]` stays empty (cleared above), so the resolution loop finds no cells for
+			// them and no other entity ever finds them in one.
+			if (!CanCollide(collidable))
 			{
-				FillCollisionMatrixBox(collidable, boxes, l);
 				continue;
 			}
-			if (collidable.GetCollisionType() is CollisionLine)
+			// One GetCollisionType() per collidable per pass, reused by the type dispatch AND the
+			// fill (card 391e11d2). It was evaluated up to FOUR times per entity per pass -- once
+			// per `is` test in the dispatch chain, then again inside FillCollisionMatrix* -- and
+			// every ADC evaluation runs retrieveBoundsFromTexture, i.e. two ConditionalWeakTable
+			// lookups plus the cell arithmetic. (The narrow phase still recomputes, through
+			// ICollidable.DetectCollision; widening that signature is deliberately out of this
+			// card's scope.)
+			ICollisionType shape = collidable.GetCollisionType();
+			if (shape is CollisionBox)
 			{
-				FillCollisionMatrixLine(collidable, boxes, l);
+				FillCollisionMatrixBox(shape, boxes, l);
+				continue;
+			}
+			if (shape is CollisionLine)
+			{
+				FillCollisionMatrixLine(shape, boxes, l);
 				continue;
 			}
 			// Perf batch 2: circles (Blast/Ball/StarMine/PlasmaBall/JunkBoss) used to fall
@@ -149,9 +204,9 @@ public class CollisionHandler
 			// then handles them like every other gridded collider (one callback per direction),
 			// which both removes the O(n)/O(n^2) scan and fixes the double nudge. The bounding
 			// box fully covers the disc, so no overlapping pair can miss a shared cell.
-			if (collidable.GetCollisionType() is CollisionSimpleCircle)
+			if (shape is CollisionSimpleCircle)
 			{
-				FillCollisionMatrixCircle(collidable, boxes, l);
+				FillCollisionMatrixCircle(shape, boxes, l);
 				continue;
 			}
 			// Remaining non-gridded types (CollisionMultibox / CollisionLevelMap — level walls,
@@ -159,7 +214,9 @@ public class CollisionHandler
 			for (int n = 0; n < count; n++)
 			{
 				ICollidable other = collidables[n];
-				if ((IsActive(other) & IsActive(collidable)) && other != collidable && collidable.DetectCollision(other))
+				// The CanCollide skip is the same argument as above -- DetectCollision would
+				// return false for a non-colliding `other` anyway, this just skips the call.
+				if (CanCollide(other) && (IsActive(other) & IsActive(collidable)) && other != collidable && collidable.DetectCollision(other))
 				{
 					other.CollidesWith(collidable);
 					collidable.CollidesWith(other);
@@ -168,22 +225,38 @@ public class CollisionHandler
 		}
 		for (int m = 0; m < count; m++)
 		{
+			// Monotonic, so a freshly zeroed `seen` (a grown array) and every earlier pass's
+			// values are all below it -- see the field comment.
+			if (stampCounter == int.MaxValue)
+			{
+				// Unreachable in practice (~50 hours of play at 200 collidables and 60 Hz), but a
+				// wrapped counter would start matching stale entries again, so reset rather than
+				// wrap: zeroing `seen` makes every stamp from 1 fresh once more.
+				System.Array.Clear(seen, 0, seen.Length);
+				stampCounter = 0;
+			}
+			int stamp = ++stampCounter;
 			colliders.Clear();
 			foreach (BoxInfo cell in boxes[m])
 			{
-				foreach (ICollidable occupant in fieldMatrix[cell.x, cell.y])
+				foreach (int occupant in fieldMatrix[cell.x, cell.y])
 				{
-					if (!colliders.Contains(occupant) && occupant != collidables[m])
+					// Distinct indices are distinct components, so this is the old
+					// `occupant != collidables[m]` reference test.
+					if (occupant != m && seen[occupant] != stamp)
 					{
+						seen[occupant] = stamp;
 						colliders.Add(occupant);
 					}
 				}
 			}
-			foreach (ICollidable collider in colliders)
+			foreach (int collider in colliders)
 			{
-				if (IsActive(collidables[m]) && IsActive(collider) && collidables[m].DetectCollision(collider))
+				// IsActive is re-read per candidate, exactly as before: a callback earlier in this
+				// same gather can disable a component, and that must still take effect.
+				if (IsActive(collidables[m]) && IsActive(collidables[collider]) && collidables[m].DetectCollision(collidables[collider]))
 				{
-					collidables[m].CollidesWith(collider);
+					collidables[m].CollidesWith(collidables[collider]);
 				}
 			}
 		}
@@ -200,9 +273,9 @@ public class CollisionHandler
 		}
 	}
 
-	private void FillCollisionMatrixLine(ICollidable collidable, List<List<BoxInfo>> boxes, int i)
+	private void FillCollisionMatrixLine(ICollisionType shape, List<List<BoxInfo>> boxes, int i)
 	{
-		CollisionLine collisionLine = (CollisionLine)collidable.GetCollisionType();
+		CollisionLine collisionLine = (CollisionLine)shape;
 		Vector2 origin = collisionLine.Origin;
 		Vector2 cursor = origin;
 		float dx = collisionLine.End.X - collisionLine.Origin.X;
@@ -219,7 +292,7 @@ public class CollisionHandler
 		}
 		int cellX = (int)(origin.X / 80f);
 		int cellY = (int)(origin.Y / 80f);
-		addToMatrix(collidable, cellX, cellY, boxes, i);
+		addToMatrix(cellX, cellY, boxes, i);
 		// Guaranteed-termination backstop for the DDA below (card 7a3e70ad). A straight line crosses
 		// at most squaresX + squaresY (=18) grid cells, so every well-behaved lazer steps far fewer
 		// times than this. The cap only ever trips for a DEGENERATE near-axis-aligned line: a
@@ -253,7 +326,7 @@ public class CollisionHandler
 						cursor.X += dxToEdge;
 						cursor.Y += dxToEdge * slope;
 					}
-					addToMatrix(collidable, cellX, cellY, boxes, i);
+					addToMatrix(cellX, cellY, boxes, i);
 				}
 			}
 			else if (dy < 0f)
@@ -275,7 +348,7 @@ public class CollisionHandler
 						cursor.X += dxToEdge;
 						cursor.Y += dxToEdge * slope;
 					}
-					addToMatrix(collidable, cellX, cellY, boxes, i);
+					addToMatrix(cellX, cellY, boxes, i);
 				}
 			}
 			else
@@ -284,7 +357,7 @@ public class CollisionHandler
 				{
 					cellX++;
 					cursor.X += 80f;
-					addToMatrix(collidable, cellX, cellY, boxes, i);
+					addToMatrix(cellX, cellY, boxes, i);
 				}
 			}
 		}
@@ -309,7 +382,7 @@ public class CollisionHandler
 						cursor.X += dxToEdge;
 						cursor.Y += dxToEdge * slope;
 					}
-					addToMatrix(collidable, cellX, cellY, boxes, i);
+					addToMatrix(cellX, cellY, boxes, i);
 				}
 			}
 			else if (dy < 0f)
@@ -331,7 +404,7 @@ public class CollisionHandler
 						cursor.X += dxToEdge;
 						cursor.Y += dxToEdge * slope;
 					}
-					addToMatrix(collidable, cellX, cellY, boxes, i);
+					addToMatrix(cellX, cellY, boxes, i);
 				}
 			}
 			else
@@ -340,7 +413,7 @@ public class CollisionHandler
 				{
 					cellX--;
 					cursor.X -= 80f;
-					addToMatrix(collidable, cellX, cellY, boxes, i);
+					addToMatrix(cellX, cellY, boxes, i);
 				}
 			}
 		}
@@ -350,7 +423,7 @@ public class CollisionHandler
 			{
 				cellY++;
 				cursor.Y += 80f;
-				addToMatrix(collidable, cellX, cellY, boxes, i);
+				addToMatrix(cellX, cellY, boxes, i);
 			}
 		}
 		else if (dy < 0f)
@@ -359,14 +432,14 @@ public class CollisionHandler
 			{
 				cellY--;
 				cursor.Y -= 80f;
-				addToMatrix(collidable, cellX, cellY, boxes, i);
+				addToMatrix(cellX, cellY, boxes, i);
 			}
 		}
 	}
 
-	private void FillCollisionMatrixBox(ICollidable collidable, List<List<BoxInfo>> boxes, int i)
+	private void FillCollisionMatrixBox(ICollisionType shape, List<List<BoxInfo>> boxes, int i)
 	{
-		CollisionBox collisionBox = (CollisionBox)collidable.GetCollisionType();
+		CollisionBox collisionBox = (CollisionBox)shape;
 		int top = (int)(collisionBox.Top / 80f);
 		int left = (int)(collisionBox.Left / 80f);
 		int right = (int)(collisionBox.Right / 80f);
@@ -392,14 +465,14 @@ public class CollisionHandler
 			for (int k = top; k < bottom + 1; k++)
 			{
 				boxes[i].Add(new BoxInfo(j, k));
-				fieldMatrix[j, k].Add(collidable);
+				fieldMatrix[j, k].Add(i);
 			}
 		}
 	}
 
-	private void FillCollisionMatrixCircle(ICollidable collidable, List<List<BoxInfo>> boxes, int i)
+	private void FillCollisionMatrixCircle(ICollisionType shape, List<List<BoxInfo>> boxes, int i)
 	{
-		CollisionSimpleCircle circle = (CollisionSimpleCircle)collidable.GetCollisionType();
+		CollisionSimpleCircle circle = (CollisionSimpleCircle)shape;
 		float r = circle.Radius;
 		int left = (int)((circle.Position.X - r) / 80f);
 		int right = (int)((circle.Position.X + r) / 80f);
@@ -426,12 +499,12 @@ public class CollisionHandler
 			for (int k = top; k < bottom + 1; k++)
 			{
 				boxes[i].Add(new BoxInfo(j, k));
-				fieldMatrix[j, k].Add(collidable);
+				fieldMatrix[j, k].Add(i);
 			}
 		}
 	}
 
-	private void addToMatrix(ICollidable collidable, int x, int y, List<List<BoxInfo>> boxes, int i)
+	private void addToMatrix(int x, int y, List<List<BoxInfo>> boxes, int i)
 	{
 		int cellX = x;
 		int cellY = y;
@@ -451,9 +524,9 @@ public class CollisionHandler
 		{
 			cellY = 7;
 		}
-		if (!fieldMatrix[cellX, cellY].Contains(collidable))
+		if (!fieldMatrix[cellX, cellY].Contains(i))
 		{
-			fieldMatrix[cellX, cellY].Add(collidable);
+			fieldMatrix[cellX, cellY].Add(i);
 			boxes[i].Add(new BoxInfo(cellX, cellY));
 		}
 	}

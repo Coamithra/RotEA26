@@ -1222,6 +1222,56 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   restore it, so "host white / joiner purple" holds for DEFAULT colours; nothing normalises the
   two peers' hue tables.) The puppet's render clock advances on REAL time (never turbo/slowmo/
   hit-stop-scaled game time) -- a local hit-stop must not drag the interpolation point.
+  - **THE FIRING HOLD IS MEASURED IN PACKETS, NOT MILLISECONDS (card a5c2a39b), and getting that
+    wrong is what made one tap fire TWICE on the peer.** `firing` is a LEVEL on the wire and
+    `DriveRemoteShip` reads `buffer.Newest.Firing` EVERY tick, so the peer holds the newest
+    sample until a newer one arrives: **N packets marked firing=true = N SEND INTERVALS of
+    firing=true in front of the re-fire gate over there.** That gate is
+    `1000/shotsPerSec` -- the peer sets it from the SAME packet -- so the peer spawns
+    `1 + floor(window / period)` bullets for one tap. `SendShipState` streamed a flat
+    `FiringHoldMs` 150 ms against a 125 ms default period: **exactly two bullets per tap**, three
+    at the maxed 18/s. They are real bullets in the peer's world and damage what they hit, which
+    is why the card also reported "P1 can kill an enemy on P2's screen that is alive on P1's" --
+    one symptom, not two bugs, and the generous-claim design is working as intended underneath.
+    `NetSession.FiringHoldMsFor(shotsPerSec)` now returns **`period/2`**, floored at one send
+    interval and capped at the old 150; `NetSession.Friends.cs` uses it too (a couch player's tap
+    doubled identically, and an AI friend gained one bullet at the tail of every burst).
+    - **`P/2` IS THE BOUND AND IT HOLDS FOR EVERY SEND INTERVAL, which is the point.** If
+      `I >= H` the peer's window is exactly `I`; if `I < H` it is `ceil(H/I)*I < H + I < 2H = P`.
+      So any send interval shorter than the cadence period is safe at any frame rate.
+    - **DO NOT DERIVE IT FROM THE NOMINAL 33 ms INTERVAL -- that was tried and it is only correct
+      at exactly 60 Hz.** `SendShipState` runs off a `now - lastStreamTx >= StreamIntervalMs` gate
+      evaluated ONCE PER FRAME, so the real interval is the smallest frame multiple >= 33: 33.3 ms
+      at 60 Hz but **40 ms at 100 Hz**, and never 33.0. Counting whole nominal packets over-fires
+      at **7, 9, 10, 13, 14 and 15 shots/sec on a 100 Hz display** -- ordinary in-play rates. Note
+      the direction: a hitched frame is a DOUBLING risk here, not a missed-bullet one, because
+      `ceil(H/I)*I` GROWS with `I`. (A fraction-of-the-period hold was the attempt before that;
+      0.6 x the 62.5 ms period at 16/s is 37.5 ms, which still catches two 33 ms-apart sends.)
+    - **TWO RESIDUALS, accepted (do not re-derive them):** (a) from 15/s up the floor binds, so a
+      tap rides a single packet with no redundancy and a stream-lane DROP loses that bullet on the
+      peer -- the kill still counts on the owner's screen, where the bullet was real; exactness
+      under loss needs a shot COUNT or a fire EDGE on the wire, i.e. a protocol version, judged
+      not worth it for one cosmetic bullet at one end of the range. (b) a send interval at or past
+      the cadence period (below ~18 fps at the top fire rate) cannot represent that cadence at all
+      and doubles again -- nothing a level encoding can do. Revisit (a) if real-network playtests
+      show missing tap bullets.
+    - **NOT FIXED, and unchanged by the card: `PlayerShip.FireAt` stamps `NetLastFireMs` on the
+      INTENT, before its own cadence gate.** So a second tap inside one cadence period restarts
+      the hold while spawning no local bullet -- two taps ~80 ms apart are ONE bullet on the owner
+      and TWO on the peer. The pre-card 150 ms hold did the same, so it is pre-existing rather
+      than a regression, and stamping on the actual SHOT instead would leave the hold uncovered
+      between shots (`H < P` by construction) and trade it for a stretched sustained cadence.
+      Wants its own card and its own measurement.
+    - **Verify with `eaNetFire()`** (`Compat/Net/NetFireTest.cs`, 16 assertions;
+      `tools/headless/probes/net_single_tap.txt`). **DESTRUCTIVE** like `eaNetPickup` -- it pairs
+      a real host session onto the live level and fires real bullets into it, so use a throwaway
+      `?level=Level2&invuln` boot. It COUNTS the bullets a scripted tap spawns on a real puppet,
+      with the PRE-CARD packet pattern beside it as the control (which must still report 2), and
+      asserts the bound as a pure decision over the whole 1..18 domain CROSSED WITH the send
+      intervals a real frame rate produces. **Read leg 1 as the rigorous half**: the rig sends at
+      one cadence with packets on tick boundaries, so the end-to-end legs sample ONE phase at
+      60 Hz -- both the nominal-packet and the 0.6-fraction mutations pass every one of them and
+      fail only leg 1.
 
 ## Metrics & verification
 

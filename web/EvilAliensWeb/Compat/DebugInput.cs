@@ -677,6 +677,18 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetPickupTest.Run();
 		}
 
+		// JS bridge for the single-tap bullet-count suite (eaNetFire in wwwroot/index.html, card
+		// a5c2a39b). Asserts the firing-hold contract as a pure decision over every fire rate,
+		// then COUNTS the bullets a scripted single tap re-fires on a real remote puppet -- with
+		// the pre-card packet pattern beside it, which must still produce the doubled tap.
+		// **DESTRUCTIVE**: it needs a live GameScene and fires real bullets into it, so run it in
+		// a throwaway ?level=Level2&invuln boot.
+		[JSInvokable("debugNetFireTest")]
+		public static string NetFire()
+		{
+			return EvilAliensWeb.Compat.Net.NetFireTest.Run();
+		}
+
 		// JS bridge for the co-op per-slot combo/powerup self-test (eaNetCombo in
 		// wwwroot/index.html, card 1a3ad45a). Round-trips the real MsgHudState wire format,
 		// then drives the real PowerupData exp curve over two divergent combo streams -- running

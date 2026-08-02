@@ -66,7 +66,11 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     continue;
                 }
-                bool firing = now - s.NetLastFireMs < FiringHoldMs;
+                // Same cadence-derived hold as the primary ship (card a5c2a39b) -- SendFriendState
+                // feeds NetApplyRemoteState through NetSession.Friends' DriveFriendPuppet, i.e.
+                // the identical re-fire gate, so a flat hold doubles a couch player's tap and
+                // adds one bullet to the tail of every AI friend's burst.
+                bool firing = now - s.NetLastFireMs < FiringHoldMsFor(s.NetShotsPerSec);
                 float aim = (firing || s.NetLastFireMs > 0) ? s.NetLastFireAim : 4.712389f;
                 transport.SendStream(NetProtocol.EncodeFriendState((byte)slot, friendTxSeq++, (uint)(now - sessionStartAt),
                     s.GetPosition(), s.NetVelocity, aim, firing, s.NetShotsPerSec, s.NetBulletLife));

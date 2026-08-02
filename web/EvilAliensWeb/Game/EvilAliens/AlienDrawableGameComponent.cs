@@ -794,6 +794,31 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	// chose (a lazer's beam angle) must keep taking the replicated value.
 	internal virtual float NetSpinPerMs => 0f;
 
+	// Does this type's `curframe` LOOP FREELY at a constant fps? Default TRUE, and a true answer
+	// opts the puppet out of REPLICATED frames: NetPuppets pins curframe once at spawn and the
+	// driver's NetAdvanceFrame owns it from there, so the snapshot's CurFrame field is ignored.
+	// The NetSpinPerMs idiom one field over, and for the same reason (cards c92f3817 / 0dfc4495 /
+	// 435db27f).
+	//
+	// WHY IT IS NOT FREE TO KEEP CORRECTING IT. Both peers advance the same loop at the same fps,
+	// so in STEADY state the correction is a no-op and costs nothing -- it is the disturbances it
+	// re-injects that show. MsgWorldSnapshot rides the STREAM lane, which is unordered with
+	// maxRetransmits:0 and carries no sequence or timestamp, so a reordered or late entry hands
+	// the driver an OLDER frame than the one it is already showing and the animation kicks
+	// BACKWARD. Nothing reads curframe but Draw, so there is no correctness argument on the other
+	// side of that trade: a locally-run loop is smoother, cheaper and cannot be reordered.
+	//
+	// OVERRIDE TO FALSE when either half of "free-running at a constant fps" fails:
+	//   * Update WRITES curframe from a state machine (Spider's rear-up / land choreography), so
+	//     the frame is host-gated and a local loop would animate a pose the host is not in; or
+	//   * Update MUTATES fps (MarsBoss ramps 16 -> 32 with HitPointsNormalized), so a puppet --
+	//     whose Update never runs -- would free-run at the wrong RATE and drift.
+	// A type whose Draw does not read curframe at all (SpiderBoss / FakeBoss / BattleSkull animate
+	// an AnimatedSprite through their own replicated animFrame state extra; Wall, Lazer,
+	// StationaryBoss, BrainBoss and Powerup are single-frame) is unaffected either way and keeps
+	// the default. When in doubt, override to false: the cost is only the pre-existing behaviour.
+	internal virtual bool NetFrameLocal => true;
+
 	// INSTANCE-level opt-out from replication (card 9a3175d0): this particular instance is pure
 	// scenery, so it gets no NetId, no EvSpawn/EvDeath and no share of the world-snapshot round
 	// robin. The SPAWNER is replicated instead (NetCosmeticKind, one "effect on/off" beat) and
@@ -877,6 +902,8 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	// point of NetSpinPerMs (Asteroid) and NetCosmeticOnly (background FlyingSpider) is that a
 	// subtype answers differently.
 	float EvilAliensWeb.Compat.Net.INetEntity.NetSpinPerMs => NetSpinPerMs;
+
+	bool EvilAliensWeb.Compat.Net.INetEntity.NetFrameLocal => NetFrameLocal;
 
 	bool EvilAliensWeb.Compat.Net.INetEntity.NetCosmeticOnly => NetCosmeticOnly;
 

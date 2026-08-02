@@ -78,8 +78,37 @@ namespace EvilAliensWeb.Compat.Net
     //     every distinct claimant still gets paid.
     public static class NetPuppets
     {
-        private const float CorrectionWindowMs = 150f; // blend a snapshot error over this
+        // FLOOR of the blend window, not the window itself -- see CorrectionWindowFor.
+        private const float CorrectionWindowMs = 150f;
         private const float SnapThresholdPx = 100f;    // bigger error: snap + count a pop
+
+        // How long to spread one snapshot's position error over. The 150 ms constant this replaced
+        // was FIXED while the thing it has to absorb is not: the round-robin cursor gives an entity
+        // a correction only every SnapshotTurnMs, which grows with the world (60 ms at 16 live
+        // entities, 480 ms at 128), and each correction is a fresh velocity offset of err/window
+        // that lasts until the next one lands. Drain it faster than the arrival rate and the puppet
+        // spends most of its life on a stale dead-reckon and then lurches; drain it over ~2 turns
+        // and successive corrections overlap into something continuous.
+        //
+        // Measured in tools/sim/net_puppet_drive_sim.py --smoothness (FlyingSpider-shaped motion,
+        // jerk = stddev of successive per-tick step deltas; the host truth reads 0.0008):
+        //     N          16      32      64     128
+        //     fixed 150  0.089   0.114   0.180   0.327     maxstep 3.04 -> 8.52 px
+        //     2x turn    0.096   0.092   0.091   0.090     maxstep 3.27 -> 3.03 px
+        // i.e. flat in the world size instead of degrading 3.7x, at the cost of a hair at N=16 --
+        // which the 150 ms FLOOR keeps, since below 75 ms of turn the fixed window is the better of
+        // the two. A longer window is NOT free in general (it holds a bigger error for longer), so
+        // this is a floor-and-multiple rather than "make it big": past ~2 turns the same sweep shows
+        // the curve flattening out.
+        //
+        // An EXPONENTIAL / critically-damped drain was the obvious alternative and was measured and
+        // REJECTED -- it is worse at every N (0.132 / 0.187 / 0.317 / 0.654), because its tail keeps
+        // a velocity offset alive to be re-hit by the next correction. Don't re-try it without
+        // re-running the sweep.
+        private static float CorrectionWindowFor(int liveCount)
+        {
+            return MathHelper.Max(CorrectionWindowMs, 2f * NetSession.SnapshotTurnMs(liveCount));
+        }
         private const int LedgerCap = 512;
 
         private sealed class PuppetInfo
@@ -92,6 +121,11 @@ namespace EvilAliensWeb.Compat.Net
             public Vector2 Vel;          // design px/ms from the last snapshot
             public Vector2 Correction;   // remaining position error being blended away
             public float CorrectionMsLeft;
+            // The window THIS correction was opened with. Held per puppet rather than read live in
+            // Drive because CorrectionWindowFor moves with the live count: a correction that opened
+            // over 480 ms must finish over 480 ms, or a spawn burst mid-blend rescales the fraction
+            // already applied and the puppet jumps.
+            public float CorrectionMs;
             public float TargetScale;
             public bool HasSnapshot;
             // Built by the snapshot self-heal, i.e. with NO spawn extras -- so its variant
@@ -327,6 +361,7 @@ namespace EvilAliensWeb.Compat.Net
                 entity.Position = stale.Comp.Position;
                 info.Vel = stale.Vel;
                 info.Correction = stale.Correction;
+                info.CorrectionMs = stale.CorrectionMs;
                 info.CorrectionMsLeft = stale.CorrectionMsLeft;
                 info.TargetScale = stale.TargetScale;
                 info.HasSnapshot = stale.HasSnapshot;
@@ -424,7 +459,8 @@ namespace EvilAliensWeb.Compat.Net
                 else
                 {
                     info.Correction = err;
-                    info.CorrectionMsLeft = CorrectionWindowMs;
+                    info.CorrectionMs = CorrectionWindowFor(byId.Count);
+                    info.CorrectionMsLeft = info.CorrectionMs;
                 }
             }
             info.Vel = state.Vel;
@@ -434,7 +470,14 @@ namespace EvilAliensWeb.Compat.Net
             {
                 comp.NetRotation = state.Rotation; // free-spinners rotate locally -- see NetSpinPerMs
             }
-            comp.NetSetFrame(state.CurFrame);
+            if (isSpawn || !comp.NetFrameLocal)
+            {
+                // A free-running loop is PINNED once, at spawn, and then owned by the driver's
+                // NetAdvanceFrame -- see NetFrameLocal for why re-snapping it every turn can only
+                // ever hurt (the stream lane is unordered and unsequenced, so a late entry kicks
+                // the animation backward). Types whose frame is host-gated still take it.
+                comp.NetSetFrame(state.CurFrame);
+            }
             comp.NetSpeedVector = state.Vel; // per-type Draw reading Direction stays truthful
             if (state.Hp > 0 && comp.NetKillable is INetKillable killable)
             {
@@ -609,10 +652,10 @@ namespace EvilAliensWeb.Compat.Net
                 // ShipStateBuffer caps its own extrapolation at 250ms for exactly this reason.
                 // An in-flight correction still drains; it is finishing a snapshot we DID get.
                 Vector2 step = NetSession.PeerStalled ? Vector2.Zero : info.Vel * dtMs;
-                if (info.CorrectionMsLeft > 0f)
+                if (info.CorrectionMsLeft > 0f && info.CorrectionMs > 0f)
                 {
                     float take = MathHelper.Min(dtMs, info.CorrectionMsLeft);
-                    step += info.Correction * (take / CorrectionWindowMs);
+                    step += info.Correction * (take / info.CorrectionMs);
                     info.CorrectionMsLeft -= take;
                 }
                 comp.Position += step;

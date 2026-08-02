@@ -336,6 +336,23 @@ namespace EvilAliensWeb.Compat
 			return WorldCensus.Report(game);
 		}
 
+		// eaNetVelScan(on?): the measured ceiling the co-op teleport guard is set against (card
+		// 8dabe812). Arm it, play/soak a level, call again to read the fastest observed velocity
+		// per replicable type against NetSession.MaxObservedSpeedPxPerMs. Needs NO net session --
+		// it measures the GAME's motion, which is the quantity the guard bounds.
+		[JSInvokable("debugNetVelScan")]
+		public static string NetVelScan(bool on)
+		{
+			Microsoft.Xna.Framework.Game game =
+				EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>()?.ComponentBin?.Game;
+			if (on)
+			{
+				EvilAliensWeb.Compat.Net.NetVelocityScan.SetEnabled(true, game);
+				return "[velscan] armed";
+			}
+			return EvilAliensWeb.Compat.Net.NetVelocityScan.Report();
+		}
+
 		// JS bridge for the dev-build FPS HUD (eaFps in wwwroot/index.html; card 22e655b5).
 		// FpsProfile(on) arms the per-phase accumulators, FpsStats() returns the HUD's JSON
 		// payload and FpsStatsLine() the one-line console form. Same polling contract as the

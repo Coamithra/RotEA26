@@ -80,6 +80,7 @@ namespace EvilAliensWeb.Compat.Net
         bool IsDead { get; }
         float NetPointValue { get; }
         float NetSpinPerMs { get; }
+        bool NetFrameLocal { get; }
         bool NetCosmeticOnly { get; }
 
         // Frozen-puppet upkeep, all driven by NetPuppets.Drive on REAL dt.

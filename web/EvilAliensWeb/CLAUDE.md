@@ -506,6 +506,10 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   throwaway `?level=InsaneBossI` boot; see "Audio runtime"),
   `eaFlySpiders()` (the live flying-spider population split background/foreground plus the
   flatten settings in force — run from inside Level 2),
+  `eaNetVelScan(on?)` (the measured ceiling the co-op teleport guard's speed cap is set against
+  -- card 8dabe812: arm it, soak a level, call again for each replicable type's fastest SUSTAINED
+  speed against `NetSession.MaxObservedSpeedPxPerMs`. Needs NO net session, since it measures the
+  GAME's motion; the negative test that a cap never clips a real fast mover),
   `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
   `eaOracleRoster()` (the OFFLINE roster -- works at the menu, where `eaNetRoster` refuses),
   `eaNetSnap()` (the world-snapshot unknown-id attribution suite -- run from the main menu),

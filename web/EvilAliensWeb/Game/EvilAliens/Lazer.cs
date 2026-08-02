@@ -200,6 +200,7 @@ internal class Lazer : AlienDrawableGameComponent
 	// every snapshot and kill the crackle). base.Position is the driver-dead-reckoned muzzle.
 	internal void NetApplyBeam(float angle, float length, float leadValue)
 	{
+		NetNoteRates(angle, length, leadValue);
 		base.Direction = angle;
 		len = length;
 		lead = leadValue;
@@ -207,5 +208,89 @@ internal class Lazer : AlienDrawableGameComponent
 		lazor.AimAt(angle);
 		lazor.SetLength(length);
 		lazor.SetLead(leadValue);
+	}
+
+	// ---- Local simulation of the beam between snapshots (card 0108d1fc) -------------------
+	//
+	// THE BUG: aim, length and lead are STATE EXTRAS, so a frozen puppet's beam only moved when
+	// that entity's round-robin turn came up -- once per SnapshotTurnMs, i.e. 60ms at best and
+	// several hundred in a busy world. A beam that grows at 0.4 px/ms therefore jumped in ~24px
+	// steps instead of extending, which is the reported chop.
+	//
+	// THE FIX, AND WHY IT NEEDS NO WIRE BYTES: all three quantities are RAMPS, so their rates can
+	// be OBSERVED from consecutive snapshots exactly the way NetSession.CaptureBaseState observes
+	// an entity's velocity from consecutive positions -- the same idiom, one layer down. The
+	// alternative (putting growthspeed on the wire) would also have been WRONG, because
+	// `len` is scaled by Settings.DifficultyModifier, which ramps with elapsed play time and adapts
+	// on death and so is NOT equal on the two peers. An observed rate is measured on the host's
+	// actual beam and carries that scaling for free.
+	//
+	// IT COVERS ROTATION TOO, which is the card's explicit caveat: Level 1's miniboss SWEEPS its
+	// beam (Lazer.ChangeAim), and the angular rate falls out of the same two samples. The angle
+	// delta is wrapped into (-PI, PI] so a beam sweeping across the 0/2PI seam does not extrapolate
+	// backwards at ~6 rad per turn.
+	//
+	// BOUNDED, deliberately: extrapolation stops after NetExtrapolateCapMs of silence. A stalled
+	// peer must not have its beam grow without limit across the screen -- puppets are collidable,
+	// so an invented beam can kill the local player. Same reasoning as the driver's PeerStalled
+	// hold and ShipStateBuffer's 250ms cap; the cap is a little over one packet interval, since
+	// this only has to bridge BETWEEN turns, never a real outage.
+	private const float NetExtrapolateCapMs = 250f;
+
+	private bool netHasRates;
+	private float netAngleRate;   // rad/ms
+	private float netLenRate;     // px/ms
+	private float netLeadRate;    // px/ms
+	private float netLastApplyMs;
+	private float netSinceApplyMs;
+	private float netPrevAngle;
+	private float netPrevLen;
+	private float netPrevLead;
+	private bool netHasPrev;
+
+	private void NetNoteRates(float angle, float length, float leadValue)
+	{
+		if (netHasPrev && netSinceApplyMs > 0f)
+		{
+			float dt = netSinceApplyMs;
+			netAngleRate = MathHelper.WrapAngle(angle - netPrevAngle) / dt;
+			netLenRate = (length - netPrevLen) / dt;
+			netLeadRate = (leadValue - netPrevLead) / dt;
+			netHasRates = true;
+		}
+		netPrevAngle = angle;
+		netPrevLen = length;
+		netPrevLead = leadValue;
+		netHasPrev = true;
+		netSinceApplyMs = 0f;
+		netLastApplyMs = 0f;
+	}
+
+	internal override void NetDriveExtras(GameTime gameTime)
+	{
+		base.NetDriveExtras(gameTime);
+		float dtMs = (float)gameTime.ElapsedGameTime.TotalMilliseconds;
+		netSinceApplyMs += dtMs;
+		if (!netHasRates || netLastApplyMs >= NetExtrapolateCapMs)
+		{
+			// Still track the muzzle: base.Position is dead-reckoned by the driver every tick, and
+			// the Quad holds its own copy, so without this the beam's origin lags its emitter even
+			// when there is nothing to extrapolate.
+			lazor.MoveTo(base.Position);
+			return;
+		}
+		float step = MathHelper.Min(dtMs, NetExtrapolateCapMs - netLastApplyMs);
+		netLastApplyMs += step;
+		base.Direction += netAngleRate * step;
+		// The ramps are monotone on the host (growthspeed is positive and `stopped`/`freed` only
+		// ever zero a rate or start the lead one), so a negative observed rate is a sample pair
+		// straddling a re-Setup rather than real shrinkage -- clamping at 0 keeps a recycled beam
+		// from retracting into itself.
+		len = MathHelper.Max(0f, len + MathHelper.Max(0f, netLenRate) * step);
+		lead = MathHelper.Max(0f, lead + MathHelper.Max(0f, netLeadRate) * step);
+		lazor.MoveTo(base.Position);
+		lazor.AimAt(base.Direction);
+		lazor.SetLength(len);
+		lazor.SetLead(lead);
 	}
 }

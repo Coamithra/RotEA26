@@ -1410,7 +1410,126 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     spins its puppets locally instead (Asteroid). A puppet's Update is frozen, so a
     continuously spinning type could only advance at its ~16.7 Hz round-robin snapshot turn --
     visibly choppy. Only override where rotation is cosmetic and no hitbox reads it.
-  - **Peer stall != peer lost.** `PeerStallMs` raises `NetWaitOverlay` (banner only -- it does
+  - **Peer stall != peer lost.**
+
+## Puppet SMOOTHNESS -- the four fixes (cards c92f3817 / 0dfc4495 / d3add86f / 8dabe812 / 0108d1fc)
+
+A family, not four bugs: everything a puppet does between snapshot turns was either not simulated
+at all or corrected as if the blind window were fixed. **`pupPops` cannot see any of it** -- every
+one of these stutters happens while the error stays well under `SnapThresholdPx`, so the counter
+reads a contented 0 throughout. The instrument is
+`python tools/sim/net_puppet_drive_sim.py --smoothness`, which measures the SHAPE of the motion
+(*jerk* = stddev of successive per-tick step deltas) against the host as a control, and asserts.
+
+- **`AlienDrawableGameComponent.NetFrameLocal` (default TRUE) opts a puppet out of REPLICATED
+  FRAMES** -- the `NetSpinPerMs` idiom one field over. `curframe` is pinned once at spawn and the
+  driver's `NetAdvanceFrame` owns it from there; `ApplySnapshotState` stops calling `NetSetFrame`.
+  In STEADY state the correction was already a no-op (both peers advance the same loop at the same
+  fps), so what it removes is the DISTURBANCES: `MsgWorldSnapshot` rides the stream lane, which is
+  unordered `maxRetransmits:0` and carries **no sequence and no timestamp**, so a reordered or late
+  entry hands the driver an OLDER frame than the one being shown and the animation kicks BACKWARD.
+  Nothing but Draw reads `curframe`, so there is no correctness case on the other side.
+  - **THE AUDIT IS THE WHOLE RISK, and it is two questions, not one.** Override to `false` when
+    either half of "a free-running loop at a constant fps" fails. Only two types in the registry
+    do, and each fails a different half: **`Spider`** writes `curframe` outright from its
+    rear-up/launch/land choreography (so the frame IS the pose, and a local loop would pounce on
+    its own schedule), and **`MarsBoss`** re-derives `fps = Lerp(32, 16, HitPointsNormalized)`
+    every `Update`, so a puppet -- whose Update never runs -- would free-run at Initialize's 16
+    forever and drift. Everything else keeps the default. The audit is greppable and worth
+    re-running if a type is added: `curframe =` and `fps =` outside `AlienDrawableGameComponent`.
+  - **`SpiderHelperMothership` is the near-miss that makes the distinction concrete** -- it is
+    MarsBoss's twin (4x4 sheet, A/B half flipped on the wrap) and it DOES qualify, because its
+    `fps` is a constant 16 set once in `Initialize`. It is card c92f3817's subject.
+  - Types whose Draw ignores `curframe` are unaffected either way and keep the default:
+    `SpiderBoss` / `FakeBoss` / `BattleSkull` animate an `AnimatedSprite` through their own
+    replicated `animFrame` state extra, and `Wall` / `Lazer` / `StationaryBoss` / `BrainBoss` /
+    `Powerup` are single-frame.
+  - Covered by `eaNetEntity()` (43 checks now, up from 38) -- the base answer, an override, and the
+    two real opt-outs with a UFO beside them as the control, since a predicate hard-wired to
+    `false` would otherwise pass.
+- **The correction window is `max(150ms, 2 x SnapshotTurnMs)`, not a constant 150ms.** The window
+  was fixed while the thing it absorbs is not: an entity is corrected only every `snapTurn`, which
+  scales with the world (60ms at 16 live entities, 480ms at 128). Draining faster than corrections
+  arrive leaves the puppet on a stale dead-reckon most of its life and then lurching. Measured
+  (FlyingSpider-shaped motion, host control 0.0008):
+
+  | N | turn | fixed 150ms | 2x turn |
+  |---|---|---|---|
+  | 16 | 60ms | 0.089 | 0.089 |
+  | 32 | 120ms | 0.114 | 0.092 |
+  | 64 | 240ms | 0.180 | 0.091 |
+  | 128 | 480ms | 0.327 | 0.090 |
+
+  Flat in the world size instead of degrading 3.7x, and identical at N=16 where the 150ms FLOOR is
+  what is in force. **An exponential / critically-damped drain was proposed first, measured, and
+  REFUTED** -- worse at every N (0.132 / 0.187 / 0.317 / 0.653), because its tail keeps a velocity
+  offset alive to be re-hit by the next correction. The sim asserts that, so it stays refuted.
+  The window is held PER PUPPET (`PuppetInfo.CorrectionMs`) rather than read live in `Drive`: a
+  spawn burst mid-blend would otherwise rescale the fraction already applied and jump.
+- **THE TELEPORT GUARD (card 8dabe812) -- host-side, in `CaptureBaseState`.** A finite difference
+  cannot tell motion from a REPOSITION, and the SpiderBoss is parked at the far screen edge to
+  start each fly-by. Differentiating that ~800px jump stamped 42-57 px/ms onto the wire, and the
+  client snapped (correctly) and then **dead-reckoned onward at teleport speed** -- puppets are
+  collidable, so the boss crossed the screen and killed the local player, in the card's "2-3
+  frames". A sample implying more than `MaxObservedSpeedPxPerMs` now falls back to
+  `NetSpeedVector`, the same fallback the first-observation branch already used. Sim-measured:
+  client peak **158 -> 3.1 px/tick**, and the run **still pops once** -- the position is still
+  snapped, it is only the VELOCITY that is refused. That negative leg is asserted; a guard that
+  hid the reposition would be worse than the lurch.
+  - **The cap is 5.0 px/ms and it is MEASURED, by `eaNetVelScan` in the real game.** Genuine
+    motion tops out at ~2.5 (MarsBoss's entry PowerCurve 2.404 measured, EvilSkull's launched
+    `MaxSpeed` 2.5 declared); the repositions sit an order of magnitude up (SpiderBoss 42-57,
+    a `wrapping` Braineroid 13.5, EvilSkull's random respawn 11.6). 5.0 is the log midpoint.
+    **Do not tighten it toward the measurements** -- gameplay RNG is unseeded and three runs of one
+    rig read MarsBoss at 1.777 / 2.013 / 2.404, so a cap inside that band is a coin flip (a trial
+    cap of 2.0 passed the probe on one run and failed on the next).
+  - **`eaNetVelScan(on?)` / `eval NetVelScan true` is the negative test**, and it needs NO net
+    session -- it measures the GAME's motion, which is the quantity the guard bounds. Arm, soak,
+    read. It reports SUSTAINED speed (a plateau, i.e. a neighbouring sample at least half as fast)
+    beside the raw peak, because a reposition is a one-interval spike by definition. Types that
+    reposition in ordinary play are named in `NetVelocityScan.RepositioningTypes` **with the code
+    line that proves it** and excluded from the verdict. Committed as
+    `tools/headless/probes/net_velguard.txt`.
+  - **TWO RIG TRAPS, both of which produced confident wrong numbers before being fixed.** (a) The
+    scan keys its position history on `ComponentRemoved`, mirroring `NetIdRegistry` -- every
+    replicable type is POOLED, so without that it differences across a recycle and reports an
+    `EvilBullet` whose declared speed is 0.24 px/ms at a SUSTAINED 14.9. (b) It samples on GAME
+    time, not `NowMs`: `eahl --nodraw` runs ~17x real time, so a wall-clock cadence took ~10
+    samples out of 5000 frames and read a UFO at 17 px/ms.
+  - **The soak has to be LONG (~8 sim-minutes).** The bosses that set the ceiling arrive deep into
+    a level; a 5000-frame Level-2 run never reaches MarsBoss and reports UFO 0.758 as the fastest
+    thing in the game -- a PASS for the wrong reason, which is why the probe asserts `MarsBoss` is
+    in the table as its positive control.
+  - `[net]` gains **`velGuard=`**, the count of refused samples. It counts REPOSITIONS, so 0 on a
+    level with none is correct and it is not a health metric; what makes it worth printing is that
+    it is the only externally visible sign the guard fired (a guarded sample looks exactly like an
+    entity standing still). **A count climbing on a type that does not reposition means the cap is
+    clipping real motion -- raise it.**
+- **Per-type LOCAL SIMULATION, via the existing `NetDriveExtras` hook -- no wire bytes, no
+  protocol change.**
+  - **`Lazer` (card 0108d1fc):** aim, length and lead are state extras, so a frozen beam only moved
+    on its round-robin turn -- a beam growing at 0.4 px/ms jumped in ~24px steps. `NetApplyBeam`
+    now records the three values and derives their RATES from consecutive snapshots (the
+    `CaptureBaseState` observed-velocity idiom, one layer down), and `NetDriveExtras` extrapolates
+    on real dt. **Observed rather than wired on purpose:** `len` is scaled by
+    `Settings.DifficultyModifier`, which ramps with play time and adapts on death and so is NOT
+    equal on the two peers -- a wired `growthspeed` would be the wrong number, while an observed
+    rate carries that scaling for free. **It covers the card's rotation caveat** (Level 1's
+    miniboss sweeps its beam) out of the same two samples, with the angle delta wrapped so a beam
+    crossing the 0/2PI seam does not extrapolate backwards. Bounded at 250ms of silence: puppets
+    are collidable, so an invented beam can kill the local player.
+  - **`PlasmaBall` (card 435db27f, "the final boss's electricity balls"):** `BrainBoss.Update`
+    spawns these, and both crackle angles only advance in `Update`, so a puppet was a STILL IMAGE.
+    `NetDriveExtras` runs the +-PI/2 rad/s counter-spin and the re-roll locally. The angles were
+    already per-instance random and never matched across peers, so local is exactly as correct as
+    the host's copy. **Private `Random`, never `RandomHelper.Random`** -- the `Quad`/`ShipConnector`
+    rule; this runs once per puppet per tick and would otherwise pull the shared generator out from
+    under every other consumer on that peer.
+- **Cost:** `NetPuppets.Drive`'s per-tick body is unchanged bar a field load where a const was
+  (the frame branch lives in `ApplySnapshotState`, which runs per snapshot ENTRY, not per tick, and
+  now does strictly less work for most types). `eaNetPuppetBench(128, 2000)` reads 8.6-9.7 us/call
+  (~67 ns/puppet) across runs in one process, so any delta here is below the instrument's own
+  resolution -- which is the honest claim, not a measured 0. `PeerStallMs` raises `NetWaitOverlay` (banner only -- it does
     NOT push the collection, because the world staying live is the point and dimming a
     playfield the player is still dodging in would be worse than the hiccup) and parks puppet
     dead-reckoning (`NetSession.PeerStalled`; without that, the wider grace would let stale

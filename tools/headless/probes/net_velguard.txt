@@ -1,0 +1,80 @@
+# PROBE: the co-op teleport guard's speed cap must clear every GENUINE mover in the game.
+#
+# eahl: --flags "?level=Level2&invuln&aiplayer&difficulty=Inzane"
+#
+# PINS: NetSession.MaxObservedSpeedPxPerMs (card 8dabe812). CaptureBaseState stamps each entity's
+# observed velocity as a finite difference between its snapshot turns, which cannot tell motion
+# from a REPOSITION -- the SpiderBoss is parked at the far screen edge to start each fly-by, and
+# differentiating that ~800px jump put 42-57 px/ms on the wire. The client snapped to the new
+# position (correct) and then DEAD-RECKONED onward at teleport speed, and since puppets are
+# collidable it crossed the screen and killed the local player. The guard refuses a sample above
+# the cap and falls back to the entity's declared NetSpeedVector.
+#
+# WHAT THIS PROBE IS FOR, and it is the NEGATIVE half rather than the positive one. That a
+# reposition gets rejected is easy, and is asserted in tools/sim/net_puppet_drive_sim.py
+# --smoothness along with the leg requiring it to still SNAP. The dangerous failure is the
+# opposite one: a cap set too low silently clips a legitimately fast enemy, which re-creates the
+# very stutter the card removes -- one type at a time, invisibly, and only for whoever is playing
+# the join side. So this runs the real game and measures the fastest thing that genuinely moves.
+#
+# HOW eaNetVelScan MEASURES IT (Compat/Net/NetVelocityScan.cs has the full reasoning): it samples
+# every replicable entity's position at the 60ms snapshot cadence -- the same finite difference
+# CaptureBaseState takes -- and reports each type's SUSTAINED speed, meaning one whose neighbouring
+# sample is at least half as fast. A reposition is a one-interval spike by definition; flight holds
+# its speed on at least one side. Types that reposition as part of ordinary play (EvilSkull
+# respawns at a random point, a `wrapping` Braineroid teleports across the screen, SpiderBoss parks
+# for its fly-by) are named in that file and EXCLUDED from the verdict, because for them a big
+# reading is the guard working rather than the guard being wrong.
+#
+# FAILURE MEANS: read the table on the [velscan] lines. A FAIL names a type whose SUSTAINED speed
+# is at or above the cap. Two possible causes, needing OPPOSITE fixes -- either it is genuinely
+# that fast, in which case RAISE NetSession.MaxObservedSpeedPxPerMs (never leave it clipping), or
+# it is a new repositioning type, in which case add it to NetVelocityScan.RepositioningTypes with
+# the code line that proves it.
+#
+# WHY LEVEL 2 AT Inzane. The binding constraint in the whole game is MarsBoss's entry PowerCurve
+# at 2.404 px/ms -- nothing else that genuinely moves comes close (Spider 1.237, PlasmaBall 0.600,
+# EvilBullet 0.240, and the fastest DECLARED speed anywhere is EvilSkull's launched MaxSpeed 2.5).
+# Level 1 and Level 3 were swept by hand at the same settings and top out at 0.240 and 0.600
+# respectively, i.e. they have ~10x of slack and could not fail this before Level 2 did. Inzane
+# because several speeds are difficulty-scaled and the cap has to clear the worst case. If a
+# future card adds a fast type to another level, sweep it by hand with `eval NetVelScan` before
+# assuming this probe covers it.
+#
+# `&invuln&aiplayer` so the run is unattended and cannot end early on a death, which would cut the
+# soak short and under-report the ceiling.
+#
+# THE SOAK IS LONG ON PURPOSE (~8 sim-minutes). MarsBoss arrives deep into Level 2: a
+# 5000-frame run never reaches it at all and reports UFO 0.758 as the fastest thing in the game,
+# which is a PASS FOR THE WRONG REASON. That is why `expect MarsBoss` is here as the positive
+# control -- without it this probe would go green on a run that measured nothing interesting.
+#
+# THIS PROBE ALREADY EARNED ITS KEEP TWICE while the card was being written: a first cut at a 3.0
+# cap FAILED here on MarsBoss (only 1.25x of headroom over its 2.404 peak), and before that the
+# scan's own sampler was differencing across POOL RECYCLES and reported an EvilBullet whose
+# declared Speed is 0.24 px/ms at a sustained 14.9. Neither would have been visible in a frame.
+#
+# THE MEASURED NUMBER MOVES BETWEEN RUNS AND THAT IS EXPECTED. Gameplay RNG is unseeded, so the
+# soak samples MarsBoss's entry curve wherever it happens to land: three runs of this exact rig
+# read 1.777 / 2.013 / 2.404. The probe is still deterministic in its VERDICT because the shipped
+# cap sits a factor of two clear of that whole band -- which is the reason it sits there. Do not
+# read any single [velscan] figure as exact, and do not tighten the cap toward one.
+#
+# MUTATION-TESTED at 1.0 (below the whole band): the verdict line reads
+# `fastest non-repositioning=MarsBoss 2.013 px/ms, cap=1.00 -- FAIL` and the `expect ... PASS` leg
+# fails. NOTE a mutation to 2.0 -- INSIDE the band -- passed on one run and failed on the next, so
+# a mutation test of this probe has to clear the variance too, or it proves nothing.
+
+step 200 nodraw
+eval NetVelScan true
+step 30000 nodraw
+eval NetVelScan false
+
+# Positive control first: a run that sampled nothing prints VACUOUS rather than a low ceiling, and
+# MarsBoss being in the table is what says the soak actually reached the boss fight.
+expect \[velscan\] observed \|vel\| per replicable type
+expect MarsBoss
+expect \[velscan\] fastest non-repositioning=.* -- PASS
+expect-not VACUOUS
+expect-not -- FAIL
+quit

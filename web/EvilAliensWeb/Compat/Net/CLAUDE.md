@@ -516,10 +516,14 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   design wants a new event type, a state-extra field or a spawn-extra anchor, put it on the wire.
   The conventions below (append-only indices, decode-boundary validators, a version bump when an
   old peer would misbehave) still apply -- they are about correctness and dev-tab sanity, not
-  compatibility. Two shipped designs were bent around avoiding the wire by a one-batch
-  coordination rule and carry their straighter replacements as card comments: the Lazer
-  observed-rate estimator (card 0108d1fc -- send the growth/angle rates instead) and the
-  periodic-mover dead reckoning (card 0dfc4495 -- anchor the deterministic path in spawn extras).
+  compatibility. Four shipped designs were bent around avoiding the wire by a one-batch
+  coordination rule; their straighter wire-first replacements are CHARTERED at the top of the
+  Backlog (analysis on the original cards' comments): `a45b78f6` a cumulative shot counter in
+  `MsgShipState` (replaces `FiringHoldMsFor` + both its residuals, card a5c2a39b), `f62116b5` an
+  explicit death-began event (replaces the hp==0 snapshot trigger's latency + one-tick residual,
+  card 303bfb5b), `e79bb994` a teleport marker (replaces the observed-velocity plausibility cap,
+  card 8dabe812), `c1a38ef9` motion parameters on the wire (sent Lazer rates, card 0108d1fc +
+  deterministic-path spawn anchors, card 0dfc4495 -- the second half gated on the playtest).
   Serializing WHO edits `NetProtocol.cs` in a parallel batch is an orchestration concern; it must
   not shape the design.
 

@@ -76,6 +76,10 @@ internal sealed class BrainBossOverlays
 
     // Zero every patch's playback clock. Called from BrainBoss.Initialize so a RECYCLED
     // boss (re-fight) restarts its overlays at phase 0 instead of mid-loop.
+    // WorldTime reading at the last Draw, so the patches advance on the WORLD's clock rather
+    // than on raw Draw time (card d79a2f48). Negative until the first Draw seeds it.
+    private float _lastWorldSeconds = -1f;
+
     public void Reset()
     {
         foreach (Overlay ov in _overlays)
@@ -83,6 +87,7 @@ internal sealed class BrainBossOverlays
             ov.Clock = 0f;
             ov.Playing = false;
         }
+        _lastWorldSeconds = -1f;
     }
 
     // Sheets are loaded through the shared ContentManager (which caches by asset name and
@@ -202,7 +207,22 @@ internal sealed class BrainBossOverlays
     {
         if (_overlays.Count == 0)
             return;
-        float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
+        // The one bespoke animation clock in the game, and it used to tick on the frame's RAW
+        // elapsed time inside Draw -- so the eye and the pods kept cycling while the boss sat
+        // frozen in a pause (measured: 22482 px between two paused frames 45 steps apart).
+        // It now advances by however far the WORLD's clock moved since the last Draw, which is
+        // zero under a pause, a hit-stop or the Guide, and scaled by the 1-up slow-mo.
+        // Two other things fall out of that and are worth keeping:
+        //   * a `shot` with no `step` between it and the previous one is now IDENTICAL (dt is
+        //     zero), so a BrainBoss screenshot is repeatable without ?brainoverlayphase=;
+        //   * the sprite harness still PLAYS the overlays -- it freezes the boss with
+        //     Enabled=false rather than a pause layer, so WorldTime keeps running there.
+        float dt = (_lastWorldSeconds < 0f) ? 0f : WorldTime.Seconds - _lastWorldSeconds;
+        _lastWorldSeconds = WorldTime.Seconds;
+        if (dt < 0f)
+        {
+            dt = 0f;
+        }
         // Map manifest (1448x1086 reference) coords onto the actual boss texture, so a
         // future higher-res brainbosshd (with a matching DesignFrameWidth) still lines up —
         // provided it keeps the 1448:1086 aspect (else sx != sy and a patch's crop aspect
@@ -222,8 +242,11 @@ internal sealed class BrainBossOverlays
                 ov.Playing = true;
                 ov.Clock = parkPhase.Value * ov.CycleSeconds;
             }
-            else
+            else if (dt > 0f)
             {
+                // dt == 0 skips the whole advance, not just the accumulate: the triggered
+                // patch's per-frame roll would otherwise still fire under a pause and start
+                // an animation that then cannot run.
                 AdvanceClock(ov, dt, gameTime, spawnActive);
             }
             FramePair(ov, out int f0, out int f1, out float frac);

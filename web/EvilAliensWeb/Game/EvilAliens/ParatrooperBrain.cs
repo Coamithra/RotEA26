@@ -134,7 +134,7 @@ public class ParatrooperBrain : KillableAlien
 
 	public override void Draw(GameTime gameTime)
 	{
-		BrainGlow.Draw(spriteBatch, glowTexture, Position, rotation, DrawScale, glowPhase, gameTime, blendMode);
+		BrainGlow.Draw(spriteBatch, glowTexture, Position, rotation, DrawScale, glowPhase, blendMode);
 		base.Draw(gameTime);
 	}
 

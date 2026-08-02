@@ -386,7 +386,8 @@ internal class WebcamMothership : AlienDrawableGameComponent
 		// LazerGenerator sets Visible=false in its ctor, so its owner must draw it by hand.
 		if (beamActive && beamLen > 0f)
 		{
-			beam.Draw((float)gameTime.TotalGameTime.TotalSeconds);
+			// WorldTime, not gameTime -- the Lazer.Draw reasoning (card d79a2f48).
+			beam.Draw(WorldTime.Seconds);
 		}
 		// Re-centre the DRAW on Position: the art sits (-16,-6) px off the frame centre, so
 		// shifting the sprite (+16,+6)*DrawScale puts its VISUAL centre on Position (= the beam x),

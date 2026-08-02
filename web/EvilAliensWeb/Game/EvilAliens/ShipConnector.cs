@@ -73,6 +73,9 @@ internal class ShipConnector : AlienDrawableGameComponent
 	private readonly Tendril[] tendrils = new Tendril[16];
 	private readonly float fxPhase = (float)(fxr.NextDouble() * 1000.0);
 	private float fxTime;
+	// WorldTime reading at the last Draw, so fxTime advances on the world's clock rather
+	// than raw draw time (card d79a2f48). Negative until the first Draw seeds it.
+	private float lastWorldSeconds = -1f;
 	private float lastArcTime = float.NaN;
 
 	private Texture2D lineTex;  // GFX/Sprites/lazermiddle -- the thin glowing strip for bolt segments
@@ -94,7 +97,9 @@ internal class ShipConnector : AlienDrawableGameComponent
 	// Sprite-harness mode (?harness=connector). The real connector needs two live PlayerShips as
 	// endpoints; the frozen harness has none, so instead we derive the two orbs from this component's
 	// own Position/rotation (which HarnessScene drives) at a fixed half-gap. The FX still animate
-	// because fxTime advances in Draw, not Update. Off in normal play (byte-identical).
+	// because fxTime advances in Draw, not Update, and the harness freezes the object with
+	// Enabled=false rather than a pause layer, so the world clock it now reads keeps running.
+	// Off in normal play (byte-identical).
 	internal bool HarnessMode;
 	private const float HarnessHalfGap = 39f;  // matches the live ±39px docking separation
 
@@ -178,9 +183,16 @@ internal class ShipConnector : AlienDrawableGameComponent
 
 	public override void Draw(GameTime gameTime)
 	{
-		// Cosmetic FX advance on RAW draw time (like the metal sheen / brain overlays) so the
-		// lightning keeps crackling through a hit-stop freeze.
-		float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
+		// Cosmetic FX advance on the WORLD's clock (Compat/WorldTime, card d79a2f48) rather than
+		// raw draw time: this is a Draw-side clock on a component whose Update a pause freezes, so
+		// on the raw one the connector kept crackling while the two ships it joins sat still. The
+		// delta since the last Draw is zero under a pause and scaled by the 1-up slow-mo, and the
+		// sprite harness is unaffected (it freezes the object with Enabled=false, not a pause
+		// layer, so the world clock keeps running there).
+		// It no longer crackles through a HIT-STOP, unlike BombRipple: a bomb ring is a
+		// travelling wave that reads as a dropped frame if it stops, this is an idle ambience.
+		float dt = (lastWorldSeconds < 0f) ? 0f : WorldTime.Seconds - lastWorldSeconds;
+		lastWorldSeconds = WorldTime.Seconds;
 		if (dt < 0f) dt = 0f; else if (dt > 0.1f) dt = 0.1f;
 		fxTime += dt;
 

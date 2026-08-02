@@ -127,10 +127,12 @@ internal class Blast : AlienDrawableGameComponent, IAlienKiller
 	// intended look, per the card. Spin is time-based so it animates even in the frozen sprite
 	// harness; the per-blast random base rotation (Initialize) desyncs overlapping blasts in
 	// gameplay (the harness overrides rotation via ?rot, so that desync isn't visible there).
+	// The clock is WorldTime, not gameTime -- so the spin stops with the world under a pause
+	// (card d79a2f48) while still running in the harness, which holds no pause layer.
 	public override void Draw(GameTime gameTime)
 	{
 		spriteBatch.BlendMode = blendMode;
-		float spin = ((float)gameTime.TotalGameTime.TotalSeconds * SpinSpeed) % MathHelper.TwoPi;
+		float spin = (WorldTime.Seconds * SpinSpeed) % MathHelper.TwoPi;
 		Vector4 c = color.ToVector4();
 		Color layer = new Color(new Vector4(c.X, c.Y, c.Z, c.W * 0.5f));
 		spriteBatch.Draw(texture, Position, rotation + spin, DrawScale, center: true, layer, spriteEffects);

@@ -565,7 +565,9 @@ public class PlayerShip : AlienDrawableGameComponent
 			spriteBatch.colorizeEffect.Enable();
 			if (currentPower == Powerup.PowerupType.OneUp)
 			{
-				spriteBatch.colorizeEffect.RangeTarget = new Vector3(100f, 280f, 250f * (float)gameTime.TotalGameTime.TotalSeconds % 360f);
+				// WorldTime, not gameTime: a Draw-time hue cycle on the raw clock kept the OneUp
+				// rainbow rolling while the world sat frozen in a pause (card d79a2f48).
+				spriteBatch.colorizeEffect.RangeTarget = new Vector3(100f, 280f, 250f * WorldTime.Seconds % 360f);
 			}
 			else
 			{

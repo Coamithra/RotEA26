@@ -56,6 +56,10 @@ from typing import NoReturn
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
+sys.path.insert(0, os.path.dirname(HERE))
+# Straight-alpha edge bleed, shared with tools/font + tools/textures/bleed_pngs.py.
+# See load_source() for why every dxt/raw build runs it (card 5d75b700).
+from imagebleed import bleed_transparent_rgb, check_bled   # noqa: E402
 CONTENT = os.path.join(REPO, "web", "EvilAliensWeb", "wwwroot", "Content")
 TEXCONV = os.path.join(HERE, "texconv.exe")
 SCRATCH = os.path.join(HERE, "_build")
@@ -429,6 +433,28 @@ def build_mip_chain(im, w, h, tw, th, base, out_dds):
     return len(blobs)
 
 
+def load_source(png, asset):
+    """Open a source PNG and hand back what should actually be COMPILED.
+
+    Every source is bled first (card 5d75b700): 55 of the shipped sources carry an
+    all-black fully-transparent field, and straight-alpha bilinear mixes that black
+    into the sprite's own edge -- a dark halo on every scaled or minified draw. Doing
+    it HERE rather than in the .png means the source of record (much of it verbatim
+    tools/xnb/unpack.py output) stays untouched while nothing black can reach a
+    shipped texture. Alpha is never written, so the compressor sees the same coverage.
+
+    The guard is not tautological even though it sits one line under the bleed: it is
+    what fires if that bleed call is ever DELETED, which is the regression it exists for
+    (losing it is silent -- a slightly dark sprite edge, no error, no size change). It
+    cannot move later in the pipeline: the pad past GUTTER is deliberately transparent
+    black (the --padtest canary), so a post-pad check would fire on every padded asset.
+    """
+    from PIL import Image
+    im = bleed_transparent_rgb(Image.open(png).convert("RGBA"))
+    check_bled(im, asset)
+    return im
+
+
 def build_dxt(asset, dry, pad_extra=0, mip=False):
     from PIL import Image
     png = src_png(asset)
@@ -437,7 +463,7 @@ def build_dxt(asset, dry, pad_extra=0, mip=False):
     if not os.path.isfile(TEXCONV):
         fail("texconv.exe not found at " + TEXCONV + "\n  download: "
              "https://github.com/microsoft/DirectXTex/releases/latest/download/texconv.exe")
-    im = Image.open(png).convert("RGBA")
+    im = load_source(png, asset)
     w, h = im.size
     # Pad up to a mult-of-4 (never crop). pad_extra (>0 only in --padtest) grossly over-pads so
     # any code that still reads the PADDED size instead of the logical size shows an obvious
@@ -470,11 +496,10 @@ def build_dxt(asset, dry, pad_extra=0, mip=False):
 
 
 def build_raw(asset, dry):
-    from PIL import Image
     png = src_png(asset)
     if not os.path.isfile(png):
         fail("source not found: " + png)
-    im = Image.open(png).convert("RGBA")
+    im = load_source(png, asset)
     w, h = im.size
     out = os.path.join(os.path.dirname(png), os.path.basename(asset) + ".rtex")
     print(f"  raw  {asset}  {w}x{h} -> {os.path.basename(out)}  ({w*h*4//1024} KB payload)")

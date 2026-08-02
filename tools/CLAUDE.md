@@ -491,6 +491,31 @@ script after editing any `.fx`.** Pixel-shader-only effects (e.g. `holosim.fx`) 
 
 ## Textures — `tools/textures/`
 
+**The straight-alpha edge bleed (card `5d75b700`) — `tools/imagebleed.py`, and WHO owns which
+asset.** Bilinear averages RGB *ignoring* alpha here, so whatever sits on the transparent side of a
+sprite edge is mixed into that edge; every producer leaves it black, so 72 of the 127 shipped RGBA
+PNGs drew with a dark halo (the menufont's bug, card `5d8becc2`, at fleet scale). `imagebleed.py`
+is the one implementation — `bleed_transparent_rgb()` gives each fully-transparent texel its
+nearest ink's RGB, `check_bled()` is the guard. **Alpha is never written**, so coverage, shapes and
+AA are bit-for-bit unchanged. Exactly one tool owns each asset:
+
+- **Listed in `textures.config`** → `build_textures.py`'s `load_source()` bleeds the source on the
+  way into the `.dds`/`.rtex`. Its PNG is only an INPUT and stays exactly as its producer wrote it
+  (much of it verbatim `tools/xnb/unpack.py` output), so the fix is at the shipping layer.
+- **Unlisted** → the PNG *is* the shipped artifact and there is no compile step to hook, so
+  **`bleed_pngs.py` owns it**. It skips anything with a `.dds`/`.rtex` sibling **or** a
+  `textures.config` entry — the UNION, because each signal alone has a hole: a removed config line
+  leaves a shipping sibling behind, and a line added but not yet BUILT leaves no sibling, which
+  would let this script rewrite a source `build_textures.py` deliberately leaves alone. Its nominal
+  producers are ~8 scattered scripts, several unrunnable (gitignored raw sources, AI models), and
+  four assets have no producer beyond the unpack — which is why the bleed is a separate layer
+  rather than smeared across scripts that cannot be executed to prove it.
+
+**Re-run `python tools/textures/bleed_pngs.py` after any tool regenerates an unlisted PNG** (an
+`upscale/` pipeline, an unpack, a hand re-export) — it is idempotent, and **`--check` exits 1 on
+any asset that has drifted back**, which is the lint for exactly that silent regression. A
+regenerated *listed* PNG needs no such step; `build_textures.py` bleeds it on the next build.
+
 - **`build_textures.py`** reads `textures.config` and precompiles listed sprites to a GPU-ready
   sibling that `WebContentManager` prefers over the PNG: **`.dds`** (BC3/DXT5, lossy, ~0 decode;
   needs `texconv.exe`; dims padded up to a mult-of-4 with the logical size stamped in the header —
@@ -627,6 +652,9 @@ authored with the live editor (`editor/serve.py` after `--emit-editor`) and bake
   normal case here (the atlas is `SS`x denser than the design quad). Same class as
   `build_textures.py`'s `edge_gutter()`, one level down. Measured on `?textshot`: 5921 pixels
   changed, **100% of them brighter, none darker**.
+  **It lives in `tools/imagebleed.py` now** (card `5d75b700`) and this script imports it — the same
+  halo was found across the sprite fleet, so there is one implementation, not three. The font
+  rebuild is byte-identical across that move.
 - **A `*.orig` backup must NOT be present when you build.** The committed atlas was built with
   none, so `read_orig()`'s carried glyphs (space + debug symbols) came from the LIVE font; reading
   a backup instead shifts 1258 texels (measured, with one seeded from git history) and the build
@@ -634,13 +662,19 @@ authored with the live editor (`editor/serve.py` after `--emit-editor`) and bake
   `--commit` CREATES the pair as a side effect, so a second `--commit` in a row is already the bad
   case: delete them after every commit run. `read_orig()` warns loudly when it finds one. Revert
   through git history, which is the documented recovery path (`.gitignore` says so too).
-- **`check_no_black_halo()` gates `write_font`**, because losing the bleed fails silently — a
-  slightly dark glyph edge, no error and no metrics diff. It stays quiet on art that is
-  legitimately all-black.
-- **51 of the 94 shipped RGBA PNGs under `Content/` have the same all-black transparent field**
-  (36 load as `.dds`, 15 as plain PNG), i.e. the sprite fleet plausibly carries this halo too.
-  Measured while fixing the font under card `5d8becc2`; deliberately NOT addressed there and no
-  card filed yet — treat this as an open lead, not a closed question.
+- **`check_bled()` gates `write_font`**, because losing the bleed fails silently — a slightly dark
+  glyph edge, no error and no metrics diff. It also lives in `tools/imagebleed.py` now, and its
+  PREDICATE CHANGED with the move: it used to ask "is any fully-transparent texel still black",
+  which only works for white-on-transparent art. **52% of `gfx/sprites/spider_sheet2`'s edge ink is
+  itself pure black**, so a correctly bled dark sprite keeps millions of black transparent texels
+  and the old rule cried wolf (measured: 6763990 on a perfectly bled sheet). It now asks whether
+  the image is a FIXED POINT of `bleed_transparent_rgb()` — every transparent texel already carries
+  its nearest ink's RGB, whatever colour that is — which needs no exemption for black art and is
+  strictly stronger for the font.
+- **The sprite fleet carried the same halo, and card `5d75b700` fixed it.** See the Textures
+  section (`load_source` in `build_textures.py`, and `bleed_pngs.py` for the assets with no
+  precompile step). The lead this bullet used to record read "51 of 94"; re-measured on the current
+  fleet it is **72 of 127 RGBA PNGs**, split 55 precompiled / 17 plain PNG.
 
 ## Cursor — `tools/cursor/`
 

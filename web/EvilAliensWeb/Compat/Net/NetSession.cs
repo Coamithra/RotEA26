@@ -1016,9 +1016,12 @@ namespace EvilAliensWeb.Compat.Net
                 hudTxTypes[count] = activeType.HasValue ? (byte)activeType.Value : NetProtocol.HudPowerupNone;
                 hudTxProgress[count] = progress;
                 // The Option population is SHIP state, unlike everything else in this entry, which
-                // is roster state that outlives a death (card c5228350). No ship reports 0/0 --
-                // there is nothing orbiting -- and the peer's puppet is gone at the same moment,
-                // since an Option dies with its owner (Option.OnComponentRemoved).
+                // is roster state that outlives a death (card c5228350). With no ship we report
+                // 0/0, which is indistinguishable from a live ship flying none -- and that is
+                // correct either way, since an Option dies with its owner
+                // (Option.OnComponentRemoved). The cost is that a dead owner's 0/0 can reach the
+                // observer before the puppet's own death does, so the orbit blinks out up to one
+                // interpolation delay early.
                 PlayerShip owner = FindShipForSlot(slot);
                 for (int layer = 0; layer < NetProtocol.HudOptionLayers; layer++)
                 {
@@ -1063,7 +1066,7 @@ namespace EvilAliensWeb.Compat.Net
                 // packet. The owner's count is authoritative over the whole population, so this
                 // both catches up a join-in-progress peer (which replays no EvClaim, so it never
                 // saw the per-pickup options at all) and drops any this peer is over.
-                FindShipForSlot(slot)?.NetSetOptionCounts(hudRxOptions[0], hudRxOptions[1]);
+                FindShipForSlot(slot)?.NetSetOptionCounts(hudRxOptions);
                 metrics.HudRx++;
             }
         }

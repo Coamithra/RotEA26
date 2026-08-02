@@ -1250,9 +1250,15 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
       an Option dies with its owner. Clamped at the decode boundary
       (`NetProtocol.HudMaxOptionsPerLayer` 32): the byte is off a stranger's wire and it drives
       real component spawns.
-    - Cost: a remote player's pickup options appear up to one HUD interval (~50 ms mean) later
-      than they used to. Taken deliberately over an estimate that can be visibly WRONG and then
-      pop.
+    - Two costs, both taken deliberately over an estimate that can be visibly WRONG and then pop.
+      A remote player's pickup options appear up to one HUD interval (~50 ms mean) later than
+      they used to; and because a dead owner reports 0/0 while its puppet is still ~100 ms of
+      interpolation behind, the orbit blinks out slightly before the ship it belongs to does.
+    - **The spawn goes through `ComponentBin.TryAdd`, not `Add`** -- this caller adopts what it
+      adds, and the rx drains inside a tick where a `Purge<AlienDrawableGameComponent>` can be
+      standing. Adopting a diverted option would satisfy the list count with a component the
+      world does not have and the reconcile would never notice; a refusal simply waits for the
+      next packet.
   - `FirePower`/`Range` already ride `MsgShipState`; `Blast` and `OneUp` stay unmirrored for the
     reasons in the hardening bullet above and in `HandleClaim`.
   - **`OwnsSlot(slot)` gates the SHIP half and the HUD half stays ungated.** The host also runs

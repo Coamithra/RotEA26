@@ -987,21 +987,30 @@ public class PlayerShip : AlienDrawableGameComponent
 	//
 	// NetSession.HandleHudState is the only caller and gates on !OwnsSlot, so it never touches a
 	// ship whose own CollidesWith/PowerUp maintain the real population. Counts arrive already
-	// clamped at the decode boundary (NetProtocol.HudMaxOptionsPerLayer).
-	internal void NetSetOptionCounts(int layer0, int layer1)
+	// clamped at the decode boundary (NetProtocol.HudMaxOptionsPerLayer), indexed by LAYER --
+	// the array rather than one parameter per layer, so a third orbit could never be silently
+	// folded into the second's count. A layer the wire does not mention reads 0.
+	internal void NetSetOptionCounts(int[] counts)
 	{
+		if (counts == null)
+		{
+			return;
+		}
 		bool changed = false;
 		for (int layer = 0; layer < options.Length; layer++)
 		{
-			int want = Math.Max(0, layer == 0 ? layer0 : layer1);
+			int want = layer < counts.Length ? Math.Max(0, counts[layer]) : 0;
 			List<Option> list = options[layer];
 			while (list.Count > want)
 			{
 				Option surplus = list[list.Count - 1];
 				list.RemoveAt(list.Count - 1);
 				// A silent despawn, not a kill: nothing shot this one down here, so it must not
-				// explode, score or make a noise. OnComponentRemoved's own list maintenance is a
-				// no-op for it now, which is why the removal from `list` leads.
+				// explode, score or make a noise. Dropping it from `list` leads because
+				// OnComponentRemoved's own list maintenance is then a no-op -- but the WORLD
+				// removal is queued like every other Die(), so for up to one flush the dropped
+				// option still draws (at its stale angle, beside the redressed ring) and still
+				// collides. Cosmetic, and the same deal every Die() call site takes.
 				surplus.NetDespawn();
 				changed = true;
 			}
@@ -1009,7 +1018,17 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				Option option = Option.NewOption(collection, base.Game);
 				option.Setup(this, 0f, layer + 1, player);
-				collection.Add((GameComponent)(object)option);
+				// TryAdd, not Add: this caller ADOPTS what it adds, and Add diverts SILENTLY
+				// into the recycle pool under a standing Purge<AlienDrawableGameComponent>
+				// (GameScene's reset/win paths arm one, and the net rx drains inside the same
+				// tick). Adopting a diverted option would satisfy list.Count with a component
+				// the world does not have, and the reconcile would never notice. On a refusal
+				// leave the list alone and let the next packet retry -- the NetSession
+				// SpawnPuppet rule, root CLAUDE.md.
+				if (!collection.TryAdd((GameComponent)(object)option))
+				{
+					break;
+				}
 				list.Add(option);
 				changed = true;
 			}

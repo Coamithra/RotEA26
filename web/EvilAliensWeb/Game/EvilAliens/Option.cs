@@ -73,7 +73,8 @@ internal class Option : KillableAlien, IAlienKiller
 	}
 
 	// Online co-op (card c5228350): drop this option out of the world with no death FX, cue or
-	// score -- the owner simply reports fewer than this peer is flying, which is not a kill.
+	// score -- the owner simply reports fewer than this peer is flying, which is not a kill. The
+	// removal itself is QUEUED like every other Die(), so it survives to the next flush.
 	// Die() is protected, so PlayerShip.NetSetOptionCounts cannot reach it directly; it is the
 	// right primitive anyway (it flags isdead, which Initialize clears when the pool hands the
 	// component out again).

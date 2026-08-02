@@ -96,6 +96,16 @@ namespace EvilAliensWeb.Compat.Net
         // Lvl1StartDemoEvent.Volley for what "cosmetic" is contractually allowed to do.
         public const byte EvIntroVolley = 24;
 
+        // Card a66e190a, EITHER PEER, reliable: "my 1up bar filled -- run the slow motion".
+        // `[durationMs:2]`, 6 bytes. The receiver calls Oracle.NetSetSlowmotion, which is the
+        // same work SetSlowmotion does minus the send, so there is no echo to guard against.
+        //
+        // It is the one Ev* that scales GAME TIME on the far peer, which is why it is NOT an
+        // EvFx (that lane is host-only and contractually draw/audio only). It is safe -- and
+        // safer than the pre-card unilateral slowdown -- because the scaling is SYMMETRIC and
+        // the whole net layer runs on real time: see the slow-motion bullet in Compat/Net/CLAUDE.md.
+        public const byte EvSlowmo = 25;
+
         // "No slot" -- a refused join grant. 0xFF can never be a real slot (Oracle.MaxPlayers is 4)
         // and matches KillerNone's convention.
         public const byte SlotNone = 0xFF;
@@ -1108,6 +1118,30 @@ namespace EvilAliensWeb.Compat.Net
                 return false;
             }
             seed = (int)ReadU32(b, 4);
+            return true;
+        }
+
+        // EvSlowmo (either peer, card a66e190a): [durationMs:2]. A duration, not an on/off state,
+        // because Oracle.SetSlowmotion EXTENDS an already-running window rather than restarting
+        // it -- so the receiver needs the number, and a repeat is idempotent-ish rather than
+        // destructive. No enum to validate; a u16 is bounded by its own width (65.5 s worst case
+        // off a hostile wire, against the 12 s the game sends) and the effect is a time scale
+        // that ends by itself, so there is nothing here a REJECT would protect.
+        public static byte[] EncodeSlowmoEvent(ushort eventSeq, ushort durationMs)
+        {
+            byte[] b = EventHeader(EvSlowmo, eventSeq, 2);
+            WriteU16(b, 4, durationMs);
+            return b;
+        }
+
+        internal static bool TryDecodeSlowmoEvent(byte[] b, out ushort durationMs)
+        {
+            durationMs = 0;
+            if (b.Length < 6)
+            {
+                return false;
+            }
+            durationMs = ReadU16(b, 4);
             return true;
         }
 

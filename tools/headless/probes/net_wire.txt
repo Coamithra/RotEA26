@@ -81,6 +81,9 @@ expect 5\. scaled-i16 motion rates
 # the sign, turning the miniboss' beam sweep into a counter-sweep), and the two SCALES must
 # stay distinct -- the sweep rate is 7 wire units at the rad scale and 0.7 at the px one, so
 # sharing a scale would leave every swept beam turning 43% wrong, silently.
-expect \[netwire\] 88 passed, 0 failed
+# Card a66e190a raised it 88 -> 90: EvSlowmo's duration. The risk there is the WIDTH -- the
+# game sends 12000 ms, which a byte would silently truncate to 224, i.e. a fifth of a second of
+# slow motion on the peer, which reads as "it nearly works" rather than as a broken frame.
+expect \[netwire\] 90 passed, 0 failed
 expect-not FAIL
 quit

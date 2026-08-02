@@ -570,6 +570,17 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetFxTest.Run();
 		}
 
+		// JS bridge for the per-peer presentation effects (eaNetLocalFx in wwwroot/index.html;
+		// cards 7a8ec0d3 / a66e190a). One suite for one question -- which peer sees an effect:
+		// a floating score is the killer's alone (asserted as "no popup AND the score still
+		// moved", with an owned-slot claim beside it as the control), and the 1up slow motion
+		// crosses the wire in both directions without echoing. Menu-only and leave-no-trace.
+		[JSInvokable("debugNetLocalFx")]
+		public static string NetLocalFx()
+		{
+			return EvilAliensWeb.Compat.Net.NetLocalFxTest.Run();
+		}
+
 		// JS bridge for the teleport marker (eaNetTeleport in wwwroot/index.html, card e79bb994).
 		// A real HOST session's snapshot frames read off the wire (flag set, declared velocity
 		// rather than the jump's finite difference) and a real CLIENT session's puppet snapping

@@ -564,13 +564,35 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		}
 	}
 
+	// The positional overload -- the ONE place a "+10" floater is born. The score itself is
+	// credited either way; what is gated is the popup.
+	//
+	// Online co-op (card 7a8ec0d3): a floating score belongs to the player who earned it, and
+	// only their own screen shows it. Every net award path leads here -- the host locally
+	// re-fires a remote player's bullets (AlienDrawableGameComponent.AwardScore), the host pays
+	// an EvClaim (NetSession.HandleClaim / PayDeadClaim), and the client pays the host's EvDeath
+	// award array (NetPuppets.ApplyAwards) -- so ONE gate covers all four rather than four
+	// gates that can drift. OwnsSlot is unconditionally true offline and for couch slots, so
+	// single-player and local co-op are unchanged, and a couch partner sharing your screen
+	// still gets their own popups.
+	//
+	// The other two floater kinds need no gate: CheckPowerup's "Power Up!" and combo pops only
+	// run inside SustainCombo, which card 1a3ad45a already gated on the same predicate.
 	public float AddScore(float amount, bool isCombo, Vector2 location, int player)
 	{
 		float points = AddScore(amount, isCombo, player);
-		FloatingText floater = GetText((int)points, location, FloatingText.ShowType.scrollup, "");
-		floatingtexts.Add(floater);
+		if (EvilAliensWeb.Compat.Net.NetSession.OwnsSlot(player))
+		{
+			FloatingText floater = GetText((int)points, location, FloatingText.ShowType.scrollup, "");
+			floatingtexts.Add(floater);
+		}
 		return points;
 	}
+
+	// How many floaters are in flight. A floater leaves no other trace -- it is a local list
+	// drawn and then recycled, moving no score, no metric and no component -- so this readback
+	// is what lets NetLocalFxTest assert the gate above instead of eyeballing a screenshot.
+	internal int FloatingTextCount => floatingtexts.Count;
 
 	private void CheckPowerup(ref Vector2 location, int player)
 	{

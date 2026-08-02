@@ -41,6 +41,9 @@ inputs; the other peer's ship is an interpolated puppet.
   laser fire, the DANGER/WARNING arrows the bosses spawn, the big-UFO and JunkBoss charge glows,
   and Level 2's bees ambience. **One new event type (`EvFx`) for the whole family and NO protocol
   bump** -- see the transient-feedback bullet under "Protocol, NetIds & the replicable set".
+- **Per-peer presentation effects** (`7a8ec0d3` / `a66e190a`, v15): a floating score is the
+  KILLER's alone, and the 1up slow motion is the WORLD's -- see the presentation-effects
+  bullet at the end of "Claims, score & per-slot HUD".
 - **Level 1's intro cinematic plays on BOTH peers** (`8a7772d6`): the host's scripted no-ship
   phase is replicated as a `MsgShipState` flag bit, so neither ship is on screen until the
   cutscene ends and then both fly in together -- and the hail of bullets, which cannot replicate
@@ -590,6 +593,10 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   behaviour (a beam that holds between turns, a wasp on its own phase) rather than
   mis-parsing -- so like card 8a7772d6 above it did NOT have to bump, and did only as the
   parallel batch's convention.)
+  **v15** adds `EvSlowmo` (event 25) -- either peer announces its 1up slow motion so both
+  worlds scale together, card a66e190a. A v14 peer ignores the unknown event and falls back
+  to the pre-card unilateral slowdown, so like v14 the bump is the batch convention rather
+  than a forced incompatibility.
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -1302,8 +1309,9 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     the point of the side effect below.
     Levels go through the real `PlayerShip.PowerUp(..., doEffect: false)` one step at a time, so
     the puppet's re-fired bullets match its owner's actual loadout. **`OneUp` is unreachable
-    there and must stay so** -- slow motion is deliberately local, which is the same reason the
-    puppet driver dead-reckons on real time.
+    there and must stay so**: since card a66e190a the slow motion's EFFECT replicates as
+    `EvSlowmo`, but its TRIGGER is still the owner's alone -- a peer must never fire one off a
+    slot it does not own.
   - **Side effect, deliberate:** `AwardScoreToAll` (every boss) pays each slot with THAT slot's
     own multiplier, so the host used to compute the client's boss share from a combo the client
     never had. It now uses the real one -- a payout change, and a correction.
@@ -1324,6 +1332,61 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     separate browsers can only pair via `?rtc` + signaling. Plan net verification around
     one-tab round trips (this test, `eaNetBgTest`) and treat a two-window run as a
     smoke check whose absolute rates are meaningless.
+- **PRESENTATION EFFECTS: whose screen does this belong to? (cards 7a8ec0d3 + a66e190a.)** Two
+  reports, opposite answers, one question -- and the question is worth asking of any new effect.
+  - **A FLOATING SCORE IS THE KILLER'S ALONE.** `ScoreVisualiser.AddScore`'s POSITIONAL overload
+    is the one place a "+10" is born, and it now spawns one only for a slot `NetSession.OwnsSlot`
+    answers for. FOUR net paths reach it for a slot this peer does not own -- the host locally
+    re-fires a remote player's bullets (so their kill runs `AwardScore` here), the host pays an
+    `EvClaim` (`HandleClaim` / `PayDeadClaim`), and the client pays the host's `EvDeath` award
+    array (`NetPuppets.ApplyAwards`) -- so ONE gate at the choke point rather than four that can
+    drift. The score itself is credited unchanged; only the popup is gated. Offline and for couch
+    slots `OwnsSlot` is unconditionally true, so single-player and local co-op are byte-identical
+    and a partner sharing your screen keeps their own popups. The other two floater kinds needed
+    nothing: `CheckPowerup`'s "Power Up!" and the combo pops only run inside `SustainCombo`, which
+    card 1a3ad45a already gated on the same predicate.
+    - **`AwardScoreToAll` hands its ONE positional figure to the first seated slot WE OWN**, not
+      the first seated slot. Otherwise a boss kill shows a joiner nothing at all -- its own payout
+      goes out through the non-positional overload while the one floater is spent on a slot whose
+      popup is suppressed. Offline the two readings are the same slot.
+  - **THE 1UP SLOW MOTION IS THE WORLD'S, and it now crosses the wire: `EvSlowmo` (event 25,
+    reliable, `[durationMs:2]`, protocol v15), sent by EITHER peer.** `PlayerShip.PowerUp`'s
+    `OneUp` case is `Oracle.SetSlowmotion(12f)`, a whole-sim time scale, and it used to be purely
+    local -- so the peer who filled the bar crawled for 12 s while the other ran at full speed.
+    On a CLIENT it was worse than one-sided: enemies there are host-driven puppets, so its own
+    ship slowed while the enemies it was dodging did not.
+    - **The send sits INSIDE `Oracle.SetSlowmotion`** -- the one place a local slow motion begins
+      (the 1up bar and the `eaSlowmo()` QA seam both land there), so there is no per-caller
+      plumbing. The rx side calls **`Oracle.NetSetSlowmotion`**, which does the identical work
+      WITHOUT the send: no echo BY CONSTRUCTION rather than by a latch, and no `fromNet` bool for
+      a caller to get wrong. Two peers that each re-announced what they received would slow-motion
+      each other for as long as the session lasted -- and since `SetSlowmotion` EXTENDS a running
+      window, the symptom would be a world that never speeds up again, not a crash.
+    - **WHY THIS IS SAFE WHERE `Juice.AddHitStop` IS REFUSED (card 68f62e92), because the two
+      look alike and are not.** A hit-stop is scale ZERO on ONE peer: that peer stops producing
+      motion while the wire keeps streaming, and the other peer's puppets are corrected BACKWARD
+      (measured 23 px). This is 0.4 on BOTH, and every net clock -- the cadence,
+      `NetPuppets.Drive`, the observed velocities -- reads REAL time and is untouched by the game
+      time scale, so the wire carries the slowed truth and nothing is corrected backward. It
+      REPLACES a 12-second divergence with the one-way-trip skew at each end of the window. So
+      the rule is not "no time scaling in a session"; it is **no ASYMMETRIC time scaling**.
+    - **Cosmetic-only replication was considered and cannot fix the card at all.** Mirroring the
+      bloom preset and the ghost trails without the time scale would leave the non-triggering peer
+      smeared while everything moved at full speed -- and on a client, the only thing that can
+      slow the ENEMIES is the host slowing its authoritative world.
+    - The `?nethitstop=1` reproduction seam is unrelated and untouched: it re-enables `Juice`'s
+      freeze, which is still the asymmetric case.
+  - **Verify with `eaNetLocalFx()`** (`Compat/Net/NetLocalFxTest.cs`, 22 assertions;
+    `tools/headless/probes/net_local_fx.txt`), MENU-runnable and leave-no-trace. A screenshot
+    cannot see either half: a floater moves no score, no metric and no component, so its absence
+    is exactly as invisible as its presence, and the effects belong to the peer whose console you
+    are not reading. **The two legs that carry the cards** are "no floater appeared AND the score
+    still moved" (a gate that suppressed the whole payout, or a claim that never arrived, would
+    pass the absence alone) and the no-echo assertion. Mutation-tested four ways, each failing one
+    leg. **Deliberately absent from `net_selftests.txt`** -- it has its own probe, which carries
+    the write-up and the mutation matrix, the `eaNetDeathFx` precedent.
+  - **NOT VERIFIED ON TWO REAL SCREENS.** Whether 12 s of shared bullet-time from one player's
+    1up FEELS right is a playtest question this rig cannot answer.
 
 ## Roster slots, seating & the remote ship
 

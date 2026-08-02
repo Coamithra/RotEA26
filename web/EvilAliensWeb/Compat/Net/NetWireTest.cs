@@ -399,6 +399,16 @@ namespace EvilAliensWeb.Compat.Net
             check("EvIntroVolley refuses a truncated frame",
                 !NetProtocol.TryDecodeIntroVolleyEvent(new byte[7], out _));
 
+            // EvSlowmo (card a66e190a): a bare duration. The risk is the WIDTH -- the game sends
+            // 12000 ms, which a byte would have silently truncated to 224 (a fifth of a second
+            // of slow motion on the peer, which reads as "it nearly works").
+            byte[] slowmo = Round(NetProtocol.EncodeSlowmoEvent(11, 12000), reliable: true);
+            check("EvSlowmo round-trips a 12000ms duration",
+                slowmo != null && NetProtocol.TryDecodeSlowmoEvent(slowmo, out ushort smMs)
+                    && smMs == 12000);
+            check("EvSlowmo refuses a truncated frame",
+                !NetProtocol.TryDecodeSlowmoEvent(new byte[5], out _));
+
             // The two ship messages share a body with the friend one shifted right by a byte for
             // the slot -- exactly the shape where an off-by-one reads the neighbouring field and
             // still decodes, so both are pinned.

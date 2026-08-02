@@ -619,6 +619,6 @@ internal class SpiderHelperMothership : KillableAlien
 
 	internal override void NetDriveExtras(GameTime gameTime)
 	{
-		EvilAliensWeb.Compat.Net.NetChargeGlow.Drive(ref windup, netCharging, netChargeOffset, netChargeWindup, netChargeSize, collection, base.Game, base.Position);
+		EvilAliensWeb.Compat.Net.NetChargeGlow.Drive(ref windup, netCharging, netChargeOffset, netChargeWindup, netChargeSize, 1f, collection, base.Game, base.Position);
 	}
 }

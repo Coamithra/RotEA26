@@ -696,6 +696,45 @@ public class UFO : KillableAlien
 		}
 	}
 
+	// The laser-charge glow (card 57ea30cd). A BIG ufo winds up a child LazerGenerator for 2500ms
+	// before firing (UFOState.lazor) and draws it BY HAND in Draw -- so on a join peer, where this
+	// saucer is a frozen puppet whose Update never runs, the beam simply appeared with no windup at
+	// all. Same shape as SweepUFO / MarsBoss / SpiderHelperMothership: the descriptor streams a
+	// tiny charge state and NetDriveExtras rebuilds a local copy into this very field, so Draw and
+	// the OnComponentRemoved Free() cover it with no edits. See Compat/Net/NetChargeGlow.
+	private bool netCharging;
+
+	private Microsoft.Xna.Framework.Vector2 netChargeOffset;
+
+	private float netChargeWindup = 2.5f;
+
+	private float netChargeSize = 1f;
+
+	// Host encode: read live off the real generator (non-null only during the lazor windup -- the
+	// state clears it the moment the beam is fired).
+	internal bool NetCharging => lazerGenerator != null;
+
+	internal Microsoft.Xna.Framework.Vector2 NetChargeOffset => lazerGenerator != null ? lazerGenerator.Position - base.Position : Microsoft.Xna.Framework.Vector2.Zero;
+
+	internal float NetChargeWindup => lazerGenerator != null ? lazerGenerator.NetWindupSeconds : 2.5f;
+
+	internal float NetChargeSize => lazerGenerator != null ? lazerGenerator.NetSize : 1f;
+
+	// Client apply: record only. The child is spawned in NetDriveExtras, never here -- the
+	// descriptor contract forbids spawning from ApplyStateExtra.
+	internal void NetApplyCharge(bool charging, Microsoft.Xna.Framework.Vector2 offset, float windup, float size)
+	{
+		netCharging = charging;
+		netChargeOffset = offset;
+		netChargeWindup = windup;
+		netChargeSize = size;
+	}
+
+	internal override void NetDriveExtras(Microsoft.Xna.Framework.GameTime gameTime)
+	{
+		EvilAliensWeb.Compat.Net.NetChargeGlow.Drive(ref lazerGenerator, netCharging, netChargeOffset, netChargeWindup, netChargeSize, 1f, collection, base.Game, base.Position);
+	}
+
 	internal void NetClearBonus()
 	{
 		hasbonus = false;

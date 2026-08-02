@@ -303,6 +303,13 @@ internal class JunkBoss : KillableAlien
 				animatedMessage.Setup("Danger!", SoundManager.Texts.Danger, AnimatedMessage.MessageType.redwarning);
 				animatedMessage.SetWarningDirection(4.712389f);
 				collection.Add((GameComponent)(object)animatedMessage);
+				// Online co-op (card c146422f, "no warning when asteroids appear"): spawned from the
+				// boss's host-only Update, so the join peer got the meteor shower unannounced. Same
+				// EvMessage lane the script banners use. NOT MakeShort -- this one is the full-width
+				// banner, unlike the SpiderBoss sweep arrows.
+				EvilAliensWeb.Compat.Net.NetSession.OnGameMessage(
+					"Danger!", (int)SoundManager.Texts.Danger,
+					(int)AnimatedMessage.MessageType.redwarning, 4.712389f, isShort: false);
 				dangermessage = true;
 			}
 			if (!generictimer.Finished)
@@ -468,6 +475,48 @@ internal class JunkBoss : KillableAlien
 	// animates within it. r (the collision radius) is intentionally NOT recomputed on the swap,
 	// exactly like real play.
 	internal bool NetEyeAttracting => eyeAttracting;
+
+	// The attraction glow (card c146422f, "no attraction vfx+sfx when the boss attracts
+	// asteroids"). `suckeffect` is a child LazerGenerator this boss spawns mid-`attracting` and
+	// draws BY HAND in Draw, so on a join peer -- where the boss is a frozen puppet -- the
+	// swirling suck-in swarm and its looped "lazercharge" cue never existed. It was listed as an
+	// accepted best-effort divergence in JunkBossDescriptor; it is replicated now, through exactly
+	// the same seam the enemy laser windups use (Compat/Net/NetChargeGlow).
+	//
+	// It is NOT derivable from the eye's attract flag beside it: the eye swaps sheets the instant
+	// the state begins, while the swarm appears one `sucktimer` later and outlives nothing.
+	private bool netCharging;
+
+	private Vector2 netChargeOffset;
+
+	// 2.5f is LazerGenerator's own fallback: this boss never calls SetWindup on the suck swarm,
+	// so that default IS the host's live value and the client's copy ramps identically.
+	private float netChargeWindup = 2.5f;
+
+	private float netChargeSize = 4f;
+
+	internal bool NetCharging => suckeffect != null;
+
+	internal Vector2 NetChargeOffset => suckeffect != null ? suckeffect.Position - base.Position : Vector2.Zero;
+
+	internal float NetChargeWindup => suckeffect != null ? suckeffect.NetWindupSeconds : 2.5f;
+
+	internal float NetChargeSize => suckeffect != null ? suckeffect.NetSize : 4f;
+
+	// Client apply: record only -- the child spawn happens in NetDriveExtras (the descriptor
+	// contract forbids spawning from ApplyStateExtra).
+	internal void NetApplyCharge(bool charging, Vector2 offset, float windup, float size)
+	{
+		netCharging = charging;
+		netChargeOffset = offset;
+		netChargeWindup = windup;
+		netChargeSize = size;
+	}
+
+	internal override void NetDriveExtras(GameTime gameTime)
+	{
+		EvilAliensWeb.Compat.Net.NetChargeGlow.Drive(ref suckeffect, netCharging, netChargeOffset, netChargeWindup, netChargeSize, 0.5f, collection, base.Game, base.Position);
+	}
 
 	internal void NetSetEyeAttract(bool attract)
 	{

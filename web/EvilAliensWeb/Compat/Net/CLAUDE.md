@@ -34,6 +34,11 @@ inputs; the other peer's ship is an interpolated puppet.
 - **Score + per-slot HUD correctness:** the awarded AMOUNT is replicated, not the combo
   (`b0ab09ec`, v7); a slot's combo and powerup progression belong to its OWNER (`1a3ad45a`, v9,
   `MsgHudState`); a late powerup claim no longer strands a HUD icon (`a8c92fb9`).
+- **Transient feedback -- the beats a frozen puppet could never reach** (`43e85936` / `57ea30cd` /
+  `ee939dd1` / `8d063d33` / `c146422f`): boss + asteroid hit flashes, the Ball detach burst, enemy
+  laser fire, the DANGER/WARNING arrows the bosses spawn, the big-UFO and JunkBoss charge glows,
+  and Level 2's bees ambience. **One new event type (`EvFx`) for the whole family and NO protocol
+  bump** -- see the transient-feedback bullet under "Protocol, NetIds & the replicable set".
 - **Diagnostics + rigs:** fake lag/loss/jitter (`40334a8f`), the snapshot unknown-id split and
   `snapTurn` (`48ab9b2f`), decorative swarms as one on/off beat (`9a3175d0`, v10), the
   standing-purge-filter races (`74403f83`), the signaling server deployed (`8c3c18da`).
@@ -124,7 +129,7 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     `WebRtcTransport`, whose bye rides the ORDERED reliable channel as a `0x00` frame. So a
     scenario asserting "the peer's last `EvLeave` arrives before its bye" passes here and fails in
     play; do not write one against this transport.
-  - **Verify with `eaNetWire.test()`** (`Compat/Net/NetWireTest.cs`, 67 assertions): the transport
+  - **Verify with `eaNetWire.test()`** (`Compat/Net/NetWireTest.cs`, 77 assertions): the transport
     contract at N=2 and N=4, `NetImpairment` composed over a real endpoint (the chain production
     always builds, previously never executed outside a browser), and every codec's real frames put
     ON the wire and decoded from what the far endpoint received -- which an encode/decode pair
@@ -397,7 +402,8 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     12 ids at `snapTurn` 60ms. The card's scope on that burst is PROPOSE, not fix.
 - **`tools/headless/probes/net_selftests.txt` runs every menu-runnable net self-test as one exit
   code** (card 25ad0659): `eaNetWire.test`, `eaNetHost`, `eaNetEntity`, `eaSlotTest`, `eaKickTest`, `eaNetSnap`,
-  `eaNetCombo.test`, `eaNetScore.test`, `eaNetCosmetic`, `eaBinTest`, `eaTeamSeat`, `eaNetScenarios`. They were
+  `eaNetCombo.test`, `eaNetScore.test`, `eaNetCosmetic`, `eaBinTest`, `eaTeamSeat`, `eaNetScenarios`,
+  `eaNetFx`. They were
   console calls a human made once; this is what re-runs them. Asserted as TALLIES with their
   counts, never `expect-not FAIL` -- an absence assertion passes on a run where the `eval` never
   happened, and several of these suites SKIP legs they cannot reach, which is not a pass. Raise a
@@ -522,7 +528,9 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   **v10** adds `EvCosmeticSwarm` -- a decorative swarm replicates as one on/off beat and its
   entities stop being replicated individually, card 9a3175d0, see the decorative-swarm bullet.
   No existing layout changed, but a v9 peer would ignore the beat AND still expect the
-  per-entity spawns, i.e. see empty scenery -- a real incompatibility, hence the version move).
+  per-entity spawns, i.e. see empty scenery -- a real incompatibility, hence the version move.
+  The transient-feedback cards add **`EvFx`** and deliberately STAY ON v10 -- the next bullet
+  says why that is a decision and not an oversight).
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -536,6 +544,91 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   timer throttling, so its ticks arrive in ~1/min bursts; without the wide window the link
   flaps and the designed peer-lost failsafe silently unfreezes the world. A held local
   pause is re-announced on reconnect (`PeerConnected`).
+- **TRANSIENT FEEDBACK: `EvFx`, a one-shot cosmetic beat** (cards 43e85936 / 57ea30cd /
+  ee939dd1 / 8d063d33 / c146422f). Ten reported symptoms, one root cause and five mechanisms --
+  and the interesting part is how few of them needed new protocol.
+  - **The root cause.** A puppet is frozen for life, so anything the HOST's `Update` does that is
+    neither a sheet swap nor a base-state field simply never happened on the joiner's screen: a
+    hit flash, a chunk breaking away, a warning banner, a windup glow, a looping ambience. It
+    fails INTERMITTENTLY rather than cleanly, which is the tell -- a client hit-tests puppets with
+    its own bullets, so a hit IT observed ran the real code and a hit only the host observed
+    produced nothing. That is card 43e85936's "missing sfx/anims **sometimes**" exactly.
+  - **`EvFx` (event 22, reliable): `[kind:1][netId:2][param:1]`, 8 bytes.** `netId` 0 means
+    "no entity" (the registry never allocates 0); `param` is per-kind and 0 for every kind shipped
+    so far. **It carries NO POSITION**: the entity kinds draw on a puppet whose position is already
+    replicated and NEWER than a beat could be, and the entity-free kind plays a 2D cue. The first
+    cut carried one and every consumer ignored it. `NetFxKind` is APPEND-ONLY and takes the **REJECT** policy -- the kind
+    selects an effect to EXECUTE, so a substituted one is worse than silence.
+  - **WHY IT CANNOT BE A STATE EXTRA -- answer this before adding a kind.** The snapshot round
+    robin corrects an entity every `live/16*60ms` (`SnapshotTurnMs`): 60 ms at best, ~1.2 s in a
+    big world. A `KillableAlien` hit blink is **35 ms**. A sampled bit would miss the event
+    outright and a sampled cue would double-fire or drop. Anything that PERSISTS (a charge state,
+    a sheet swap) belongs in the state extras; anything that is an EVENT belongs here.
+  - **EVERY APPLY IS DRAW/AUDIO ONLY AND IDEMPOTENT. Both halves are contract.** An apply may not
+    damage, kill, award, spawn a replicable entity or move gameplay state -- `NetFxTest` asserts a
+    hit beat spends no hp. And because the client may already have run the same effect off its own
+    collision, each apply no-ops when what it would start is already running:
+    `KillableAlien`/`SpiderBoss` gate on their own `hittimer.Active` (the same gate `HitBy` opens
+    with), `Ball` on a `netDetached` latch.
+    **`Ball` uses a LATCH rather than a `state == connected` test on purpose** -- a puppet's
+    `state` never advances past `startup` (Initialize sets it, Update is frozen for life), so a
+    state test refuses every beat and the feature silently does nothing at all. It was written the
+    wrong way first and the suite caught it.
+  - **The per-type knowledge lives on the ENTITY (`INetEntity.NetPlayFx`), never on the wire.**
+    The base is a no-op; `KillableAlien` starts its blink, `SpiderBoss` adds its `bugdies` pair and
+    bleed spray, `Ball` its blink and its detach burst. A new type costs one override, and the wire
+    never has to name a cue or a sprite.
+  - **NO PROTOCOL VERSION BUMP -- and the four graceful-degradation claims were VERIFIED against
+    the decode code, not assumed.** (a) `HandleEvent`'s switch has NO `default:` arm, so an unknown
+    event type falls through and returns, with `EventsRx`/`lastRxEventSeq` still advancing so no
+    false `seqGap`; (b) `TryDecodeCosmeticSwarmEvent` returns false on an unknown kind and the case
+    drops the frame cleanly; (c) `TryDecodeMessageEvent` bounds with `b.Length < 11 + textLen`, so
+    a trailing byte is tolerated; (d) `EvSpawn` and snapshot entries are both length-prefixed, so a
+    longer state-extra block cannot shift the following parse, and every `ApplyStateExtra` reads
+    named bits behind a `len` guard. Each degrades to the PRE-CARD behaviour, which is the bump
+    test (card `ca4fd94f`'s precedent, not `9a3175d0`'s). **If any of those four stops holding,
+    the bump is back on the table.**
+  - **The four symptoms that needed NO new lane are the more useful half to remember:**
+    - **The boss DANGER/WARNING arrows ride `EvMessage`.** `MessageEvent` (the script banner)
+      already hooks it, and `SpiderBoss`'s three sweep arrows + its helper warning and `JunkBoss`'s
+      meteor warning are the same `AnimatedMessage.Setup` call from host-only boss code -- so they
+      call `NetSession.OnGameMessage`. The only thing missing from the payload was `MakeShort`,
+      appended PAST the variable-length text as an OPTIONAL byte, which is what keeps it compatible
+      in both directions. **Do not move that byte in front of the text.**
+    - **The big-UFO and JunkBoss charge glows ride the existing `NetChargeGlow` seam** -- the same
+      child-`LazerGenerator` shape `SweepUFO`/`MarsBoss`/`SpiderHelperMothership` already used,
+      carried in a SPARE BIT of each descriptor's existing flags byte plus the 7-byte
+      `NetChargeWire` block. No new field and no width change.
+    - **Level 2's bees ambience rides `EvCosmeticSwarm`** as a new `NetCosmeticKind` -- see the
+      looping-cue sub-bullet under the decorative-swarm bullet.
+  - **ENEMY TELEGRAPHS ARE AUDIBLE ON THE JOINER NOW**, reversing `NetChargeGlow`'s `SetupSilent`
+    and the intent behind `LazerDescriptor`'s `playSound:false`. **The rule that replaced them is
+    PLAYER-vs-WORLD, and it is the line to hold:** silence is for a remote PLAYER's private
+    business (their pickups -- card d53431b4), sound is for WORLD events both players are dodging.
+    An inaudible windup or beam is a gameplay DISADVANTAGE for the joiner, not politeness. All four
+    enemy charge glows and the enemy single-shot beam are audible; the player-ship summon glow
+    (`PlayerShipSummon`, and `GameScene`'s preload prime) never went through this seam and stays
+    silent. `LazerDescriptor` still builds its puppet `playSound:false` -- the CONSTRUCTION is not
+    the event, and the report rides its own beat instead.
+  - **`EnemyLazerFire` is emitted at `Lazer.SetupSingleShot`, NOT off the beam's `EvSpawn`, and the
+    reason generalises to any future spawn-time cue.** `NetIdRegistry.ReplayLive` re-sends
+    `EvSpawn` for the WHOLE live set at an `EvReady` catch-up and the puppet layer cannot tell that
+    from a fresh spawn -- so a cue on the spawn path would salvo every live beam at a
+    join-in-progress peer the instant it arrived. A beat fired at the real moment is simply missed
+    by a peer who was not there yet, which is correct.
+  - **Verify with `eaNetFx()`** (`Compat/Net/NetFxTest.cs`, 24 assertions; a leg of
+    `net_selftests.txt`). Real `EvFx` frames from a scripted host over a `NetWire` into a REAL
+    client session, asserting the EFFECT on the live puppet -- `eaNetWire.test` covers the layout,
+    and the layout was never what was broken. MENU-runnable and leave-no-trace.
+    **Its observables are private state that moves NO metric** (a 35 ms timer read only by `Draw`,
+    an `Explosion` entering the bin), which is the same fact that made these bugs invisible in the
+    first place, so the entity types expose narrow `Net*` readbacks for it. Mutation-tested five
+    ways. **The second Ball exists to stop a vacuous leg**: the first is already blinking, so
+    `!hittimer.Active` would refuse a post-detach chip beat whatever the latch said.
+  - **KNOWN LIMIT, pre-existing and NOT introduced by these cards: a client's `Ball` keeps its own
+    hp.** It can therefore detach on its own schedule, and in principle twice. The beats are
+    idempotent against that (whichever lands first latches), but the two peers' chip COUNTS still
+    diverge; closing it means putting Ball hp on the wire, which it has never been on.
 - **Every wire enum is validated at the DECODE boundary, and nowhere else (card 88f87ba2).**
   The validators and the contract live in one region of `NetProtocol.cs`. **Never cast a raw
   wire byte to an enum outside it**, and a consumer of a decoded value may ASSUME it is in
@@ -641,6 +734,28 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     the rest of that belt. Keeping them aligned would mean streaming the angle -- the per-entity
     cost this card exists to remove -- so it is a decoration-vs-decoration mismatch taken on
     purpose.
+  - **A kind can be a LOOPING CUE rather than a spawner (card 8d063d33).**
+    `NetCosmeticKind.BeesLoop` is Level 2's bees ambience -- two script events (`beesSoundOn` /
+    `beesSoundOff`) wrapped around the fog swarm, host-only like the rest of the script, so the
+    spiderwasp wave played out in SILENCE on the joiner while its screen filled with the fog that
+    same swarm beat had already replicated. It takes this lane rather than one of its own because
+    it IS that swarm's sound, it is switched by the same stretch of script, and the lane already
+    carries the join-in-progress catch-up and the checkpoint-revert clear a looping cue needs.
+    Client-side its "own copy of the effect" is a `SoundEffectInstance`
+    (`GameScene.netCosmeticLoop`), so its entry carries a **null `Spawner`** exactly as a host
+    latch does, and `rate` is meaningless (the emitter sends 1 -- a positive, so the lane's shared
+    "rate <= 0 means off" guard needs no special case).
+    **Its failure mode is the OPPOSITE of the swarms', which is what its legs assert:** not
+    scenery that fails to appear, but a loop that fails to STOP and outlives the level. So every
+    entry-dropping path goes through `NetStopCosmeticLoop` (an "off" beat, the checkpoint revert,
+    `Initialize`, `Terminate`), and the test reads the live INSTANCE rather than the entry --
+    dropping the entry while the sound plays on forever IS the leak. No version bump: an older
+    peer rejects the unknown kind and gets no sound, i.e. the pre-card behaviour.
+    **KNOWN ASYMMETRY at a checkpoint revert:** the clear stops the CLIENT's loop, but the host
+    keeps its own `Level2.bees` instance playing -- the script's `beesSoundOff` never runs on a
+    revert, which is the very reason the entries are cleared there. That host-side behaviour
+    (including `beesSoundOn` overwriting `bees` without stopping the old instance) predates these
+    cards; what changed is that it is now audibly ASYMMETRIC rather than silently one-sided.
   - **Verify with `eaNetCosmetic()`** (`Compat/Net/NetCosmeticTest.cs`) -- codec, the instance
     predicate (every check beside its positive control, since a predicate answering "not
     replicated" for everything would pass a fog-spiders-only test and silently stop replicating
@@ -1557,9 +1672,13 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   `Compat/Net/Descriptors/DescriptorsCoverage.cs`). The enemy laser-CHARGE glow (a child
   `LazerGenerator` the emitter draws by hand) now replicates too: rather than making
   LazerGenerator itself replicable (it is also the player-summon glow), the SweepUFO / MarsBoss /
-  SpiderHelperMothership descriptors stream a tiny charge state and the puppet rebuilds a local,
-  silent copy into the emitter's own generator field (`AlienDrawableGameComponent.NetDriveExtras`
+  SpiderHelperMothership descriptors stream a tiny charge state and the puppet rebuilds a local
+  copy into the emitter's own generator field (`AlienDrawableGameComponent.NetDriveExtras`
   driver hook + `Compat/Net/NetChargeGlow`). The fired beam already replicated as its own `Lazer`.
+  **Cards 57ea30cd / c146422f extend that seam to the big `UFO` (`UFOState.lazor`) and the
+  JunkBoss' asteroid-attraction swarm, and make all of them AUDIBLE** -- see the transient-feedback
+  bullet under "Protocol, NetIds & the replicable set" for the player-vs-world rule that replaced
+  the old blanket "a puppet is never the shooter".
 - **AI "friend" ships replicate (host-authoritative), follow-up to card 11.2:** the Mechanical
   Friends cheat is re-enabled in net sessions -- but ONLY the host adds AI friends (it runs the
   real AI, whose enemy kills already replicate), and only after the client's Remote ship has

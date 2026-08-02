@@ -504,6 +504,11 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   is not silent — the real death paths play their real cues),
   `eaNetCosmetic()` (the decorative-swarm replication self-test — card 9a3175d0; run it inside
   a level to cover the client apply leg),
+  `eaNetFx()` (the transient-feedback beats — cards 43e85936 / 57ea30cd / ee939dd1 / 8d063d33 /
+  c146422f: real EvFx frames from a scripted host over a NetWire into a real client session,
+  asserting the EFFECT on the live puppet. The hit blink and the detach burst are private state
+  that no metric moves and no frame can be timed to — which is the same reason those effects
+  needed a wire beat at all. Menu-only and leave-no-trace),
   `eaBinTest()` (the ComponentBin lifecycle scenario suite — run from the main menu),
   `eaKickTest()` (the co-op kick/block rules + v6 handshake codec — best from the main menu),
   `eaSlotTest()` (the co-op primary-slot negotiation + the v8 handshake codec, plus the stale

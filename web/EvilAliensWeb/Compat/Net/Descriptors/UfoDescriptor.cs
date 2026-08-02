@@ -13,8 +13,15 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     //   ship is a Level-2 stationary variant reached via MakeMedium-style internals and is
     //   covered by the landed state byte.
     // Spawn extras: [flags:1][bonusType:1]  (flags: 1=isBig, 2=classic behaviour, 4=hasbonus)
-    // State extras: [flags:1]               (1=stationary/landed, 4=hasbonus -- bonus can
-    //   only ever turn OFF in play (dropped on death), so late clearing is cosmetic-safe)
+    // State extras: [flags:1]               (1=stationary/landed, 2=charging, 4=hasbonus -- bonus
+    //   can only ever turn OFF in play (dropped on death), so late clearing is cosmetic-safe)
+    //   + the 7-byte NetChargeWire block while charging.
+    //
+    // Card 57ea30cd: a BIG ufo winds up a child LazerGenerator for 2500ms before firing
+    // (UFOState.lazor) and draws it by hand, so the join peer saw the beam appear with no
+    // telegraph. Bit 1 (value 2) of the EXISTING flags byte carries it -- no new field and no
+    // wire-width change, so no protocol bump: an older peer reads the stationary and bonus bits
+    // as before and ignores this one, and the trailing block is inside the entry's length prefix.
     internal sealed class UfoDescriptor : NetTypeDescriptor<UFO>
     {
         private const byte FlagBig = 1;
@@ -22,6 +29,9 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
         private const byte FlagBonus = 4;
         private const byte FlagUfoSheet = 8; // MakeSmall's random sheet pick, forced to match
         private const byte FlagStationary = 1;
+        // The SHARED charging bit -- the other five charge-glow descriptors use the same one, so
+        // it lives with NetChargeWire rather than being re-declared per descriptor.
+        private const byte FlagCharging = NetChargeWire.FlagChargingBit1;
 
         public override int EncodeSpawnExtra(AlienDrawableGameComponent c, byte[] buf, int off)
         {
@@ -76,7 +86,16 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             {
                 flags |= FlagBonus;
             }
+            bool charging = u.NetCharging;
+            if (charging)
+            {
+                flags |= FlagCharging;
+            }
             buf[off++] = flags;
+            if (charging)
+            {
+                off = NetChargeWire.Encode(buf, off, u.NetChargeOffset, u.NetChargeWindup, u.NetChargeSize);
+            }
             return off;
         }
 
@@ -87,6 +106,15 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
                 return;
             }
             UFO u = C(c);
+            if ((buf[off] & FlagCharging) != 0 && len >= 1 + NetChargeWire.Bytes)
+            {
+                NetChargeWire.Decode(buf, off + 1, out Vector2 chargeOffset, out float windup, out float size);
+                u.NetApplyCharge(true, chargeOffset, windup, size);
+            }
+            else
+            {
+                u.NetApplyCharge(false, Vector2.Zero, 2.5f, 1f);
+            }
             bool landed = (buf[off] & FlagStationary) != 0;
             if (landed && !u.NetStationary)
             {

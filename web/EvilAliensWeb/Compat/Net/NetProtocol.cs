@@ -68,6 +68,15 @@ namespace EvilAliensWeb.Compat.Net
         // instead of per entity -- each peer runs its own spawner and its own scenery.
         // [kind:1][on:1][rate:f32]. See NetCosmeticKind.
         public const byte EvCosmeticSwarm = 21;
+        // Card group "transient feedback never crosses the wire" (43e85936 / c146422f): a ONE-SHOT
+        // cosmetic beat -- a hit flash, a chunk detaching, an enemy beam firing. These are
+        // host-side events a frozen puppet can never reach, and unlike a sheet swap or a charge
+        // state they CANNOT ride the snapshot's state extras: the round robin corrects an entity
+        // only every `live/16*60ms` (SnapshotTurnMs, 60ms at best and ~1.2s in a big world) while
+        // a KillableAlien hit blink lasts 35ms, so a sampled bit would miss the event outright and
+        // a sampled cue would double-fire or drop. [kind:1][netId:2][param:1].
+        // See NetFxKind.
+        public const byte EvFx = 22;
 
         // "No slot" -- a refused join grant. 0xFF can never be a real slot (Oracle.MaxPlayers is 4)
         // and matches KillerNone's convention.
@@ -170,11 +179,26 @@ namespace EvilAliensWeb.Compat.Net
         internal static bool TryCosmeticKind(int raw, out NetCosmeticKind kind)
         {
             kind = default;
-            if (raw < 0 || raw > (int)NetCosmeticKind.BackgroundAsteroids)
+            if (raw < 0 || raw > (int)NetCosmeticKind.BeesLoop)
             {
                 return false;
             }
             kind = (NetCosmeticKind)raw;
+            return true;
+        }
+
+        // REJECT: the kind SELECTS which effect to run on which entity, so an unknown one has no
+        // stand-in -- playing the wrong cue or flashing the wrong thing is worse than silence, and
+        // dropping the frame degrades to exactly the pre-card behaviour (no feedback) with nothing
+        // desynced, since an FX beat carries no gameplay state.
+        internal static bool TryFxKind(int raw, out NetFxKind kind)
+        {
+            kind = default;
+            if (raw < 0 || raw > (int)NetFxKind.EnemyLazerFire)
+            {
+                return false;
+            }
+            kind = (NetFxKind)raw;
             return true;
         }
 
@@ -800,29 +824,38 @@ namespace EvilAliensWeb.Compat.Net
 
         // ---- level-script beat events (card 11.3) -------------------------------------------
 
-        // EvMessage: [msgType:1][speech:1][angle:f32][textLen:1][utf8 text:N] -- the exact
-        // AnimatedMessage.Setup args the host-side MessageEvent spawned with (angle only
+        // EvMessage: [msgType:1][speech:1][angle:f32][textLen:1][utf8 text:N][short:1] -- the exact
+        // AnimatedMessage.Setup args the host-side emitter spawned with (angle only
         // meaningful for the redwarning type's direction arrow).
-        public static byte[] EncodeMessageEvent(ushort eventSeq, byte msgType, byte speech, float angle, string text)
+        //
+        // The trailing `short` byte (AnimatedMessage.MakeShort, the compact warning arrow the
+        // bosses spawn) is APPENDED PAST the variable-length text and is OPTIONAL on decode, which
+        // is what keeps this backwards- AND forwards-compatible with no protocol bump: the
+        // pre-existing decoder bounds with `b.Length < 11 + textLen`, so an older peer reads the
+        // text and ignores the extra byte, and a frame from an older peer simply decodes as
+        // isShort=false, which is the pre-card behaviour. Do not move it in front of the text.
+        public static byte[] EncodeMessageEvent(ushort eventSeq, byte msgType, byte speech, float angle, string text, bool isShort = false)
         {
             byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(text ?? "");
             int textLen = Math.Min(utf8.Length, 255);
-            byte[] b = EventHeader(EvMessage, eventSeq, 7 + textLen);
+            byte[] b = EventHeader(EvMessage, eventSeq, 8 + textLen);
             b[4] = msgType;
             b[5] = speech;
             WriteF32(b, 6, angle);
             b[10] = (byte)textLen;
             Array.Copy(utf8, 0, b, 11, textLen);
+            b[11 + textLen] = (byte)(isShort ? 1 : 0);
             return b;
         }
 
         // Both enums CLAMP rather than reject -- see the wire-enum contract above.
-        internal static bool TryDecodeMessageEvent(byte[] b, out AnimatedMessage.MessageType msgType, out SoundManager.Texts speech, out float angle, out string text)
+        internal static bool TryDecodeMessageEvent(byte[] b, out AnimatedMessage.MessageType msgType, out SoundManager.Texts speech, out float angle, out string text, out bool isShort)
         {
             msgType = AnimatedMessage.MessageType.starwarsblue;
             speech = SoundManager.Texts.Nothing;
             angle = 0f;
             text = null;
+            isShort = false;
             if (b.Length < 11 || b.Length < 11 + b[10])
             {
                 return false;
@@ -831,6 +864,41 @@ namespace EvilAliensWeb.Compat.Net
             speech = SpeechOrNone(b[5]);
             angle = ReadF32(b, 6);
             text = System.Text.Encoding.UTF8.GetString(b, 11, b[10]);
+            // Optional trailing byte -- absent means an older peer's frame, i.e. not short.
+            isShort = b.Length >= 12 + b[10] && b[11 + b[10]] != 0;
+            return true;
+        }
+
+        // EvFx (the transient-feedback beats): [kind:1][netId:2][param:1].
+        // `netId` 0 means "no entity" -- a purely positional kind (NetIdRegistry never allocates 0).
+        // `param` is per-kind and is 0 for every kind shipped so far; it exists so a later kind can
+        // carry a level/size/on-off without a second event type.
+        //
+        // NO POSITION FIELD, deliberately. The two entity kinds resolve their target by netId and
+        // draw on the puppet, whose position is already replicated and NEWER than anything a beat
+        // could carry; the one entity-free kind plays a 2D cue. A position was carried in the first
+        // cut of this event and every consumer ignored it -- if a future kind genuinely needs one,
+        // add it then rather than shipping eight bytes per beat that nothing reads.
+        public static byte[] EncodeFxEvent(ushort eventSeq, byte kind, ushort netId, byte param)
+        {
+            byte[] b = EventHeader(EvFx, eventSeq, 4);
+            b[4] = kind;
+            WriteU16(b, 5, netId);
+            b[7] = param;
+            return b;
+        }
+
+        internal static bool TryDecodeFxEvent(byte[] b, out NetFxKind kind, out ushort netId, out byte param)
+        {
+            kind = default;
+            netId = 0;
+            param = 0;
+            if (b.Length < 8 || !TryFxKind(b[4], out kind))
+            {
+                return false;
+            }
+            netId = ReadU16(b, 5);
+            param = b[7];
             return true;
         }
 
@@ -1090,6 +1158,38 @@ namespace EvilAliensWeb.Compat.Net
         // belt, AsteroidChase, Demo1). The client's copy runs the spawner's own
         // SetBackGroundOnly() seam, so it never produces the collidable ones.
         BackgroundAsteroids = 1,
+        // Level 2's looping "bees" ambience (Level2.beesSoundOn/Off). It is the SOUND of the fog
+        // swarm above and is turned on and off by the same stretch of host-only level script, so
+        // it rides this on/off lane rather than growing one of its own -- which buys it the latch,
+        // the JIP catch-up replay, the checkpoint clear and the eaNetBg() state line for free.
+        // The client "spawner" for this kind is the looping cue itself; `rate` is meaningless and
+        // the emitter sends 1 (a positive, so the shared `rate <= 0 means off` guard is unchanged).
+        BeesLoop = 2,
+    }
+
+    // Card group "transient feedback never crosses the wire": which one-shot cosmetic beat an
+    // EvFx frame carries. APPEND-ONLY (the value is the wire byte) and bounded by
+    // NetProtocol.TryFxKind -- a new member must move that bound AND its ProbeWireEnums row.
+    //
+    // Every kind here is DRAW/AUDIO ONLY on the receiving peer: nothing an EvFx applies may
+    // damage, kill, award, spawn a replicable entity or move gameplay state, or the two worlds
+    // diverge. They are also all IDEMPOTENT against the client's own local simulation -- a client
+    // hit-tests puppets with its own bullets, so it may already have run the same feedback, and
+    // each apply no-ops when the effect it would start is already running.
+    public enum NetFxKind : byte
+    {
+        // The host landed a hit on the entity `netId`: light it up (and play its own per-type hit
+        // cue). Covers KillableAlien's 35ms blink, SpiderBoss's Lazer hit and Ball's chip hit.
+        EnemyHitFlash = 0,
+        // A JunkBoss orbit Ball took its last chip and broke away: the detach explosion + "expl1".
+        BallDetach = 1,
+        // An enemy fired a single-shot Lazer: the "lazershotnoloop" cue (2D, so it needs no
+        // position). Emitted at the
+        // host's real firing moment rather than off the beam's EvSpawn, because ReplayLive
+        // re-sends EvSpawn for the WHOLE live set at a join-in-progress catch-up and the puppet
+        // layer cannot tell that from a fresh spawn -- which would salvo every live beam's cue at
+        // the joiner the instant it arrives.
+        EnemyLazerFire = 2,
     }
 
     public struct ShipSample

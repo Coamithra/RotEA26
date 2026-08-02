@@ -50,6 +50,12 @@ expect 1\. transport contract
 expect 2\. NetImpairment composed over an endpoint
 expect 3\. codec round trips through the wire
 expect 4\. stream-lane reorder \+ dedup
-expect \[netwire\] 69 passed, 0 failed
+# Cards 43e85936 / c146422f raised this 69 -> 77: the EvFx codec (kind/netId/pos/param, its
+# entity-free netId-0 form, a truncated frame, an out-of-enum KIND refused and a known one
+# accepted as the control) plus EvMessage's optional trailing `short` flag. That flag's
+# THIRD leg is the one to keep: a frame encoded WITHOUT the byte must still decode, as
+# not-short -- which is the whole reason those cards needed no protocol version bump, so if
+# it ever goes red the bump is back on the table.
+expect \[netwire\] 77 passed, 0 failed
 expect-not FAIL
 quit

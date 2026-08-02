@@ -16,7 +16,8 @@ namespace EvilAliensWeb.Compat.Net
     // re-creates a local, silent LazerGenerator that self-animates.
     //
     // The child is stored in the emitter's OWN generator field (SweepUFO.g / MarsBoss.lazerGenerator
-    // / SpiderHelperMothership.windup), so the emitter's existing hand-draw + its OnComponentRemoved
+    // / SpiderHelperMothership.windup / UFO.lazerGenerator / JunkBoss.suckeffect), so the emitter's
+    // existing hand-draw + its OnComponentRemoved
     // Free() both already cover it -- no Draw/removal edits. On the host this field holds the real
     // generator and Drive is never called (the puppet driver is client-only); the two never overlap.
     internal static class NetChargeGlow
@@ -25,17 +26,28 @@ namespace EvilAliensWeb.Compat.Net
         // child on the charge-on edge, tracks the muzzle while charging, and frees it on charge-off.
         // Spawning here (not in ApplyStateExtra) honours the descriptor contract's "never spawn from
         // ApplyStateExtra" rule -- ApplyStateExtra only records the flags this reads.
-        public static void Drive(ref LazerGenerator child, bool charging, Vector2 offset, float windupSeconds, float size, ComponentBin collection, Game game, Vector2 emitterPos)
+        // `lifetime` is the emitter's own Setup argument, NOT a wire field: it is a per-emitter
+        // CONSTANT that both peers already have in their copy of the code, so streaming it would
+        // be paying for something the client can read locally. It is a parameter rather than a
+        // literal because the emitters disagree -- JunkBoss's suck swarm passes 0.5 where the four
+        // laser windups pass 1, and a hard-coded 1 gave the client's suck particles twice the
+        // host's life.
+        public static void Drive(ref LazerGenerator child, bool charging, Vector2 offset, float windupSeconds, float size, float lifetime, ComponentBin collection, Game game, Vector2 emitterPos)
         {
             if (charging)
             {
                 if (child == null)
                 {
                     child = LazerGenerator.NewLazerGenerator(collection, game);
-                    // Setup clears the silent flag, so SetupSilent MUST follow it: a puppet must never
-                    // play the "lazercharge" cue (it is not the local shooter).
-                    child.Setup(emitterPos + offset, size, 1f, 0f, 0f);
-                    child.SetupSilent();
+                    child.Setup(emitterPos + offset, size, lifetime, 0f, 0f);
+                    // AUDIBLE, and it used to be SetupSilent() -- reversed by cards 57ea30cd /
+                    // c146422f. The old reasoning ("a puppet is not the local shooter") is the
+                    // right rule for a remote PLAYER's private business, which is why a remote
+                    // powerup pickup is silent (card d53431b4). An ENEMY windup is the opposite
+                    // kind of thing: it is a world event both players are dodging, and the whole
+                    // point of a telegraph is that you hear it coming. Muting it on the join peer
+                    // was a gameplay disadvantage, not politeness. The looped "lazercharge" cue
+                    // stops with the child on Free(), same as the host's.
                     child.SetWindup(windupSeconds, loop: false); // ramp fills the replicated windup exactly
                     collection.Add((GameComponent)(object)child);
                 }

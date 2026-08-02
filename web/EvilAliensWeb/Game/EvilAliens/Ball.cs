@@ -47,6 +47,12 @@ internal class Ball : AlienDrawableGameComponent
 	private Timer starttimer;
 
 	private float rotationspeed;
+	// Online co-op, CLIENT side: this ball has already broken away as far as the FX are
+	// concerned -- either we saw the hit ourselves or the host's beat told us. It is a latch of
+	// its own rather than a `state == connected` test because a PUPPET's state never advances
+	// past `startup` (Initialize sets it and Update is frozen for life), so a state test would
+	// silently refuse every beat and the feature would do nothing at all.
+	private bool netDetached;
 
 	private CollisionSimpleCircle collisionSimpleCircle = new CollisionSimpleCircle(Vector2.Zero, 1f);
 
@@ -136,6 +142,7 @@ internal class Ball : AlienDrawableGameComponent
 		starttimer.Reset();
 		starttimer.Start();
 		hitpoints = 3;
+		netDetached = false;
 		ybuffer = 900f / Settings.GetInstance().DifficultyFactorized(0.5f);
 	}
 
@@ -245,6 +252,12 @@ internal class Ball : AlienDrawableGameComponent
 				hitpoints--;
 				hittimer.Start();
 				hittimer.Reset();
+				// Online co-op (card c146422f, "the asteroids do not light up"): a Ball is not a
+				// KillableAlien -- its hp and its 35ms blink are private to this method and ride
+				// no wire field at all -- so a chip the HOST landed was completely invisible on
+				// the join peer. Both beats are no-ops with no session or no peer.
+				EvilAliensWeb.Compat.Net.NetSession.OnGameFx(
+					EvilAliensWeb.Compat.Net.NetFxKind.EnemyHitFlash, this);
 				if (hitpoints == 0)
 				{
 					base.Direction = MyMath.VectorToAngle(base.Position - owner.GetPosition) + (float)Math.PI / 4f * RandomHelper.RandomNextFloat(-1f, 1f);
@@ -253,10 +266,13 @@ internal class Ball : AlienDrawableGameComponent
 					base.MaxSpeed = 0.45f;
 					base.Speed = base.MaxSpeed;
 					base.MinSpeed = 0.18f * Settings.GetInstance().DifficultyModifier;
-					Explosion explosion = Explosion.NewExplosion(collection, base.Game);
-					explosion.Setup(base.Position, 1f, 1f, base.Speed * 0.05f, base.Direction);
-					collection.Add((GameComponent)(object)explosion);
-					sound.PlayCue("expl1");
+					netDetached = true;
+					DetachEffect();
+					// ...and the same beat for the DETACH, whose explosion + "expl1" are likewise
+					// spawned here and nowhere the wire can see: the ball simply drifted away
+					// silently on the other screen.
+					EvilAliensWeb.Compat.Net.NetSession.OnGameFx(
+						EvilAliensWeb.Compat.Net.NetFxKind.BallDetach, this);
 					if (other is Bullet)
 					{
 						AwardScore(combo: true, other);
@@ -321,6 +337,12 @@ internal class Ball : AlienDrawableGameComponent
 	// The ctor picks one of AsteroidSmall1..4 at RANDOM; the client puppet must be forced onto the
 	// host's pick or the same netId ball is a different rock on each screen.
 	// 1..4 = the asset's trailing digit (1-BASED -- unlike Asteroid.NetSmallSheetIndex's 0..3).
+	// Read by NetFxTest: the hit blink is a private timer with no other observable, and a beat
+	// that quietly stopped starting it would change no counter anywhere.
+	internal bool NetHitBlinking => hittimer.Active;
+
+	internal bool NetDetachedFx => netDetached;
+
 	internal int NetAsteroidVariant
 	{
 		get
@@ -344,5 +366,45 @@ internal class Ball : AlienDrawableGameComponent
 			return;
 		}
 		LoadAnimation(new AnimationData("GFX/Sprites/AsteroidSmall" + variant));
+	}
+
+	// The break-away burst, factored out of CollidesWith so the client can run the SAME code off
+	// the wire beat rather than a copy that could drift from it. Pure FX -- no state, no score.
+	// (Explosion is a cosmetic type and never replicates, so spawning one on a client is legal.)
+	private void DetachEffect()
+	{
+		Explosion explosion = Explosion.NewExplosion(collection, base.Game);
+		explosion.Setup(base.Position, 1f, 1f, base.Speed * 0.05f, base.Direction);
+		collection.Add((GameComponent)(object)explosion);
+		sound.PlayCue("expl1");
+	}
+
+	// Card c146422f: the client half of the two beats emitted in CollidesWith.
+	//
+	// Both guards are the puppet's own state, which is what makes them idempotent against the
+	// client's own hit-testing: a chip it saw already started `hittimer`, and a ball it saw break
+	// away is already out of `connected`, so the host's beat for the same event does nothing.
+	// The detach beat deliberately does NOT change `state` or touch `owner` -- the freed ball's
+	// motion arrives in the world snapshot like every other puppet's, and a puppet must never
+	// run gameplay.
+	internal override void NetPlayFx(EvilAliensWeb.Compat.Net.NetFxKind kind)
+	{
+		switch (kind)
+		{
+		case EvilAliensWeb.Compat.Net.NetFxKind.EnemyHitFlash:
+			if (!netDetached && !hittimer.Active)
+			{
+				hittimer.Start();
+				hittimer.Reset();
+			}
+			break;
+		case EvilAliensWeb.Compat.Net.NetFxKind.BallDetach:
+			if (!netDetached)
+			{
+				netDetached = true;
+				DetachEffect();
+			}
+			break;
+		}
 	}
 }

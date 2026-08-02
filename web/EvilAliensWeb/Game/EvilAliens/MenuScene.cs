@@ -1210,6 +1210,14 @@ internal class MenuScene : Scene
 		netMode = true;
 		netNoticeUp = false;
 		mainMenu.RemoveInstantly();
+		// ...and the browse carousel, for the same reason and by the same no-op-when-not-shown
+		// rule: you cannot be shopping for a game while sitting in a lobby with a live session.
+		// Reachable because DebugFlags.GameBrowser is process-lifetime -- on a ?gamebrowser boot
+		// Initialize re-shows the carousel on EVERY menu entry, so a card-3b6c12e7 lobby return
+		// would otherwise land netPickMenu on top of it: two live MenuSub1s, which have no
+		// modality, moving two selections per arrow (card 72143c11).
+		onlineGamesMenu.RemoveInstantly();
+		browsingGames = false;
 		if (EvilAliensWeb.Compat.Net.NetSession.IsHost)
 		{
 			HideNetStatus();
@@ -1534,6 +1542,17 @@ internal class MenuScene : Scene
 			Collection.Add((GameComponent)(object)mainMenu);
 		}
 		hidemainmenu = false;
+		// Card 3b6c12e7: an online co-op level that FINISHED left the pairing standing, so this
+		// re-entry is a return to the lobby rather than to the main menu -- the host picks the
+		// next mission and the pair keeps playing. Take-once, and LAST: EnterNetLobby removes the
+		// mainMenu this method has just added, so anything re-adding it afterwards would put a
+		// live main menu underneath the lobby panel (card 72143c11's two-menus-eat-every-keypress
+		// shape). Story levels come back through CreditsScene, so this can be seconds after the
+		// scene went down and the two peers need not arrive together.
+		if (EvilAliensWeb.Compat.Net.NetSession.TakeLobbyReturn())
+		{
+			EnterNetLobby();
+		}
 		base.Initialize();
 	}
 

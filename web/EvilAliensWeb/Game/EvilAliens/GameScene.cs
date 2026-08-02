@@ -1978,6 +1978,25 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		}
 	}
 
+	// The angle a ship both flies IN on and, at level end, flies OUT on -- PlayerShip.Update's
+	// hasWon arm thrusts at `startdir` forever. One source for what used to be the same three
+	// literals in SpawnPlayer, SpawnAllPlayers and (wrongly, hard-coded) the two net puppet
+	// spawns. Screen Y grows downward, so South = 3*pi/2 = up the screen (card b4a9fe60).
+	private static float SpawnDirectionFor(PlayerSpawnType type)
+	{
+		return type switch
+		{
+			PlayerSpawnType.West => 0f,
+			PlayerSpawnType.North => (float)Math.PI / 2f,
+			_ => 4.712389f,
+		};
+	}
+
+	// INetScene: the net layer's puppet spawns need the same angle the scene gives its local
+	// ships, or the remote ship flies off in a different direction from everyone else at
+	// victory (card b4a9fe60 -- both puppet sites hard-coded South while Level 2 is West).
+	public float PlayerSpawnDirection => SpawnDirectionFor(spawnType);
+
 	// Spawn the ship for an already-seated slot. `slot` is the seat AddPlayer/the net allocator
 	// actually took -- never `oracle.Players - 1`, which only agrees while the table is dense.
 	public void SpawnPlayer(ControlDevice controlDevice, int slot)
@@ -1987,16 +2006,17 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		{
 			playerShip = new PlayerShip(base.Game);
 		}
+		float startDirection = PlayerSpawnDirection;
 		switch (spawnType)
 		{
 		case PlayerSpawnType.South:
-			playerShip.Setup(slot, new Vector2(400f, 648f), startup: true, invulnerable: true, 4.712389f);
+			playerShip.Setup(slot, new Vector2(400f, 648f), startup: true, invulnerable: true, startDirection);
 			break;
 		case PlayerSpawnType.West:
-			playerShip.Setup(slot, new Vector2(-48f, 300f), startup: true, invulnerable: true, 0f);
+			playerShip.Setup(slot, new Vector2(-48f, 300f), startup: true, invulnerable: true, startDirection);
 			break;
 		case PlayerSpawnType.North:
-			playerShip.Setup(slot, new Vector2(400f, -48f), startup: true, invulnerable: false, (float)Math.PI / 2f);
+			playerShip.Setup(slot, new Vector2(400f, -48f), startup: true, invulnerable: false, startDirection);
 			break;
 		}
 		if (controlDevice == ControlDevice.Keyboard)
@@ -2193,6 +2213,16 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		// bullets into the next play of this level, where the host never announced one.
 		netIntroVolley = null;
 		netScriptGateHeld = false;
+		// Card 3b6c12e7: a FINISHED level keeps an online co-op pairing alive and sends both
+		// peers back to the lobby, so the host can pick the next one. Latched here rather than
+		// read at the scene-down edge because by then the scene is gone -- and keyed off the
+		// terminate MODE, not _state, so a quit taken during the victory choreography (which
+		// leaves _state == Victory) is still an ordinary match end. Must be ABOVE the
+		// NetActiveScene null below, which is what raises that edge.
+		if (mode == FinishedMode.finishedlevel)
+		{
+			EvilAliensWeb.Compat.Net.NetSession.OnLevelFinished();
+		}
 		// KEEP THIS ABOVE THE PURGES (card 74403f83). ComponentBin.Add exempts the puppet layer
 		// from the standing purge filter, and the only thing stopping that exemption dropping a
 		// puppet into a scene that is tearing down is that EvSpawn / the snapshot path are gated
@@ -2537,16 +2567,17 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 				{
 					playerShip = new PlayerShip(base.Game);
 				}
+				float startDirection = PlayerSpawnDirection;
 				switch (spawnType)
 				{
 				case PlayerSpawnType.South:
-					playerShip.Setup(i, new Vector2(800f / ((float)oracle.Players + 1f) * (float)ordinal, 648f), startup: true, invulnerable: false, 4.712389f);
+					playerShip.Setup(i, new Vector2(800f / ((float)oracle.Players + 1f) * (float)ordinal, 648f), startup: true, invulnerable: false, startDirection);
 					break;
 				case PlayerSpawnType.West:
-					playerShip.Setup(i, new Vector2(-48f, 600f / ((float)oracle.Players + 1f) * (float)ordinal), startup: true, invulnerable: false, 0f);
+					playerShip.Setup(i, new Vector2(-48f, 600f / ((float)oracle.Players + 1f) * (float)ordinal), startup: true, invulnerable: false, startDirection);
 					break;
 				case PlayerSpawnType.North:
-					playerShip.Setup(i, new Vector2(800f / ((float)oracle.Players + 1f) * (float)ordinal, -48f), startup: true, invulnerable: false, (float)Math.PI / 2f);
+					playerShip.Setup(i, new Vector2(800f / ((float)oracle.Players + 1f) * (float)ordinal, -48f), startup: true, invulnerable: false, startDirection);
 					break;
 				}
 				if (invulnerable)

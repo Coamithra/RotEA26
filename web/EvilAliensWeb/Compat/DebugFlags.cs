@@ -172,9 +172,15 @@ namespace EvilAliensWeb.Compat
 		// at the two damage gates instead (PlayerShip.CollidesWith, WebcamLevel.PlayerHit).
 		public static bool Invuln { get; private set; }
 
-		// TEMP DEBUG (repro only): in any GameScene, jump straight to Victory() once the
-		// level reaches Normal play, to exercise the victory -> credits -> brag -> menu
-		// handoff without playing the whole level. Combine with ?level=Level2. REMOVE.
+		// LEVEL 2 ONLY -- Level2.cs is its only reader, and it replaces that level's script with
+		// the ending unlock chain -> Victory() (forcing Hard along the way), to exercise the
+		// victory -> credits -> menu handoff without playing the level out. It does NOT work "in
+		// any GameScene", which this comment used to claim and which the root CLAUDE.md's
+		// `?level=N&win` phrasing inherited -- both corrected by card 3b6c12e7, whose two-peer
+		// level-end probes are its main user now (a host wins from its SCRIPT, never from a wire
+		// beat, so this is the only route a rig has to a co-op HOST victory). Out of `Active` and
+		// nothing rests on that: it is useless without `?level=`, which is in `Active` -- so a
+		// menu-lobby pairing carrying it still needs `?netallowdebug` either way.
 		public static bool Win { get; private set; }
 
 		// Sprite harness (see the header comment + HarnessScene/HarnessRegistry). Harness is
@@ -3455,6 +3461,10 @@ namespace EvilAliensWeb.Compat
 							+ (NoWalls ? " nowalls" : "")
 							+ (BrainBoss ? " brainboss" : "")
 							+ (TutorialTraining ? " tutorialtraining" : "")
+							// Same class (card 3b6c12e7): ?win replaces Level 2's script with the ending
+							// unlock chain AND forces Hard, so a run that reached the credits in a
+							// minute has to be able to say why.
+							+ (Win ? " win" : "")
 							// Prints only when set: it decides which attract demo a capture or probe
 							// actually measured. Note the whole line is gated on `Active`, which
 							// DemoPick is deliberately out of -- so a bare ?demo=2 confirms nothing

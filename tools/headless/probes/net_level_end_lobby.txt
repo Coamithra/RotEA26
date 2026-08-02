@@ -1,0 +1,48 @@
+# PROBE: after an online co-op level is FINISHED, the HOST comes back to its lobby -- the level
+# pick menu, with the main menu gone and the net flow live -- rather than to the main menu
+# (card 3b6c12e7, "so the host can select the next level and keep playing with their buddy").
+#
+# THE SIBLING PROBE net_level_end.txt COVERS THE SESSION; THIS ONE COVERS THE MENUS, and they
+# are separate for a reason that is not tidiness: the session half runs a real CLIENT (only a
+# client applies an EvVictory off the wire), and EnterNetLobby's two roles land in DIFFERENT
+# menus -- the host on netPickMenu, the client on the status panel. The host's row is the one
+# the card is about, and a host wins from its own SCRIPT, never from a beat a rig can inject.
+# Hence `?win`, which is the only route to a host victory here (and is Level-2-only).
+#
+# WHY THE MENU CENSUS AND NOT A SCREENSHOT (card 72143c11): NetStatusMenu draws its own 50%
+# darken at DrawOrder 2000 and MenuSub1 has NO modality at all, so a main menu left live under
+# the lobby merely looks dim while moving a second selection on every arrow and invoking a
+# second entry on every Enter. That is invisible in a frame and moves no counter.
+#
+# WHY THE LONG STEP: ~4600 frames (~77 s of game time) covers the ?win script reaching Victory,
+# GameScene.UpdateWin's 7 s choreography, and Level 2's whole post-level text crawl -- story
+# levels return through CreditsScene, so the menus are seconds behind the scene going down.
+#
+# THE netMode LEG IS NOT DECORATION. It is what reroutes the shared level/difficulty selectors'
+# OnExit back to netPickMenu and what makes the difficulty pick REPLICATE the launch
+# (MenuScene.difficultyMenu_difficultySelected). A lobby whose menus are right but whose netMode
+# is false would look correct and then launch a solo game off a live pairing.
+#
+# DESTRUCTIVE: it drives the live level to its end. Boot it throwaway.
+#
+# MUTATION-TESTED: dropping the TakeLobbyReturn() call from MenuScene.Initialize leaves
+# MenuSubWithSkull live and netMode false, failing the three menu legs and the state line.
+#
+# eahl: --flags "?level=Level2&invuln&netallowdebug&noattract&win&seed=1234"
+
+step 200 nodraw
+mark
+
+eval NetLevelEndArmHost
+
+# The ?win script's victory, UpdateWin's 7 s, then the credits crawl.
+step 4600 nodraw
+
+eval MenuNetState
+expect \[menunetstate\] netMode=True
+
+eval NetLevelEndMenu
+
+expect \[netlevelendmenu\] 10 passed, 0 failed
+expect-not FAIL
+quit

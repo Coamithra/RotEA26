@@ -41,6 +41,12 @@ namespace EvilAliensWeb.Compat.Net
         // answer, latched at the last CheckPlayerJoins.
         bool JoinWouldSpawnNow { get; }
 
+        // The angle the scene's ships fly IN on and, at level end, fly OUT on (PlayerShip's
+        // hasWon arm thrusts at its `startdir` forever). The puppet spawns hard-coded South,
+        // so on a West/North level the remote ship left in a different direction from every
+        // local one -- card b4a9fe60.
+        float PlayerSpawnDirection { get; }
+
         // Card 8a7772d6: the level script is holding the local player spawn (Level 1's intro
         // cinematic is the only shipped case). The HOST streams this in every MsgShipState so
         // the joiner can watch the same cutscene instead of flying around during it.

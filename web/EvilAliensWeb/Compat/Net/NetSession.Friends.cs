@@ -245,7 +245,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 ship = new PlayerShip(game);
             }
-            ship.Setup(slot, ch.Buffer.Newest.Pos, startup: false, invulnerable: false, 4.712389f);
+            ship.Setup(slot, ch.Buffer.Newest.Pos, startup: false, invulnerable: false, PuppetSpawnDirection());
             if (!bin.TryAdd((GameComponent)(object)ship))
             {
                 // Same standing-Purge<PlayerShip> race as the primary remote ship in

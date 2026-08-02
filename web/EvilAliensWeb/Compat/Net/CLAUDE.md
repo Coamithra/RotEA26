@@ -53,6 +53,10 @@ inputs; the other peer's ship is an interpolated puppet.
 - **The respawn indicator crosses the wire** (`37f3a663`, v17): a dead player's clock ring is
   drawn on BOTH screens, so you can see your buddy coming back and where -- see the
   respawn-indicator bullet at the end of "Claims, score & per-slot HUD".
+- **A lobby pairing survives a finished level** (`3b6c12e7`, no protocol change): both peers walk
+  back to the lobby with the session up and the host picks the next mission, instead of the match
+  ending -- and the remote ship now flies off in the level's own spawn direction rather than
+  always upward (`b4a9fe60`). Two bullets at the end of "Signaling, menu lobby & handshake".
 - **Level 1's intro cinematic plays on BOTH peers** (`8a7772d6`): the host's scripted no-ship
   phase is replicated as a `MsgShipState` flag bit, so neither ship is on screen until the
   cutscene ends and then both fly in together -- and the hail of bullets, which cannot replicate
@@ -510,11 +514,13 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   the peer's own symmetric detection) actually egress; the peer's inbound reject during the
   grace ends our side early. The detection itself is symmetric (each side derives the notice
   from the peer's hello), so the frame is belt-and-braces; the grace is what makes it land.
-  Match-end: any player leaving a MENU session (quit, tab close, drop,
-  victory/game-over wind-down) ends it for both -- scene-down edge or `PeerLost` sends
+  Match-end: any player leaving a MENU session (quit, tab close, drop, game-over
+  wind-down) ends it for both -- scene-down edge or `PeerLost` sends
   `EvLeave`/notice, `NetSession.Stop()` tears down (registries disabled, state reset,
   restartable), `GameScene.NetApplyPeerLeft` force-exits a running level (except in
   Victory/GameOver, which finish locally), and the menus surface `TakeMenuNotice()`.
+  **A level FINISHED is the one exception since card 3b6c12e7 -- see the level-end bullet
+  below; it used to be in that list, and "one match per lobby" is no longer true.**
   `EvReady` (client scene-up edge -> host `ReplayLive`) covers the lobby launch race
   where one peer out-warms the other; world messages are gated client-side while no
   GameScene is up. URL `?net=` sessions keep the old semantics (session survives peer
@@ -572,6 +578,81 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
       `tools/headless/probes/net_menumode_reset.txt` (plant the flag, round-trip through the
       Tutorial, require it clear AND require an ordinary Mission 1 launch to still launch). None
       of those four fields changes a pixel, so no screenshot can see any of this.
+
+- **FINISHING A LEVEL RETURNS BOTH PEERS TO THE LOBBY WITH THE SESSION ALIVE (card 3b6c12e7).**
+  The host then picks the next mission and the pair keeps playing. Before it, `UpdateSceneEdges`'
+  scene-down branch was the single teardown trigger for EVERY normal level end -- `EvLeave` +
+  `Stop("match ended")` -- so a finished level dropped both players to the main menu and a second
+  level meant re-signalling from scratch.
+  - **NO PROTOCOL CHANGE AND NO NEW WIRE MESSAGE, which is the design's whole shape.** Both peers
+    already reach the end through the existing host-broadcast `EvVictory`, so each one
+    independently keeps its own session and walks to its own lobby. Nothing has to be negotiated,
+    and the two peers need not arrive together -- which matters, because story levels come back
+    through `CreditsScene` and either player can be seconds behind the other. Protocol stays v15.
+  - **THE LATCH IS KEYED OFF THE TERMINATE MODE, NOT `_state`.** The seam is `GameScene.Terminate`
+    calling `NetSession.OnLevelFinished()` on `FinishedMode.finishedlevel`, IMMEDIATELY ABOVE the
+    `NetActiveScene = null` that raises the edge. The edge itself cannot ask: by the time it fires
+    the scene is already gone, so `NetEndingNormally` (the existing discriminator, read only inside
+    `EndMatchPeerGone`) is unreachable there. `_state` would also be the wrong question -- it reads
+    `Victory` for a quit taken DURING the victory choreography, which is an ordinary match end. The
+    latch is SPENT by the edge, so it can never survive into a later level.
+  - **`listedSession` (join-in-progress) is DELIBERATELY EXCLUDED and keeps the old teardown**: a
+    JIP host has no lobby to return to -- it was playing single-player when a stranger arrived --
+    so its level ending is still a match end, and its joiner still sees the `EvLeave`.
+  - **`ResetPerMatchState()` is what makes a SECOND level correct, and the split is the interesting
+    part.** It is the WORLD-scoped subset of `ResetPerSessionState`: the interpolation buffer (or
+    the next level's puppet spawns at the LAST level's final position), the rx queue, the puppet +
+    friend channels, the kill/death ledgers, and a `Disable`/`Enable` cycle of `NetIdRegistry`
+    (host) / `NetPuppets` (client) to drop the dead level's id maps -- exactly what a
+    `Stop()`/`Start()` pair does, and `NetIdRegistry`'s `next` counter keeps counting across it by
+    design, so the next level's ids cannot collide. What it KEEPS is what describes the PAIRING
+    rather than the match: the transport, `PeerUp`/`menuSession`, the peer identity and block list,
+    the roster grants (the same two peers keep their seats), the monotone tx/rx event sequences,
+    and `pendingLaunch*` -- the host may already have picked the next level while this peer was
+    still watching the crawl, and that latch is what lets the client mirror it on arrival.
+  - **The menus come back in through card c337222a's `MenuScene.EnterNetLobby()`** -- this is its
+    first caller. `NetSession.TakeLobbyReturn()` is a take-once latch polled at the END of
+    `MenuScene.Initialize`, after `ResetNetFlowState()` and after `mainMenu` has been re-added
+    (`EnterNetLobby` removes it, so nothing may re-add it afterwards). `NetLobby.Phase` is
+    untouched -- `Stop()`, its only resetter, deliberately did not run -- so the client's status
+    panel gets its text from the same `Connected` branch a fresh pairing does, and both peers'
+    Cancel still leaves the match through `NetLobby.Cancel`.
+  - **Verify with `tools/headless/probes/net_level_end.txt` (the SESSION) and
+    `net_level_end_lobby.txt` (the MENUS)**; console `eaNetLevelEnd.arm()`/`.check()` and
+    `.armHost()`/`.menu()`. Two probes because the halves need OPPOSITE roles: only a CLIENT
+    applies an `EvVictory` off the wire, and only a HOST lands on `netPickMenu` -- and a host wins
+    from its own SCRIPT, never from a beat a rig can inject, which is why the lobby probe boots
+    `?win` (Level-2-only). **Both are DESTRUCTIVE** -- they drive the live level to its END -- and
+    both need `?level=Level2`, the one shipped level with a non-default `spawnType` and so the only
+    boot on which the fly-off legs below discriminate. `?netallowdebug` is required (a real menu
+    session, and `?level=` sets `DebugFlags.Active`). **The discriminator is the ABSENCE of an
+    `EvLeave` on the peer's queue**, with the peer's delivery count beside it as the positive
+    control; the three session legs alone pass on a run that never terminated its scene, which is
+    why the scene-down is asserted separately. Do NOT pump the WIRE before reading that queue --
+    `NetWire.Pump` drains every endpoint with no collector attached and the evidence is gone
+    (`Close()` clears only the CLOSING endpoint's own inbound, so `Stop()` does not destroy it).
+- **A NET PUPPET LEAVES THE WAY THE SCENE SAYS, NOT ALWAYS UPWARD (card b4a9fe60).** At level end
+  `PlayerShip.Update`'s `hasWon` arm thrusts at the ship's `startdir` forever -- the angle it flew
+  IN on -- and both puppet spawn sites (`NetSession.SpawnPuppet`, `NetSession.Friends.SpawnFriend`)
+  hard-coded `4.712389f`, i.e. `PlayerSpawnType.South` = up the screen. `GameScene.spawnType` is
+  per-LEVEL, so on **Level 2 (West)** the remote ship flew UP while every local ship flew RIGHT, on
+  BOTH peers' screens; `ClassicAliens` (North) and `InsaneBossI`'s Mars section had it too. It is
+  not a replication desync -- once `hasWon` is set, `PlayerShip.Update` never reaches its `Remote`
+  case again, so `DriveRemoteShip` stops running and each peer simulates every ship's departure
+  LOCALLY off that one field.
+  - The scene owns the angle now: `GameScene.SpawnDirectionFor` is the one source (the three
+    literals used to be duplicated across `SpawnPlayer` and `SpawnAllPlayers`), exposed on the
+    seam as `INetScene.PlayerSpawnDirection` and read by both puppet sites through
+    `NetSession.PuppetSpawnDirection()`. The fallback only covers a spawn with no scene up, which
+    the callers' own gates exclude.
+  - **It is a per-ship field with no other observable**, so it is verified as DATA:
+    `PlayerShip.NetStartDirection` is the read seam, `net_level_end.txt` compares the puppet's
+    against the live LOCAL ship's on a West level -- with the pre-card South constant beside every
+    leg as the negative control, because on a South level the bug and the fix agree and every
+    direction assertion would pass on the broken build -- and `logic_probe`'s
+    **`ProbeSpawnDirection`** sweeps the whole `PlayerSpawnType` enum against the VECTORS each arm
+    must produce. NORTH has no end-to-end route at all (it ships on `ClassicAliens`, a challenge
+    level whose victory a rig cannot reach), so the pure sweep is the only thing covering it.
 
 ## Protocol, NetIds & the replicable set
 

@@ -185,6 +185,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeSpawnDirection(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         rc = ProbeRespawnSummon(asm);
         if (rc != 0)
         {
@@ -2191,6 +2197,74 @@ internal static class Program
             "6. labels",
         };
         return RunBrowserSuite(asm, "EvilAliensWeb.Compat.Net.NetHostMenuTest", sections, minAssertions: 44, card: "0d6ffe70");
+    }
+
+    // Card b4a9fe60 -- the angle a ship flies IN on and, at level end, flies OUT on.
+    // GameScene.SpawnDirectionFor is the one source for it now; both net puppet spawn sites used
+    // to hard-code South instead, so on a West level the remote ship left upward while every
+    // local ship left to the right, on BOTH peers' screens.
+    //
+    // WHY THIS IS HERE AND NOT ONLY IN net_level_end.txt. That probe drives the decision END TO
+    // END, which is the stronger evidence -- but only on the level it boots, so it covers South
+    // (the constant) and West (Level 2). NORTH ships on ClassicAliens, a challenge level whose
+    // victory a rig cannot reach, so the third arm has no end-to-end route at all. A pure sweep
+    // is what covers it, and it needs no Game, no browser and no level.
+    //
+    // The angles are asserted against the VECTORS they have to produce rather than restated as
+    // the same three literals: screen Y grows downward, so South must point UP the screen. A
+    // transcription that swapped two arms would satisfy any literal-vs-literal comparison.
+    private static int ProbeSpawnDirection(Assembly asm)
+    {
+        Type scene = asm.GetType("EvilAliens.GameScene", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        const BindingFlags anyNested = BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo forType = scene.GetMethod("SpawnDirectionFor", anyStatic);
+        Type spawnType = scene.GetNestedType("PlayerSpawnType", anyNested);
+        if (forType == null || spawnType == null)
+        {
+            Console.WriteLine("FAIL: could not reflect the targets (SpawnDirectionFor="
+                + (forType != null) + " PlayerSpawnType=" + (spawnType != null) + ") -- renamed or moved?");
+            return 2;
+        }
+
+        Console.WriteLine("[logic_probe] GameScene.SpawnDirectionFor (card b4a9fe60)");
+
+        Func<string, float> dir = name =>
+            (float)forType.Invoke(null, new object[] { Enum.Parse(spawnType, name) });
+        // The game's own convention (MyMath.AngleToVector): (cos, sin), screen Y downward.
+        Func<float, string> vec = a => "("
+            + Math.Round(Math.Cos(a), 3).ToString(System.Globalization.CultureInfo.InvariantCulture) + ", "
+            + Math.Round(Math.Sin(a), 3).ToString(System.Globalization.CultureInfo.InvariantCulture) + ")";
+        Func<float, double> dx = a => Math.Cos(a);
+        Func<float, double> dy = a => Math.Sin(a);
+
+        float south = dir("South");
+        float west = dir("West");
+        float north = dir("North");
+
+        Check("South leaves UPWARD -- +x flat, -y " + vec(south),
+            Math.Abs(dx(south)) < 0.001 && dy(south) < -0.999, south.ToString());
+        Check("West leaves RIGHTWARD " + vec(west),
+            dx(west) > 0.999 && Math.Abs(dy(west)) < 0.001, west.ToString());
+        Check("North leaves DOWNWARD " + vec(north),
+            Math.Abs(dx(north)) < 0.001 && dy(north) > 0.999, north.ToString());
+
+        // NON-DEGENERACY. Every leg above is a shape test, so an implementation collapsing two
+        // arms onto one angle would still have to fail one of them -- but a FOURTH arm added
+        // later and quietly given an existing value would not, and that is exactly how the
+        // shipped bug looked (every puppet on South, whatever the level said).
+        Check("the three arms are three DISTINCT angles",
+            south != west && west != north && south != north,
+            south + " / " + west + " / " + north);
+
+        // Every value of the enum is covered -- so a new PlayerSpawnType added without an arm
+        // (which would fall through to the switch's South default and silently ship the very bug
+        // this card fixed) is caught here rather than by someone watching a level end.
+        string[] known = Enum.GetNames(spawnType);
+        Check("the sweep covers the whole enum (" + string.Join(",", known) + ")",
+            known.Length == 3, known.Length.ToString());
+
+        return 0;
     }
 
     private static int ProbeListingLevels(Assembly asm)

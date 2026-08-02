@@ -494,13 +494,20 @@ namespace EvilAliensWeb.Compat.Net
         // a peer while DebugFlags.Active is set, and a scenario that needs a live world boots with
         // ?level=, so a menu session would reject its own scripted pairing; `listedSession` would
         // make PeerConnected send an EvLaunch no scenario wants.
-        internal static void StartForTest(Game g, bool host, INetTransport t, string room)
+        //
+        // `asMenuSession` (card 3b6c12e7) opts back IN, for the one scenario whose SUBJECT is
+        // menu-session match-end semantics. It does not dodge the refusal above -- it inherits
+        // it -- so such a scenario must boot with `?netallowdebug` beside its `?level=`, which
+        // is the production flag for exactly this (a debug-flagged peer in a menu lobby), and
+        // must assert its own pairing so a refusal reads as a FAIL rather than a vacuous pass.
+        internal static void StartForTest(Game g, bool host, INetTransport t, string room,
+            bool asMenuSession = false)
         {
             if (Active)
             {
                 return;
             }
-            StartWith(g, host, t, room, asMenuSession: false, asListedSession: false);
+            StartWith(g, host, t, room, asMenuSession, asListedSession: false);
         }
 
         // The hash a scripted peer's hello must carry to be accepted. READ rather than recomputed:
@@ -675,6 +682,10 @@ namespace EvilAliensWeb.Compat.Net
             pendingLaunchHas = false;
             peerByeQueued = false;
             listedSession = false;
+            // Card 3b6c12e7. Both are per-MATCH latches; a session that ends outright must not
+            // leave the menus about to enter a lobby for a pairing that no longer exists.
+            levelFinishedCleanly = false;
+            pendingLobbyReturn = false;
             pendingStopAt = 0;
             pendingStopNotice = null;
             pendingStopReason = "pairing rejected";
@@ -875,11 +886,43 @@ namespace EvilAliensWeb.Compat.Net
             return (NetHost.Current.DebugActive && !presentClean) ? NetProtocol.HelloFlagDebugActive : (byte)0;
         }
 
+        // FINISHING A LEVEL RETURNS A MENU-LOBBY PAIRING TO ITS LOBBY WITH THE SESSION ALIVE
+        // (card 3b6c12e7). Latched by GameScene.Terminate off the terminate MODE, immediately
+        // before it nulls NetActiveScene -- the scene-down edge below is the only teardown
+        // trigger for a normal level end and by the time it fires the scene is already gone, so
+        // it cannot ask NetEndingNormally (and _state alone would also accept a quit taken
+        // during the victory choreography). Spent by that edge, so it can never survive into a
+        // later level.
+        private static bool levelFinishedCleanly;
+
+        internal static void OnLevelFinished()
+        {
+            if (Active)
+            {
+                levelFinishedCleanly = true;
+            }
+        }
+
+        // Set when a finished level left the session standing: the menus poll it once and enter
+        // the lobby instead of the main menu. Take-once, so a second MenuScene.Initialize (the
+        // credits -> menu hop, a later return) cannot re-enter the lobby off a stale flag.
+        public static bool TakeLobbyReturn()
+        {
+            bool r = pendingLobbyReturn;
+            pendingLobbyReturn = false;
+            return r;
+        }
+
+        internal static bool PendingLobbyReturn => pendingLobbyReturn;
+
+        private static bool pendingLobbyReturn;
+
         // GameScene lifecycle edges (card 11.4): the client announces its scene coming up
         // (EvReady -> the host replays the live world into it, covering a client that
         // finished its level warm after the host started spawning); a scene going DOWN in
-        // a menu session means the local match ended (quit, game over, victory credits) --
-        // one match per lobby, so tell the peer and wind the session down.
+        // a menu session means the local match ended (quit, game over, drop) -- so tell the
+        // peer and wind the session down. Since card 3b6c12e7 a level FINISHED is the
+        // exception: the pairing survives and both peers walk back to the lobby.
         private static void UpdateSceneEdges()
         {
             bool sceneUp = NetScene.Current != null;
@@ -895,8 +938,23 @@ namespace EvilAliensWeb.Compat.Net
                     transport.SendReliable(NetProtocol.EncodeEmptyEvent(txEventSeq++, NetProtocol.EvReady));
                     metrics.EventsTx++;
                 }
+                return;
             }
-            else if (menuSession || listedSession)
+            bool finished = levelFinishedCleanly;
+            levelFinishedCleanly = false;
+            if (finished && menuSession)
+            {
+                // Card 3b6c12e7: the host picks the next level and the pair keeps playing. No
+                // EvLeave and no Stop -- each peer independently reaches this off the EvVictory
+                // both already ran, so nothing new crosses the wire. listedSession is excluded
+                // deliberately: a join-in-progress host has no lobby to return to, so its level
+                // ending is still a match end (and its joiner sees the EvLeave as before).
+                Console.WriteLine("[net] level finished -- session kept alive, returning to the lobby");
+                ResetPerMatchState();
+                pendingLobbyReturn = true;
+                return;
+            }
+            if (menuSession || listedSession)
             {
                 // Our own level ended / we quit: tell the peer and end the match. For a JIP
                 // host this fires when its level finishes; the joiner (menu session) then
@@ -906,6 +964,63 @@ namespace EvilAliensWeb.Compat.Net
                     transport.SendReliable(NetProtocol.EncodeEmptyEvent(txEventSeq++, NetProtocol.EvLeave));
                 }
                 Stop("match ended");
+            }
+        }
+
+        // The WORLD-scoped half of ResetPerSessionState, for a session that outlives its level
+        // (card 3b6c12e7). Everything here describes the level that just ended and would be
+        // stale -- or actively wrong -- in the next one: the interpolation buffer would place
+        // the next level's puppet at the last level's final position, and the id maps would
+        // collide with the next level's ids.
+        //
+        // DELIBERATELY KEPT, because they describe the PAIRING rather than the match: the
+        // transport, PeerUp/menuSession, the peer identity and block list, the roster grants
+        // (the same two peers keep their seats), the monotone tx/rx event sequences, and
+        // pendingLaunch* (the host may already have picked the next level).
+        //
+        // A URL `?net=` SESSION IS THE ONE OTHER SHAPE THAT OUTLIVES A LEVEL, and it deliberately
+        // does NOT come through here -- the scene-down branch below only reaches menu/listed
+        // sessions, so a dev rig keeps its buffers and id maps across a level exactly as it always
+        // has. That is pre-existing and rig-only, and changing it would alter what those two-tab
+        // recipes measure; it is called out so the omission reads as a decision rather than a
+        // missed call site.
+        private static void ResetPerMatchState()
+        {
+            localPaused = false;
+            rxQueue.Clear();
+            buffer.Clear();
+            renderMs = double.NaN;
+            hasLastPuppetPos = false;
+            remoteAlive = false;
+            peerScriptGate = false;
+            puppet = null;
+            puppetSeenAlive = false;
+            ResetFriends();
+            unmarkedTeleportReported.Clear();
+            lastTxShotCount = 0;
+            lastTxShip = null;
+            lastTxShipShots = 0;
+            killNotes.Clear();
+            killNoteOrder.Clear();
+            recentDeaths.Clear();
+            recentDeathOrder.Clear();
+            if (RemotePaused)
+            {
+                RemotePaused = false;
+            }
+            ClearPeerStalled();
+            // Drop the dead level's id maps exactly as a Stop()/Start() pair would, then
+            // re-arm for the next one. NetIdRegistry keeps its `next` counter across the
+            // cycle by design, so the next level's ids cannot collide with this one's.
+            if (isHost)
+            {
+                NetIdRegistry.Disable(game);
+                NetIdRegistry.Enable(game);
+            }
+            else
+            {
+                NetPuppets.Disable();
+                NetPuppets.Enable(game);
             }
         }
 
@@ -3958,6 +4073,19 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
+        // Card b4a9fe60. Both puppet spawns used to hard-code South (4.712389f = up the screen),
+        // which is only right for the levels that happen to use it: `startdir` is also the
+        // direction PlayerShip.Update's hasWon arm thrusts at forever, so at victory the remote
+        // ship flew UP off Level 2 while every local ship flew RIGHT. The scene owns the angle;
+        // the fallback only covers a spawn with no scene up, which the callers' gates exclude.
+        private const float FallbackSpawnDirection = 4.712389f;
+
+        internal static float PuppetSpawnDirection()
+        {
+            INetScene scene = NetScene.Current;
+            return scene != null ? scene.PlayerSpawnDirection : FallbackSpawnDirection;
+        }
+
         private static void SpawnPuppet()
         {
             // The peer's primary seat was allocated at handshake time (host: it granted it;
@@ -3976,7 +4104,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 ship = new PlayerShip(game);
             }
-            ship.Setup(slot, buffer.Newest.Pos, startup: false, invulnerable: false, 4.712389f);
+            ship.Setup(slot, buffer.Newest.Pos, startup: false, invulnerable: false, PuppetSpawnDirection());
             if (!bin.TryAdd((GameComponent)(object)ship))
             {
                 // A standing Purge<PlayerShip> is live this tick. The one that can actually

@@ -916,7 +916,7 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     `tools/headless/probes/net_pickup.txt`). **DESTRUCTIVE** like `eaNetResetSpawn` -- it pairs a
     real HOST session onto the live level, adopts a real ship puppet off a scripted client's
     stream and drives real `EvClaim` frames at it -- so run it in a throwaway
-    `?level=Level2&invuln` boot. Its load-bearing leg is the option arithmetic, driven over the
+    `?level=Level2&invuln` boot. The leg the suite rests on is the option arithmetic, driven over the
     FULL remote sequence (claims AND HUD state) rather than either path alone, because the risk
     of fixing "the observer sees fewer" is inverting it into "the observer sees more"; measured
     owner +6 / observer +6 over 3 pickups + 3 level-ups, and +3 on the observer under the

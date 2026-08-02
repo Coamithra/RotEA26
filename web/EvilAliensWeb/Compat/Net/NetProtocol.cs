@@ -106,6 +106,22 @@ namespace EvilAliensWeb.Compat.Net
         // the whole net layer runs on real time: see the slow-motion bullet in Compat/Net/CLAUDE.md.
         public const byte EvSlowmo = 25;
 
+        // Card 37f3a663, EITHER PEER, reliable: "one of my ships died and its respawn clock has
+        // started -- draw the indicator here". `[slot:1][posX:f32][posY:f32][durationMs:u16]`,
+        // 15 bytes. The receiver runs a COSMETIC PlayerShipSummon (PlayerShipSummon.SetupRemote):
+        // it draws the same ring, pops at the same time and drops the same reward blast, but it
+        // never spawns a PlayerShip -- the peer's own ship arrives through the ordinary
+        // remoteAlive edge (NetSession.SpawnPuppet), which stays the only way a puppet is born.
+        //
+        // NOT an EvFx: that lane is host-only and keyed on a netId, and this is neither. Either
+        // peer's ship can die, and a respawn summon is not a replicated entity -- it has no netId
+        // at all -- so it needs its own position. EvSlowmo is the shape this follows.
+        //
+        // The duration is SENT rather than re-derived because it is not a function of anything the
+        // receiver knows: it falls out of the dying player's own respawntimebonus (a powerup
+        // progression) as well as the difficulty.
+        public const byte EvRespawn = 26;
+
         // "No slot" -- a refused join grant. 0xFF can never be a real slot (Oracle.MaxPlayers is 4)
         // and matches KillerNone's convention.
         public const byte SlotNone = 0xFF;
@@ -1242,6 +1258,35 @@ namespace EvilAliensWeb.Compat.Net
             WriteF32(b, 9, pos.Y);
             b[13] = (byte)Math.Clamp(level, 0, 255);
             return b;
+        }
+
+        // EvRespawn: [slot:1][posX:4][posY:4][durationMs:2] -- card 37f3a663. Slot-tagged for the
+        // same reason EvBlast is: any LOCALLY OWNED ship can be the one respawning (the primary,
+        // a couch player, an AI friend), and the receiver must not paint an indicator over one of
+        // its own seats.
+        public static byte[] EncodeRespawnEvent(ushort eventSeq, byte slot, Vector2 pos, int durationMs)
+        {
+            byte[] b = EventHeader(EvRespawn, eventSeq, 11);
+            b[4] = slot;
+            WriteF32(b, 5, pos.X);
+            WriteF32(b, 9, pos.Y);
+            WriteU16(b, 13, (ushort)Math.Clamp(durationMs, 0, ushort.MaxValue));
+            return b;
+        }
+
+        internal static bool TryDecodeRespawnEvent(byte[] b, out byte slot, out Vector2 pos, out int durationMs)
+        {
+            slot = 0;
+            pos = Vector2.Zero;
+            durationMs = 0;
+            if (b.Length < 15)
+            {
+                return false;
+            }
+            slot = b[4];
+            pos = new Vector2(ReadF32(b, 5), ReadF32(b, 9));
+            durationMs = ReadU16(b, 13);
+            return true;
         }
 
         // ---- primitives -----------------------------------------------------------------

@@ -698,6 +698,10 @@
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetLocalFx')); }
             catch (e) { console.warn('[debug] eaNetLocalFx failed (game not booted yet?): ' + e.message); }
         };
+        window.eaNetRespawn = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetRespawn')); }
+            catch (e) { console.warn('[debug] eaNetRespawn failed (game not booted yet?): ' + e.message); }
+        };
         window.eaNetScenarios = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetScenarios')); }
             catch (e) { console.warn('[debug] eaNetScenarios failed (game not booted yet?): ' + e.message); }
@@ -926,6 +930,13 @@
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugKillShips')); }
             catch (e) { console.warn('[debug] eaKillShips failed (game not booted yet?): ' + e.message); }
         };
+        // eaKillShip(slot) — asplode ONE locally-owned ship. eaKillShips() takes them all in the
+        // same tick, which is the case where the respawn summon is correctly suppressed; this is
+        // how you reach the co-op case where one player dies and the other flies on.
+        window.eaKillShip = (slot) => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugKillShip', Number(slot) | 0)); }
+            catch (e) { console.warn('[debug] eaKillShip failed (game not booted yet?): ' + e.message); }
+        };
 
         // Debug: live flying-spider population + the group-flatten settings in force (card
         // 9c92962e). The flatten costs per BACKGROUND spider, so a frame-time figure without
@@ -1058,6 +1069,26 @@
         window.eaRipple.state = () => {
             try { DotNet.invokeMethod('EvilAliensWeb', 'debugRippleState'); }
             catch (e) { console.warn('[debug] eaRipple.state failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: the respawn clock ring (card 37f3a663).
+        //   eaRespawn.park(phase) — park the ring at 0..1 of its fill for a screenshot; pass
+        //                           nothing (or a negative) to let it run again.
+        //   eaRespawn.state()     — print every live summon's fill/pulse/pop as data. The pulse
+        //                           moves, so a screenshot pair cannot verify it (an identical
+        //                           frame also passes on a build that stopped drawing the ring).
+        window.eaRespawn = {
+            park: (phase) => {
+                try {
+                    DotNet.invokeMethod('EvilAliensWeb', 'debugRespawnPark',
+                        phase === undefined || phase === null || isNaN(Number(phase)) ? -1 : Number(phase));
+                }
+                catch (e) { console.warn('[debug] eaRespawn.park failed (game not booted yet?): ' + e.message); }
+            },
+            state: () => {
+                try { DotNet.invokeMethod('EvilAliensWeb', 'debugRespawnState'); }
+                catch (e) { console.warn('[debug] eaRespawn.state failed (game not booted yet?): ' + e.message); }
+            }
         };
 
         // Debug: live-set the ship-connector lightning knobs (the ?level=TeamChallenge tuner). Drives

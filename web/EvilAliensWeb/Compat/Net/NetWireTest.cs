@@ -684,6 +684,15 @@ namespace EvilAliensWeb.Compat.Net
             byte[] blast = Round(NetProtocol.EncodeBlastEvent(18, 1, new Vector2(9f, 9f), 2), reliable: true);
             check("EvBlast envelope", blast != null
                 && blast[0] == NetProtocol.MsgEvent && blast[1] == NetProtocol.EvBlast && blast[2] == 18);
+            // EvRespawn (card 37f3a663) DOES have a Try* decoder, so it is round-tripped by
+            // VALUE rather than by envelope. Slot, position and duration are driven to three
+            // distinct values so a pair of swapped offsets cannot pass.
+            byte[] respawn = Round(NetProtocol.EncodeRespawnEvent(21, 3, new Vector2(123f, 456f), 9500), reliable: true);
+            check("EvRespawn round-trips slot/pos/duration", respawn != null
+                && respawn[0] == NetProtocol.MsgEvent && respawn[1] == NetProtocol.EvRespawn
+                && NetProtocol.TryDecodeRespawnEvent(respawn, out byte rsSlot, out Vector2 rsPos,
+                    out int rsMs)
+                && rsSlot == 3 && rsPos.X == 123f && rsPos.Y == 456f && rsMs == 9500);
             byte[] pause = Round(NetProtocol.EncodeByteEvent(19, NetProtocol.EvPause, 1), reliable: true);
             check("a byte event envelope carries its value", pause != null
                 && pause.Length == 5 && pause[1] == NetProtocol.EvPause && pause[4] == 1);
@@ -708,6 +717,8 @@ namespace EvilAliensWeb.Compat.Net
                 !NetProtocol.TryDecodeBackgroundEvent(Truncate(bg), out _, out _));
             check("a truncated EvCosmeticSwarm is refused",
                 !NetProtocol.TryDecodeCosmeticSwarmEvent(Truncate(swarm), out _, out _, out _));
+            check("a truncated EvRespawn is refused",
+                !NetProtocol.TryDecodeRespawnEvent(Truncate(respawn), out _, out _, out _));
             // TWICE, and that is not a typo: since the short flag was appended, dropping ONE byte
             // off a banner produces a legal older-peer frame (asserted three lines up), so a
             // single Truncate here would assert the OPPOSITE of the compatibility leg and fail.

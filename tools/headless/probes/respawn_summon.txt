@@ -1,0 +1,63 @@
+# PROBE: a respawn summon is raised only when somebody else is still flying (card 37f3a663)
+#
+# PINS:   the card's side-fix, on its CO-OP branch. Before it, EVERY death raised a respawn
+#         summon, and when a death WIPED the world GameScene.LoseLife purged it again on the next
+#         tick -- so the countdown appeared for one frame and looked broken. PlayerShip_OnDeath
+#         now asks PlayerShipSummon.ShouldSummon first. respawn_singleplayer.txt is the same
+#         predicate's other branch; this one carries the POSITIVE, without which the fix reads as
+#         coverage while having silently deleted the whole feature.
+#
+#         TeamChallenge is the rig because it is the one level that seats a SECOND local ship
+#         with no gamepad attached (card e6927ef8's AI partner). `eval KillShips` asplodes both
+#         in one tick and in roster order, which puts BOTH branches in one deterministic command:
+#         slot 0 dies with slot 1 still flying (summon), then slot 1 dies into an empty world
+#         (suppressed).
+#
+#         DELIBERATELY NOT the tether. Killing only slot 0 does eventually take the partner with
+#         it, but WHEN depends on where the two ships had drifted to, and `?seed=` is
+#         near-deterministic rather than deterministic -- measured, the partner's death did not
+#         land inside the assertion window on every run. Card af4c3694's rule: pin the state,
+#         do not wait for it.
+#
+# FAILURE MEANS:
+#   no `summon slot=0 ... others=1` -> the gate is too tight and NO co-op death shows an
+#   indicator, i.e. the feature is gone. Look at PlayerShip.CountOtherLiveShips: it must count
+#   ships that are not IsDead, and must not count the dying ship itself.
+#   no `summon suppressed slot=1` -> the wipe raises a doomed summon again (the 1-frame flash).
+#   Look at the ShouldSummon gate in PlayerShip_OnDeath.
+#
+# Mutation-tested: `return otherLiveShips > 0` -> `return true` makes the suppression leg go red
+# (it prints `summon slot=1 ... others=0` instead); `-> return false` makes the positive leg go
+# red. Both were run.
+#
+# eahl: --flags "?level=TeamChallenge&noattract&invuln&seed=99"
+
+step 300
+
+# PRECONDITION, asserted rather than waited out (card af4c3694): BOTH ships have to be flying
+# before the kill, or "one died and the other lived" is not the case being tested at all.
+# aliveSlots is the liveness readout -- eaWorldCensus caps its report and would drop a ship.
+mark
+eval OracleRoster
+expect eaOracleRoster: players=2 seated=0:Keyboard,1:AI aliveSlots=\[0,1\]
+
+# Both branches, in roster order, from one command.
+mark
+eval KillShips
+expect \[debug\] eaKillShips asploded 2 local ship\(s\)
+# 1. THE POSITIVE. Slot 0 dies with its partner still up. The duration is on the line because it
+#    is what an online peer's copy of the clock runs for, so a build that stopped deriving it
+#    would show here.
+expect \[respawn\] summon slot=0 ms=[0-9]+ others=1
+# 2. THE WIPE. Slot 1 dies into a world where nobody is left -- the death the purge would eat a
+#    frame later.
+expect \[respawn\] summon suppressed slot=1 \(no other live ship\)
+
+# 3. ...and the world really did wipe, so leg 2 is about a wipe rather than about a death that
+#    printed the suppression line for some other reason.
+step 4
+mark
+eval OracleRoster
+expect eaOracleRoster: players=2 seated=0:Keyboard,1:AI aliveSlots=\[\]
+
+quit

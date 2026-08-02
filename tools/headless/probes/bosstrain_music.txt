@@ -1,0 +1,66 @@
+# PROBE: the Boss Train switches to Level 3's music at the alien base, and a death in that
+# window puts Level 2's music back instead of stranding it.
+#
+# PINS: card 4a3b22b7 -- InsaneBossI's section state vs GameEventList.RevertToCheckpoint.
+# InsaneBossI is the only level whose script walks three SECTIONS (space -> Mars -> alien base),
+# and each transition changes the track, the backdrop and the Mars floor. None of that is
+# event-list state, so a checkpoint revert does not restore it -- and the walk-back lands on the
+# nearest checkpoint AT OR BEFORE the death, which for the alien-base transition (script index 33,
+# next checkpoint 36) is checkpoint 24, TWO sections earlier. So dying in the ~10s window right
+# after the transition replayed Level 2's spider boss on the alien-base backdrop under Level 3's
+# track -- and the second arrival at "level 3's bosses" changed no music at all, because nothing
+# had ever put it back. Reported as "the music doesnt change into lvl 3's music", 1 of 2 attempts;
+# the coin flip is whether you died inside that window.
+#
+# FAILURE MEANS one of two different regressions, and the two legs separate them:
+#   - section 1 fails  -> the level no longer ASKS for stage3 at the alien base at all, or a
+#     checkpoint's declared section has drifted from where the script actually is by then (someone
+#     added or moved an event without moving its CheckPointSection). Read the `[bosstrain]`
+#     checkpoint lines: each names the declared section and the forward walk's.
+#   - section 2 fails  -> the revert leg. `[fixed] ... -> AlienBase/Level3` is the bug back
+#     verbatim: the section was left stranded across a revert that rewound past the transition.
+#
+# WHY A PROBE AND NOT A PLAYTHROUGH: the window is ~10 seconds wide at the end of a multi-minute
+# boss run. Eight full AI soaks (Medium and Very_Hard, up to 25 deaths each) reached
+# `revert 33 -> 24` but never once died one index later, so no soak of any practical length
+# reproduces it. The oracle drives the REAL RevertToCheckpoint over the REAL event list instead.
+#
+# WHY NOT A SCREENSHOT: music has no pixels. `[music] play <song> cue=<cue>` (SoundManager) is the
+# only observable there is -- eahl stubs eaMusic.* entirely, so a beat that never fires and a beat
+# that fires correctly are otherwise identical.
+#
+# MUTATION-TESTED: reverting InsaneBossI's checkpoint re-assert (the pre-card behaviour) is run
+# HERE as section 2's own negative control, so the run itself shows the same input breaking the
+# old code -- a green tick on the fixed path alone would prove nothing. Additionally verified by
+# hand: deleting a CheckPointSection call makes section 1 report that checkpoint as declaring no
+# section; pointing checkpoint 24 at AlienBase makes it report the mismatch against the walk.
+#
+# eahl: --flags "?level=InsaneBossI"
+
+# Settle past the intro white fade (Background.Reset's LeavingHyperspace) before asserting.
+# Deliberately NO `mark`: the level's opening `[music] play Level1` is printed during boot, i.e.
+# before the script's first command, and marking would drop it -- and that line is section 1's
+# positive control.
+step 200 nodraw
+
+# ---- Section 1: the level asks for the right track, and the script agrees with itself --------
+# Positive control first: the level really did start on Level 1's track, so "Level 3 was
+# requested" below means a CHANGE and not "it was always there".
+expect \[music\] play Level1 cue=stage1
+eval BossTrain
+expect \[bosstrain\] script events=50 checkpoints=6 sectionChanges=3
+expect checkpoint 24 declares Mars, forward walk says Mars
+expect checkpoint 36 declares AlienBase, forward walk says AlienBase
+expect-not FAIL checkpoint
+expect-not declares no section
+
+# ---- Section 2: the revert leg ---------------------------------------------------------------
+# A death one tick into the alien base must land back in Mars with Level 2's track, not sit
+# stranded on Level 3's. The pre-card line is the negative control and is EXPECTED to say FAIL.
+expect \[fixed\] death at pos 35: AlienBase/Level3 -> Mars/Level2 \(expected Mars\)
+expect \[pre-card\] death at pos 35: AlienBase/Level3 -> AlienBase/Level3
+expect ok   negative control fails as it must
+expect \[bosstrain\] PASS \(0 failure\(s\)\)
+
+# And the re-assert really did re-REQUEST the track, not merely relabel the section.
+expect \[music\] play Level2 cue=stage2 was=Level3

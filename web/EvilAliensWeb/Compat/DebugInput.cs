@@ -719,6 +719,19 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.TeamSeatTest.Run();
 		}
 
+		// JS bridge for the Boss Train's section-state oracle (eaBossTrain in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugBossTrain'). Checks every checkpoint's declared
+		// section against a forward walk of the real script, then drives the REAL
+		// RevertToCheckpoint from the alien-base window and reads the section + track back, with the
+		// pre-card behaviour as the negative control. Needs a live ?level=InsaneBossI boot.
+		// DESTRUCTIVE -- it moves the script position and the section, so run it in a throwaway
+		// boot, never mid-playthrough. See Compat/BossTrainTest.cs.
+		[JSInvokable("debugBossTrain")]
+		public static string BossTrain()
+		{
+			return EvilAliensWeb.Compat.BossTrainTest.Run();
+		}
+
 		// JS bridge for the death/reset path (eaKillShips in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugKillShips'). Asplodes every
 		// LOCALLY-OWNED PlayerShip through the real Asplode()->Die() path, so the scene's

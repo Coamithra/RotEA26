@@ -712,6 +712,17 @@
             catch (e) { console.warn('[debug] eaTeamSeat failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: the Boss Train's section state (card 4a3b22b7). Checks every checkpoint's declared
+        // section against a forward walk of the real script, then drives the REAL
+        // RevertToCheckpoint from the alien-base window -- the ~10s slot where a death used to rewind
+        // the script two sections while leaving the backdrop and the music on the alien base -- and
+        // reads the section + track back, with the pre-card behaviour as the negative control.
+        // DESTRUCTIVE: needs a throwaway ?level=InsaneBossI boot, not a real playthrough.
+        window.eaBossTrain = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugBossTrain')); }
+            catch (e) { console.warn('[debug] eaBossTrain failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: capture + persist this level's level-select thumbnail NOW (card d67755d2).
         //   eaShotNow('arm')   -> grab the frame in the next post-Draw hook
         //   eaShotNow('save')  -> composite it into the 300x225 thumbnail and write <Level>.dat
@@ -1651,7 +1662,16 @@
                     manifestPromise = fetch("Content/music/music.json")
                         .then(function (r) { return r.json(); })
                         .then(function (m) { manifest = m; return m; })
-                        .catch(function () { manifest = {}; return {}; });
+                        .catch(function (e)
+                        {
+                            // The promise is CACHED, so this resolves {} once and every cue for
+                            // the rest of the session then takes the "no entry" branch below --
+                            // a third silent failure wearing the second one's message. Say which
+                            // it really is (card 4a3b22b7).
+                            console.warn("[music] music.json could not be loaded ("
+                                + (e && e.message ? e.message : e) + ") -- no cue can resolve");
+                            manifest = {}; return {};
+                        });
                 return manifestPromise;
             }
 
@@ -1700,10 +1720,22 @@
                 {
                     if (myToken !== token) return;            // superseded before manifest resolved
                     var info = m[cue];
-                    if (!info) return;
+                    // Card 4a3b22b7: both this and the catch below used to be SILENT, and either
+                    // one leaves the PREVIOUS track playing with nothing said -- indistinguishable,
+                    // from outside, from the game never asking for the switch. Pair the [music]
+                    // line C# prints on the request with one here when the request cannot be
+                    // honoured, so "the music did not change" always names its half.
+                    if (!info)
+                    {
+                        console.warn("[music] no music.json entry for cue '" + cue + "' -- previous track keeps playing");
+                        return;
+                    }
                     fetch(encodeURI(info.file)).then(function (resp)
                     {
-                        if (!resp.ok) throw 0;
+                        // `throw 0` here until card 4a3b22b7: the catch below renders it as the
+                        // literal "0", so a 404 on a track reported no status at all -- which is
+                        // the very thing the catch was added to name.
+                        if (!resp.ok) throw new Error("HTTP " + resp.status);
                         return resp.arrayBuffer();
                     }).then(function (ab)
                     {
@@ -1731,7 +1763,18 @@
                         src.connect(g).connect(master);
                         src.start();
                         current = { cue: cue, src: src, gain: g };
-                    }).catch(function () { /* music is non-fatal */ });
+                    }).catch(function (e)
+                    {
+                        // Music is non-fatal and stays non-fatal -- but a failed fetch/decode is
+                        // reported now (see the manifest branch above). For the fetch/decode
+                        // failures this exists for, `current` has not been touched yet, so the OLD
+                        // track simply keeps playing forever; a throw AFTER the swap above would
+                        // land here with `current` already null, i.e. silence rather than a stale
+                        // track. The wording covers the common case and the message says which
+                        // cue, so either way it is attributable.
+                        console.warn("[music] could not load cue '" + cue + "' (" + (info && info.file) + "): "
+                            + (e && e.message ? e.message : e) + " -- previous track keeps playing");
+                    });
                 });
             }
 

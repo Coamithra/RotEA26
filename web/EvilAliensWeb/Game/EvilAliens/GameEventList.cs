@@ -6,7 +6,13 @@ namespace EvilAliens;
 
 internal class GameEventList
 {
-	public delegate void CheckPointReached(GameEventList sender);
+	// `checkpoint` is the event that IS the checkpoint (card 4a3b22b7). A level whose script
+	// mutates persistent scene state -- music, backdrop, floor -- needs to know WHICH checkpoint
+	// was entered so it can re-assert that section's state: RevertToCheckpoint walks back to the
+	// nearest checkpoint at or before the death, which can be several sections earlier, and it
+	// restores neither the backdrop nor the track. Only InsaneBossI uses the argument; GameScene's
+	// own subscriber ignores it.
+	public delegate void CheckPointReached(GameEventList sender, GameEvent checkpoint);
 
 	private Game game;
 
@@ -163,7 +169,7 @@ internal class GameEventList
 			gameEvent.Reset();
 			if (checkpoints.Contains(gameEvent) && this.OnCheckPointReached != null)
 			{
-				this.OnCheckPointReached(this);
+				this.OnCheckPointReached(this, gameEvent);
 			}
 			if (haltingEvents.Contains(gameEvent))
 			{
@@ -188,6 +194,42 @@ internal class GameEventList
 	internal int BenchPos => pos;
 
 	internal int BenchCount => eventList.Count;
+
+	// ---- Checkpoint/section debug seams (card 4a3b22b7) ---------------------------------------
+	// The reported bug is a checkpoint revert that jumps ACROSS a section change: the walk-back
+	// below lands on the nearest earlier checkpoint, which for the alien-base transition is the
+	// spider-boss one two sections back. Reaching that window in play means dying inside a ~10s
+	// slot after a multi-minute boss run, at whatever difficulty the RNG allows -- not something a
+	// probe can wait for. These let the console oracle put the REAL event list at a chosen
+	// position and call the REAL RevertToCheckpoint, so the walk-back and the level's re-assert
+	// are exercised end to end in milliseconds. Debug-surface only (Compat/BossTrainTest.cs).
+
+	// The index every checkpoint sits at, in script order -- what the oracle checks the level's
+	// own section map against.
+	internal List<int> DebugCheckpointIndices()
+	{
+		List<int> result = new List<int>();
+		for (int i = 0; i < eventList.Count; i++)
+		{
+			if (checkpoints.Contains(eventList[i]))
+			{
+				result.Add(i);
+			}
+		}
+		return result;
+	}
+
+	internal GameEvent EventAt(int index)
+	{
+		return (index >= 0 && index < eventList.Count) ? eventList[index] : null;
+	}
+
+	// Park the walker at `p` WITHOUT running any of the script up to it. Deliberately does not
+	// touch activeEvents/halted: the caller's next move is RevertToCheckpoint, which clears both.
+	internal void DebugSetPos(int p)
+	{
+		pos = MathHelper.Clamp(p, 1, eventList.Count);
+	}
 
 	public void MakeConditional(GameEvent a_event, Settings.DifficultyLevel minDifficulty, Settings.DifficultyLevel maxDifficulty)
 	{

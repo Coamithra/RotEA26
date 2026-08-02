@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.GamerServices;
@@ -8,7 +9,43 @@ namespace EvilAliens;
 
 internal class InsaneBossI : GameScene
 {
-	private bool backgroundchanged;
+	// The Boss Train is the one level that walks through all three of the game's SECTIONS in a
+	// single run -- space (Level 1's bosses), Mars (Level 2's), the alien base (Level 3's) -- and
+	// each transition mutates state that lives OUTSIDE the event list: the track, the backdrop and
+	// the Mars floor. A checkpoint revert restores none of it, and GameEventList.RevertToCheckpoint
+	// walks back to the nearest checkpoint at or before the death, which is not necessarily in the
+	// section you died in. Card 4a3b22b7: the alien-base transition sits at script index 33 while
+	// the next checkpoint is 36, so dying in that ~10s window rewound the script to the SPIDER BOSS
+	// (checkpoint 24) while the backdrop and music stayed on the alien base -- Level 2's set-piece
+	// replayed with Level 3's scenery and track, and arriving at "level 3's bosses" the second time
+	// produced no music change at all, because nothing had ever put it back.
+	//
+	// So the section is state, not an edge: each Go* handler asks for a section, ApplySection is
+	// idempotent, and every checkpoint declares which section it belongs to and re-asserts it on
+	// entry. That covers the forward pass (a no-op -- you are already in that section) and the
+	// revert (the actual fix) with one rule instead of a per-boundary patch.
+	//
+	// ONE CAVEAT, and it bounds where a future checkpoint may go: a checkpoint on a
+	// DIFFICULTY-CONDITIONAL event does not re-assert on the tiers that filter it out.
+	// GameEventList.progressList tests the difficulty range BEFORE it tests `checkpoints`, so a
+	// skipped event fires no OnCheckPointReached -- while RevertToCheckpoint's walk-back tests only
+	// `checkpoints` and can still land `pos` on it. The one such checkpoint here (the Hard+ gate in
+	// front of the BrainBoss) is harmless because both its neighbours are AlienBase too, so the
+	// section is right either way. Putting a CONDITIONAL checkpoint on a section BOUNDARY would be
+	// the unsafe case, and it would fail silently on the low tiers only.
+	internal enum Section
+	{
+		Space,
+		Mars,
+		AlienBase
+	}
+
+	private Section section;
+
+	// Which section each checkpoint belongs to, built alongside the script so the two cannot drift
+	// -- a checkpoint added without a section is a build-time omission the oracle reports, not a
+	// silent fallthrough.
+	private readonly Dictionary<GameEvent, Section> checkpointSections = new Dictionary<GameEvent, Section>();
 
 	private Floor f;
 
@@ -17,6 +54,104 @@ internal class InsaneBossI : GameScene
 	{
 		f = new Floor(base.Game);
 		base.OnFinished += InsaneBossI_OnFinished;
+		eventList.OnCheckPointReached += InsaneBossI_OnCheckPointReached;
+	}
+
+	private void InsaneBossI_OnCheckPointReached(GameEventList sender, GameEvent checkpoint)
+	{
+		if (DebugSuppressSectionReassert)
+		{
+			return;
+		}
+		if (checkpointSections.TryGetValue(checkpoint, out var want))
+		{
+			ApplySection(want);
+		}
+	}
+
+	// Idempotent by design: the forward pass hits every checkpoint too, and re-running a section's
+	// setters there would restart the track (PlayMusic is not deduped C#-side) and rebuild the
+	// backdrop layers for nothing. `section` is what was last APPLIED, so the guard is also what
+	// makes the revert case fire -- coming back to Mars from the alien base is a real change.
+	private void ApplySection(Section want)
+	{
+		if (section == want)
+		{
+			return;
+		}
+		section = want;
+		switch (want)
+		{
+		case Section.Space:
+			base.SoundManager.PlayMusic(Songs.Level1);
+			Background.SetSpace();
+			Collection.Remove((GameComponent)(object)f);
+			spawnType = PlayerSpawnType.South;
+			break;
+		case Section.Mars:
+			base.SoundManager.PlayMusic(Songs.Level2);
+			Background.SetMars();
+			Collection.Add((GameComponent)(object)f);
+			spawnType = PlayerSpawnType.West;
+			break;
+		case Section.AlienBase:
+			base.SoundManager.PlayMusic(Songs.Level3);
+			Background.SetAlienBase();
+			Collection.Remove((GameComponent)(object)f);
+			spawnType = PlayerSpawnType.South;
+			break;
+		}
+	}
+
+	// Declare the section the checkpoint just added belongs to. Called immediately after
+	// eventList.SetLastEventAsCheckPoint() so the two read as one statement at the call site.
+	private void CheckPointSection(Section s)
+	{
+		int index = eventList.BenchCount - 1;
+		checkpointSections[eventList.EventAt(index)] = s;
+		checkpointSectionAt[index] = s;
+	}
+
+	// ---- Oracle surface (Compat/BossTrainTest.cs, card 4a3b22b7) -------------------------------
+	// Two parallel records of what CheckPointSection and the Go* wiring declared, keyed by script
+	// INDEX so the oracle can compare the declarations against a forward walk of the same script.
+	// They are written by the same statements that do the real work, never restated -- a map the
+	// test spelled out itself would agree with itself and prove nothing.
+	private readonly Dictionary<int, Section> checkpointSectionAt = new Dictionary<int, Section>();
+
+	private readonly Dictionary<int, Section> sectionChangeAt = new Dictionary<int, Section>();
+
+	// Record that the event just added drives the level into `s` when it finishes. Called beside
+	// each `OnFinished += Go*`, for the same reason CheckPointSection sits beside its checkpoint.
+	private void SectionChangeHere(Section s)
+	{
+		sectionChangeAt[eventList.BenchCount - 1] = s;
+	}
+
+	internal IReadOnlyDictionary<int, Section> DebugCheckpointSections => checkpointSectionAt;
+
+	internal IReadOnlyDictionary<int, Section> DebugSectionChanges => sectionChangeAt;
+
+	internal string DebugSection => section.ToString();
+
+	internal GameEventList DebugEventList => eventList;
+
+	// The negative control's switch: with the re-assert suppressed, RevertToCheckpoint behaves
+	// exactly as it did before this card, so the oracle can show the same input breaking the old
+	// code rather than only ticking green against the new.
+	internal bool DebugSuppressSectionReassert;
+
+	internal void DebugApplySection(string name)
+	{
+		if (Enum.TryParse<Section>(name, out var s))
+		{
+			ApplySection(s);
+			return;
+		}
+		// Reported, never swallowed -- the file-wide value-carrying-flag convention. A silent
+		// no-op here would surface only as the oracle's generic "could not park the level".
+		Console.WriteLine("[bosstrain] unknown section '" + name + "' (expected one of "
+			+ string.Join(", ", Enum.GetNames(typeof(Section))) + ") -- ignored");
 	}
 
 	private void InsaneBossI_OnFinished(object sender, FinishedArgs args)
@@ -40,10 +175,18 @@ internal class InsaneBossI : GameScene
 			score.Lives = 1;
 			break;
 		}
+		// Force the opening section rather than ApplySection(Space): the level scene is a re-added
+		// singleton, so `section` still holds whatever the LAST play ended on and the idempotence
+		// guard would skip the setters on a replay. Everything after this goes through
+		// ApplySection.
+		section = Section.Space;
 		spawnType = PlayerSpawnType.South;
 		Background.SetSpace();
+		// Not in the pre-card code, and a no-op on a fresh entry -- but without it "section ==
+		// Space" would not actually imply "no floor" after a replay, and the whole point of the
+		// field is that it names the state that IS in force.
+		Collection.Remove((GameComponent)(object)f);
 		base.SoundManager.PlayMusic(Songs.Level1);
-		backgroundchanged = false;
 		Settings.GetInstance().LockDifficulty();
 	}
 
@@ -91,6 +234,7 @@ internal class InsaneBossI : GameScene
 		eventList.AddEvent(waitEvent);
 		eventList.AddHalt();
 		waitEvent.OnFinished += GoSpace;
+		SectionChangeHere(Section.Space);
 		MessageEvent messageEvent = new MessageEvent(base.Game, "Warning!", SoundManager.Texts.Warning, 2.5f);
 		messageEvent.SetupAsWarning(4.712389f);
 		eventList.AddEvent(messageEvent, halting: true);
@@ -113,6 +257,7 @@ internal class InsaneBossI : GameScene
 		eventList.AddEvent(messageEvent, halting: true);
 		eventList.AddHalt();
 		eventList.SetLastEventAsCheckPoint();
+		CheckPointSection(Section.Space);
 		JunkBossSpawner junkBossSpawner = new JunkBossSpawner(base.Game);
 		ufoSpawner = new UfoSpawner(base.Game, 0f, 0.12f, big: false);
 		eventList.AddEvent(ufoSpawner, halting: false);
@@ -127,12 +272,14 @@ internal class InsaneBossI : GameScene
 		eventList.AddHalt();
 		waitEvent = Wait(5f);
 		waitEvent.OnFinished += GoMars;
+		SectionChangeHere(Section.Mars);
 		Wait(3f);
 		messageEvent = new MessageEvent(base.Game, "Warning!", SoundManager.Texts.Warning);
 		messageEvent.SetupAsWarning((float)Math.PI / 8f);
 		eventList.AddEvent(messageEvent, halting: true);
 		eventList.AddHalt();
 		eventList.SetLastEventAsCheckPoint();
+		CheckPointSection(Section.Mars);
 		MarsBossSpawner marsBossSpawner = new MarsBossSpawner(base.Game);
 		Wait(3f);
 		StationarySpawner stationarySpawner = new StationarySpawner(base.Game, 560f, 0f, 0.8f);
@@ -156,6 +303,7 @@ internal class InsaneBossI : GameScene
 		eventList.AddEvent(messageEvent);
 		messageEvent.SetupAsWarning(0f);
 		eventList.SetLastEventAsCheckPoint();
+		CheckPointSection(Section.Mars);
 		waitEvent = Wait(4f);
 		waitEvent.OnFinished += halt;
 		SpiderBossEvent spiderBossEvent = new SpiderBossEvent(base.Game);
@@ -178,6 +326,7 @@ internal class InsaneBossI : GameScene
 		Wait(2f);
 		waitEvent = Wait(5f);
 		waitEvent.OnFinished += GoAlienBase;
+		SectionChangeHere(Section.AlienBase);
 		Wait(5f);
 		StarMineSpawner starMineSpawner = new StarMineSpawner(base.Game, 5f, 0.7f);
 		eventList.AddEvent(starMineSpawner, halting: false);
@@ -185,6 +334,7 @@ internal class InsaneBossI : GameScene
 		messageEvent.SetupAsWarning(-(float)Math.PI / 2f);
 		eventList.AddEvent(messageEvent, halting: false);
 		eventList.SetLastEventAsCheckPoint();
+		CheckPointSection(Section.AlienBase);
 		Wait(5f);
 		SkullSpawner skullSpawner = new SkullSpawner(base.Game, 0f, 0.1f, maze: false, bonusonly: true);
 		eventList.AddEvent(skullSpawner, halting: false);
@@ -201,6 +351,7 @@ internal class InsaneBossI : GameScene
 		messageEvent.SetupAsWarning(-(float)Math.PI / 2f);
 		eventList.AddEvent(messageEvent, halting: false);
 		eventList.SetLastEventAsCheckPoint();
+		CheckPointSection(Section.AlienBase);
 		Wait(3f);
 		FakeBossSpawner fakeBossSpawner = new FakeBossSpawner(base.Game);
 		eventList.AddEvent(fakeBossSpawner);
@@ -211,6 +362,7 @@ internal class InsaneBossI : GameScene
 		eventList.AddEvent(messageEvent, halting: false);
 		eventList.MakeConditional(messageEvent, Settings.DifficultyLevel.Hard, Settings.DifficultyLevel.Inzane);
 		eventList.SetLastEventAsCheckPoint();
+		CheckPointSection(Section.AlienBase);
 		waitEvent = Wait(5f);
 		eventList.MakeConditional(waitEvent, Settings.DifficultyLevel.Hard, Settings.DifficultyLevel.Inzane);
 		BrainBossSpawner brainBossSpawner = new BrainBossSpawner(base.Game, challenge: true);
@@ -281,21 +433,16 @@ internal class InsaneBossI : GameScene
 
 	private void GoAlienBase(GameEvent sender)
 	{
-		base.SoundManager.PlayMusic(Songs.Level3);
-		Background.SetAlienBase();
-		Collection.Remove((GameComponent)(object)f);
-		spawnType = PlayerSpawnType.South;
+		ApplySection(Section.AlienBase);
 	}
 
 	private void GoSpace(GameEvent sender)
 	{
-		if (backgroundchanged)
-		{
-			base.SoundManager.PlayMusic(Songs.Level1);
-			Background.SetSpace();
-			Collection.Remove((GameComponent)(object)f);
-		}
-		spawnType = PlayerSpawnType.South;
+		// The `backgroundchanged` guard this replaces was the same idea in miniature -- "only put
+		// space back if something else moved us off it". ApplySection's own guard says that for
+		// every section, so on the opening pass (already Space, set by Initialize) this is a no-op
+		// exactly as before, and it stays correct if a revert ever lands here from further on.
+		ApplySection(Section.Space);
 	}
 
 	private WaitEvent Wait(float seconds)
@@ -308,11 +455,11 @@ internal class InsaneBossI : GameScene
 
 	private void GoMars(GameEvent sender)
 	{
-		base.SoundManager.PlayMusic(Songs.Level2);
-		Background.SetMars();
-		backgroundchanged = true;
-		Collection.Add((GameComponent)(object)f);
+		ApplySection(Section.Mars);
+		// NOT part of ApplySection: this clears the Level-1 boss's leftover Balls as the script
+		// crosses the boundary ONCE. It is host-authoritative (see NetApplySceneChange above), and
+		// a checkpoint re-assert has no Balls to clear anyway -- there are none in the Mars or
+		// alien-base sections.
 		Collection.Purge<Ball>();
-		spawnType = PlayerSpawnType.West;
 	}
 }

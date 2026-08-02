@@ -497,6 +497,8 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `eaBgCull()` (the background tile-cull oracle — run from inside a level),
   `eaTeamSeat()` (TeamChallenge's partner-seat resolver over every pad-connection mask -- pure,
   so it needs neither a level nor a gamepad),
+  `eaBossTrain()` (the Boss Train's checkpoint/section oracle -- **destructive**, so run it in a
+  throwaway `?level=InsaneBossI` boot; see "Audio runtime"),
   `eaFlySpiders()` (the live flying-spider population split background/foreground plus the
   flatten settings in force — run from inside Level 2),
   `eaNetRoster()` (dump the net roster + per-ship positions + reset counter at this instant),
@@ -1886,6 +1888,39 @@ work on files under `Compat/Net/`. Design doc: `plans/stage11-online-coop.md`.
   Japanese-vocal `Songs.Classic` on Hard+ (an earned reward), else `Songs.ClassicClean`. The
   difficulty-selected challenges call the helper; the Tutorial forces clean (it locks difficulty
   for gameplay); TeamChallenge locks the menu-chosen difficulty and routes through the helper.
+- **Every music switch prints `[music] play <Song> cue=<cue> was=<Song|none>` / `[music] stop
+  was=<...>`** (`SoundManager`, card 4a3b22b7). It is the ONLY observable a music beat has:
+  **`eahl` stubs `eaMusic.*` entirely**, so headlessly a beat that never fires and a beat that
+  fires correctly are otherwise identical, and in the browser music has no pixels either. Both
+  halves of a failed switch now name themselves -- the C# line says what was REQUESTED, and
+  `eaMusic.play`'s two failure branches (`no music.json entry for cue '<x>'`, `could not load cue
+  '<x>' (<file>): <err>`) say when the request could not be HONOURED. Both JS branches leave the
+  previous track playing untouched and were silent before, which is exactly what made "the music
+  did not change" unattributable. Don't reformat the `[music]` line --
+  `tools/headless/probes/bosstrain_music.txt` greps it.
+- **A checkpoint revert restores NO scene state -- music, backdrop and floor all survive it**, and
+  `GameEventList.RevertToCheckpoint` walks back to the nearest checkpoint AT OR BEFORE the death,
+  which can be an earlier SECTION than the one you died in. That combination is card 4a3b22b7:
+  `InsaneBossI` (Boss Train) is the one level that walks three sections in a run, its alien-base
+  transition sits at script index 33 while the next checkpoint is 36, so dying in that ~10 s window
+  rewound the script to the SPIDER BOSS (checkpoint 24) with Level 3's backdrop and track still up
+  -- Level 2's set-piece replayed on Level 3's scenery, and the second arrival at "level 3's
+  bosses" changed no music because nothing had put it back.
+  **The fix is the shape to copy if another level ever grows a second section:** the section is
+  STATE, not an edge. `InsaneBossI.ApplySection` is idempotent, each `Go*` handler asks for a
+  section, and every checkpoint declares its section (`CheckPointSection` beside its
+  `SetLastEventAsCheckPoint`) and re-asserts it on entry -- a no-op on the forward pass, the fix on
+  a revert. `GameEventList.OnCheckPointReached` passes the checkpoint EVENT so a level can tell its
+  checkpoints apart. **Verify as DATA with console `eaBossTrain()`** (`Compat/BossTrainTest.cs`,
+  `eval BossTrain` under `eahl`): it checks every checkpoint's declared section against a forward
+  walk of the REAL script, then drives the REAL `RevertToCheckpoint` from the alien-base window and
+  reads the section + track back, with the pre-card behaviour as the negative control. A checkpoint
+  on a DIFFICULTY-CONDITIONAL event is the one gap: progressList tests the difficulty range before
+  it tests `checkpoints`, so such a checkpoint does not re-assert on the tiers that skip it (today
+  harmless -- see the caveat in InsaneBossI.cs). **It is
+  DESTRUCTIVE** (it moves the script position and the section) -- throwaway `?level=InsaneBossI`
+  boot only. A playthrough cannot cover this: eight full AI soaks, up to 25 deaths each, hit
+  `revert 33 -> 24` and never once died one index later.
 - **`Songs.LastSignal`** (`lastsignal.ogg`) is the end-of-level text-crawl theme in `CreditsScene`
   (played at rate 1.0). It replaced the bank's `sjaakslow` cue — both that cue and its ogg are
   gone; **don't reintroduce them.**

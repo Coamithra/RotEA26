@@ -125,6 +125,22 @@ namespace EvilAliensWeb.Compat.Net
 
         private const float FacingUp = 4.712389f; // 3*pi/2, the spawn heading every ship uses
 
+        // What PlayerShip.Asplode/AsplodeWall request. Legs 0a and 6 both use it so the control
+        // and the assertion are about the same duration.
+        private const float PlayerDeathHitStopSeconds = 0.18f;
+
+        // Run any standing hit-stop out. Juice.Update clamps its dt to 0.1 s per call (a stall
+        // must not burn a whole freeze), so this is a loop rather than one big dt -- and it
+        // matters that it is exact: leg 6 reads TimeScale as its verdict, so a leg starting with
+        // someone else's freeze still standing would pass or fail for the wrong reason.
+        private static void DrainHitStop()
+        {
+            for (int i = 0; i < 8 && Juice.TimeScale == 0f; i++)
+            {
+                Juice.Update(0.1f);
+            }
+        }
+
         public static string Run()
         {
             StringBuilder sb = new StringBuilder();
@@ -228,6 +244,23 @@ namespace EvilAliensWeb.Compat.Net
                 // the only other caller, NetSnapshotTest, skips itself while a GameScene is up
                 // (which this suite requires) and disables in a finally. If that ever changes,
                 // this leg needs a NetPuppets.Enabled precondition, not looser counts.
+                // ---- 0a: the hit-stop baseline, and it MUST run before the session starts ----
+                // Leg 6 requires that a player death arms no hit-stop while a session is up. On
+                // its own that assertion passes on a build where AddHitStop is broken outright,
+                // or where Asplode stopped calling it -- so this is its negative control, and
+                // there is exactly one moment to take it: NetSession.Active is the gate, so the
+                // control has to be read with no session, i.e. here.
+                sb.Append(" 0a. hit-stop baseline -- OFFLINE a hit-stop really does freeze game time\n");
+                DrainHitStop();
+                Check("PRECONDITION no session yet, so hit-stop is not suppressed",
+                    !NetSession.Active && !Juice.HitStopSuppressed);
+                Juice.AddHitStop(PlayerDeathHitStopSeconds);
+                Check("offline, AddHitStop freezes game time (TimeScale=" + Juice.TimeScale + ")",
+                    Juice.TimeScale == 0f);
+                DrainHitStop();
+                Check("... and the freeze drains off real time again (TimeScale=" + Juice.TimeScale + ")",
+                    Juice.TimeScale == 1f);
+
                 sb.Append(" 0b. the session was built through the INetHost seam (step 2b)\n");
                 NetSession.StartForTest(game, host: false, ours, Room);
                 int gotOracle = services.OracleReads;
@@ -407,6 +440,130 @@ namespace EvilAliensWeb.Compat.Net
                 // GameScene.SpawnPlayer, reached through the seam.
                 Check("both retry legs respawned via the REAL SpawnPlayer (spawns="
                     + scene.SpawnPlayerCalls + ")", scene.SpawnPlayerCalls == 2);
+
+                // ---- 5. the reset "extra explosion" (card b4d0ba1d) --------------------------
+                // The report: P1 and P2 both die, the level restarts, and on P1's screen both
+                // ships fly in -- then P2 explodes instantly again and flies in again. Cause:
+                // ManagePuppet read `remoteAlive` as a LEVEL. SpawnAllPlayers respawns every
+                // SEATED slot and the peer's seat is deliberately reserved across a death, so
+                // ~1.3 s into the reset a ship arrived in the Remote seat while the peer -- still
+                // running its OWN reset -- honestly reported alive=false; ManagePuppet adopted it
+                // and immediately played the full death FX on a death that never happened.
+                // Two halves, and this leg drives both: SpawnAllPlayers no longer fills a
+                // net-owned seat (5b, the real method), and the explode fires on the alive
+                // EDGE with a quiet release for anything adopted while the peer is dead (5c).
+                //
+                // metrics.RemoteShipExplosions is the observable because the FX leaves no other
+                // trace a headless run can read -- two Explosions and a cue into the live world.
+                sb.Append(" 5. the peer's death FX fires ONCE, on the alive EDGE (card b4d0ba1d)\n");
+                bin.TopOfTickFlush();
+                scene.SpawnPlayer(localDevice, GrantedSlot);
+                rx = ours.RxDelivered;
+                peer.SendStream(ShipFrame(ref shipSeq, ref shipMs));
+                wire.Pump();
+                NetSession.Update();
+                Check("PRECONDITION the peer is alive again with an adopted puppet",
+                    NetSession.HasRemotePuppet);
+
+                // 5a. POSITIVE. A genuine death -- the peer stops reporting alive while we hold
+                // a puppet it HAS been alive on -- still explodes, exactly once.
+                long fx = NetSession.Metrics.RemoteShipExplosions;
+                peer.SendStream(ShipFrame(ref shipSeq, ref shipMs, alive: false));
+                wire.Pump();
+                NetSession.Update();
+                Check("a real death explodes the remote ship exactly once (fx+"
+                    + (NetSession.Metrics.RemoteShipExplosions - fx) + ")",
+                    NetSession.Metrics.RemoteShipExplosions - fx == 1);
+                Check("... and the puppet is released with it", !NetSession.HasRemotePuppet);
+
+                // 5b. THE FIX'S FIRST HALF, through the REAL SpawnAllPlayers. The peer is still
+                // reporting alive=false (it is mid-reset), and its seat is still reserved -- so
+                // pre-card this call put a fly-in ship straight into the Remote seat.
+                sb.Append(" 5b. SpawnAllPlayers leaves the net-owned seat alone\n");
+                bin.TopOfTickFlush();
+                Check("PRECONDITION the peer's seat is still reserved and empty",
+                    oracle.DeviceIsPlaying(ControlDevice.Remote)
+                    && oracle.GetPlayerShip(NetSession.HostPrimarySlot) == null);
+                GameScene.NetActiveScene.NetSpawnAllPlayersForTest();
+                Check("it respawned OUR seat", oracle.IsAlive(GrantedSlot));
+                Check("... and put NO ship in the peer's Remote seat",
+                    oracle.GetPlayerShip(NetSession.HostPrimarySlot) == null);
+                fx = NetSession.Metrics.RemoteShipExplosions;
+                peer.SendStream(ShipFrame(ref shipSeq, ref shipMs, alive: false));
+                wire.Pump();
+                NetSession.Update();
+                Check("the still-dead peer produced NO second explosion (fx+"
+                    + (NetSession.Metrics.RemoteShipExplosions - fx) + ")",
+                    NetSession.Metrics.RemoteShipExplosions - fx == 0);
+
+                // 5c. THE FIX'S SECOND HALF, defence in depth. Put a ship in the Remote seat the
+                // way the pre-card SpawnAllPlayers did -- SpawnPlayer takes its controller from
+                // the seat, so this is a genuine Remote ship. ManagePuppet must adopt it and let
+                // it go QUIETLY: the peer is dead, so the ship does not belong in our world, but
+                // nothing died here either.
+                sb.Append(" 5c. a puppet adopted while the peer is DEAD is released with no FX\n");
+                bin.TopOfTickFlush();
+                scene.SpawnPlayer(ControlDevice.Remote, NetSession.HostPrimarySlot);
+                PlayerShip stray = oracle.GetPlayerShip(NetSession.HostPrimarySlot);
+                Check("PRECONDITION a Remote-controlled ship really is in the seat",
+                    stray != null && stray.Controller == ControlDevice.Remote);
+                fx = NetSession.Metrics.RemoteShipExplosions;
+                peer.SendStream(ShipFrame(ref shipSeq, ref shipMs, alive: false));
+                wire.Pump();
+                NetSession.Update();
+                Check("it was released with NO death FX (fx+"
+                    + (NetSession.Metrics.RemoteShipExplosions - fx) + ")",
+                    NetSession.Metrics.RemoteShipExplosions - fx == 0);
+                Check("... and the session is not holding it as a puppet", !NetSession.HasRemotePuppet);
+                // The release is a ComponentBin.Remove, i.e. a QUEUED death like every other --
+                // so it is the next tick boundary that takes the ship out of the world, exactly
+                // as it is for ExplodePuppet. Assert it after the flush, not before.
+                bin.TopOfTickFlush();
+                Check("... and one flush later it is out of the world, not left flying for a dead peer",
+                    oracle.GetPlayerShip(NetSession.HostPrimarySlot) == null);
+
+                // 5d. POSITIVE CONTROL for 5b and 5c. Both assert that NOTHING happened, which is
+                // also what a session that had quietly died would report. The peer comes back
+                // alive, the puppet must return, and its NEXT death must explode again.
+                sb.Append(" 5d. positive control -- the peer returns, and dies again for real\n");
+                bin.TopOfTickFlush();
+                peer.SendStream(ShipFrame(ref shipSeq, ref shipMs));
+                wire.Pump();
+                NetSession.Update();
+                Check("the peer reporting alive again re-spawns the puppet",
+                    NetSession.HasRemotePuppet);
+                fx = NetSession.Metrics.RemoteShipExplosions;
+                peer.SendStream(ShipFrame(ref shipSeq, ref shipMs, alive: false));
+                wire.Pump();
+                NetSession.Update();
+                Check("and its death explodes once, exactly as in 5a (fx+"
+                    + (NetSession.Metrics.RemoteShipExplosions - fx) + ")",
+                    NetSession.Metrics.RemoteShipExplosions - fx == 1);
+                Check("every leg-5 frame reached the session (rx+"
+                    + (ours.RxDelivered - rx) + ")", ours.RxDelivered - rx == 6);
+
+                // ---- 6. the death hit-stop must not run in a session (card 68f62e92) ---------
+                // Game1.UpdateScaled folds Juice.TimeScale into the gameTime it hands
+                // UpdateInner, so a freeze halts this peer's WHOLE world -- every
+                // host-authoritative enemy included -- while NetSession.Update keeps streaming on
+                // the real clock. The peer then receives ~180 ms of snapshots carrying unchanged
+                // positions while its own NetPuppets.Drive dead-reckons forward on real time (by
+                // design, see Drive's header), and the corrections that follow glide every
+                // replicated enemy BACKWARD at once: "when P1 dies the whole game rewinds a bit".
+                // Driven through the REAL PlayerShip.Asplode, which is where the 180 ms request
+                // lives; leg 0a is the control that says a hit-stop would otherwise land.
+                // LAST, because it kills the local ship every leg above needs.
+                sb.Append(" 6. a player death arms NO hit-stop inside a session (card 68f62e92)\n");
+                DrainHitStop();
+                PlayerShip localShip = oracle.GetPlayerShip(GrantedSlot);
+                Check("PRECONDITION a live local ship to kill, and game time running",
+                    localShip != null && !localShip.IsDead && Juice.TimeScale == 1f);
+                Check("PRECONDITION the session is what suppresses it",
+                    NetSession.Active && Juice.HitStopSuppressed);
+                localShip.Asplode();
+                Check("the real Asplode path ran (the ship is dead)", localShip.IsDead);
+                Check("... and game time was NOT frozen (TimeScale=" + Juice.TimeScale + ")",
+                    Juice.TimeScale == 1f);
             }
 
             // THE CLOCK IS PINNED FOR THE WHOLE RUN (card 25ad0659 step 2a). Installed BEFORE
@@ -647,11 +804,14 @@ namespace EvilAliensWeb.Compat.Net
         // Always alive=true: the alive-flag edge belongs to the puppet DEATH path (ExplodePuppet),
         // which is a different subject, so this suite never varies it rather than carrying a seam
         // that reads as coverage it does not have.
-        private static byte[] ShipFrame(ref ushort seq, ref uint senderMs)
+        // `alive` is leg 5's whole lever (card b4d0ba1d): the peer reports its ship dead for as
+        // long as its own reset choreography runs, and what the session does with that LEVEL
+        // while a ship sits in the Remote seat is the artifact under test.
+        private static byte[] ShipFrame(ref ushort seq, ref uint senderMs, bool alive = true)
         {
             senderMs += 33; // advance, or ShipStateBuffer refuses the sample as stale
             return NetProtocol.EncodeShipState(seq++, senderMs, RemoteShipPos, Vector2.Zero,
-                FacingUp, alive: true, firing: false, shotsPerSec: 8, bulletLife: 450f);
+                FacingUp, alive, firing: false, shotsPerSec: 8, bulletLife: 450f);
         }
 
         private static byte[] FriendFrame(ref ushort seq, ref uint senderMs)

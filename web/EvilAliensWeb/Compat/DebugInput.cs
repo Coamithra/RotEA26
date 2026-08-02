@@ -216,6 +216,13 @@ namespace EvilAliensWeb.Compat
 			{
 				ms = 120f;
 			}
+			// Report the refusal rather than no-opping silently: inside a co-op session every
+			// hit-stop is refused (card 68f62e92), so without this the hook looks broken.
+			if (Juice.HitStopSuppressed)
+			{
+				Console.WriteLine("[debug] eaHitstop " + ms + "ms SUPPRESSED -- an online co-op session refuses every hit-stop (?nethitstop=1 to allow)");
+				return;
+			}
 			Juice.AddHitStop(ms / 1000f);
 			Console.WriteLine("[debug] eaHitstop " + ms + "ms");
 		}

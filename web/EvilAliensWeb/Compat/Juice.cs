@@ -34,6 +34,12 @@
 //     beat when the PLAYER is destroyed reads as intentional, not stuttery.
 //     The eaHitstop() console/JS hook also calls AddHitStop directly, so it
 //     always fires on demand regardless of the flag.
+//   * ONLINE CO-OP REFUSES EVERY HIT-STOP, whatever the caller (card 68f62e92).
+//     A freeze halts this peer's whole world while the wire keeps streaming on
+//     the real clock, and the peer's puppets then get corrected BACKWARD — the
+//     "when P1 dies the whole game rewinds" report. See AddHitStop for the full
+//     mechanism; `?nethitstop=1` restores the pre-card behaviour. Shake is
+//     untouched (present-blit only, no gameplay time).
 //
 // Tuning/QA:
 //   * URL: ?shake=0 (off) / ?shake=1.5 (amplify, 0..3) · ?hitstop=1 (re-enable
@@ -106,14 +112,34 @@ namespace EvilAliensWeb.Compat
             trauma = MathHelper.Clamp(trauma + amount, 0f, 1f);
         }
 
+        // Would a hit-stop request be refused right now? True only inside an online
+        // co-op session (card 68f62e92) — see AddHitStop for why. `?nethitstop=1`
+        // restores the pre-card behaviour and is the deliberate bug reproduction.
+        public static bool HitStopSuppressed =>
+            Net.NetSession.Active && !DebugFlags.NetHitstop;
+
         // Freeze game time for `seconds` of REAL time. Overlapping requests take the
         // max (never accumulate), so stacked events can't freeze the game solid.
         // NOT gated by DebugFlags.Hitstop here — that flag only governs whether
         // KillPunch's automatic per-kill/boss-kill stop fires (see below); a direct
         // caller (player death, the eaHitstop() console/JS hook) always gets its freeze.
+        //
+        // ONLINE CO-OP REFUSES EVERY HIT-STOP (card 68f62e92), and the reason is not
+        // "feel" — a freeze here desyncs the two worlds. Game1.UpdateScaled folds
+        // TimeScale into the gameTime it hands UpdateInner, so a freeze halts this
+        // peer's WHOLE world (every host-authoritative enemy included) while
+        // NetSession.Update keeps streaming on the real clock: the peer receives ~180ms
+        // of snapshots carrying UNCHANGED positions while its own NetPuppets.Drive keeps
+        // dead-reckoning forward on real time (deliberately — see Drive's header). The
+        // corrections that follow then glide every replicated enemy BACKWARD at once,
+        // which is what "when P1 dies the whole game rewinds a bit" was. Symmetric, so
+        // it is gated for both roles: a client freeze stalls its own ship stream and the
+        // host's ShipStateBuffer pays the same price.
+        // Shake is NOT gated with it — that is applied at the present blit and touches
+        // no gameplay time, so the death still reads as an impact.
         public static void AddHitStop(float seconds)
         {
-            if (seconds <= 0f)
+            if (seconds <= 0f || HitStopSuppressed)
             {
                 return;
             }

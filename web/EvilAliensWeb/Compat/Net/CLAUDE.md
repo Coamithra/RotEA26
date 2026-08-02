@@ -1063,7 +1063,8 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     extra ship", whoever owns it. `EvBlast` gained a slot byte (a couch player's bomb used to
     detonate on the peer's PRIMARY puppet) and `EvScoreSync` widened from 2 slots to 4.
   - `DriveFriendShip` ADOPTS a ship the scene spawned into its slot (`SpawnAllPlayers` respawns
-    every seated slot after a reset, puppet slots included) -- without it the re-spawned puppet
+    every seated slot after a reset, and since card b4d0ba1d `RemoteFriend` is the only puppet
+    slot it still fills -- see the death/reset pair) -- without it the re-spawned puppet
     matched no channel and froze on its spawn pose. The primary remote path always adopted;
     this one didn't, which only stopped being a corner case once couch players (who hit resets
     constantly) could exist.
@@ -1143,9 +1144,62 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     `session stop (pairing rejected)`; the joiner logs `peer rejected the pairing (reason=4)`
     (4 = `RejectFull`) + `session stop (rejected by peer)` -- an explicit reject rather than a
     bare channel close is what proves the `RejectGraceMs` deferral let the reliable frame out.
+- **THE DEATH/RESET ARTIFACT PAIR (cards 68f62e92 + b4d0ba1d), both pinned by
+  `tools/headless/probes/net_reset_spawn.txt` legs 0a / 5 / 6.**
+  - **NO HIT-STOP RUNS INSIDE A SESSION (card 68f62e92).** `Juice.AddHitStop` early-returns while
+    `NetSession.Active` -- the death stop, the `?hitstop=1` kill/boss stops and `eaHitstop()`
+    alike. **This is a desync fix, not a feel decision.** `Game1.UpdateScaled` folds
+    `Juice.TimeScale` into the gameTime it hands `UpdateInner`, so a freeze halts that peer's
+    WHOLE world (every host-authoritative enemy included) while `NetSession.Update` sits OUTSIDE
+    that scaled path and keeps streaming snapshots of the frozen positions on the real clock. The
+    other peer's puppets keep dead-reckoning forward -- which they must, see the real-time driver
+    rule above -- so the corrections that follow walk every replicated enemy BACKWARD at once,
+    over a background that never stopped scrolling. That was "when P1 dies, the whole game rewinds
+    a bit". Measured by `python tools/sim/net_puppet_drive_sim.py --hoststall`: **23 px of
+    backward glide** at N=64 and a typical 0.15 px/ms enemy, 45 px for a fast diver, 0 hard pops
+    (a glide, not a teleport), against a stall=0 control that never steps backward at all. It
+    saturates in stall LENGTH and scales with POPULATION -- a small world is corrected several
+    times inside a 180 ms freeze.
+    - **Suppressed for BOTH roles, not just the host.** A client freeze stalls its own ship stream
+      and the host's `ShipStateBuffer` pays the same price.
+    - **Replicating the halt instead was weighed and lost.** The peer only learns of the death
+      after RTT/2 + a stream interval, so the two halts are offset by ~30-80 ms and a residual
+      divergence of exactly that size survives; it would also mean freezing `NetPuppets.Drive`,
+      reverting the invariant that exists to stop `pupPops` bursts; and it makes P2's world stutter
+      for a death P2 did not have.
+    - **Shake is deliberately NOT suppressed** -- it is applied at the present blit and touches no
+      gameplay time, so a co-op death still reads as an impact.
+    - **`?nethitstop=1` restores the pre-card behaviour and is IN `DebugFlags.Active`**, unlike
+      `?hitstop`. Since this card `?hitstop` cannot degrade a session at all (`AddHitStop` refuses
+      regardless), so this is the one flag whose entire purpose is reintroducing a net-desync bug
+      and it must never reach a public lobby or a listed game. Every legitimate use is a dev
+      `?net=` boot, which is anything-goes.
+  - **THE PEER'S DEATH FX FIRES ON THE ALIVE EDGE, NOT THE LEVEL (card b4d0ba1d).** Reported as:
+    P1 and P2 both die, the level restarts, and on P1's screen both ships fly in -- then P2
+    explodes instantly again and flies in again. `ManagePuppet` tested `!remoteAlive && puppet !=
+    null` as a LEVEL, and `SpawnAllPlayers` respawns every SEATED slot while the peer's seat is
+    deliberately reserved across a death -- so ~1.3 s into the reset a ship arrived in the Remote
+    seat while the peer, still running its OWN reset, honestly reported alive=false, and the
+    session played the full explosion + `expl2` on a death that never happened. Two halves:
+    - `SpawnAllPlayers` SKIPS a slot seated to `ControlDevice.Remote` while a session is active --
+      the net layer owns that ship's whole lifecycle (`SpawnPuppet` / `ExplodePuppet`), so it
+      appears when the peer's own ship does. **`RemoteFriend` is deliberately NOT skipped**:
+      `SpawnFriend` adopts a scene-spawned couch ship by design and its death is stream-timeout
+      driven, so the friend path never had this bug.
+    - `ExplodePuppet` now needs `puppetSeenAlive` -- the peer must have reported alive=true while
+      we held THIS puppet. Set in `SpawnPuppet` (which is already gated on it) rather than only in
+      `ManagePuppet`'s per-tick refresh, or a peer dying in the very next tick would be released
+      quietly. A puppet adopted while the peer is dead is released QUIETLY instead
+      (`ReleasePuppetQuietly`): the peer is dead, so its ship does not belong in our world, but
+      nothing died either. Defence in depth for the skip above.
+    - `NetMetrics.RemoteShipExplosions` is the observable the probe reads -- the FX leaves no
+      other headless trace (two `Explosion`s and a cue into a live world). Counts `ExplodePuppet`
+      only; `ExplodeFriend` is a different lifecycle and is not folded in. Not on the `[net]`
+      line: it is a per-death event, not a health rate.
 - **Remote ship:** `ControlDevice.Remote` (APPEND-ONLY enum position). Joins via
-  `oracle.AddPlayer(Remote)` on the first alive stream (or is spawned by the GameScene's
-  own SpawnAllPlayers reset flow -- NetSession adopts either). `PlayerShip.Update` case
+  `oracle.AddPlayer(Remote)` on the first alive stream. (It used to be spawned by the GameScene's
+  own SpawnAllPlayers reset flow as well, with NetSession adopting either -- that is what card
+  b4d0ba1d removed; see the death/reset pair above.) `PlayerShip.Update` case
   Remote -> `NetSession.DriveRemoteShip`: position sampled from `ShipStateBuffer`
   ~100 ms behind the newest sample (velocity-extrapolated max 250 ms on underrun), speed
   zeroed; shots re-fired locally through the real `FireAt` path from the replicated firing

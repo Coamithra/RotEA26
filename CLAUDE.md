@@ -258,8 +258,15 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   MessageChannel to ~1Hz, so any rendered soak measures nothing. `?aiff=<n>` is the watchable
   fast-forward (n sims per drawn frame, each at a synthesised 60Hz dt). Tuning overrides
   `?aismooth= ?aismoothurgent= ?aipark= ?aireact= ?aigapmargin= ?aiscanrows= ?aicrosspenalty=
-  ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall=`. Pair with
-  `?aiplayer`.
+  ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall= ?aiseekapproach=
+  ?aiseekpowerup= ?aipowerupreach=`. Pair with `?aiplayer`.
+  **The bench also reports `killers=<Type>:<n>` (with `SpiderBoss(standing)` split out),
+  `pickups=<n>/<spawned>(<pct>%)` and `boss=<px> bossfar=<pct>`** (cards 31ceb6ff / ada9e839) --
+  which is what turned "the AI runs into the stationary spider boss" and "the AI ignores
+  powerups" from impressions into numbers. **A 0.8-weight `steerTarget` seek is ZEROED by the
+  park (0.95)** whenever nothing else is pushing that tick, so the boss-approach term was dead code until `?aiseekapproach`
+  (baked 1.1) lifted the halting-boss standoff above it; the powerup half was measured and
+  DECLINED. Details + all the tables: web CLAUDE.md.
   **Per-tier AI skill** (card c10e3e7f): the threat-field and aim-spread knobs resolve through
   `PlayerShip.AiSkillByDifficulty[]`, keyed off `Settings.EffectiveDifficulty` (the LOCK-aware
   tier -- attract demos lock Hard). `eaAiBench()` prints the resolved row; the `?ai*` overrides

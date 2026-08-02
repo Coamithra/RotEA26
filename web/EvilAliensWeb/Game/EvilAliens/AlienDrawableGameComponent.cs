@@ -392,7 +392,11 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	// LoadAnimation (or a texture swap), but the method is called several times per entity per
 	// collision pass -- see CollisionHandler -- and each call otherwise costs two
 	// TextureDims ConditionalWeakTable lookups. Keyed on everything the arithmetic reads, so a
-	// layout change re-derives rather than going stale (card 391e11d2).
+	// layout change re-derives rather than going stale (card 391e11d2). Note the key is the
+	// Texture2D IDENTITY, so it assumes a texture's registered LOGICAL dims never change after
+	// first use -- true today (WebContentManager.TryLoadDds registers before handing the texture
+	// out), and the reason the memo may hold a strong reference to a swapped-out texture for the
+	// component's lifetime, which is one object and deliberately not worth a weak reference.
 	private Texture2D cellDimsTexture;
 	private int cellDimsColumns;
 	private int cellDimsRows;

@@ -115,9 +115,10 @@ internal class BraineroidGlows : DrawableGameComponent, IComponentWatcher
 
 	public override void Draw(GameTime gameTime)
 	{
-		// Suppressed: every Braineroid.Draw is drawing its own glow again, so drawing them here
-		// too would double the additive contribution.
-		if (Suppressed)
+		// The SAME predicate Braineroid.Draw asks before suppressing its own glow, deliberately:
+		// if the two guards could disagree (a Suppressed flip, or _liveCount drifting out of step
+		// with bin membership) both paths would draw and the additive contribution would double.
+		if (!Active)
 		{
 			return;
 		}
@@ -126,14 +127,16 @@ internal class BraineroidGlows : DrawableGameComponent, IComponentWatcher
 		{
 			return;
 		}
-		// ONE blend flip for the whole population instead of two per brain. Restored afterwards
-		// because the wrapper's BlendMode is shared state that the next drawer inherits.
+		// ONE blend flip for the whole population instead of two per brain. Restored to whatever
+		// was incoming (BrainBossOverlays.Draw's shape) because the wrapper's BlendMode is shared
+		// state that the next drawer inherits.
+		SpriteBlendMode savedBlend = spriteBatch.BlendMode;
 		spriteBatch.BlendMode = (SpriteBlendMode)2;
 		for (int i = 0; i < members.Count; i++)
 		{
 			members[i].DrawGlowOnly(gameTime);
 		}
-		spriteBatch.BlendMode = (SpriteBlendMode)1;
+		spriteBatch.BlendMode = savedBlend;
 	}
 
 	// One pass over the live components, the same shape Oracle.GetBaddies and FlyingSpiderSwarm

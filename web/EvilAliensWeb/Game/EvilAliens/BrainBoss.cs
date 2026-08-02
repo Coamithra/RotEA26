@@ -200,8 +200,8 @@ internal class BrainBoss : KillableAlien
 			|| netVenting
 			|| EvilAliensWeb.Compat.DebugFlags.Harness != null;
 		// Card 9f90978c: the hit flash is KillableAlien.Draw bracketing lightenEffect around
-		// base.Draw ONLY, and the overlays are drawn after it -- so the eye, the pods and the
-		// folds stayed unlit while the brain under them flashed white. Re-open the same bracket
+		// base.Draw ONLY, and the overlays are drawn after it -- so the shipped patches (the eye
+		// and the pods) stayed unlit while the brain under them flashed white. Re-open the bracket
 		// here so the patches flash with the sprite they sit on. Both of overlays.Draw's branches
 		// have a compiled variant with LIGHTEN in it (`lighten` for the plain one, whose tint
 		// still rides the vertex colour; `lighten_interpolate_fade` for the interpolated one,

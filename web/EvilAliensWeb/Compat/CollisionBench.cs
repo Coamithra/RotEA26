@@ -123,7 +123,8 @@ namespace EvilAliensWeb.Compat
             // LIVE world would have them collide with real entities and drive real reactions, and
             // a scene's own population would make the timing figure meaningless. Report the skip
             // — an unrun bench must never read as a measurement.
-            if (GameScene.NetActiveScene != null || EvilAliensWeb.Compat.Net.NetSession.Active)
+            if (GameScene.NetActiveScene != null || EvilAliensWeb.Compat.Net.NetSession.Active
+                || EvilAliensWeb.Compat.Net.NetPuppets.LiveCount > 0)
             {
                 sb.Append("  SKIP (run from the main menu, with no level, attract demo or session up)\n");
                 return sb.ToString();

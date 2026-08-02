@@ -289,7 +289,7 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   the parked ring a bomb powerup level (a maxed bomb is 1.88x the amplitude). Details: web
   CLAUDE.md.
 - **BrainBoss overlay rigs** (cards 391e11d2 / 9f90978c): **`?brainoverlayphase=<0..1>`** parks
-  every animated overlay patch (the eye, the exhaust pods, the fleshy folds) at a chosen point in
+  every animated overlay patch (the shipped pair: the eye and the exhaust pods) at a chosen point in
   its cycle and holds it there -- the eye rests CLOSED on frame 0 and opens only on a ~15 s random
   roll, so it is otherwise unreachable for a screenshot. Negative = live, the `?ripplephase=`
   convention. **It is also the only way to get a REPEATABLE frame out of the boss at all**: the

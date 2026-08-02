@@ -630,8 +630,9 @@ nothing, because an empty callback list matches an empty callback list. Committe
 ### BrainBoss: the hit flash and the overlay patches (card 9f90978c)
 
 `KillableAlien.Draw` brackets `spriteBatch.lightenEffect` around `base.Draw` **only**.
-`BrainBoss.Draw` calls `base.Draw` and THEN `overlays.Draw`, so the animated patches (the eye, the
-pods, the folds) sat outside the bracket and stayed unlit while the brain under them flashed white.
+`BrainBoss.Draw` calls `base.Draw` and THEN `overlays.Draw`, so the animated patches (the shipped
+pair: `eye_reveal` and `pods_flicker`) sat outside the bracket and stayed unlit while the brain
+under them flashed white.
 `BrainBoss.Draw` now re-opens the bracket around the overlay draw. No shader work was needed --
 `EffectHandler` already compiles both variants the overlay's two branches resolve to (`lighten` for
 the plain one, whose tint still rides the vertex colour, and `lighten_interpolate_fade` for the

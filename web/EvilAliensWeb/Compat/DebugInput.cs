@@ -285,6 +285,12 @@ namespace EvilAliensWeb.Compat
 		// card compared two runs whose populations were never equal and read the difference as a
 		// flatten cost. Returns the live counts plus the active flatten mode and box size, so a
 		// figure pasted onto the card carries its own conditions.
+		[JSInvokable("debugFlySpiders")]
+		public static string FlySpiders()
+		{
+			return EvilAliens.FlyingSpiderCensus.Report();
+		}
+
 		// eaBraineroidGlowBatch(on): flip the Braineroid glow draw between the batched driver
 		// (on, the shipped path) and the pre-card per-brain path (off). The appearance A/B --
 		// flip it between two screenshots with NO tick in between so both paths draw the SAME
@@ -328,12 +334,6 @@ namespace EvilAliensWeb.Compat
 			Microsoft.Xna.Framework.Game game =
 				EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>()?.ComponentBin?.Game;
 			return WorldCensus.Report(game);
-		}
-
-		[JSInvokable("debugFlySpiders")]
-		public static string FlySpiders()
-		{
-			return EvilAliens.FlyingSpiderCensus.Report();
 		}
 
 		// JS bridge for the dev-build FPS HUD (eaFps in wwwroot/index.html; card 22e655b5).

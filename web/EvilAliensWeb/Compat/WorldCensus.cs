@@ -13,7 +13,8 @@
 //   POPULATION -- live components by type, plus the collidable count the collision
 //              grid runs over.
 //
-// Read it with eaWorldCensus() / `eval WorldCensus` under eahl.
+// Read it with eaWorldCensus() / `eval Census true` under eahl (`eval` binds by C# method
+// name and on arity, so it is DebugInput.Census with its one argument, not eaWorldCensus).
 // ---------------------------------------------------------------------------
 using System;
 using System.Collections.Generic;
@@ -42,7 +43,9 @@ namespace EvilAliensWeb.Compat
             }
         }
 
-        // Called once per tick from Game1.DrawInner's tail.
+        // Called once per tick from Game1.Draw, right after DrawInner returns -- i.e. BEFORE the
+        // post passes and the letterbox blit, which are therefore out of the window. Those use
+        // the raw spriteBatch rather than the wrapper, so they open no counted batch anyway.
         internal static void EndFrame()
         {
             if (!Enabled)

@@ -55,14 +55,6 @@ public class CollisionHandler
 
 	private int stampCounter;
 
-	// One GetCollisionType() per collidable per pass, reused by the type dispatch AND the fill
-	// (card 391e11d2). It was evaluated up to FOUR times per entity per pass -- once per `is` test
-	// in the dispatch chain, then again inside FillCollisionMatrix* -- and every ADC evaluation
-	// runs retrieveBoundsFromTexture, i.e. two ConditionalWeakTable lookups plus the cell
-	// arithmetic. (The narrow phase still recomputes, through ICollidable.DetectCollision; widening
-	// that signature is deliberately out of this card's scope.)
-	private ICollisionType[] shapes = new ICollisionType[0];
-
 	private const long growthReportIntervalMs = 2000;
 
 	// Diagnostic for the instant-add lifecycle (card 02d9ad67): how many passes ended with
@@ -177,10 +169,6 @@ public class CollisionHandler
 		{
 			seen = new int[count + 64];
 		}
-		if (shapes.Length < count)
-		{
-			shapes = new ICollisionType[count + 64];
-		}
 		for (int l = 0; l < count; l++)
 		{
 			ICollidable collidable = collidables[l];
@@ -191,8 +179,14 @@ public class CollisionHandler
 			{
 				continue;
 			}
+			// One GetCollisionType() per collidable per pass, reused by the type dispatch AND the
+			// fill (card 391e11d2). It was evaluated up to FOUR times per entity per pass -- once
+			// per `is` test in the dispatch chain, then again inside FillCollisionMatrix* -- and
+			// every ADC evaluation runs retrieveBoundsFromTexture, i.e. two ConditionalWeakTable
+			// lookups plus the cell arithmetic. (The narrow phase still recomputes, through
+			// ICollidable.DetectCollision; widening that signature is deliberately out of this
+			// card's scope.)
 			ICollisionType shape = collidable.GetCollisionType();
-			shapes[l] = shape;
 			if (shape is CollisionBox)
 			{
 				FillCollisionMatrixBox(shape, boxes, l);
@@ -266,9 +260,6 @@ public class CollisionHandler
 				}
 			}
 		}
-		// Don't pin this pass's collision shapes (BrainBoss/Braineroid allocate a fresh
-		// CollisionBox per access) past the pass that used them.
-		System.Array.Clear(shapes, 0, count);
 		if (EvilAliensWeb.Compat.DebugFlags.BinLog && collidables.Count > count)
 		{
 			midPassGrowthPasses++;

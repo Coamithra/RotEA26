@@ -1,0 +1,72 @@
+# PROBE: the Level-3 WALL's replication -- derived scale, the collision/draw invariant, anchored
+# scroll.
+#
+# PINS: cards 4392bd30 ("netplay: lvl3 walls go out of sync") + 80749dc4 ("netplay (p2): walls
+# syncing is odd..") -- Compat/Net/NetWallTest, driven by eaNetWalls() / `eval NetWalls`.
+#
+# WHAT BROKE. NetBaseState.Scale rides the wire as a u16 at 1/256 and the cast TRUNCATES, so the
+# absolute error is up to 1/256 whatever the value. A wall's scale is 800 / (1248 * gridWidth) --
+# tiny -- so that is a RELATIVE error of 4.94% on the 12-wide Level-3 grid (measured, and the
+# probe prints the table). Wall.Draw sizes every block as LogicalWidth/Height * scale, so the
+# joiner drew 63.38px rows against the host's 66.67px: 402px apart by the bottom of that 122-row
+# grid, i.e. the two peers looking at different parts of the same wall. And because
+# CollisionLevelMap sized its tile from the grid alone -- which agreed with the drawn block only
+# because Wall.Setup derives `scale` from the same 800/width -- the joiner's collision rows
+# reached 3.29px further DOWN the screen per row than its towers did. That is the second reported
+# symptom: hitting walls before touching them, and bullets vanishing short of them.
+#
+# It is NOT host-side collision authority: PlayerShip.CollidesWith refuses damage to a
+# ControlDevice.Remote puppet outright, and a joiner's bullets are never replicated. Both collide
+# against the joiner's OWN wall puppet, on the joiner's own screen.
+#
+# FAILURE MEANS: read the quoted PASS/FAIL line. Nothing here throws and no counter moves -- on
+# EACH screen a mis-scaled wall looks like a perfectly ordinary wall, which is why this was
+# reported as "out of sync" from a two-window screenshot and could not be reproduced from either
+# half of it.
+#
+# WHY IT IS NOT A logic_probe CASE SET, unlike net_wire: every leg builds a real Wall, and
+# constructing one needs a Game (and decodes GFX/Base/756-v1). eahl is the only headless runner.
+#
+# MUTATION-TESTED THREE WAYS, each isolated and each failing DISJOINT legs:
+#   * Wall.NetScaleLocal -> false                       2 FAIL (predicate + the puppet's scale)
+#   * CollisionLevelMap back to the hard-coded 800/width 1 FAIL (the tile-tracks-scale guard)
+#   * Wall.NetPathAnchored -> false                     2 FAIL (predicate + the velocity ease)
+#
+# NOTE WHAT M1 DOES *NOT* FAIL, because it is the reason the guard leg exists at all: with the
+# scale fixed, the puppet is back on the derived number, so `800/width` and `LogicalWidth*scale`
+# AGREE again -- which is precisely the coincidence that let the two drift apart in the first
+# place. So the drawn-block == collision-tile leg cannot tell a derived tile size from the old
+# hard-coded one, and the guard leg forces a scale on by hand to reproduce the pre-card condition.
+# Two independent changes, two independent legs; neither covers the other.
+#
+# NOTE the section-1 table is the NEGATIVE CONTROL for the whole suite -- everything after it
+# asserts the puppet IGNORES the wire's scale, which means nothing unless the wire's scale is
+# shown to be wrong. It is printed rather than only asserted so the figures stay reproducible.
+#
+# MENU-ONLY and leave-no-trace: the suite SKIPs itself over a session, level or attract demo
+# (it would otherwise tear down a real puppet layer and leave a stray wall scrolling through the
+# world), so `?noattract` is not decoration here -- without it the idle demo makes every leg skip.
+#
+# eahl: --flags "?menu&noattract"
+
+step 200 nodraw
+mark
+eval NetWalls
+
+expect \[netwalls\] Level-3 wall replication
+expect 1\. the wire's scale is LOSSY for a wall
+expect 2\. the opt-out predicate
+expect 3\. a real puppet keeps its DERIVED scale
+expect 4\. anchored motion
+# The measured defect, pinned as a number: if the wire ever stops being lossy here (a widened
+# Scale field) this line moves and the suite's controls need re-reading, not silencing.
+expect variation 0 \(width 12\): scale 0\.053419 -> wire 0\.050781, 4\.94% out
+expect 402px apart by row 122
+# The SKIP guard: a run that skipped prints no tally, so this is what tells "menu was busy" from
+# "the suite passed".
+expect-not SKIP \(run from the main menu
+# A TALLY, never `expect-not FAIL` on its own: an absence assertion passes on a run where the
+# eval never happened at all. Raise it when legs are added; never lower it to make a run green.
+expect \[netwalls\] 24 passed, 0 failed
+expect-not FAIL
+quit

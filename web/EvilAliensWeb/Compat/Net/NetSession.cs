@@ -593,6 +593,7 @@ namespace EvilAliensWeb.Compat.Net
             grantsAwaitingStream.Clear();
             localJoinSimDone = 0;
             localJoinSimAt = 0;
+            unmarkedTeleportReported.Clear();
             txSeq = 0;
             txEventSeq = 0;
             lastStreamTx = 0;
@@ -1666,9 +1667,15 @@ namespace EvilAliensWeb.Compat.Net
             // screen edge to start each fly-by. Differentiating that ~800 px jump stamped 42-57
             // px/ms onto the wire, and the client DEAD-RECKONED on it -- it snapped to the new
             // position (correctly) and then flew onward at teleport speed until its next
-            // correction, collidably, killing the local player. For a repositioned entity the
-            // DECLARED speed is the honest answer, because it describes what the entity will do
-            // NEXT, which is what the client needs.
+            // correction, collidably, killing the local player.
+            //
+            // THE DECLARED SPEED IS THE BEST THE HOST HAS, NOT A GOOD ANSWER -- do not read the
+            // fallback as informative. Half the replicable set (the SpiderBoss included) moves by
+            // writing `Position` directly and never assigns `Speed`/`Direction`, so its
+            // `NetSpeedVector` is ZERO: a marked park sends zero velocity and the puppet stands
+            // still until its next turn, up to ~1.2 s in a big world. That is the correct trade
+            // against flinging it across the screen collidably, and it is what card 8dabe812's
+            // cap already did -- putting real motion parameters on the wire is card c1a38ef9.
             //
             // The host KNOWS, so it says so rather than guessing: the reposition sites call
             // NetNoteTeleport (grep it -- Braineroid/EvilSkull/SpiderBoss/Ball) and the marker
@@ -1704,7 +1711,17 @@ namespace EvilAliensWeb.Compat.Net
 
         // Types already reported as suspected unmarked teleporters, so the console says each name
         // ONCE. A reposition site fires every fly-by, and this runs inside the snapshot encode.
+        //
+        // Cleared per SESSION (ResetPerSessionState) and per SCAN (NetVelocityScan.Arm), not per
+        // process: a name burned once for the whole process would let a suite that reports a type
+        // on purpose -- NetTeleportTest's unmarked-jump control does exactly that with a UFO --
+        // silence a genuine one hit later in the same run, leaving only a counter to notice it.
         private static readonly HashSet<string> unmarkedTeleportReported = new HashSet<string>();
+
+        internal static void ClearUnmarkedTeleportReports()
+        {
+            unmarkedTeleportReported.Clear();
+        }
 
         // THE SAFETY NET FOR A MISSED REPOSITION SITE (card e79bb994).
         //
@@ -1727,6 +1744,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
+            metrics.UnmarkedTeleports++;
             ReportUnmarkedTeleport(c.GetType().Name, observed.Length());
         }
 
@@ -1736,9 +1754,14 @@ namespace EvilAliensWeb.Compat.Net
         // -- `tools/headless/probes/net_velguard.txt` greps this exact line, so its shape is an
         // interface. The once-per-type set is shared too: the message names a CODE fact, so
         // repeating it per fly-by would only bury it.
+        //
+        // **THE METRIC IS NOT BUMPED HERE, deliberately** -- `NetMetrics` has no reset (every
+        // scenario asserts on DELTAS instead), so letting the offline scan bump `tpUnmarked` would
+        // leave a figure from a menu-time audit sitting in the first `[net]` line of an unrelated
+        // session. The caller above owns it, so that counter stays what its comment says: what a
+        // LIVE HOST observed. The scan keeps its own tally and prints it in the velscan table.
         internal static void ReportUnmarkedTeleport(string typeName, float speedPxPerMs)
         {
-            metrics.UnmarkedTeleports++;
             if (unmarkedTeleportReported.Add(typeName))
             {
                 Console.WriteLine("[net] UNMARKED teleport suspected: " + typeName + " at "

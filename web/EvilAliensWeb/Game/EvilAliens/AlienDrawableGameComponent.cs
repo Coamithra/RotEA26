@@ -661,6 +661,11 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	{
 		isdead = false;
 		awarded = false;
+		// Per-LIFE, like the two above: every replicable type is POOLED, so an entity that wrapped
+		// or respawned and was then killed before its next snapshot turn comes back out of the
+		// pool with the latch still set -- and the fresh instance's first observation would go out
+		// marked, for a reposition that happened in a previous life somewhere else entirely.
+		netTeleported = false;
 		foreach (Timer timer in timers)
 		{
 			timer.Reset();

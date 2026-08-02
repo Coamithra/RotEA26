@@ -1834,6 +1834,13 @@ reads a contented 0 throughout. The instrument is
   call `AlienDrawableGameComponent.NetNoteTeleport()`, `CaptureBaseState` read-and-clears the latch
   and stamps the entity's declared `NetSpeedVector` instead of differentiating, and the marker
   rides the wire so the client snaps rather than blends.
+  - **THE DECLARED SPEED IS THE BEST THE HOST HAS, NOT A GOOD ANSWER** -- half the replicable set
+    (the SpiderBoss included) moves by writing `Position` directly and never assigns
+    `Speed`/`Direction`, so its `NetSpeedVector` is **ZERO**: a marked park sends zero velocity and
+    the puppet stands still until its next turn, up to ~1.2 s in a big world. That is the correct
+    trade against flinging it across the screen collidably, and it is exactly what card 8dabe812's
+    cap already did -- putting real motion parameters on the wire is card `c1a38ef9`. Do not read
+    the fallback as informative.
   - **The reposition sites are the whole feature, and there are exactly four types.** Found by
     auditing every direct `Position =` on the 29 replicable types: `Braineroid`'s four wrap
     branches, `EvilSkull`'s random respawn in `CollidesWith`, `SpiderBoss`'s three fly-by parks,

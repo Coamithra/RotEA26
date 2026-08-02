@@ -141,8 +141,8 @@ Read both consoles. The `[net]` metrics line prints every 5 seconds.
 **Pairing** — one line on each, and the roles must differ:
 
 ```
-[net] session start role=host room=<CODE> protocol=v10 transport=WebRTC (menu lobby)
-[net] session start role=join room=<CODE> protocol=v10 transport=WebRTC (menu lobby)
+[net] session start role=host room=<CODE> protocol=v11 transport=WebRTC (menu lobby)
+[net] session start role=join room=<CODE> protocol=v11 transport=WebRTC (menu lobby)
 ```
 
 `transport=WebRTC` is the point of the whole exercise, and on this path it is the only value it

@@ -97,8 +97,11 @@ namespace EvilAliensWeb.Compat.Net
         // The host sets the latch at the reposition itself (NetNoteTeleport, called from the
         // ~dozen sites that write Position as a JUMP rather than as motion: the SpiderBoss's
         // fly-by park, a wrapping Braineroid, EvilSkull's respawn, a wrapping Ball).
-        // NetSession.CaptureBaseState consumes it, which is the only reader -- so a peer-less
-        // game just sets a bool nothing looks at.
+        // NetSession.CaptureBaseState consumes it, which is the only production reader (the
+        // offline NetVelocityScan audit is the other) -- so a peer-less game just sets a bool
+        // nothing looks at. A marked sample goes out with the entity's DECLARED speed instead of
+        // a finite difference across the jump; read CaptureBaseState for why that is the best the
+        // host has rather than a good answer.
         //
         // READ-AND-CLEAR rather than a plain property because the latch has to survive from
         // whenever the reposition happened until that entity's next snapshot TURN (up to

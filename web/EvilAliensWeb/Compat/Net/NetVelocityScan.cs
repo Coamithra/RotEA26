@@ -69,6 +69,11 @@ namespace EvilAliensWeb.Compat.Net
         // worth more than a speed table now -- see the marker-audit block above `Sample`.
         private static readonly Dictionary<string, int> markedByType = new Dictionary<string, int>();
 
+        // Samples over the threshold with NO marker: a reposition site that has not been taught
+        // to call NetNoteTeleport. See the marker-audit block in `Sample` for why the count lives
+        // here rather than in NetMetrics.
+        private static readonly Dictionary<string, int> unmarkedByType = new Dictionary<string, int>();
+
         private static Ticker ticker;
         private static float sampleAccMs;
         private static int tickIndex;
@@ -105,6 +110,8 @@ namespace EvilAliensWeb.Compat.Net
             sustainedByType.Clear();
             samplesByType.Clear();
             markedByType.Clear();
+            unmarkedByType.Clear();
+            NetSession.ClearUnmarkedTeleportReports();
             sampleAccMs = 0f;
             tickIndex = 0;
             if (on && ticker == null && game != null)
@@ -154,6 +161,22 @@ namespace EvilAliensWeb.Compat.Net
             tickIndex++;
             if (ticker == null)
             {
+                return;
+            }
+            // A SESSION STARTING WHILE ARMED DISARMS THE SCAN, and this is the half that actually
+            // holds the invariant `Arm` only states. Arm-time refusal covers "host, then arm";
+            // the ordinary debug flow is the other order -- arm at the menu, then host a game --
+            // and `Sample` read-and-CLEARS the teleport latch, so an armed scan would eat every
+            // marker before CaptureBaseState saw it and silently reintroduce the exact bug this
+            // audits, while someone was watching for it. Disarming loses a half-finished audit,
+            // which is the cheap side of that trade; it is LOUD so the reading is not mistaken
+            // for a complete one.
+            if (NetSession.Active)
+            {
+                Console.WriteLine("[velscan] DISARMED -- a co-op session started while the scan was"
+                    + " armed, and it consumes the teleport markers the host needs to send."
+                    + " Re-run it offline; this run's tallies are gone.");
+                Disarm();
                 return;
             }
             // Walks Game.Components rather than Oracle.GetBaddies, and the difference is
@@ -222,6 +245,12 @@ namespace EvilAliensWeb.Compat.Net
                     }
                     else if (speed > NetSession.MaxObservedSpeedPxPerMs)
                     {
+                        // Its OWN tally, not metrics.UnmarkedTeleports -- NetMetrics has no reset,
+                        // so an offline audit's figure would sit in the first [net] line of an
+                        // unrelated session later in the process. NetSession owns that counter and
+                        // the wording; this owns the count it reports in its own table.
+                        unmarkedByType.TryGetValue(name, out int u);
+                        unmarkedByType[name] = u + 1;
                         NetSession.ReportUnmarkedTeleport(name, speed);
                     }
                     maxByType.TryGetValue(name, out float prevMax);
@@ -295,7 +324,9 @@ namespace EvilAliensWeb.Compat.Net
                   // whose markers had all been deleted would print no UNMARKED lines here either
                   // -- it would simply stop repositioning as far as this scan can tell -- so the
                   // probe requires a known repositioning type to show a nonzero count.
-                  .Append(", marked=").Append(Marked(names[i])).Append(')')
+                  .Append(", marked=").Append(Marked(names[i]))
+                  .Append(Unmarked(names[i]) > 0
+                      ? ", UNMARKED=" + Unmarked(names[i]).ToString() : "").Append(')')
                   .Append(repositions ? "  [repositions -- excluded]" : "").Append('\n');
                 if (!repositions && sus > worst)
                 {
@@ -325,6 +356,11 @@ namespace EvilAliensWeb.Compat.Net
         private static int Marked(string name)
         {
             return markedByType.TryGetValue(name, out int v) ? v : 0;
+        }
+
+        private static int Unmarked(string name)
+        {
+            return unmarkedByType.TryGetValue(name, out int v) ? v : 0;
         }
 
         // Types that REPOSITION as part of ordinary play, so a big reading for them is the

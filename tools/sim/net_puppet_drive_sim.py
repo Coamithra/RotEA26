@@ -910,8 +910,8 @@ def main():
     ap.add_argument("--population", action="store_true",
                     help="pops vs live entity count (card 48ab9b2f: is pupPops a swarm artifact?)")
     ap.add_argument("--smoothness", action="store_true",
-                    help="jerk/maxstep vs correction window + the teleport guard "
-                         "(cards 0dfc4495 / d3add86f / 8dabe812)")
+                    help="jerk/maxstep vs correction window + the teleport marker "
+                         "(cards 0dfc4495 / d3add86f / 8dabe812 / e79bb994)")
 
     ap.add_argument("--hoststall", action="store_true",
                     help="card 68f62e92: how far a HOST-side hit-stop rewinds the peer's world")

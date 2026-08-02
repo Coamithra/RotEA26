@@ -223,6 +223,11 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   mode -- the one precondition of card 72143c11 a headless run cannot otherwise produce -- and
   **`eaMenuCensus()`** lists the LIVE menus, which is the only observable that separates "drawn
   behind" from "still taking input". Pinned by `tools/headless/probes/net_notice_menu.txt`.
+  **`eaMenuNetState()`** (card c337222a) reads that flag and its three siblings BACK -- none of
+  them changes a pixel, so it is the only way to see whether a level launch left the menu still
+  believing it is inside the Online Co-op flow (it no longer does; net CLAUDE.md has the
+  lifecycle and the `EnterNetLobby()` entry point). Pinned by
+  `tools/headless/probes/net_menumode_reset.txt`.
 - **`?nethitstop=1`** (card 68f62e92): let a hit-stop freeze game time inside an online co-op
   session again. Normally `Juice.AddHitStop` refuses EVERY hit-stop while `NetSession.Active` --
   the death stop, the `?hitstop=1` kill/boss stops and `eaHitstop()` alike -- because a freeze
@@ -343,7 +348,7 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   `?harness=brainboss&brainoverlayphase=0.5&brainhitflash`.
 - **Post-level text crawl** (card bee8f0e0): the crawl now tapers like a Star Wars opening.
   **`?creditsshot=<1|2|3>`** boots straight into it for that level (otherwise reachable only by
-  finishing a level or `?level=N&win`), **`?crawlpos=<designY>`** parks the scroll for a
+  finishing a level or `?level=Level2&win` -- see the `?win` note below), **`?crawlpos=<designY>`** parks the scroll for a
   screenshot, **`?crawlskew=<f>`** dials the taper (`0` = the flat pre-card crawl). **The amount
   is CLAMPED to what keeps the widest line on screen and the shipped crawls saturate it at
   0.081-0.095, not the card's 0.2** -- +20% of a 669px line does not fit 800px at any pivot. Read

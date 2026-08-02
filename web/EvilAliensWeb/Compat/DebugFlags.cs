@@ -172,9 +172,14 @@ namespace EvilAliensWeb.Compat
 		// at the two damage gates instead (PlayerShip.CollidesWith, WebcamLevel.PlayerHit).
 		public static bool Invuln { get; private set; }
 
-		// TEMP DEBUG (repro only): in any GameScene, jump straight to Victory() once the
-		// level reaches Normal play, to exercise the victory -> credits -> brag -> menu
-		// handoff without playing the whole level. Combine with ?level=Level2. REMOVE.
+		// LEVEL 2 ONLY -- Level2.cs is its only reader, and it replaces that level's script with
+		// the ending unlock chain -> Victory() (forcing Hard along the way), to exercise the
+		// victory -> credits -> menu handoff without playing the level out. It does NOT work "in
+		// any GameScene", which this comment used to claim and which the root CLAUDE.md's
+		// `?level=N&win` phrasing inherited -- both corrected by card 3b6c12e7, whose two-peer
+		// level-end probes are its main user now. Deliberately OUT of `Active`, so an online MENU
+		// session can still pair with a tab carrying it -- which is what makes a co-op HOST
+		// victory reachable by a rig at all (a host wins from its script, never from a wire beat).
 		public static bool Win { get; private set; }
 
 		// Sprite harness (see the header comment + HarnessScene/HarnessRegistry). Harness is

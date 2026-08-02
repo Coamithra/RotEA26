@@ -523,6 +523,15 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `eaNetSceneOrder()` (scenario 6 of the same harness -- reset/pause/checkpoint ordering
   against a REAL GameScene, so **destructive**: run it in a throwaway `?level=Level2&invuln`
   boot),
+  `eaNetLevelEnd.arm()`/`.check()` and `.armHost()`/`.menu()` (finishing an online co-op level
+  keeps the pairing ALIVE and returns both peers to the lobby, and the remote ship flies off in
+  the level's own spawn direction -- cards 3b6c12e7 / b4a9fe60. TWO CALLS with the game running
+  in between, because the subject is the level's own ~7 s victory choreography plus, for the
+  lobby half, the whole post-level crawl. **DESTRUCTIVE** -- they drive the live level to its
+  END -- and Level-2-only, since it is the one shipped level whose `spawnType` is not the
+  hard-coded South the puppets used to assume. Boot
+  `?level=Level2&invuln&netallowdebug&noattract` (`&win` for the host half); pinned by
+  `tools/headless/probes/net_level_end.txt` + `net_level_end_lobby.txt`),
   `eaNetIntroGate()` (Level 1's intro cinematic in co-op — card 8a7772d6: the replicated
   player-spawn hold and the cosmetic intro bullet volley, driven over the in-process wire against
   the REAL Level 1 script. **DESTRUCTIVE and LEVEL-1-ONLY** — it pairs real sessions onto the live
@@ -1181,7 +1190,8 @@ site now lives under:
     and the top by 26%, against a card that said "fairly minimal"); mid-screen staying
     pixel-identical to the 2008 crawl is the property that was chosen instead.
   - Rig: **`?creditsshot=<1|2|3>`** boots straight into the crawl for that level (the only other
-    route is finishing a level, or `?level=N&win`), **`?crawlpos=<designY>`** parks the scroll so
+    route is finishing a level, or `?level=Level2&win` -- `?win` is LEVEL-2-ONLY, see "Debug flags"),
+    **`?crawlpos=<designY>`** parks the scroll so
     a taper that is a function of Y can be screenshot at all. Pinned by
     `tools/headless/probes/credits_crawl.txt` + `credits_crawl_clamp.txt` (taper present + fits;
     an over-large request saturates).

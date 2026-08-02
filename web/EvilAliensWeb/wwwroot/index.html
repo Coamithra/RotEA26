@@ -756,6 +756,9 @@
         // eaMenuCensus() lists the LIVE menus: MenuSub1 has no modality, so two live menus both
         // take input, and the census is the only thing that separates "drawn behind the notice"
         // from "still selectable underneath it" — a screenshot cannot tell them apart.
+        // eaMenuNetState() (card c337222a) reads that flag and its three siblings back: none of
+        // them changes a pixel, so it is the only way to see whether a level launch left the menu
+        // believing it is still inside the Online Co-op flow.
         window.eaNetNotice = (text) => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetNotice', text || '')); }
             catch (e) { console.warn('[debug] eaNetNotice failed (game not booted yet?): ' + e.message); }
@@ -763,6 +766,10 @@
         window.eaMenuNetMode = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugMenuNetMode')); }
             catch (e) { console.warn('[debug] eaMenuNetMode failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaMenuNetState = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugMenuNetState')); }
+            catch (e) { console.warn('[debug] eaMenuNetState failed (game not booted yet?): ' + e.message); }
         };
         window.eaMenuCensus = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugMenuCensus')); }

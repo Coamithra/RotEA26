@@ -2169,6 +2169,18 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		}
 	}
 
+	// Scenario seam for NetResetSpawnTest leg 5 (card b4d0ba1d), the StartForTest/HasRemotePuppet
+	// idiom. The Remote-seat skip below is the fix, and every caller of SpawnAllPlayers --
+	// UpdateStartup, UpdateResetting's DirectRespawn branch, Level1's level-entry spawn and
+	// Demo1's -- sits behind seconds of game-time choreography the suite deliberately does not
+	// tick, so without this there is no way to drive the real method and the skip could only be
+	// spot-read. It passes UpdateStartup's `invulnerable: false` shape; the skip is
+	// argument-independent, so do not add a leg that turns on the difference.
+	internal void NetSpawnAllPlayersForTest()
+	{
+		SpawnAllPlayers(invulnerable: false);
+	}
+
 	protected void SpawnAllPlayers(bool invulnerable)
 	{
 		if (!isDemo)
@@ -2183,6 +2195,19 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		for (int i = 0; i < Oracle.MaxPlayers; i++)
 		{
 			if (!oracle.IsSeated(i))
+			{
+				continue;
+			}
+			// Online co-op (card b4d0ba1d): the REMOTE peer's primary ship is a puppet the net
+			// layer owns end to end (NetSession.SpawnPuppet / ExplodePuppet), and its seat is
+			// deliberately kept reserved across a death — so respawning it here put a ship in
+			// the world for a peer that is still dead. ManagePuppet then adopted it and, seeing
+			// the peer's honest alive=false, played the full death FX on it: "both ships fly in,
+			// then P2 explodes instantly again, then flies in again". The puppet appears when
+			// the peer's own ship does, which is what the stream already says.
+			// RemoteFriend is deliberately NOT skipped — SpawnFriend adopts a scene-spawned
+			// couch ship by design and its death is stream-timeout driven, so it never had this.
+			if (EvilAliensWeb.Compat.Net.NetSession.Active && oracle.Controller(i) == ControlDevice.Remote)
 			{
 				continue;
 			}

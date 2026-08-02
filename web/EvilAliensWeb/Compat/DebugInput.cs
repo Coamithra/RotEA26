@@ -216,6 +216,13 @@ namespace EvilAliensWeb.Compat
 			{
 				ms = 120f;
 			}
+			// Report the refusal rather than no-opping silently: inside a co-op session every
+			// hit-stop is refused (card 68f62e92), so without this the hook looks broken.
+			if (Juice.HitStopSuppressed)
+			{
+				Console.WriteLine("[debug] eaHitstop " + ms + "ms SUPPRESSED -- an online co-op session refuses every hit-stop (?nethitstop=1 to allow)");
+				return;
+			}
 			Juice.AddHitStop(ms / 1000f);
 			Console.WriteLine("[debug] eaHitstop " + ms + "ms");
 		}
@@ -679,6 +686,18 @@ namespace EvilAliensWeb.Compat
 		public static string NetPickup()
 		{
 			return EvilAliensWeb.Compat.Net.NetPickupTest.Run();
+		}
+
+		// JS bridge for the single-tap bullet-count suite (eaNetFire in wwwroot/index.html, card
+		// a5c2a39b). Asserts the firing-hold contract as a pure decision over every fire rate,
+		// then COUNTS the bullets a scripted single tap re-fires on a real remote puppet -- with
+		// the pre-card packet pattern beside it, which must still produce the doubled tap.
+		// **DESTRUCTIVE**: it needs a live GameScene and fires real bullets into it, so run it in
+		// a throwaway ?level=Level2&invuln boot.
+		[JSInvokable("debugNetFireTest")]
+		public static string NetFire()
+		{
+			return EvilAliensWeb.Compat.Net.NetFireTest.Run();
 		}
 
 		// JS bridge for the co-op per-slot combo/powerup self-test (eaNetCombo in

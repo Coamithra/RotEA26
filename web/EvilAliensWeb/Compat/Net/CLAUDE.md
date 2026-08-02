@@ -1131,7 +1131,8 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     extra ship", whoever owns it. `EvBlast` gained a slot byte (a couch player's bomb used to
     detonate on the peer's PRIMARY puppet) and `EvScoreSync` widened from 2 slots to 4.
   - `DriveFriendShip` ADOPTS a ship the scene spawned into its slot (`SpawnAllPlayers` respawns
-    every seated slot after a reset, puppet slots included) -- without it the re-spawned puppet
+    every seated slot after a reset, and since card b4d0ba1d `RemoteFriend` is the only puppet
+    slot it still fills -- see the death/reset pair) -- without it the re-spawned puppet
     matched no channel and froze on its spawn pose. The primary remote path always adopted;
     this one didn't, which only stopped being a corner case once couch players (who hit resets
     constantly) could exist.
@@ -1211,9 +1212,71 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     `session stop (pairing rejected)`; the joiner logs `peer rejected the pairing (reason=4)`
     (4 = `RejectFull`) + `session stop (rejected by peer)` -- an explicit reject rather than a
     bare channel close is what proves the `RejectGraceMs` deferral let the reliable frame out.
+- **THE DEATH/RESET ARTIFACT PAIR (cards 68f62e92 + b4d0ba1d), both pinned by
+  `tools/headless/probes/net_reset_spawn.txt` legs 0a / 5 / 6.**
+  - **NO HIT-STOP RUNS INSIDE A SESSION (card 68f62e92).** `Juice.AddHitStop` early-returns while
+    `NetSession.Active` -- the death stop, the `?hitstop=1` kill/boss stops and `eaHitstop()`
+    alike. **This is a desync fix, not a feel decision.** `Game1.UpdateScaled` folds
+    `Juice.TimeScale` into the gameTime it hands `UpdateInner`, so a freeze halts that peer's
+    WHOLE world (every host-authoritative enemy included) while `NetSession.Update` sits OUTSIDE
+    that scaled path and keeps streaming snapshots of the frozen positions on the real clock. The
+    other peer's puppets keep dead-reckoning forward -- which they must, see the real-time driver
+    rule above -- so the corrections that follow walk every replicated enemy BACKWARD at once,
+    over a background that never stopped scrolling. That was "when P1 dies, the whole game rewinds
+    a bit". Measured by `python tools/sim/net_puppet_drive_sim.py --hoststall`: **23 px of
+    backward glide** at N=64 and a typical 0.15 px/ms enemy, 45 px for a fast diver, 0 hard pops
+    (a glide, not a teleport), against a stall=0 control that never steps backward at all. It
+    saturates in stall LENGTH and scales with POPULATION -- a small world is corrected several
+    times inside a 180 ms freeze.
+    - **Suppressed for BOTH roles, not just the host.** A client freeze stalls its own ship stream
+      and the host's `ShipStateBuffer` pays the same price.
+    - **Replicating the halt instead was weighed and lost.** The peer only learns of the death
+      after RTT/2 + a stream interval, so the two halts are offset by ~30-80 ms and a residual
+      divergence of exactly that size survives; it would also mean freezing `NetPuppets.Drive`,
+      reverting the invariant that exists to stop `pupPops` bursts; and it makes P2's world stutter
+      for a death P2 did not have.
+    - **Shake is deliberately NOT suppressed** -- it is applied at the present blit and touches no
+      gameplay time, so a co-op death still reads as an impact.
+    - **`?nethitstop=1` restores the pre-card behaviour and is IN `DebugFlags.Active`**, unlike
+      `?hitstop`. Since this card `?hitstop` cannot degrade a session at all (`AddHitStop` refuses
+      regardless), so this is the one flag whose entire purpose is reintroducing a net-desync bug
+      and it must never reach a public lobby or a listed game. Every legitimate use is a dev
+      `?net=` boot, which is anything-goes.
+      **It has its OWN probe, `tools/headless/probes/net_hitstop_flag.txt`, and the reason
+      generalises to any bug-reproduction seam**: `net_reset_spawn.txt` runs with the flag OFF, so
+      it only ever exercises the SUPPRESSING side -- `DebugFlags.NetHitstop` has exactly one
+      reader, and dropping it would leave the flag silently inert with every existing assertion
+      still green (mutation-tested: that revert fails the new probe and NOT the old one). The new
+      probe re-runs the SAME suite with the flag on and requires the two hit-stop assertions to
+      FLIP, bounded by the `61 passed, 2 failed` tally so a flag that broke something else is
+      caught too. A reproduction seam that has quietly stopped reproducing is worse than none --
+      the next person concludes the bug is gone.
+  - **THE PEER'S DEATH FX FIRES ON THE ALIVE EDGE, NOT THE LEVEL (card b4d0ba1d).** Reported as:
+    P1 and P2 both die, the level restarts, and on P1's screen both ships fly in -- then P2
+    explodes instantly again and flies in again. `ManagePuppet` tested `!remoteAlive && puppet !=
+    null` as a LEVEL, and `SpawnAllPlayers` respawns every SEATED slot while the peer's seat is
+    deliberately reserved across a death -- so ~1.3 s into the reset a ship arrived in the Remote
+    seat while the peer, still running its OWN reset, honestly reported alive=false, and the
+    session played the full explosion + `expl2` on a death that never happened. Two halves:
+    - `SpawnAllPlayers` SKIPS a slot seated to `ControlDevice.Remote` while a session is active --
+      the net layer owns that ship's whole lifecycle (`SpawnPuppet` / `ExplodePuppet`), so it
+      appears when the peer's own ship does. **`RemoteFriend` is deliberately NOT skipped**:
+      `SpawnFriend` adopts a scene-spawned couch ship by design and its death is stream-timeout
+      driven, so the friend path never had this bug.
+    - `ExplodePuppet` now needs `puppetSeenAlive` -- the peer must have reported alive=true while
+      we held THIS puppet. Set in `SpawnPuppet` (which is already gated on it) rather than only in
+      `ManagePuppet`'s per-tick refresh, or a peer dying in the very next tick would be released
+      quietly. A puppet adopted while the peer is dead is released QUIETLY instead
+      (`ReleasePuppetQuietly`): the peer is dead, so its ship does not belong in our world, but
+      nothing died either. Defence in depth for the skip above.
+    - `NetMetrics.RemoteShipExplosions` is the observable the probe reads -- the FX leaves no
+      other headless trace (two `Explosion`s and a cue into a live world). Counts `ExplodePuppet`
+      only; `ExplodeFriend` is a different lifecycle and is not folded in. Not on the `[net]`
+      line: it is a per-death event, not a health rate.
 - **Remote ship:** `ControlDevice.Remote` (APPEND-ONLY enum position). Joins via
-  `oracle.AddPlayer(Remote)` on the first alive stream (or is spawned by the GameScene's
-  own SpawnAllPlayers reset flow -- NetSession adopts either). `PlayerShip.Update` case
+  `oracle.AddPlayer(Remote)` on the first alive stream. (It used to be spawned by the GameScene's
+  own SpawnAllPlayers reset flow as well, with NetSession adopting either -- that is what card
+  b4d0ba1d removed; see the death/reset pair above.) `PlayerShip.Update` case
   Remote -> `NetSession.DriveRemoteShip`: position sampled from `ShipStateBuffer`
   ~100 ms behind the newest sample (velocity-extrapolated max 250 ms on underrun), speed
   zeroed; shots re-fired locally through the real `FireAt` path from the replicated firing
@@ -1227,6 +1290,56 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   restore it, so "host white / joiner purple" holds for DEFAULT colours; nothing normalises the
   two peers' hue tables.) The puppet's render clock advances on REAL time (never turbo/slowmo/
   hit-stop-scaled game time) -- a local hit-stop must not drag the interpolation point.
+  - **THE FIRING HOLD IS MEASURED IN PACKETS, NOT MILLISECONDS (card a5c2a39b), and getting that
+    wrong is what made one tap fire TWICE on the peer.** `firing` is a LEVEL on the wire and
+    `DriveRemoteShip` reads `buffer.Newest.Firing` EVERY tick, so the peer holds the newest
+    sample until a newer one arrives: **N packets marked firing=true = N SEND INTERVALS of
+    firing=true in front of the re-fire gate over there.** That gate is
+    `1000/shotsPerSec` -- the peer sets it from the SAME packet -- so the peer spawns
+    `1 + floor(window / period)` bullets for one tap. `SendShipState` streamed a flat
+    `FiringHoldMs` 150 ms against a 125 ms default period: **exactly two bullets per tap**, three
+    at the maxed 18/s. They are real bullets in the peer's world and damage what they hit, which
+    is why the card also reported "P1 can kill an enemy on P2's screen that is alive on P1's" --
+    one symptom, not two bugs, and the generous-claim design is working as intended underneath.
+    `NetSession.FiringHoldMsFor(shotsPerSec)` now returns **`period/2`**, floored at one send
+    interval and capped at the old 150; `NetSession.Friends.cs` uses it too (a couch player's tap
+    doubled identically, and an AI friend gained one bullet at the tail of every burst).
+    - **`P/2` IS THE BOUND AND IT HOLDS FOR EVERY SEND INTERVAL, which is the point.** If
+      `I >= H` the peer's window is exactly `I`; if `I < H` it is `ceil(H/I)*I < H + I < 2H = P`.
+      So any send interval shorter than the cadence period is safe at any frame rate.
+    - **DO NOT DERIVE IT FROM THE NOMINAL 33 ms INTERVAL -- that was tried and it is only correct
+      at exactly 60 Hz.** `SendShipState` runs off a `now - lastStreamTx >= StreamIntervalMs` gate
+      evaluated ONCE PER FRAME, so the real interval is the smallest frame multiple >= 33: 33.3 ms
+      at 60 Hz but **40 ms at 100 Hz**, and never 33.0. Counting whole nominal packets over-fires
+      at **7, 9, 10, 13, 14 and 15 shots/sec on a 100 Hz display** -- ordinary in-play rates. Note
+      the direction: a hitched frame is a DOUBLING risk here, not a missed-bullet one, because
+      `ceil(H/I)*I` GROWS with `I`. (A fraction-of-the-period hold was the attempt before that;
+      0.6 x the 62.5 ms period at 16/s is 37.5 ms, which still catches two 33 ms-apart sends.)
+    - **TWO RESIDUALS, accepted (do not re-derive them):** (a) from 15/s up the floor binds, so a
+      tap rides a single packet with no redundancy and a stream-lane DROP loses that bullet on the
+      peer -- the kill still counts on the owner's screen, where the bullet was real; exactness
+      under loss needs a shot COUNT or a fire EDGE on the wire, i.e. a protocol version, judged
+      not worth it for one cosmetic bullet at one end of the range. (b) a send interval at or past
+      the cadence period (below ~18 fps at the top fire rate) cannot represent that cadence at all
+      and doubles again -- nothing a level encoding can do. Revisit (a) if real-network playtests
+      show missing tap bullets.
+    - **NOT FIXED, and unchanged by the card: `PlayerShip.FireAt` stamps `NetLastFireMs` on the
+      INTENT, before its own cadence gate.** So a second tap inside one cadence period restarts
+      the hold while spawning no local bullet -- two taps ~80 ms apart are ONE bullet on the owner
+      and TWO on the peer. The pre-card 150 ms hold did the same, so it is pre-existing rather
+      than a regression, and stamping on the actual SHOT instead would leave the hold uncovered
+      between shots (`H < P` by construction) and trade it for a stretched sustained cadence.
+      Wants its own card and its own measurement.
+    - **Verify with `eaNetFire()`** (`Compat/Net/NetFireTest.cs`, 16 assertions;
+      `tools/headless/probes/net_single_tap.txt`). **DESTRUCTIVE** like `eaNetPickup` -- it pairs
+      a real host session onto the live level and fires real bullets into it, so use a throwaway
+      `?level=Level2&invuln` boot. It COUNTS the bullets a scripted tap spawns on a real puppet,
+      with the PRE-CARD packet pattern beside it as the control (which must still report 2), and
+      asserts the bound as a pure decision over the whole 1..18 domain CROSSED WITH the send
+      intervals a real frame rate produces. **Read leg 1 as the rigorous half**: the rig sends at
+      one cadence with packets on tick boundaries, so the end-to-end legs sample ONE phase at
+      60 Hz -- both the nominal-packet and the 0.6-fraction mutations pass every one of them and
+      fail only leg 1.
 
 ## Metrics & verification
 

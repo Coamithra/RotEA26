@@ -206,6 +206,14 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   mode -- the one precondition of card 72143c11 a headless run cannot otherwise produce -- and
   **`eaMenuCensus()`** lists the LIVE menus, which is the only observable that separates "drawn
   behind" from "still taking input". Pinned by `tools/headless/probes/net_notice_menu.txt`.
+- **`?nethitstop=1`** (card 68f62e92): let a hit-stop freeze game time inside an online co-op
+  session again. Normally `Juice.AddHitStop` refuses EVERY hit-stop while `NetSession.Active` --
+  the death stop, the `?hitstop=1` kill/boss stops and `eaHitstop()` alike -- because a freeze
+  halts that peer's whole world while the wire keeps streaming the frozen positions, and the other
+  peer's enemies are then corrected BACKWARD ("when P1 dies, the whole game rewinds a bit";
+  measured at 23px by `python tools/sim/net_puppet_drive_sim.py --hoststall`). **The deliberate
+  bug reproduction** (the `?teampartner=pad` idiom), and IN `DebugFlags.Active` for that reason --
+  it must never reach a public lobby. Screen SHAKE is unaffected either way. Details: net CLAUDE.md.
 - **Local co-op + online co-op together** (card 4d904410): `?netlocal=<1-3>` queues that many
   synthetic COUCH joins on this peer once the session is live — a real one is a gamepad Start
   press the rig can't produce. Pair with `?net=host`/`?net=join`; the `[net]` line's new

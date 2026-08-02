@@ -581,6 +581,18 @@
             catch (e) { console.warn('[debug] eaNetPickup failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: single-tap bullet count over a real co-op wire (card a5c2a39b). One tap used to
+        // reach the other peer as TWO bullets, because the sender streamed firing=true for a flat
+        // 150 ms while the peer re-fires through a 125 ms cadence gate. Asserts the packet-derived
+        // hold contract for every fire rate, then counts the bullets a scripted tap actually
+        // spawns on a real remote puppet — with the pre-card pattern beside it as the control.
+        // DESTRUCTIVE: needs a live level and fires real bullets into it, so run it in a
+        // throwaway ?level=Level2&invuln boot. Prints PASS/FAIL.
+        window.eaNetFire = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetFireTest')); }
+            catch (e) { console.warn('[debug] eaNetFire failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: co-op per-slot combo + powerup self-test (card 1a3ad45a). Round-trips the real
         // MsgHudState wire format, then drives the real PowerupData exp curve over two divergent
         // combo streams — running the OLD ungated behaviour over the identical stream first, so

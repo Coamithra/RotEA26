@@ -161,10 +161,38 @@ unavailable · `4` `--fake-no-audio-device` could not install its `alsoft.ini`.
   how long they are. `?loadlog`'s `COLD decode` lines DO work (they are a preload-bracket fact, not
   a timing one), as does `eval PreloadExport`. Anything phrased as "confirm the hitches stop" needs
   Chrome.
-- **Only the boot frame has a non-synthesised dt.** `RunOneFrame()` ticks once off the wall clock to
-  build the device and run `LoadContent`; every frame after it is exactly `1/--fps`. Note that the
-  game itself is not fully deterministic across runs regardless (RNG seeding), so identical flags
-  do not guarantee identical PNGs — settle to a steady state rather than pinning an exact frame.
+- **Reproducibility: `?seed=<n>` gets you most of the way, and the residual is the boot frame.**
+  Two runs of the same gameplay flags are otherwise different worlds — measured on
+  `?level=OwnLevel&noattract`, mean |diff| **0.2**, **MAX 210** of 255, which is a bigger signal
+  than most changes an A/B is trying to see. `?seed=<n>` (card d937c721) seeds `RandomHelper`, the
+  gameplay RNG, and is what makes a level-level A/B measure the change instead of the divergence.
+  - **Same seed ⇒ one of a HANDFUL of discrete worlds, not one world — and how many depends on
+    how busy the machine is.** Two measurements of the same rig, same binary: on a quiet box, 10
+    consecutive runs byte-identical; with sibling builds hammering the CPU, 10 runs landed in **4
+    distinct states** (modal one 6/10, the others 2/1/1). The odd ones sit at mean 0.45 / MAX 203
+    — the unseeded noise floor — so an unlucky pair looks exactly like a real effect. A cold
+    binary is the most reliable way to draw a rare state, so the first run after `dotnet build`
+    is the one most likely to be odd.
+  - **WORKING PRACTICE — capture each side of an A/B TWICE and require the same-side pair to be
+    byte-identical before you compare sides.** That is valid whichever state the lottery hands
+    you, and it is the only cheap check that cannot be fooled; "run it twice and it matched" on a
+    single side is not it. Prefer an in-process A/B (two `shot`s off ONE boot with no `step`
+    between) whenever the rig allows, since it skips the lottery entirely. Controls for the
+    numbers above, same rig: a different seed diverges (1.48) and an unseeded pair diverges
+    (1.08), so a zero diff really is the seed doing the work.
+  - **Why the residual exists.** `RunOneFrame()` ticks once off the wall clock to build the device
+    and run `LoadContent`; every frame after it is exactly `1/--fps`. That boot dt is now pinned to
+    one fixed step (`IsFixedTimeStep` + `TargetElapsedTime`, restored right after — see
+    `HeadlessHost.Boot`), which matters because `RandomHelper.RandomFromAverage` is dt-PROPORTIONAL,
+    so a variable boot dt spends a different amount of even a seeded stream. What is left is that a
+    fixed-step `Tick` runs `accumulated / TargetElapsedTime` catch-up updates and the boot's
+    accumulated wall time still varies, so an occasional run starts one step further on. Refuted
+    fixes, do not retry them: `MaxElapsedTime = _step` throws (KNI enforces a 0.5 s floor), and
+    `ResetElapsedTime()` from a `BeginRun` override made every run diverge again.
+  - `?seed=` reaches `RandomHelper` ONLY. Quad's and ShipConnector's FX RNGs, Juice's shake RNG and
+    SplashScene's `rng` are separate instances by design and stay unseeded, so a rig showing a
+    laser, the connector, a shake or the splash keeps some jitter of its own.
+  - Settling to a steady state still beats pinning an exact frame where the rig allows it.
 
 ---
 

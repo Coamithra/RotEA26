@@ -30,6 +30,20 @@
 # reached a death fails the `expect` rather than passing on an assertion it never got to. The
 # `asploded 1 local ship` line above it names WHICH half went wrong when it does.
 #
+# PRECONDITION, and why it is asserted separately (card af4c3694): there must be a LIVE local ship
+# to kill, and without `?invuln` there sometimes was not. OwnLevel runs a continuous SkullSpawner
+# maze alongside its Walls(2), and this probe never touches the controls -- so the parked ship
+# sometimes died on its own before frame 600, and PlayerShipSummon's respawn countdown is ~10 s
+# (600 frames), leaving the world shipless exactly when `KillShips` fired. Measured on the
+# pre-card flags: `asploded 0` in 3 of 30 runs; with `?invuln`, 30 of 30 report `asploded 1`.
+# `?invuln` only blocks the collision-damage branch in PlayerShip.CollidesWith -- Asplode() (which
+# is all `KillShips` calls) has no such guard, so the death this probe is about is unaffected.
+# The `aliveSlots=[0]` expect fires BEFORE anything is killed, so a run that lost its ship anyway
+# fails as a PRECONDITION instead of as a fade defect (the field is a SLOT LIST -- `[0]` is slot 0
+# flying, `[]` is a shipless world). Do NOT use `eval Census` for that: WorldCensus prints only the
+# fourteen most populous types and PlayerShip=1 drops off a busy scene (which cost one bogus
+# measurement while writing this).
+#
 # NOT NODRAW: SealAlpha is reached from Background.Draw, so the post-death steps must render.
 #
 # WHY A CHALLENGE LEVEL AND NOT A STORY ONE: on EASY, GameScene.ApplyDifficultyPolicy sets
@@ -38,11 +52,17 @@
 # would never reach a fade (measured: `?level=Level3&wallsonly` prints nothing in 600 frames).
 # The nine challenge levels never call ApplyDifficultyPolicy, so OwnLevel always takes the fade.
 #
-# TIMING: the settle is what a ship needs to exist (OwnLevel spawns one by frame ~600 -- at 400
-# `eaKillShips` reports 0 and the probe would fail on its own anti-vacuity line). UpdateResetting
-# then waits 3 s before Background.CrossFade, so the seal lands ~191 frames after the kill.
+# TIMING: the settle only has to outlast the spawn, and that is quick -- GameScene.UpdateStartup
+# spawns at its 1300 ms mark, i.e. frame ~78, and `aliveSlots=[0]` reads live from frame 100 onward
+# (measured under these flags). The 600 is kept for margin; an earlier note here claimed the ship
+# only exists by frame ~600, which was the un-invulned ship having DIED and been in its respawn
+# countdown, not a slow spawn. UpdateResetting then waits 3 s before Background.CrossFade, so the
+# seal lands ~191 frames after the kill.
 #
-# MUTATION-TESTED two ways, each isolated. Reverting SealAlpha's DrawStretched call to the bare
+# MUTATION-TESTED three ways, each isolated. The precondition line goes red -- and goes red FIRST,
+# before anything about the fade -- when the ship is killed ahead of it (an extra `eval KillShips`
+# above the `expect`), which is the shape of every run that used to flake here.
+# Reverting SealAlpha's DrawStretched call to the bare
 # `spriteBatch.Draw(whitePixel, new Rectangle(0, 0, width, height), Color.White)` drops the line
 # entirely, so the `src=10x10` expect goes red. Widening the clamp to `texture.Bounds` -- the
 # shape a real regression takes, since it still compiles and still passes a source rect -- prints
@@ -54,10 +74,12 @@
 # Rebuild tools/headless after either mutation -- eahl links the game sources in, so a
 # `web/EvilAliensWeb`-only build leaves the probe testing the old binary and passing.
 #
-# eahl: --flags "?level=OwnLevel&noattract"
+# eahl: --flags "?level=OwnLevel&noattract&invuln"
 
 step 600 nodraw
+mark
 eval OracleRoster
+expect      eaOracleRoster: .* aliveSlots=\[0\]
 mark
 eval KillShips
 step 260

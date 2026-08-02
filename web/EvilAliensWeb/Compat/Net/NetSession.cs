@@ -9,7 +9,7 @@ namespace EvilAliensWeb.Compat.Net
     // Distributed authority: each peer owns its OWN ship completely -- local input is read
     // untouched with zero added latency; the wire carries ship STATE (never inputs); the
     // other peer's ship is an interpolated puppet ~InterpDelayMs behind, whose shots spawn
-    // locally from its replicated firing state.
+    // locally from its replicated cumulative shot count.
     //
     // Card 11.2 adds WORLD authority: the host runs the real sim (spawners, level script,
     // enemy AI, score/lives); a join peer suppresses those (GameScene skips its event list,
@@ -73,16 +73,22 @@ namespace EvilAliensWeb.Compat.Net
         // the event and fall back to the hp==0 trigger, i.e. the pre-card latency rather than a
         // desync -- so this bump is the cheap-protocol ruling's "put it on the wire and move the
         // number" rather than a forced incompatibility.
-        // v12 (card e79bb994): a per-SAMPLE flags byte on every world-snapshot ENTRY
-        // (NetProtocol.NetSnapshotFlags), carrying the host's teleport marker. Unlike v11 and the
-        // appended event types before it, this MOVED AN EXISTING LAYOUT -- a v11 peer would
+        // v12 (card a45b78f6): MsgShipState / MsgFriendState carry a cumulative u8 shotCount in
+        // place of the `firing` LEVEL flag. MsgFriendState MISPARSES on a v11 peer -- its b[2] was
+        // the flags byte and is now a raw count, so bit 1 of the count reads as "firing" and every
+        // couch/AI-friend puppet fires at random. MsgShipState degrades more quietly (the count
+        // took the byte after `aim`, which v11 never read, so it would simply see firing=false
+        // forever and the remote ship would never shoot). Either way a mixed pairing is wrong
+        // rather than merely older, which is the bump test.
+        // v13 (card e79bb994): a per-SAMPLE flags byte on every world-snapshot ENTRY
+        // (NetProtocol.NetSnapshotFlags), carrying the host's teleport marker. Like v12 and unlike
+        // the appended event types before it, this MOVED AN EXISTING LAYOUT -- a v12 peer would
         // mis-parse every snapshot entry it received, so the bump is not a courtesy here, it is
         // the only thing standing between a stale peer and a garbage world.
-        public const byte ProtocolVersion = 12;
+        public const byte ProtocolVersion = 13;
         public const float InterpDelayMs = 100f;
 
-        // ~30 Hz ship stream. INTERNAL because FiringHoldMsFor's contract is expressed in whole
-        // packets of it, and NetFireTest has to do the same arithmetic to assert that contract.
+        // ~30 Hz ship stream. INTERNAL because NetFireTest scripts its packet cadence against it.
         internal const long StreamIntervalMs = 33;
         // Per-slot HUD state changes far slower than a ship pose (a combo tick, a bar creeping up),
         // and it is a readout rather than something the sim reads back, so a third of the ship
@@ -173,11 +179,6 @@ namespace EvilAliensWeb.Compat.Net
         // a closed tab still departs instantly via the pagehide 'bye'.
         private const long PausedPeerTimeoutMs = 120000;
         private const long MetricsIntervalMs = 5000;
-        // "Still firing" window after the last FireAt intent -- the CEILING of the hold, not the
-        // hold itself. See FiringHoldMsFor: the far side re-fires through a cadence gate of the
-        // same period we are streaming, so the hold has to stay inside one period. This was the
-        // whole hold until card a5c2a39b, which is what doubled a single tap.
-        private const float FiringHoldMs = 150f;
         private const float RenderClockSnapMs = 250f;
         // Pop detection: a rendered step larger than any plausible ship motion over the same
         // real time (PlayerShip.MaxSpeed is 0.33 px/ms; x2 margin + slack for frame jitter).
@@ -247,6 +248,18 @@ namespace EvilAliensWeb.Compat.Net
         private static long lastScoreSyncTx;
         private static Vector2 lastTxPos = new Vector2(400f, 300f);
         private static float lastTxAim = 4.712389f;
+        // THE COUNT ON THE WIRE BELONGS TO THE SLOT, NOT TO THE SHIP, and that distinction is the
+        // whole reason these are two fields (card a45b78f6). `PlayerShip.NetShotCount` restarts at
+        // 0 with every ship -- it is pooled, so it has to -- while the receiver holds ONE baseline
+        // for as long as it holds a puppet. A ship that died at 252 and respawned at 0 is a
+        // wrapped delta of 4: inside the catch-up bound, so the peer would spawn four bullets
+        // nobody fired. Advancing our own counter by the SHIP's delta, and taking no delta at all
+        // across a ship swap, makes what we send monotone per slot however often the ship behind
+        // it is replaced -- and leaves NetMaxCatchUpShots to mean only what it says, packet loss.
+        // Held across a shipless heartbeat exactly as lastTxPos/lastTxAim are.
+        private static byte lastTxShotCount;
+        private static PlayerShip lastTxShip;
+        private static byte lastTxShipShots;
         private static long lastHudTx;
         private static int snapshotCursor;
         private static readonly byte[] snapshotScratch = new byte[SnapshotScratchBytes];
@@ -604,6 +617,9 @@ namespace EvilAliensWeb.Compat.Net
             unmarkedTeleportReported.Clear();
             txSeq = 0;
             txEventSeq = 0;
+            lastTxShotCount = 0;
+            lastTxShip = null;   // also drops a stale ship reference from the previous session
+            lastTxShipShots = 0;
             lastStreamTx = 0;
             lastSnapshotTx = 0;
             lastScoreSyncTx = 0;
@@ -853,66 +869,57 @@ namespace EvilAliensWeb.Compat.Net
 
         // ---- local ship -> wire ---------------------------------------------------------
 
-        // How long after the last FireAt intent we keep streaming firing=true (card a5c2a39b).
+        // THE SHIP STREAM CARRIES A CUMULATIVE SHOT COUNT, NOT A FIRE INTENT (card a45b78f6).
         //
-        // THE BUG THIS FIXES. `firing` is a LEVEL on the wire, and the peer re-fires from it
-        // through the REAL FireAt path -- whose cadence gate the peer has already set to OUR
-        // period (NetApplyRemoteState does `shoottimer.Duration = 1000/shotsPerSec` off the
-        // same packet). So the peer spawns `1 + floor(hold / period)` bullets for one tap. The
-        // hold was a flat 150 ms against a 125 ms default period (shotspersec 8), i.e. EXACTLY
-        // TWO bullets for every single tap -- and three at the maxed rate of 18/s (55.6 ms).
-        // Those phantom bullets are real in the peer's world and damage what they hit, which is
-        // what made a tap look like it killed an enemy on one screen and not the other.
+        // WHAT IT REPLACED, because the failure mode is the instructive part. `firing` used to be
+        // a LEVEL on the wire, sampled at packet rate, and the peer re-fired from it through a
+        // cadence gate it set from the SAME packet -- so one tap spawned `1 + floor(window /
+        // period)` bullets over there and the sender had to hold the flag for a window narrower
+        // than one cadence period to keep that at 1 (card a5c2a39b's `FiringHoldMsFor`, `P/2`).
+        // That bound held, but two things could not be fixed inside it: at the top fire rates the
+        // window is one packet wide, so a stream-lane DROP silently lost that bullet on the peer;
+        // and the intent was stamped BEFORE the owner's own gate, so two taps inside one cadence
+        // period were one bullet for the owner and two for the peer.
         //
-        // WHAT THE PEER ACTUALLY SEES IS PACKETS, NOT MILLISECONDS, and that is the whole
-        // subtlety. It holds the NEWEST sample until a newer one arrives (DriveRemoteShip reads
-        // buffer.Newest every tick), so a hold of `H` ms puts firing=true in front of the re-fire
-        // gate for `ceil(H / I) * I` ms over there, where `I` is the REAL send interval. That
-        // product has to stay under one cadence period `P`, and it is not monotone in H alone.
+        // A COUNT HAS NEITHER PROBLEM, and both for the same reason: it is cumulative, so the
+        // wire says WHAT HAPPENED rather than what is happening now. A dropped, reordered or late
+        // packet costs nothing (the next one carries the total); a delta is only ever produced by
+        // a bullet the owner really spawned, because the increment sits beside that bullet inside
+        // FireAt's gate. The receiver spends the delta through PlayerShip's own shot spawn with
+        // NO second gate -- see NetApplyRemoteState -- so there is no rate for either side to
+        // re-derive and nothing left to get wrong at 100 Hz, at 18 shots/sec, or under loss.
         //
-        // `H = P/2` IS THE BOUND, AND IT HOLDS FOR EVERY `I`, WHICH IS THE POINT. If I >= H the
-        // window is exactly I; if I < H then ceil(H/I)*I < H + I < 2H = P. So any send interval
-        // shorter than the cadence period is safe, whatever the frame rate.
+        // SendShipState therefore streams `local.NetShotCount` verbatim and holds no window at
+        // all. NetSession.Friends.cs does the same for couch players and AI friends.
         //
-        // DO NOT DERIVE THIS FROM THE NOMINAL 33 ms INTERVAL -- that was the first attempt and it
-        // is only correct at exactly 60 Hz. `SendShipState` runs off the `now - lastStreamTx >=
-        // StreamIntervalMs` gate, which is evaluated ONCE PER FRAME, so the real interval is the
-        // smallest frame multiple >= 33: 33.3 ms at 60 Hz but 40 ms at 100 Hz, and never 33.0.
-        // Counting whole nominal packets over-fires at 7, 9, 10, 13, 14 and 15 shots/sec on a
-        // 100 Hz display -- ordinary in-play rates, since shotspersec walks 8 -> 18 one FirePower
-        // pickup at a time. A hitched frame is a DOUBLING risk here, not a missed-bullet one:
-        // ceil(H/I)*I GROWS with I.
-        //
-        // TWO RESIDUALS, both at the top of the fire-rate range and both accepted:
-        //   * The floor keeps a tap from expiring between two packets, and from 15/s up it is
-        //     what binds (P/2 falls below one send interval). There the tap rides a SINGLE packet
-        //     with no redundancy, so a stream-lane DROP loses that bullet on the peer -- the kill
-        //     still counts on the owner's screen, where the bullet was real. Exactness under loss
-        //     needs a shot COUNT or a fire EDGE on the wire, i.e. a protocol version, judged not
-        //     worth it for one cosmetic bullet at one end of the range. Revisit if real-network
-        //     playtests show missing tap bullets.
-        //   * A send interval at or past the cadence period (below ~18 fps at the maxed fire
-        //     rate) cannot represent that cadence at all and doubles again. Nothing a level
-        //     encoding can do; the owner is already dropping frames faster than it shoots.
-        //
-        // NOT FIXED HERE, and unchanged by this card: `PlayerShip.FireAt` stamps NetLastFireMs on
-        // the INTENT, before its own cadence gate, so a second tap inside one cadence period
-        // restarts the hold while spawning no local bullet -- two taps ~80 ms apart are one bullet
-        // on the owner and two on the peer. The pre-card 150 ms hold did the same, so this is a
-        // pre-existing residual rather than a regression. Stamping on the actual SHOT instead
-        // would leave the hold uncovered between shots (H < P by construction above), so it
-        // trades this for a stretched sustained cadence; it needs its own card and its own
-        // measurement.
-        internal static float FiringHoldMsFor(int shotsPerSec)
+        // Legacy note for anyone reading a `firing` in an old branch: the flag bit is gone from
+        // NetProtocol (ShipFlagFiring), ShipSample carries ShotCount instead, and there is no
+        // sender-side timing left on this path -- which is also what let eaNetFire grow a real
+        // SENDER leg, the old design's stamp being unreachable without a clock seam on FireAt.
+        // Fold a ship's own shot count into the SLOT's wire counter. A change of ship (a respawn,
+        // or a pooled instance re-seated) contributes nothing: its counter is a fresh sequence,
+        // and any bullets it fired before we first saw it were fired into a life the peer's puppet
+        // was never watching. See the lastTxShotCount comment for why per-slot is the requirement.
+        private static byte AdvanceTxShots(PlayerShip ship, ref PlayerShip lastShip,
+            ref byte lastShipShots, ref byte wireCount)
         {
-            // shotsPerSec arrives from a live ship (Setup seeds 8, FirePower caps at 18), but
-            // guard the divide rather than trust it -- a 0 here would be an infinite hold.
-            float period = 1000f / Math.Max(shotsPerSec, 1);
-            // Floor: a hold below one send interval can expire between two packets and lose the
-            // tap outright. Ceiling: a very low fire rate must not stream firing=true for most of
-            // a second off one tap. Both only ever LOWER the marked-packet count, so neither can
-            // reintroduce the overlap the P/2 bound rules out.
-            return Math.Clamp(period * 0.5f, (float)StreamIntervalMs, FiringHoldMs);
+            bool sameShip = ReferenceEquals(ship, lastShip);
+            lastShip = ship;
+            return AdvanceTxShotCount(sameShip, ship.NetShotCount, ref lastShipShots, ref wireCount);
+        }
+
+        // The arithmetic of the above, with the ship identity already resolved to a bool -- so
+        // eaNetFire can drive a ship swap and a counter restart without needing two live ships.
+        internal static byte AdvanceTxShotCount(bool sameShip, byte shipShots, ref byte lastShipShots,
+            ref byte wireCount)
+        {
+            if (!sameShip)
+            {
+                lastShipShots = shipShots;
+            }
+            wireCount = (byte)(wireCount + (byte)(shipShots - lastShipShots));
+            lastShipShots = shipShots;
+            return wireCount;
         }
 
         private static void SendShipState(long now)
@@ -923,24 +930,24 @@ namespace EvilAliensWeb.Compat.Net
             Vector2 pos = lastTxPos;
             Vector2 vel = Vector2.Zero;
             float aim = lastTxAim;
-            bool firing = false;
+            byte shotCount = lastTxShotCount;
             int shots = 8;
             float bulletLife = 450f;
             if (alive)
             {
                 pos = local.GetPosition();
                 vel = local.NetVelocity;
-                firing = now - local.NetLastFireMs < FiringHoldMsFor(local.NetShotsPerSec);
-                if (firing || local.NetLastFireMs > 0)
-                {
-                    aim = local.NetLastFireAim;
-                }
+                // A ship that has never fired reports NetLastFireAim's own seed (facing up), so
+                // there is no "has it fired yet" test left to get wrong.
+                aim = local.NetLastFireAim;
+                shotCount = AdvanceTxShots(local, ref lastTxShip, ref lastTxShipShots, ref lastTxShotCount);
                 shots = local.NetShotsPerSec;
                 bulletLife = local.NetBulletLife;
                 lastTxPos = pos;
                 lastTxAim = aim;
+                lastTxShotCount = shotCount;
             }
-            transport.SendStream(NetProtocol.EncodeShipState(txSeq++, (uint)(now - sessionStartAt), pos, vel, aim, alive, firing, shots, bulletLife));
+            transport.SendStream(NetProtocol.EncodeShipState(txSeq++, (uint)(now - sessionStartAt), pos, vel, aim, alive, shotCount, shots, bulletLife));
             metrics.StreamTx++;
         }
 
@@ -3761,8 +3768,10 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         // Called from PlayerShip.Update for ControlDevice.Remote ships: position from the
-        // interpolation buffer (~InterpDelayMs behind the newest sample), shots re-fired
-        // locally from the replicated firing state through the real FireAt path.
+        // interpolation buffer (~InterpDelayMs behind the newest sample), shots respawned locally
+        // from the newest sample's cumulative shot COUNT (card a45b78f6). The count comes off
+        // `buffer.Newest` rather than the interpolated pose deliberately -- it is a tally, not a
+        // quantity to lerp, and a stale sample would re-owe shots already fired.
         public static void DriveRemoteShip(PlayerShip ship, GameTime gameTime)
         {
             if (!Active)
@@ -3805,7 +3814,7 @@ namespace EvilAliensWeb.Compat.Net
             hasLastPuppetPos = true;
             metrics.BufferDepthMs = (float)(buffer.NewestMs - renderMs);
             ShipSample newest = buffer.Newest;
-            ship.NetApplyRemoteState(pos, newest.Aim, newest.Firing, remoteShotsPerSec, remoteBulletLife);
+            ship.NetApplyRemoteState(pos, newest.Aim, newest.ShotCount, remoteShotsPerSec, remoteBulletLife);
         }
     }
 }

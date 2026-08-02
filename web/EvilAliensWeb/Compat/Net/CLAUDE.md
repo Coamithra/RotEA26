@@ -30,7 +30,9 @@ inputs; the other peer's ship is an interpolated puppet.
   **4-player online already works** as two peers with a couch partner each (`2e0f908b`); 3-4
   separate MACHINES do not.
 - **Host kick / kick+block** (`0b8a300b`): the host's only agency under a remote pause, on a
-  self-reported peer-identity token (protocol v6).
+  self-reported peer-identity token (protocol v6). **The host's pause menu now reaches it
+  deliberately** (`0d6ffe70`, closing `98217618`), alongside an open/close-room toggle -- no
+  new protocol, both halves are second doors onto existing machinery.
 - **Score + per-slot HUD correctness:** the awarded AMOUNT is replicated, not the combo
   (`b0ab09ec`, v7); a slot's combo and powerup progression belong to its OWNER (`1a3ad45a`, v9,
   `MsgHudState`); a late powerup claim no longer strands a HUD icon (`a8c92fb9`).
@@ -54,8 +56,9 @@ the same TURN question. N-peer online (3-4 separate MACHINES) is designed but un
 (two-window net pass), `25ad0659` (headless net sim + de-static refactor) and `1cd47879` (a
 single-tab live browser pass -- only its IndexOutOfRange block is net). Deferred to "Later" rather than
 stage-sequenced: `816a8286` (replicate mechanical-friend ships), `1ec29347` (mid-boss arrival
-puppet fidelity), `2da92af9` (public-list abuse bounds), `98217618` (kick a peer who isn't
-pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
+puppet fidelity), `2da92af9` (public-list abuse bounds), `6451ceaf` (a second KEYBOARD player for local co-op).
+`98217618` (kick a peer who is not pausing) was in that list and is DONE -- card `0d6ffe70`
+shipped its UI half as the host pause menu's Online Play row; see the kick section.
 
 ## Core debug flags (per-feature flags live with their feature)
 
@@ -1736,6 +1739,46 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
     screenshot. **`?netfakepeer=<s>` is REQUIRED for any two-tab test** -- both dev tabs share
     one `localStorage`, so they present the SAME peer id and blocking the joiner would block
     yourself (the `?netfakehash=` trick, same reason).
+- **The HOST PAUSE MENU reaches the same kick deliberately, and owns the room switch (card
+  0d6ffe70).** `NetKickMenu` above only ever appears unprompted, under a REMOTE pause -- so a
+  peer who simply never pauses (blocking shots, hogging powerups, idling) was unkickable, which
+  is deferred card `98217618`. `pausedScene` now carries an **"Online Play"** row into
+  `Compat/Net/NetHostMenu`, and that submenu is where both halves live.
+  - **NO new protocol, NO wire bytes, NO server call.** Both halves are second doors onto
+    machinery that already existed: `NetSession.KickPeer(bool)` (card 0b8a300b) and
+    `Settings.AllowOnlineJoins`, which `NetListing` already watches -- off unlists while KEEPING
+    the room code, on re-lists the SAME code, so closing and re-opening mid-run renumbers nobody.
+  - **The row toggles the OPTIONS SETTING, not a per-run override.** So closing the room persists
+    into later games, exactly as if the player had gone to Options; the row is labelled with that
+    menu's own wording (`Allow Online Joins: Enabled/Disabled`) rather than a verb, for that
+    reason. `SaveThreaded()` fires on the toggle.
+  - **The two shapes are MUTUALLY EXCLUSIVE, and it is a property of `NetListing`, not of this
+    file:** `ComputeEligibleIgnoringSetting` refuses while `NetSession.Active`, so a game with a
+    peer in it is never listable. The menu does not RELY on that (fed the contradictory state it
+    still yields one shape), because the day listing during a session becomes possible the
+    failure would be a stray row over a live match.
+  - **`NetListing.CouldList` is the new predicate half** -- eligible EXCEPT for the setting.
+    `Eligible` cannot answer "is this game one toggle away from joinable", since it is already
+    false whenever the setting is off.
+  - **Entry 0 is never destructive**: the room shape leads with the toggle, the kick shape leads
+    with `Back`. `MenuSub1.Reset()` forces `selectedEntry = 0` and this menu opens over a frozen
+    world -- same reasoning as `NetKickMenu` preselecting "Keep Waiting".
+  - **The pause rows are REBUILT on every pause** (`GameScene.BuildPauseEntries`), not fixed in
+    the constructor: `AddEntry` only appends, so a conditional row added later would sit past
+    "Exit to Main Menu". Callers must `Reset()` after, since the list can get SHORTER.
+    `NetApplyPeerLeft` unwinds the submenu too -- a peer leaving while it is open would otherwise
+    strand it over a level that is running again.
+  - **The kick is per PEER and the wording says so.** The protocol is 2-peer, so there is one
+    other MACHINE; any couch players it brought leave with it. There is no per-seat kick.
+  - **Verify with `eaHostMenu()` / `.test()` / `.live()`, never a screenshot** -- a missing row
+    looks exactly like a game with nothing to offer. `.test()` (`NetHostMenuTest`, 47 assertions)
+    sweeps the pure decision over all 32 states and runs under `logic_probe` as `ProbeHostMenu`;
+    `.live()` (`NetHostMenuLiveTest`, 18) is what that sweep structurally cannot see -- a real
+    host session with a scripted peer, so `CurrentState()`'s live reads are covered, plus the
+    real `KickPeer` call and the row RETRACTING afterwards. Both are legs of `net_selftests.txt`.
+    The MENU WIRING is `tools/headless/probes/net_host_menu.txt` (the row opens the submenu; the
+    toggle really unlists) with `net_host_menu_absent.txt` as its negative control (a plain
+    `?level=` boot is `DebugFlags.Active`, so nothing is listable and the row must be gone).
 
 ## Pause, tether & 11.2 replication follow-ups
 

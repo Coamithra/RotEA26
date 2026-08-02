@@ -162,6 +162,12 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 	// while it is actually up, i.e. a remote pause that outlasted NetSession's offer delay.
 	private EvilAliensWeb.Compat.Net.NetKickMenu netKickMenu;
 
+	// Card 0d6ffe70: the host's own "Online Play" submenu off the pause menu (room open/close +
+	// kick), as opposed to netKickMenu, which only ever appears unprompted under a REMOTE pause.
+	private EvilAliensWeb.Compat.Net.NetHostMenu netHostMenu;
+
+	private bool netHostMenuUp;
+
 	private bool netKickMenuUp;
 
 	// ?netkickshot only: when to fire the one-shot freeze+show, so the capture gets a live
@@ -225,14 +231,7 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		darkener = new Darkener(base.Game, "select", "back");
 		pausedScene = new PausedScene(base.Game);
 		pausedScene.OnExit += pausedScene_OnExit;
-		pausedScene.AddEntry("Continue");
-		pausedScene.AddEntryEvent(pausedScene_ContinueSelected);
-		pausedScene.AddEntry("Controller Settings");
-		pausedScene.AddEntryEvent(pausedScene_PlayerOptionsSelected);
-		pausedScene.AddEntry("Instructions");
-		pausedScene.AddEntryEvent(pausedScene_InstructionsSelected);
-		pausedScene.AddEntry("Exit to Main Menu");
-		pausedScene.AddEntryEvent(pausedScene_ExitSelected);
+		BuildPauseEntries();
 		// Online co-op anti-griefing (card 0b8a300b). Built here with the other pause-time
 		// menus, but only ever shown to the HOST, and only once a remote pause has outlasted
 		// NetSession's offer delay -- see NetKickMenu for why this is the host's only agency.
@@ -244,6 +243,11 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		netKickMenu.AddEntryEvent(netKickMenu_KickSelected);
 		netKickMenu.AddEntry("Kick and Block");
 		netKickMenu.AddEntryEvent(netKickMenu_KickAndBlockSelected);
+		// Card 0d6ffe70. Its rows are NOT added here: they depend on state that changes between
+		// one pause and the next (a peer arriving, a room being closed), so NetHostMenu.Rebuild
+		// chooses them each time the submenu opens.
+		netHostMenu = new EvilAliensWeb.Compat.Net.NetHostMenu(base.Game);
+		netHostMenu.OnExit += netHostMenu_BackSelected;
 		exitConfirmationMenu = new ConfirmationMenu(base.Game, "Are you sure you want to exit this game session?");
 		exitConfirmationMenu.OnExit += exitConfirmationMenu_NoSelected;
 		exitConfirmationMenu.AddEntry("Yes");
@@ -1217,6 +1221,7 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		netLocalPauseUp = false;
 		netRemotePauseHeld = false;
 		netKickMenuUp = false;
+		netHostMenuUp = false;
 		// Level scenes are re-added singletons, so start every play from an empty decorative-swarm
 		// set. Terminate clears it too; this covers any exit path that never reached Terminate.
 		NetClearCosmeticSwarms();
@@ -1300,6 +1305,109 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 			// entries are inert because KickPeer no-ops without a session. Armed here, fired a
 			// couple of seconds into Update -- see netKickMenuAt.
 			netKickMenuAt = Environment.TickCount64 + NetKickMenuDelayMs;
+		}
+	}
+
+	// The pause menu's rows (card 0d6ffe70). They used to be fixed at construction; "Online Play"
+	// is CONDITIONAL -- host-only, and only while there is something behind it -- so the list is
+	// rebuilt whenever that could have changed (every pause, and after any action that removes
+	// the reason for the entry). Rebuilding beats appending/removing one entry because AddEntry
+	// only appends: an appended "Online Play" would sit past "Exit to Main Menu".
+	//
+	// Callers must Reset() the menu afterwards (or otherwise fix the selection): the list can get
+	// SHORTER here, and selectedEntry is not clamped by RemoveAllEntries.
+	private void BuildPauseEntries()
+	{
+		pausedScene.RemoveAllEntries();
+		pausedScene.AddEntry("Continue");
+		pausedScene.AddEntryEvent(pausedScene_ContinueSelected);
+		pausedScene.AddEntry("Controller Settings");
+		pausedScene.AddEntryEvent(pausedScene_PlayerOptionsSelected);
+		pausedScene.AddEntry("Instructions");
+		pausedScene.AddEntryEvent(pausedScene_InstructionsSelected);
+		if (EvilAliensWeb.Compat.Net.NetHostMenu.Available(EvilAliensWeb.Compat.Net.NetHostMenu.CurrentState()))
+		{
+			pausedScene.AddEntry("Online Play");
+			pausedScene.AddEntryEvent(pausedScene_OnlinePlaySelected);
+		}
+		pausedScene.AddEntry("Exit to Main Menu");
+		pausedScene.AddEntryEvent(pausedScene_ExitSelected);
+	}
+
+	private void pausedScene_OnlinePlaySelected(MenuSub1 sender)
+	{
+		EvilAliensWeb.Compat.Net.NetHostMenu.State state = EvilAliensWeb.Compat.Net.NetHostMenu.CurrentState();
+		if (!netHostMenu.Rebuild(state, netHostMenu_BackSelected, netHostMenu_RoomToggleSelected,
+			netHostMenu_KickSelected, netHostMenu_KickAndBlockSelected))
+		{
+			// The state moved between the pause opening and this row being chosen (the peer
+			// dropped, the level ended). Drop the now-stale row and stay on the pause menu
+			// rather than opening a submenu with nothing in it.
+			BuildPauseEntries();
+			pausedScene.Reset();
+			return;
+		}
+		pausedScene.Remove();
+		netHostMenuUp = true;
+		netHostMenu.Reset();
+		// No Setup(device), for netKickMenu's reason: MenuSub1 treats a null controller as "any
+		// device", and the alternative is pinning the host's only kick control to whichever
+		// device happened to open the pause.
+		netHostMenu.Show();
+	}
+
+	private void netHostMenu_BackSelected(MenuSub1 sender)
+	{
+		NetHideHostMenu(returnToPause: true);
+	}
+
+	private void netHostMenu_RoomToggleSelected(MenuSub1 sender)
+	{
+		Settings settings = Settings.GetInstance();
+		settings.AllowOnlineJoins = !settings.AllowOnlineJoins;
+		// The SAME switch the Options menu owns, so it persists the same way -- this submenu is
+		// a shortcut to it, not a per-run override. NetListing.Tick picks the change up on the
+		// next tick (it runs from Game1.UpdateInner, so the pause freeze does not stop it) and
+		// unlists/re-lists the SAME room code.
+		settings.SaveThreaded();
+		netHostMenu.RefreshRoomToggleLabel(EvilAliensWeb.Compat.Net.NetHostMenu.CurrentState());
+	}
+
+	private void netHostMenu_KickSelected(MenuSub1 sender)
+	{
+		NetHostMenuKick(block: false);
+	}
+
+	private void netHostMenu_KickAndBlockSelected(MenuSub1 sender)
+	{
+		NetHostMenuKick(block: true);
+	}
+
+	// Card 0d6ffe70's half of card 0b8a300b's machinery: the same KickPeer, reached deliberately
+	// from our OWN pause rather than handed to us by a remote one. Unlike NetKick above there is
+	// no freeze of the peer's to release -- ours is the pause that is up, and it stays up, so we
+	// simply go back to the pause menu with the "Online Play" row gone.
+	private void NetHostMenuKick(bool block)
+	{
+		EvilAliensWeb.Compat.Net.NetSession.KickPeer(block);
+		NetHideHostMenu(returnToPause: true);
+	}
+
+	private void NetHideHostMenu(bool returnToPause)
+	{
+		if (!netHostMenuUp)
+		{
+			return;
+		}
+		netHostMenuUp = false;
+		// Instant, not the animated Remove(): reopening it would Collection.Add a component
+		// still mid-fade, and the kick path can unwind the world underneath it.
+		netHostMenu.RemoveInstantly();
+		if (returnToPause)
+		{
+			BuildPauseEntries();
+			pausedScene.Reset();
+			pausedScene.Show();
 		}
 	}
 
@@ -1601,6 +1709,11 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		{
 			Collection.Push();
 			Collection.Add((GameComponent)(object)darkener);
+			// Card 0d6ffe70: "Online Play" is conditional, and the condition (a peer in our game
+			// / a listable room) can change between one pause and the next -- so choose the rows
+			// HERE, on the pause edge, not once in the constructor. Before Reset(), which is what
+			// puts the selection back in range if the list just got shorter.
+			BuildPauseEntries();
 			pausedScene.Reset();
 			pausedScene.Setup(controlDevice);
 			pausedScene.Show();
@@ -1712,6 +1825,10 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 			pausedScene.RemoveInstantly();
 			exitConfirmationMenu.RemoveInstantly();
 			playerOptions.RemoveInstantly();
+			// Card 0d6ffe70: the online submenu is reachable from this same pause depth, and a
+			// peer leaving while it is open (they quit, or the link died the moment before a
+			// kick) would otherwise strand it drawing over a level that is running again.
+			NetHideHostMenu(returnToPause: false);
 			Collection.Remove((GameComponent)(object)instructionsMenu);
 			netLocalPauseUp = false;
 			pausestopper.Start();

@@ -894,6 +894,15 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             byte killerSlot = NetSession.TakeKillNote(comp);
+            // AN UNATTRIBUTED CLAIM IS STILL SENT, AND THAT IS THE REPAIR PATH (card 9ccfe295).
+            // A `KillerNone` note means our own copy died a gameplay death no player landed --
+            // this peer MIS-SIMULATING state the host owns -- so the claim reads as "I have lost
+            // this id", not "I killed it". The host refuses to settle it and RE-ANNOUNCES the
+            // entity (`HandleClaim`), which is what rebuilds our puppet with the host's real
+            // spawn extras. Suppressing the send here was tried and is WRONG: we have already
+            // `MarkRemoved` the id, so with the host never told, the enemy is missing for
+            // `RecentRemovalWindowMs` and then self-heals into a generically-dressed provisional
+            // puppet that no later `EvSpawn` ever corrects.
             if (killerSlot != NetProtocol.KillerNone)
             {
                 MarkPaid(netId, killerSlot); // the local death path already paid this slot

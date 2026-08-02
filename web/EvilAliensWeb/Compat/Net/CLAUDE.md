@@ -43,6 +43,10 @@ inputs; the other peer's ship is an interpolated puppet.
   laser fire, the DANGER/WARNING arrows the bosses spawn, the big-UFO and JunkBoss charge glows,
   and Level 2's bees ambience. **One new event type (`EvFx`) for the whole family and NO protocol
   bump** -- see the transient-feedback bullet under "Protocol, NetIds & the replicable set".
+- **The vanishing laser UFO** (`9ccfe295`, with `54e9a590`, v18): a client's replicated beam
+  had no EMITTER, so a big laser UFO shot itself dead on the joiner -- and the unattributed
+  claim that followed deleted the host's live copy with no death FX at all. See the
+  unattributed-claim bullet under "Claims, score & per-slot HUD".
 - **Per-peer presentation effects** (`7a8ec0d3` / `a66e190a`, v15): a floating score is the
   KILLER's alone, and the 1up slow motion is the WORLD's -- see the presentation-effects
   bullet at the end of "Claims, score & per-slot HUD".
@@ -654,6 +658,10 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   its respawn clock, so the other peer draws the indicator too, card 37f3a663. A v16 peer ignores
   the unknown event and simply does not draw it, i.e. the pre-card behaviour, so like v14 and v15
   the bump is the batch convention rather than a forced incompatibility.
+  **v18** gives `LazerDescriptor` a `[ownerNetId:2]` SPAWN extra where it had none -- card
+  9ccfe295, see the unattributed-claim bullet under "Claims". Like v14 the block is
+  APPEND-ONLY and LENGTH-GUARDED, so an older peer degrades to exactly the pre-card behaviour
+  (an ownerless beam) rather than mis-parsing; the bump is the batch convention.
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -1208,6 +1216,85 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
       `collectionHelper.Update` -> `DetectCollisions` -> `NetSession.Update`, so a host kill in
       the COLLISION phase is dead-with-removal-queued when that same tick's `DrainRx` runs.
       Scenario 3b is that shape; 2b/2c/4c are the N-peer same-tick ones.
+- **AN UNATTRIBUTED CLAIM MEANS THE JOINER LOST THE ENTITY, NOT THAT IT KILLED IT (cards
+  9ccfe295 / 54e9a590, protocol v18).** Reported as "large (laser firing) ufo's seem to randomly
+  disappear" -- on the HOST's screen -- and "P2 does in fact shoot these, but sometimes they do
+  not play the explosion effect on P1's screen". The card guessed at a late kill message for a
+  reused object id; **the id scheme is innocent**, and the defect is a four-step chain in which
+  no single step is a bug.
+  - **The chain.** (1) `Lazer.owner` is written ONLY by `Lazer.Setup`, which no puppet runs --
+    `LazerDescriptor` builds every client beam through `SetupSingleShot`, so a joiner's beam had
+    NO emitter. (2) `UFO.CollidesWith` damages itself off any `Lazer` whose `owner != this`,
+    which with a null owner is TRUE for the ship that fired it. (3) The killing blow's
+    `NoteKill(this, other)` gets a `Lazer`, which is not an `IAlienKiller`, so the note is
+    `KillerNone`. (4) The removal seam sent `EvClaim(netId, KillerNone)` anyway and
+    `HandleClaim`'s live branch fell through to the NON-KILLABLE arm's bare `bin.Remove` -- the
+    host's healthy UFO deleted with no explosion, no cue, no award, and a `KillerNone` `EvDeath`
+    whose client branch is also a silent despawn.
+  - **WHY IT WAS INTERMITTENT, and the number that settles it.** At the exact fire pose the
+    beam's 75 px lead CLEARS the emitter's hitbox -- they do not meet. What closes the gap is
+    DRIFT: the UFO and its beam are separate puppets, corrected on separate snapshot round-robin
+    turns and dead-reckoned blind in between. Measured by the suite rather than assumed:
+    **11 px** of relative drift along the beam is enough, against a `SnapThresholdPx` of 100 and
+    corrections that blend over >= 150 ms. So it is easily reached, and reached more often as
+    `snapTurn` grows -- i.e. in the dense waves the report described.
+  - **FIX 1 -- the emitter goes on the wire.** `LazerDescriptor` gains `[ownerNetId:2]` spawn
+    extras (0 = none), resolved client-side through `NetPuppets.FindPuppet`. Ordering holds by
+    construction: the emitter's `EvSpawn` always precedes its beam's on the ORDERED reliable
+    lane (it existed first), and `ReplayLive` walks `liveList` in spawn order for a JIP peer. An
+    id that does not resolve leaves `owner` null, i.e. the pre-card behaviour.
+    **`SetupSingleShot` now CLEARS `owner`** -- `Lazer` is pooled, so a recycled beam otherwise
+    inherited the previous emitter and would spare the WRONG enemy, on BOTH peers. Same recycle
+    trap `netSweepRadPerMs` documents two lines above it -- and `Lazer.OnComponentRemoved` closes
+    its MIRROR IMAGE, the EMITTER being recycled out from under a live beam, which is a latent
+    OFFLINE bug the puppet owner merely made easier to reach.
+    **A null owner is a real answer, and only `JunkBoss` (plus `GameScene`'s off-screen warm-up
+    prime) produces one** -- both motherships fire through `Setup`, and `SpiderHelperMothership`
+    READS `lazer.owner == this`.
+  - **FIX 2 -- an unattributed claim never settles a live entity, and it is the half that
+    generalises.** `payable` is false for `KillerNone`, `KillerSelf` and any out-of-range slot;
+    `HandleClaim` now returns before the live branch, keeps the entity, counts
+    `ClaimsUnattributed` and **RE-ANNOUNCES it with `OnHostSpawn`** -- the same call the JIP
+    catch-up makes, so no new protocol. That last part is not decoration: the joiner has already
+    dropped its puppet and `MarkRemoved` the id, so without it the enemy blanks for
+    `RecentRemovalWindowMs` and then self-heals into a GENERICALLY DRESSED puppet (card
+    de4d5d65's provisional shape) with no later `EvSpawn` to correct it.
+    **THE CLIENT STILL SENDS IT, and that is the repair path rather than an oversight.** It has
+    already `MarkRemoved` the id, so a client that stayed quiet would leave the enemy missing for
+    `RecentRemovalWindowMs` and then self-heal it into a generically-dressed provisional puppet
+    no later `EvSpawn` corrects -- i.e. suppressing the send makes the two halves of this fix
+    cancel out. It was written that way first and reverted.
+    **`KillerSelf` is deliberately NOT routed here**, though it is equally unpayable: it is an
+    OPT-IN report that a real death happened (a `StarMine`'s own `Asplode`, card 4e406eba), so it
+    settles on its pre-card path and simply credits nobody. A guard written as a bare `!payable`
+    swallows it, and the claimant then watches the mine it just detonated pop back onto its
+    screen off the re-announce -- which is why the guard reads
+    `killerSlot != KillerSelf && !payable` and the arm below KEEPS its `payable` tests.
+  - **The self-hit was the loudest route to step 4, not the only one** -- which is why fix 2
+    ships even though fix 1 removes the reported symptom. `UFO.CollidesWith` calls `KilledBy`
+    DIRECTLY for `Floorbottom`, `Spider`, `FlyingSpider` and `SpiderBoss`, none of which
+    attribute anything, and a dead-reckoned puppet reaches the first of those on its own.
+  - **A BLANKET PUPPET-vs-PUPPET COLLISION FILTER WAS CONSIDERED AND DECLINED (user ruling) --
+    do not re-file it.** It looks like the tidy root fix ("the client should not simulate
+    enemy-vs-enemy at all, the host owns it"), and it has a known regression: `Floor.CollidesWith`
+    is what casts every enemy's ground shadow, so filtering the pair by "both are puppets" or by
+    "the puppet ignores non-player contacts" silently drops shadows on Mars. With fix 1 removing
+    the observed mis-simulation and fix 2 removing its destructive consequence, there is no
+    remaining victim to justify the risk.
+  - **Verify with `eaNetIdReuse()`** (`Compat/Net/NetIdReuseTest.cs`, 35 assertions;
+    `tools/headless/probes/net_id_reuse.txt`). MENU-ONLY and leave-no-trace, the `eaNetFx` shape.
+    **The leg that carries the card is a PAIR** -- the ownerless configuration DAMAGES the
+    emitter over the identical geometry and the owned one does not -- because "the UFO survived"
+    passes on a build where the two never collided at all; "another ship's beam still hurts" sits
+    beside them as the over-correction control. Mutation-tested five ways, each failing DISJOINT
+    legs, and the fifth is the evidence the card rests on: `HandleClaim` restored to its **exact**
+    pre-card shape deletes the entity, broadcasts its `EvDeath`, and leaves "no explosion was
+    spawned" still PASSING -- i.e. it reproduces the silent vanish verbatim.
+  - **KNOWN, ACCEPTED: the re-announce is 1:1 with inbound claims.** A peer spamming
+    `EvClaim(KillerNone)` makes the host emit one `EvSpawn` each -- strictly less traffic than
+    the reliable frame the attacker already sent, so it adds no amplification. Bounding a
+    hostile peer's message RATE is card `2da92af9`'s surface, not this one's.
+
 - **Score/lives: the AWARDED AMOUNT is replicated, not the combo (card b0ab09ec).** `EvDeath`
   carries what the host actually credited, per slot (`f32 x MaxSlots`), and that figure is
   authoritative on the client in every branch. Lives stay verbatim off `EvScoreSync`.

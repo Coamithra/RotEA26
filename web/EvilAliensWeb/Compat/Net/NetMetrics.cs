@@ -113,6 +113,13 @@ namespace EvilAliensWeb.Compat.Net
         public long ClaimsRx;           // host: claims received
         public long ClaimsHonored;      // host: claim settled a live entity (real kill path)
         public long ClaimsPaidDead;     // host: already dead, claimant paid from the record
+        // host: a claim we cannot credit to any slot, for an entity still LIVE -- the joiner
+        // mis-simulated a death the host owns (card 9ccfe295). The entity is kept and
+        // re-announced. Not a 0 bar and not on the `[net]` line: a peer running an older build
+        // still sends these, and one per genuine puppet-vs-puppet mishap is expected. A
+        // SUSTAINED rate means a client is killing puppets the host never kills -- read it
+        // beside `clKill`, which is the same claims that could be credited.
+        public long ClaimsUnattributed;
 
         // Score reconciliation (card b0ab09ec). Client-side only: how far the displayed score
         // had drifted from (host authoritative + our un-settled local credits) at each sync.

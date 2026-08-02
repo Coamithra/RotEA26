@@ -572,6 +572,17 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetFxTest.Run();
 		}
 
+		// JS bridge for the vanishing-laser-UFO chain (eaNetIdReuse in wwwroot/index.html;
+		// cards 9ccfe295 / 54e9a590). The beam's emitter on the wire, the self-hit it prevents
+		// with the pre-card configuration beside it as the control, and the unattributed claim
+		// that used to delete the host's live entity with no death FX at all. Menu-only and
+		// leave-no-trace.
+		[JSInvokable("debugNetIdReuse")]
+		public static string NetIdReuse()
+		{
+			return EvilAliensWeb.Compat.Net.NetIdReuseTest.Run();
+		}
+
 		// JS bridge for the per-peer presentation effects (eaNetLocalFx in wwwroot/index.html;
 		// cards 7a8ec0d3 / a66e190a). One suite for one question -- which peer sees an effect:
 		// a floating score is the killer's alone (asserted as "no popup AND the score still

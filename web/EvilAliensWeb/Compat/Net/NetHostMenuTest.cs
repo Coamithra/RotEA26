@@ -6,7 +6,8 @@ using System.Text;
 namespace EvilAliensWeb.Compat.Net
 {
     // Console self-test for the host pause menu's entry decision (card 0d6ffe70). Invoke with
-    // eaHostMenu() from the browser console, `eval HostMenuTest` under eahl, or the
+    // eaHostMenu.test() from the browser console (bare eaHostMenu() is the LIVE dump, and
+    // eaHostMenu.live() the real-session suite), `eval HostMenuTest` under eahl, or the
     // ProbeHostMenu case set in tools/sim/logic_probe.
     //
     // WHY A DECISION SUITE AND NOT A SCREENSHOT. What this card adds is almost entirely a

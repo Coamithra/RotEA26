@@ -226,9 +226,40 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
-        // The rows currently built, for eaHostMenu()'s dump of the LIVE menu (as opposed to
-        // NetHostMenuTest, which drives the pure Entries() over synthetic states).
-        internal IReadOnlyList<Entry> LiveEntries => live;
+        // The rows are chosen ONCE, when the submenu opens; the state behind them is not frozen
+        // with them. A stranger completing a join-in-progress (or a peer dropping) while this is
+        // on screen would otherwise leave the wrong shape up -- a room toggle over a game that is
+        // now in a session, or two Kick rows that no-op through KickPeer's !Active early return,
+        // both looking perfectly live. Rebuilding in place would move the selection under the
+        // player's fingers, so retract instead: doExit() raises OnExit, which is the same path
+        // "Back" takes, so the caller returns to a pause menu whose own rows are rebuilt there.
+        //
+        // The CAPTION is deliberately NOT frozen either way -- it reports the room code and the
+        // open/closed state, which the toggle on this very menu changes and which must update.
+        public override void Update(GameTime gameTime)
+        {
+            base.Update(gameTime);
+            if (live.Count > 0 && !SameEntries(live, Entries(CurrentState())))
+            {
+                doExit();
+            }
+        }
+
+        private static bool SameEntries(List<Entry> a, List<Entry> b)
+        {
+            if (a.Count != b.Count)
+            {
+                return false;
+            }
+            for (int i = 0; i < a.Count; i++)
+            {
+                if (a[i] != b[i])
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
 
         public override void DrawMenu(GameTime gameTime, float yoffset)
         {

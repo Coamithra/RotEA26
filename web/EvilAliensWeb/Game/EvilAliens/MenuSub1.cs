@@ -747,6 +747,11 @@ internal class MenuSub1 : Scene
 	// 0d6ffe70 needs the same thing for the host menu's status line, so the expression lives
 	// here instead of being copied. Derived from GetListCentre and counting VISIBLE (unlocked)
 	// entries exactly as DrawMenu does, so it tracks a font or entry-count change on its own.
+	//
+	// ASSUMES A STATIC LIST. GetListCentre answers `origin` verbatim under isScrolling (the
+	// selected entry hovers there instead of the list being centred), so adding a half-height to
+	// it means nothing for a scrolling menu; both callers are static lists. A scrolling caller
+	// needs its own expression, not this one.
 	public float GetBelowListY(float yoffset)
 	{
 		if (font == null)

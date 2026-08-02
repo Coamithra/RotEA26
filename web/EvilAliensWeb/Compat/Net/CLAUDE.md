@@ -519,7 +519,8 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   compatibility. Four shipped designs were bent around avoiding the wire by a one-batch
   coordination rule; their straighter wire-first replacements are CHARTERED at the top of the
   Backlog (analysis on the original cards' comments): `a45b78f6` a cumulative shot counter in
-  `MsgShipState` (replaces `FiringHoldMsFor` + both its residuals, card a5c2a39b), `f62116b5` an
+  `MsgShipState` -- **SHIPPED, protocol v11**, replacing `FiringHoldMsFor` and both its residuals
+  (card a5c2a39b); `f62116b5` an
   explicit death-began event (replaces the hp==0 snapshot trigger's latency + one-tick residual,
   card 303bfb5b), `e79bb994` a teleport marker (replaces the observed-velocity plausibility cap,
   card 8dabe812), `c1a38ef9` motion parameters on the wire (sent Lazer rates, card 0108d1fc +
@@ -527,9 +528,9 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   Serializing WHO edits `NetProtocol.cs` in a parallel batch is an orchestration concern; it must
   not shape the design.
 
-- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v10):** the 3
-  layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim,
-  alive|firing flags, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (see the
+- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v11):** the 3
+  layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim, alive flag,
+  CUMULATIVE shot count, shotsPerSec, bulletLife -- 32 B), `MsgWorldSnapshot` (see the
   World-snapshots bullet below), `MsgEvent` envelope with a monotone ushort seq
   (EvSpawn full base state + spawn extras / EvDeath netId+killer+pos+per-slot award / EvBlast
   pos+level / EvClaim netId+killerSlot / EvScoreSync lives+scores) + `MsgHello`/
@@ -546,7 +547,11 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   entities stop being replicated individually, card 9a3175d0, see the decorative-swarm bullet.
   No existing layout changed, but a v9 peer would ignore the beat AND still expect the
   per-entity spawns, i.e. see empty scenery -- a real incompatibility, hence the version move.
-  The transient-feedback cards add **`EvFx`** and deliberately STAY ON v10 -- the next bullet
+  **v11** replaces the `firing` LEVEL flag with a cumulative u8 shot count in `MsgShipState` AND
+  `MsgFriendState` (31 -> 32 B each) -- card a45b78f6, see the shot-counter bullet under the
+  remote ship. Both LAYOUTS changed, so a v10 peer would misparse every ship packet outright
+  rather than degrade: the least ambiguous bump in this list.
+  The transient-feedback cards add **`EvFx`** and deliberately STAY ON v10 -- two bullets down
   says why that is a decision and not an oversight).
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
@@ -1411,8 +1416,8 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   b4d0ba1d removed; see the death/reset pair above.) `PlayerShip.Update` case
   Remote -> `NetSession.DriveRemoteShip`: position sampled from `ShipStateBuffer`
   ~100 ms behind the newest sample (velocity-extrapolated max 250 ms on underrun), speed
-  zeroed; shots re-fired locally through the real `FireAt` path from the replicated firing
-  state; bombs arrive as EvBlast -> `NetDoBlast` (no local bomb-count gate). Remote ships
+  zeroed; shots respawned locally through the ship's own shot construction, paced by the
+  replicated cumulative shot COUNT (next bullet); bombs arrive as EvBlast -> `NetDoBlast` (no local bomb-count gate). Remote ships
   take NO local damage (owner decides its own hits; death arrives as the alive-flag edge ->
   local explosion FX, slot stays reserved for respawn) and CANNOT take powerups locally --
   the owning peer collects on its own screen and the pickup arrives as a claim. Hues need no
@@ -1422,56 +1427,62 @@ pausing), `6451ceaf` (a second KEYBOARD player for local co-op).
   restore it, so "host white / joiner purple" holds for DEFAULT colours; nothing normalises the
   two peers' hue tables.) The puppet's render clock advances on REAL time (never turbo/slowmo/
   hit-stop-scaled game time) -- a local hit-stop must not drag the interpolation point.
-  - **THE FIRING HOLD IS MEASURED IN PACKETS, NOT MILLISECONDS (card a5c2a39b), and getting that
-    wrong is what made one tap fire TWICE on the peer.** `firing` is a LEVEL on the wire and
-    `DriveRemoteShip` reads `buffer.Newest.Firing` EVERY tick, so the peer holds the newest
-    sample until a newer one arrives: **N packets marked firing=true = N SEND INTERVALS of
-    firing=true in front of the re-fire gate over there.** That gate is
-    `1000/shotsPerSec` -- the peer sets it from the SAME packet -- so the peer spawns
-    `1 + floor(window / period)` bullets for one tap. `SendShipState` streamed a flat
-    `FiringHoldMs` 150 ms against a 125 ms default period: **exactly two bullets per tap**, three
-    at the maxed 18/s. They are real bullets in the peer's world and damage what they hit, which
-    is why the card also reported "P1 can kill an enemy on P2's screen that is alive on P1's" --
-    one symptom, not two bugs, and the generous-claim design is working as intended underneath.
-    `NetSession.FiringHoldMsFor(shotsPerSec)` now returns **`period/2`**, floored at one send
-    interval and capped at the old 150; `NetSession.Friends.cs` uses it too (a couch player's tap
-    doubled identically, and an AI friend gained one bullet at the tail of every burst).
-    - **`P/2` IS THE BOUND AND IT HOLDS FOR EVERY SEND INTERVAL, which is the point.** If
-      `I >= H` the peer's window is exactly `I`; if `I < H` it is `ceil(H/I)*I < H + I < 2H = P`.
-      So any send interval shorter than the cadence period is safe at any frame rate.
-    - **DO NOT DERIVE IT FROM THE NOMINAL 33 ms INTERVAL -- that was tried and it is only correct
-      at exactly 60 Hz.** `SendShipState` runs off a `now - lastStreamTx >= StreamIntervalMs` gate
-      evaluated ONCE PER FRAME, so the real interval is the smallest frame multiple >= 33: 33.3 ms
-      at 60 Hz but **40 ms at 100 Hz**, and never 33.0. Counting whole nominal packets over-fires
-      at **7, 9, 10, 13, 14 and 15 shots/sec on a 100 Hz display** -- ordinary in-play rates. Note
-      the direction: a hitched frame is a DOUBLING risk here, not a missed-bullet one, because
-      `ceil(H/I)*I` GROWS with `I`. (A fraction-of-the-period hold was the attempt before that;
-      0.6 x the 62.5 ms period at 16/s is 37.5 ms, which still catches two 33 ms-apart sends.)
-    - **TWO RESIDUALS, accepted (do not re-derive them):** (a) from 15/s up the floor binds, so a
-      tap rides a single packet with no redundancy and a stream-lane DROP loses that bullet on the
-      peer -- the kill still counts on the owner's screen, where the bullet was real; exactness
-      under loss needs a shot COUNT or a fire EDGE on the wire, i.e. a protocol version, judged
-      not worth it for one cosmetic bullet at one end of the range. (b) a send interval at or past
-      the cadence period (below ~18 fps at the top fire rate) cannot represent that cadence at all
-      and doubles again -- nothing a level encoding can do. Revisit (a) if real-network playtests
-      show missing tap bullets.
-    - **NOT FIXED, and unchanged by the card: `PlayerShip.FireAt` stamps `NetLastFireMs` on the
-      INTENT, before its own cadence gate.** So a second tap inside one cadence period restarts
-      the hold while spawning no local bullet -- two taps ~80 ms apart are ONE bullet on the owner
-      and TWO on the peer. The pre-card 150 ms hold did the same, so it is pre-existing rather
-      than a regression, and stamping on the actual SHOT instead would leave the hold uncovered
-      between shots (`H < P` by construction) and trade it for a stretched sustained cadence.
-      Wants its own card and its own measurement.
-    - **Verify with `eaNetFire()`** (`Compat/Net/NetFireTest.cs`, 16 assertions;
-      `tools/headless/probes/net_single_tap.txt`). **DESTRUCTIVE** like `eaNetPickup` -- it pairs
-      a real host session onto the live level and fires real bullets into it, so use a throwaway
-      `?level=Level2&invuln` boot. It COUNTS the bullets a scripted tap spawns on a real puppet,
-      with the PRE-CARD packet pattern beside it as the control (which must still report 2), and
-      asserts the bound as a pure decision over the whole 1..18 domain CROSSED WITH the send
-      intervals a real frame rate produces. **Read leg 1 as the rigorous half**: the rig sends at
-      one cadence with packets on tick boundaries, so the end-to-end legs sample ONE phase at
-      60 Hz -- both the nominal-packet and the 0.6-fraction mutations pass every one of them and
-      fail only leg 1.
+  - **THE WIRE CARRIES A CUMULATIVE SHOT COUNT, NOT A FIRE INTENT (card a45b78f6), and the
+    history is worth 30 seconds because the same trap is one design away in any state stream.**
+    `MsgShipState` carries a wrapping u8 of the shots the owner's ship has actually SPAWNED,
+    stamped inside `PlayerShip.FireAt`'s cadence gate beside the `Bullet` it counts; the receiver
+    (`NetApplyRemoteState`) takes the wrapped DELTA against the last count it applied and spends it
+    through the ship's own `SpawnShot` -- **with no second cadence gate**, because the owner's
+    counter is already the pacing. `NetSession.Friends.cs` streams the same field for couch players
+    and AI friends. It is the delta that means anything; the absolute value belongs to one ship and
+    wraps every 256 shots.
+    - **WHAT IT REPLACED.** `firing` used to be a LEVEL sampled at packet rate, and
+      `DriveRemoteShip` read `buffer.Newest.Firing` EVERY tick -- so **N packets marked firing=true
+      = N SEND INTERVALS of firing=true in front of the re-fire gate over there**, and that gate
+      was `1000/shotsPerSec`, set from the SAME packet. The peer therefore spawned
+      `1 + floor(window / period)` bullets for one tap: a flat 150 ms hold against a 125 ms default
+      period is **exactly two bullets per tap**, three at the maxed 18/s. They are real bullets in
+      the peer's world and damage what they hit, which is why the card also reported "P1 can kill
+      an enemy on P2's screen that is alive on P1's" -- one symptom, not two bugs, with the
+      generous-claim design working as intended underneath. Card a5c2a39b bounded the sender's hold
+      at `P/2` (floored at one send interval, capped at 150), which held -- and left two residuals
+      that could not be fixed inside a level at all.
+    - **BOTH RESIDUALS ARE GONE, and they went for ONE reason: a cumulative count says what
+      HAPPENED, where a level says what is happening NOW.** (a) At the top fire rates the hold was
+      one packet wide, so a stream-lane DROP silently lost that bullet on the peer; a count is
+      carried in full by the next packet, so loss, reorder and lateness all cost nothing. (b) The
+      intent was stamped BEFORE the owner's own gate, so two taps inside one cadence period were
+      one bullet for the owner and TWO for the peer; the increment now happens where the bullet
+      does, so it is one of each on both screens.
+    - **THE RECEIVER SPENDS AT MOST ONE OWED SHOT PER TICK.** A delta that arrives bunched (after
+      loss, or a late packet) drains over the next few ticks instead of stacking bullets on one
+      point. It is not a rate limit -- nothing is ever dropped.
+    - **A delta past `NetMaxCatchUpShots` (6) is a RESYNC, not catch-up: the count is adopted and
+      nothing is fired.** Six shots is ~330 ms of continuous loss even at 18/s, past the point
+      where exactness means anything -- and the case it really guards is a peer whose ship
+      RESPAWNED, since `PlayerShip.Initialize` resets the counter to 0 and a raw delta from 200
+      would be a magazine nobody fired. (The ordinary respawn is already covered by construction:
+      the puppet is torn down on the alive edge and its replacement baselines from the first packet
+      it sees, `Initialize` resetting the receive-side latch for the same pooling reason.)
+    - **`ShipFlagFiring` and `ShipSample.Firing` are DELETED**, and `NetSession` holds no
+      sender-side timing on this path at all. That is what let the suite grow a real SENDER leg:
+      the old stamp read `Environment.TickCount64`, so driving it end to end would have needed a
+      clock seam on `FireAt` whose only reader was the test -- the call card d53431b4 declined for
+      the same reason.
+    - **Verify with `eaNetFire()`** (`Compat/Net/NetFireTest.cs`, 26 assertions;
+      `tools/headless/probes/net_single_tap.txt`). **DESTRUCTIVE** like `eaNetPickup` -- it pairs a
+      real host session onto the live level, fires real bullets into it AND drives the local
+      player's ship through scripted input, so use a throwaway `?level=Level2&invuln` boot. Six
+      legs: the wrapped-delta decision over the whole 0..255 domain (the rigorous, phase-
+      independent half), the SENDER's counter against the bullets it really spawned (including the
+      two-taps-in-one-period case), then one shot = one bullet end to end, a +2 step, a burst with
+      four of ten packets dropped, and an exact sustained cadence. **The negative control is a
+      REFERENCE IMPLEMENTATION rather than the old code**, which is deleted: `PreCardTapBullets` /
+      `PreCardLossBullets` mirror the firing-LEVEL rule on the same inputs and must give the wrong
+      answers (2 for one tap, 6 of 10 under the loss pattern). Mutation-tested three ways, each
+      failing disjoint legs -- the intent-side stamp fails ONLY the sender leg, one-bullet-per-
+      counter-change fails only the +2 and loss legs, and a signed (unwrapped) delta fails only
+      leg 1's arithmetic.
 
 ## Metrics & verification
 

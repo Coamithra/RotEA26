@@ -7,82 +7,72 @@ using Microsoft.Xna.Framework;
 
 namespace EvilAliensWeb.Compat.Net
 {
-    // eaNetFire() -- the verification for card a5c2a39b: "if P1 taps once to shoot a single
-    // bullet, P2 sees TWO bullets flying". Run it inside a level, or `eval NetFire` under eahl.
-    // Committed as tools/headless/probes/net_single_tap.txt.
+    // eaNetFire() -- the verification for the co-op fire replication: the bullets a peer sees must
+    // be exactly the bullets their owner fired, one for one, however the packets fall. Run it
+    // inside a level, or `eval NetFire` under eahl. Committed as
+    // tools/headless/probes/net_single_tap.txt.
     //
-    // THE BUG, MEASURED. The card guessed we replicate mousedown+location. We do not: the wire
-    // carries firing STATE on MsgShipState and the peer re-fires through the REAL FireAt path
-    // (NetSession.DriveRemoteShip -> PlayerShip.NetApplyRemoteState). The defect was arithmetic.
-    //   * PlayerShip.FireAt stamps NetLastFireMs every tick the trigger is held, BEFORE its own
-    //     cadence gate -- so one tap is one intent at one instant.
-    //   * SendShipState streamed firing = (now - NetLastFireMs < 150 ms) -- a flat window.
-    //   * The peer reads buffer.Newest.Firing EVERY tick and re-fires through a gate whose
-    //     period it set from the SAME packet (1000/shotsPerSec = 125 ms at the default 8/s).
-    // 150 ms of firing=true in front of a 125 ms gate spawns 1 + floor(150/125) = 2 bullets. The
-    // second one is a real bullet in the peer's world and damages what it hits, which is exactly
-    // the card's other symptom: "P1 can kill an enemy on P2's screen that is alive on P1's".
+    // THE ORIGINAL BUG (card a5c2a39b) was arithmetic: the wire carried `firing` as a LEVEL, the
+    // peer re-fired from it through a cadence gate it set from the SAME packet, and a flat 150 ms
+    // hold in front of a 125 ms period spawned 1 + floor(150/125) = TWO bullets for one tap (three
+    // at the maxed 18/s). Those are real bullets in the peer's world and damage what they hit,
+    // which is the card's other symptom -- "P1 can kill an enemy on P2's screen that is alive on
+    // P1's". That card bounded the hold at P/2 and left two residuals it could not close.
     //
-    // THE FIX IS A BOUND ON THE HOLD, WHICH IS WHY LEG 1 IS SHAPED THE WAY IT IS. The peer holds
-    // the newest sample until a newer one arrives, so a hold of H ms puts firing=true in front of
-    // the re-fire gate for `ceil(H / I) * I` ms over there, where I is the REAL send interval --
-    // not for H ms. `FiringHoldMsFor` returns P/2 (floored at one send interval, capped at the old
-    // 150), because if I >= H that window is I and if I < H it is under H + I < 2H = P: safe at
-    // EVERY send interval below the cadence period.
-    //
-    // TWO WRONG ANSWERS WERE MEASURED FIRST, and leg 1 exists to catch both. A plain
-    // fraction-of-the-period hold (0.6 * the 62.5 ms period at 16 shots/s = 37.5 ms) still catches
-    // TWO 33 ms-apart sends. Counting whole NOMINAL 33 ms packets is right at 60 Hz and wrong
-    // everywhere else: the send gate is evaluated once per frame, so the real interval is 40 ms at
-    // 100 Hz, and that over-fires at 7, 9, 10, 13, 14 and 15 shots/sec. So leg 1 sweeps the send
-    // INTERVAL as well as the fire rate.
+    // THIS SUITE NOW COVERS THE REPLACEMENT (card a45b78f6): a CUMULATIVE u8 shot count in
+    // MsgShipState, incremented inside PlayerShip.FireAt's cadence gate beside the Bullet it
+    // counts, spent by the receiver as a wrapped DELTA through the same shot construction with no
+    // second gate. Both residuals fall out of that rather than being traded against each other:
+    //   * a dropped or reordered stream packet costs nothing -- the count is cumulative, so the
+    //     next packet carries the total (leg 5);
+    //   * two taps inside one cadence period are ONE increment, because the increment happens
+    //     where the bullet does, not where the intent does (leg 2).
     //
     // WHAT EACH LEG IS FOR.
-    //   1  the contract, as a pure decision: the marked-packet window must stay under one cadence
-    //      period, for every reachable shotsPerSec CROSSED WITH every send interval a real frame
-    //      rate produces. The PRE-CARD flat 150 ms hold is computed beside it as the negative
-    //      control and must VIOLATE it -- so a predicate that had degenerated into "always true"
-    //      cannot pass this leg.
-    //   2  the symptom, end to end over a real NetWire: a scripted peer taps once, the real
-    //      remote puppet is driven at 60 Hz, and the bullets it spawns are COUNTED. Exactly 1.
-    //   3  the same at shotsPerSec 18 -- the tightest period (55.6 ms), where the fix has the
-    //      least room and the residual lives.
-    //   4  THE NEGATIVE CONTROL FOR LEG 2, and the reason a green run here means anything: the
-    //      identical rig is fed the packet pattern the PRE-CARD sender produced for one tap
-    //      (5 marked packets instead of 2) and must report 2 bullets. If leg 4 ever reports 1,
-    //      the rig has stopped being able to see the bug and legs 2-3 are worthless.
-    //   5  the overcorrection guard: a sustained hold must still produce the OWNER'S cadence,
-    //      not one bullet per packet and not zero. Without it, "always 1 bullet" -- a re-fire
-    //      that had stopped working entirely -- would pass legs 2-4.
+    //   1  the delta arithmetic as a PURE DECISION, swept over the whole 0..255 wrap domain plus
+    //      the resync bound. Phase-independent, so it is the rigorous half: legs 3-6 script one
+    //      packet cadence and therefore sample one phase of it.
+    //   2  THE SENDER, which the pre-card design could not test at all (its stamp read
+    //      Environment.TickCount64, so driving it needed a clock seam on FireAt whose only reader
+    //      would have been this suite). The counter has no clock, so the real local ship is driven
+    //      through the real input path and its increments are compared against the bullets it
+    //      really spawned -- including the two-taps-in-one-period case, which must be ONE of each.
+    //   3  the symptom end to end over a real NetWire: a scripted peer's count goes up by one, the
+    //      real remote puppet is driven at 60 Hz, and the bullets it spawns are COUNTED. Exactly 1.
+    //   4  the same at the maxed fire rate, plus a count that arrives +2 at once (two taps a full
+    //      period apart, i.e. two real bullets) which must produce exactly 2.
+    //   5  PACKET LOSS mid-burst -- the leg the old design could not have passed. Four of the
+    //      burst's packets never reach the wire and the count is still exact.
+    //   6  sustained fire runs at the OWNER'S cadence, now as an EXACT number rather than a band:
+    //      the peer fires what the counter says and nothing else.
     //
-    // LEG 1 IS THE RIGOROUS HALF AND LEGS 2-4 ARE PHASE SAMPLES -- MEASURED, not asserted. The rig
-    // sends at ONE cadence (60 Hz, SendIntervalMs) with each packet on a tick boundary, so the
-    // end-to-end legs see one phase of the tap-vs-send-vs-cadence alignment and a hold that is
-    // only marginally too long can land on the safe side of it. Mutation-tested: the 0.6-fraction
-    // hold fails leg 1 at 16/s while legs 2-5 ALL PASS, the 18/s one included, because its second
-    // bullet falls one tick outside the burst. So do not read a green leg 3 as covering the top of
-    // the range, and do not read any of 2-5 as covering a non-60 Hz sender; leg 1 covers both.
-    //
-    // THE SENDER-SIDE STAMP IS COVERED BY LEG 1 ONLY, on purpose. PlayerShip.FireAt reads
-    // Environment.TickCount64 directly while NetSession reads NetHost.Current, so driving the
-    // send half end to end on a pinned clock would need a clock seam on FireAt whose only reader
-    // is this suite -- the same call declined on card d53431b4's mute half (no cue counter in
-    // SoundManager for one test). Leg 1 tests the decision the stamp feeds instead.
+    // THE NEGATIVE CONTROL IS A REFERENCE IMPLEMENTATION, not the old code (which is deleted).
+    // `PreCardTapBullets` / `PreCardLossBullets` are pure mirrors of the firing-LEVEL rule, run on
+    // the same inputs as legs 3 and 5, and asserted to give the WRONG answer -- 2 bullets for one
+    // tap and a short count under loss. Without them a green run says nothing: a rig that had
+    // stopped exercising the fire path at all would report 1 bullet everywhere. (The
+    // CollisionBench.ReferencePass idiom.)
     //
     // *** DESTRUCTIVE, like eaNetPickup / eaNetResetSpawn. *** It pairs a real session onto the
-    // live level, seats a Remote puppet and fires real Bullets into the live world. Run it in a
-    // throwaway ?level=Level2&invuln boot, never in a game you care about. Teardown stops the
-    // session, sweeps the bullets it spawned and frees the Remote seat.
+    // live level, seats a Remote puppet, fires real Bullets into the live world and drives the
+    // LOCAL player's ship through scripted input. Run it in a throwaway ?level=Level2&invuln boot,
+    // never in a game you care about. Teardown stops the session, sweeps the bullets it spawned,
+    // releases the scripted input and frees the Remote seat.
     internal static class NetFireTest
     {
         private const string Room = "netfire";
         private const ulong PeerToken = 0x1A5E27C0UL;
 
-        // The pre-card sender: a flat 150 ms hold regardless of fire rate. Leg 1's negative
-        // control and leg 4's input, so it is named once rather than spelled twice.
+        // The pre-card sender: a flat 150 ms hold regardless of fire rate, in front of a
+        // 1000/shotsPerSec re-fire gate. The reference implementation's input.
         private const float PreCardHoldMs = 150f;
 
-        // One game tick at 60 Hz. The rig drives the puppet by hand at exactly this rate so the
+        // PlayerShip's catch-up bound, restated for the messages. Kept as a literal rather than a
+        // second internal accessor: leg 1 asserts the real predicate's behaviour AT this value, so
+        // a drift between the two fails the leg rather than hiding in it.
+        private const int MaxCatchUp = 6;
+
+        // One game tick at 60 Hz. The rig drives the ships by hand at exactly this rate so the
         // bullet counts are a function of the scripted packets and nothing else.
         private const float TickMs = 1000f / 60f;
 
@@ -97,7 +87,7 @@ namespace EvilAliensWeb.Compat.Net
 
         public static string Run()
         {
-            StringBuilder sb = new StringBuilder("[netfire] single-tap bullet count (card a5c2a39b)\n");
+            StringBuilder sb = new StringBuilder("[netfire] replicated shot count (cards a5c2a39b / a45b78f6)\n");
             int pass = 0;
             int fail = 0;
             void Check(string what, bool ok)
@@ -106,19 +96,19 @@ namespace EvilAliensWeb.Compat.Net
                 if (ok) { pass++; } else { fail++; }
             }
 
-            // Leg 1 needs no world at all, so it runs before the gate -- the contract is still
-            // worth reporting from a menu boot even though the end-to-end legs are not reachable.
-            LegContract(sb, Check);
+            // Leg 1 needs no world at all, so it runs before the gate -- the arithmetic is still
+            // worth reporting from a menu boot even though the live legs are not reachable.
+            LegDelta(sb, Check);
 
             if (GameScene.NetActiveScene == null)
             {
-                sb.Append("  SKIP legs 2-5 (need a live level -- boot ?level=Level2&invuln and run it there)\n");
+                sb.Append("  SKIP legs 2-6 (need a live level -- boot ?level=Level2&invuln and run it there)\n");
                 sb.Append(Tally(pass, fail));
                 return sb.ToString();
             }
             if (NetSession.Active)
             {
-                sb.Append("  SKIP legs 2-5 (a co-op session is already up -- this suite would tear it down)\n");
+                sb.Append("  SKIP legs 2-6 (a co-op session is already up -- this suite would tear it down)\n");
                 sb.Append(Tally(pass, fail));
                 return sb.ToString();
             }
@@ -133,6 +123,7 @@ namespace EvilAliensWeb.Compat.Net
             NetHost.Current = clock;
             try
             {
+                LegSender(sb, Check, oracle, bin, game);
                 RunLegs(sb, Check, oracle, bin, game, clock);
             }
             catch (Exception ex)
@@ -141,7 +132,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             finally
             {
-                sb.Append(" 6. teardown\n");
+                sb.Append(" 7. teardown\n");
                 Teardown(sb, Check, oracle, bin, playersBefore);
                 NetHost.Current = hostBefore;
                 Check("the injected clock is handed back", ReferenceEquals(NetHost.Current, hostBefore));
@@ -151,106 +142,212 @@ namespace EvilAliensWeb.Compat.Net
             return sb.ToString();
         }
 
-        // ---- 1. the contract, as a pure decision --------------------------------------------
+        // ---- 1. the delta arithmetic, as a pure decision --------------------------------------
 
-        // The send intervals to hold the contract against. `SendShipState` runs off a
-        // `now - lastStreamTx >= StreamIntervalMs` gate evaluated ONCE PER FRAME, so the real
-        // interval is the smallest frame multiple >= 33 -- never the nominal 33.0. These are the
-        // values that produces at the refresh rates this game is played at: 60 Hz (2 frames),
-        // 100 Hz (4), 75 Hz (3 x 13.3), 50 Hz (2), 30 Hz (2) and a doubled 60 Hz frame.
-        //
-        // SWEEPING THIS IS THE POINT OF THE LEG. Asserting only at the nominal 33 would restate
-        // FiringHoldMsFor's own arithmetic back at it, and the first version of this card did
-        // exactly that: it counted whole 33 ms packets, passed at 60 Hz, and over-fired at 7, 9,
-        // 10, 13, 14 and 15 shots/sec on a 100 Hz display.
-        private static readonly float[] SendIntervalsMs = { 33.3333f, 40f, 39.9999f, 50f, 66.6667f, 55f };
-
-        private static void LegContract(StringBuilder sb, Action<string, bool> Check)
+        private static void LegDelta(StringBuilder sb, Action<string, bool> Check)
         {
-            sb.Append(" 1. the hold-window contract over every fire rate AND every send interval\n");
-            int violations = 0;
-            int preCardViolations = 0;
-            string firstViolation = null;
-            foreach (float interval in SendIntervalsMs)
+            sb.Append(" 1. the wrapped-delta decision over the whole u8 domain\n");
+            // Every (last, received) pair in the domain: a delta the receiver will SPEND must
+            // equal the unsigned distance the counter really moved, and a step past the catch-up
+            // bound must be refused outright. Sweeping it is the point -- the live legs below only
+            // ever produce the handful of deltas their scripted bursts happen to contain.
+            int wrong = 0;
+            int spendable = 0;
+            string firstWrong = null;
+            for (int last = 0; last < 256; last++)
             {
-                for (int shots = 1; shots <= 18; shots++)
+                for (int step = 0; step < 256; step++)
                 {
-                    float period = 1000f / shots;
-                    // A send interval at or past the cadence period cannot represent that cadence
-                    // at all (documented residual, below ~18 fps at the top fire rate) -- so the
-                    // contract is only claimed where the sender can actually keep up.
-                    if (interval >= period)
+                    byte received = (byte)(last + step);
+                    int delta = PlayerShip.NetShotDelta(received, (byte)last, out bool resync);
+                    bool ok = resync ? (step > MaxCatchUp && delta == 0) : (delta == step);
+                    if (!ok)
                     {
-                        continue;
+                        wrong++;
+                        firstWrong ??= "last=" + last + " received=" + received;
                     }
-                    if (MarkedWindowMs(NetSession.FiringHoldMsFor(shots), interval) >= period)
-                    {
-                        violations++;
-                        firstViolation ??= shots + "/s at " + interval.ToString("0.##") + "ms sends";
-                    }
-                    if (MarkedWindowMs(PreCardHoldMs, interval) >= period)
-                    {
-                        preCardViolations++;
-                    }
+                    if (!resync) { spendable++; }
                 }
             }
-            Check("no fire rate spans a cadence period at ANY send interval"
-                + (violations == 0 ? "" : " -- first violation at " + firstViolation),
-                violations == 0);
-            // The negative control. Without it a FiringHoldMsFor that had collapsed to something
-            // trivially small would sail through the leg above while dropping every tap.
-            Check("NEGATIVE the pre-card flat " + PreCardHoldMs + " ms hold DOES span one"
-                + " (violates in " + preCardViolations + " rate/interval combinations)",
-                preCardViolations > 0);
-            Check("... and it violates at the DEFAULT 8 shots/sec on a 60 Hz sender -- the"
-                + " reported case", MarkedWindowMs(PreCardHoldMs, 33.3333f) >= 1000f / 8f);
-            // The other half of the trade: a hold shorter than one send interval would expire
-            // between two packets and lose the tap outright.
-            int unsendable = 0;
-            for (int shots = 1; shots <= 18; shots++)
+            Check("every counter step in 0..255 is spent exactly once, or refused as a resync"
+                + (wrong == 0 ? "" : " -- first wrong at " + firstWrong), wrong == 0);
+            // The wrap itself, named rather than left inside the sweep -- it is the property a
+            // plain subtraction would get wrong (255 -> 2 as a signed difference is -253), and
+            // the one a reader comes here to check. Both cases are inside the catch-up bound, so
+            // they are really SPENT rather than refused.
+            Check("the counter WRAPS: 255 -> 2 is 3 shots, 255 -> 0 is 1",
+                PlayerShip.NetShotDelta(2, 255, out _) == 3
+                && PlayerShip.NetShotDelta(0, 255, out _) == 1);
+            // The bound, both sides of it. A resync must fire nothing: a peer whose ship respawned
+            // restarts its counter at 0, which as a raw delta is a magazine we do not owe.
+            Check("a step of " + MaxCatchUp + " is still catch-up and is fired in full",
+                PlayerShip.NetShotDelta((byte)MaxCatchUp, 0, out bool atBound) == MaxCatchUp && !atBound);
+            Check("a step of " + (MaxCatchUp + 1) + " is a resync: adopted, nothing fired",
+                PlayerShip.NetShotDelta((byte)(MaxCatchUp + 1), 0, out bool overBound) == 0 && overBound);
+            // Non-degeneracy AND the bound's independence from where the counter happens to
+            // stand: exactly steps 0..MaxCatchUp are spendable, from EVERY one of the 256
+            // starting values. Without this the sweep above would also pass on a predicate that
+            // called everything a resync -- which would silently stop replicating fire entirely.
+            Check("exactly the first " + (MaxCatchUp + 1) + " steps are spendable, from every"
+                + " starting count (spendable=" + spendable + ")",
+                spendable == 256 * (MaxCatchUp + 1));
+            // The reference implementation, on the reported case. It is the control legs 3 and 5
+            // lean on, so it is asserted here too: a control that had stopped modelling the bug
+            // would make their disagreement meaningless.
+            int preCardTap = PreCardTapBullets(PreCardHoldMs, SendIntervalMs, 8);
+            int preCardMaxed = PreCardTapBullets(PreCardHoldMs, SendIntervalMs, 18);
+            Check("NEGATIVE the pre-card firing-LEVEL rule spawns " + preCardTap + " bullets for ONE"
+                + " tap at 8 shots/sec (the reported bug)", preCardTap == 2);
+            Check("... and " + preCardMaxed + " at the maxed 18 shots/sec", preCardMaxed == 3);
+        }
+
+        // ---- the reference implementation (the deleted firing-LEVEL rule) ---------------------
+
+        // What the PRE-CARD sender+receiver pair produced for ONE tap: the sender marked
+        // ceil(hold / interval) packets, the peer held each marked sample for one whole send
+        // interval, and re-fired through a 1000/shotsPerSec gate -- so it spawned
+        // 1 + floor(window / period) bullets. This is the arithmetic card a5c2a39b measured; it is
+        // here as the thing the counter design has to beat, not as live code.
+        private static int PreCardTapBullets(float holdMs, float intervalMs, int shotsPerSec)
+        {
+            float period = 1000f / Math.Max(shotsPerSec, 1);
+            int markedPackets = Math.Max(1, (int)Math.Ceiling(holdMs / intervalMs - 1e-4f));
+            float window = markedPackets * intervalMs;
+            return 1 + (int)Math.Floor(window / period);
+        }
+
+        // What the same pair produced for a sustained burst under LOSS. A level says only "firing
+        // now", so a packet that never arrives is a firing interval that never happened and the
+        // peer simply fires fewer times: residual (a) of card a5c2a39b, and the reason the counter
+        // design exists.
+        private static int PreCardLossBullets(int ownerShots, int shotsInDroppedPackets)
+        {
+            return ownerShots - shotsInDroppedPackets;
+        }
+
+        // ---- 2. the sender ---------------------------------------------------------------------
+
+        // The local ship, driven through the REAL input path (DebugInput -> InputHandler ->
+        // PlayerShip.Update -> FireAt) so the counter is exercised exactly as play exercises it.
+        // The subject is the pairing of the two statements inside FireAt's cadence gate: a bullet
+        // and an increment, never one without the other.
+        private static void LegSender(StringBuilder sb, Action<string, bool> Check, Oracle oracle,
+            ComponentBin bin, Game game)
+        {
+            sb.Append(" 2. the SENDER -- the local ship's counter against the bullets it spawned\n");
+            PlayerShip local = FindShip(oracle, 0);
+            InputHandler input = ServiceHelper.Get<IInputHandlerService>().InputHandler;
+            bool ready = local != null && input != null;
+            Check("PRECONDITION a live local ship at slot 0 and a reachable InputHandler", ready);
+            if (!ready)
             {
-                if (NetSession.FiringHoldMsFor(shots) < NetSession.StreamIntervalMs)
-                {
-                    unsendable++;
-                }
+                return;
             }
-            Check("every fire rate still holds for at least one nominal send interval, so no tap"
-                + " goes unsent (unsendable=" + unsendable + ")", unsendable == 0);
-            sb.Append("    holds: 8/s=" + NetSession.FiringHoldMsFor(8) + "ms, 15/s="
-                + NetSession.FiringHoldMsFor(15) + "ms, 18/s=" + NetSession.FiringHoldMsFor(18)
-                + "ms (floor " + NetSession.StreamIntervalMs + ", ceiling " + PreCardHoldMs + ")\n");
+            try
+            {
+                // A single tap: one tick of held fire. One bullet, one increment.
+                SweepBullets(bin, game, 0);
+                byte before = local.NetShotCount;
+                int fired = SenderTap(input, local, bin, game, gapTicks: 12);
+                byte after = local.NetShotCount;
+                Check("one tap spawns one bullet and moves the counter by one (bullets=" + fired
+                    + " counter+" + (byte)(after - before) + ")",
+                    fired == 1 && (byte)(after - before) == 1);
+
+                // TWO taps inside ONE cadence period. The owner's gate swallows the second, so it
+                // is one bullet -- and it must be ONE increment, or the peer fires a bullet that
+                // never existed here. This is card a5c2a39b's second residual: the pre-card stamp
+                // sat on the INTENT, before the gate, which is what made it two on the peer.
+                SweepBullets(bin, game, 0);
+                before = local.NetShotCount;
+                fired = SenderDoubleTap(input, local, bin, game, gapTicks: 3);
+                after = local.NetShotCount;
+                Check("two taps INSIDE one cadence period are one bullet AND one increment"
+                    + " (bullets=" + fired + " counter+" + (byte)(after - before) + ")",
+                    fired == 1 && (byte)(after - before) == 1);
+
+                // The control for it: the same two taps a full period apart really are two of
+                // each. Without this a counter wired never to increment would pass the leg above.
+                SweepBullets(bin, game, 0);
+                before = local.NetShotCount;
+                fired = SenderDoubleTap(input, local, bin, game, gapTicks: 12);
+                after = local.NetShotCount;
+                Check("CONTROL two taps a full period APART are two bullets and two increments"
+                    + " (bullets=" + fired + " counter+" + (byte)(after - before) + ")",
+                    fired == 2 && (byte)(after - before) == 2);
+
+                // A held trigger: one increment per bullet over a run long enough that an
+                // off-by-one per shot would show.
+                SweepBullets(bin, game, 0);
+                before = local.NetShotCount;
+                fired = SenderHold(input, local, bin, game, ticks: 60);
+                after = local.NetShotCount;
+                Check("a held trigger increments once per bullet over a full second (bullets="
+                    + fired + " counter+" + (byte)(after - before) + ")",
+                    fired > 1 && (byte)(after - before) == fired);
+            }
+            finally
+            {
+                DebugInput.Hold("Mouse1", down: false);
+                SweepBullets(bin, game, 0);
+            }
         }
 
-        // Worst case (the tap landing the instant after a send): a hold of h ms marks
-        // ceil(h / interval) sends, and the peer then sees firing=true for that many INTERVALS,
-        // because it holds the newest sample until the next one lands. This is the quantity the
-        // cadence period has to beat -- and the quantity a hold reasoned about purely in ms, or
-        // against the nominal interval alone, gets wrong.
-        private static float MarkedWindowMs(float holdMs, float intervalMs)
+        private static int SenderTap(InputHandler input, PlayerShip ship, ComponentBin bin,
+            Game game, int gapTicks)
         {
-            return MarkedPackets(holdMs, intervalMs) * intervalMs;
+            DebugInput.Hold("Mouse1", down: true);
+            SenderTicks(input, ship, bin, 1);
+            DebugInput.Hold("Mouse1", down: false);
+            SenderTicks(input, ship, bin, gapTicks);
+            return Census(game, 0);
         }
 
-        private static int MarkedPackets(float holdMs, float intervalMs)
+        private static int SenderDoubleTap(InputHandler input, PlayerShip ship, ComponentBin bin,
+            Game game, int gapTicks)
         {
-            return Math.Max(1, (int)Math.Ceiling(holdMs / intervalMs - 1e-4f));
+            DebugInput.Hold("Mouse1", down: true);
+            SenderTicks(input, ship, bin, 1);
+            DebugInput.Hold("Mouse1", down: false);
+            SenderTicks(input, ship, bin, gapTicks);
+            DebugInput.Hold("Mouse1", down: true);
+            SenderTicks(input, ship, bin, 1);
+            DebugInput.Hold("Mouse1", down: false);
+            SenderTicks(input, ship, bin, 12);
+            return Census(game, 0);
         }
 
-        // How many packets a hold marks at the cadence THIS RIG sends at -- what legs 2-4 have to
-        // script to reproduce one tap.
-        private static int RigPackets(float holdMs)
+        private static int SenderHold(InputHandler input, PlayerShip ship, ComponentBin bin,
+            Game game, int ticks)
         {
-            return MarkedPackets(holdMs, SendIntervalMs);
+            DebugInput.Hold("Mouse1", down: true);
+            SenderTicks(input, ship, bin, ticks);
+            DebugInput.Hold("Mouse1", down: false);
+            SenderTicks(input, ship, bin, 2);
+            return Census(game, 0);
         }
 
-        // ---- 2-5. the end-to-end legs -------------------------------------------------------
+        // One tick of the sender: the real InputHandler poll (which is what drains the scripted
+        // hold) followed by the ship's own Update, which is where FireAt lives.
+        private static void SenderTicks(InputHandler input, PlayerShip ship, ComponentBin bin, int ticks)
+        {
+            GameTime gt = new GameTime(TimeSpan.Zero, TimeSpan.FromMilliseconds(TickMs));
+            for (int i = 0; i < ticks; i++)
+            {
+                input.Update();
+                ship.Update(gt);
+                bin.TopOfTickFlush();
+            }
+        }
+
+        // ---- 3-6. the end-to-end legs ---------------------------------------------------------
 
         private static void RunLegs(StringBuilder sb, Action<string, bool> Check, Oracle oracle,
             ComponentBin bin, Game game, PinnedNetHost clock)
         {
-            sb.Append(" 2. rig -- a real HOST session, a scripted peer and its ship puppet\n");
-            bool rosterOk = oracle.Players == 1 && oracle.IsSeated(0) && oracle.IsAlive(0);
-            Check("PRECONDITION one local player at slot 0 with a live ship (players="
+            sb.Append(" 3. rig -- a real HOST session, a scripted peer and its ship puppet\n");
+            bool rosterOk = oracle.IsSeated(0) && oracle.IsAlive(0);
+            Check("PRECONDITION a local player at slot 0 with a live ship (players="
                 + oracle.Players + ")", rosterOk);
             if (!rosterOk)
             {
@@ -266,6 +363,7 @@ namespace EvilAliensWeb.Compat.Net
             InMemoryTransport peer = wire[1];
             ushort shipSeq = 1;
             uint shipMs = 100;
+            byte shotCount = 0;
 
             NetSession.StartForTest(game, host: true, ours, Room);
             peer.Open(Room);
@@ -278,8 +376,7 @@ namespace EvilAliensWeb.Compat.Net
 
             // The peer's ship stream is what makes SpawnPuppet seat a ControlDevice.Remote ship --
             // the real path, because the puppet's own Update is the code under test.
-            Deliver(peer, wire, clock, ref shipSeq, ref shipMs, ref clockCarry,
-                firing: false, shotsPerSec: 8);
+            Deliver(peer, wire, clock, ref shipSeq, ref shipMs, ref clockCarry, shotCount, 8);
             int peerSlot = oracle.GetPlayerIndex(ControlDevice.Remote);
             bool puppetUp = NetSession.HasRemotePuppet && peerSlot >= 0;
             Check("the peer's ship puppet was adopted into a Remote seat (slot=" + peerSlot + ")",
@@ -295,73 +392,106 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
 
-            // ---- 2. one tap at the default fire rate ----------------------------------------
-            int fired = Tap(peer, wire, bin, game, clock, puppet, peerSlot, ref shipSeq, ref shipMs, ref clockCarry,
-                shotsPerSec: 8, markedPackets: RigPackets(NetSession.FiringHoldMsFor(8)));
-            Check("a single tap at 8 shots/sec spawns exactly ONE bullet on the peer (got "
-                + fired + ")", fired == 1);
+            // ---- 3. one shot at the default fire rate ---------------------------------------
+            int fired = Burst(peer, wire, bin, game, clock, puppet, peerSlot, ref shipSeq,
+                ref shipMs, ref clockCarry, ref shotCount, shotsPerSec: 8,
+                increments: new int[] { 1 }, drops: null);
+            Check("one shot on the counter spawns exactly ONE bullet on the peer (got "
+                + fired + "), where the pre-card firing LEVEL spawned "
+                + PreCardTapBullets(PreCardHoldMs, SendIntervalMs, 8), fired == 1);
 
-            // ---- 3. the tightest period -----------------------------------------------------
-            sb.Append(" 3. the same tap at the maxed fire rate (18/s, 55.6 ms period)\n");
-            fired = Tap(peer, wire, bin, game, clock, puppet, peerSlot, ref shipSeq, ref shipMs, ref clockCarry,
-                shotsPerSec: 18, markedPackets: RigPackets(NetSession.FiringHoldMsFor(18)));
-            Check("a single tap at 18 shots/sec spawns exactly ONE bullet (got " + fired + ")",
+            // ---- 4. the tightest period, and a +2 step --------------------------------------
+            sb.Append(" 4. the maxed fire rate (18/s), and two shots arriving as ONE step\n");
+            fired = Burst(peer, wire, bin, game, clock, puppet, peerSlot, ref shipSeq,
+                ref shipMs, ref clockCarry, ref shotCount, shotsPerSec: 18,
+                increments: new int[] { 1 }, drops: null);
+            Check("one shot at 18 shots/sec spawns exactly ONE bullet (got " + fired + ")",
                 fired == 1);
+            fired = Burst(peer, wire, bin, game, clock, puppet, peerSlot, ref shipSeq,
+                ref shipMs, ref clockCarry, ref shotCount, shotsPerSec: 8,
+                increments: new int[] { 2 }, drops: null);
+            Check("a counter that moves by TWO in one packet spawns exactly two bullets (got "
+                + fired + ")", fired == 2);
 
-            // ---- 4. the negative control ----------------------------------------------------
-            sb.Append(" 4. NEGATIVE -- the pre-card packet pattern for the SAME single tap\n");
-            fired = Tap(peer, wire, bin, game, clock, puppet, peerSlot, ref shipSeq, ref shipMs, ref clockCarry,
-                shotsPerSec: 8, markedPackets: RigPackets(PreCardHoldMs));
-            Check("the pre-card 150 ms hold spawns TWO bullets for one tap -- the reported bug,"
-                + " and proof this rig can see it (got " + fired + ")", fired == 2);
+            // ---- 5. packet loss --------------------------------------------------------------
+            sb.Append(" 5. PACKET LOSS mid-burst -- the count stays exact\n");
+            // Ten packets, one shot each; four of them never reach the wire, in two runs of two so
+            // the largest delta the receiver ever sees is 3 -- inside the catch-up bound, which is
+            // the regime the claim is about (past it a resync is the correct answer, leg 1).
+            int[] ones = new int[10];
+            for (int i = 0; i < ones.Length; i++) { ones[i] = 1; }
+            bool[] drops = new bool[10];
+            drops[2] = drops[3] = drops[6] = drops[7] = true;
+            int dropped = 0;
+            foreach (bool d in drops) { if (d) { dropped++; } }
+            Check("PRECONDITION the rig really drops packets (" + dropped + " of 10)", dropped == 4);
+            fired = Burst(peer, wire, bin, game, clock, puppet, peerSlot, ref shipSeq,
+                ref shipMs, ref clockCarry, ref shotCount, shotsPerSec: 8,
+                increments: ones, drops: drops);
+            Check("10 owner shots over a lossy link are 10 bullets on the peer (got " + fired + ")",
+                fired == 10);
+            int preCardLoss = PreCardLossBullets(10, dropped);
+            Check("NEGATIVE the pre-card firing LEVEL would have spawned only " + preCardLoss
+                + " over the same loss", preCardLoss < 10);
 
-            // ---- 5. the overcorrection guard ------------------------------------------------
-            sb.Append(" 5. sustained fire still runs at the OWNER'S cadence\n");
-            // One second of held trigger at 8 shots/sec. Every packet in the burst is marked,
-            // exactly as the sender does while the trigger is genuinely down.
-            const int burstPackets = 30;   // 30 x SendIntervalMs = 1000 ms of game time
-            fired = Tap(peer, wire, bin, game, clock, puppet, peerSlot, ref shipSeq, ref shipMs, ref clockCarry,
-                shotsPerSec: 8, markedPackets: burstPackets);
-            // 1000 ms of game time at 125 ms per shot -- the shoottimer the assertion is about
-            // runs on the TICKS, not on the pinned net clock, so quote the game-time figure.
-            // Bounded rather than pinned to a single number: the tick/packet phase decides whether
-            // the last slot lands inside the burst.
-            Check("~1 s of held fire spawns the owner's cadence, not one per packet (got "
-                + fired + ", expected 7-9)", fired >= 7 && fired <= 9);
-            Check("... which is far below one-bullet-per-packet (" + burstPackets + ")",
-                fired < burstPackets / 2);
+            // ---- 6. sustained fire -----------------------------------------------------------
+            sb.Append(" 6. sustained fire runs at the OWNER'S cadence, exactly\n");
+            // A held trigger at 8 shots/sec over 32 packets (~1.07 s), spread the way a real
+            // sender spreads it: a shot every 125 ms, i.e. every ~3.75 send intervals.
+            int[] sustained = new int[32];
+            int shotsSoFar = 0;
+            for (int i = 0; i < sustained.Length; i++)
+            {
+                int want = (int)((i + 1) * SendIntervalMs / 125f);
+                sustained[i] = want - shotsSoFar;
+                shotsSoFar = want;
+            }
+            fired = Burst(peer, wire, bin, game, clock, puppet, peerSlot, ref shipSeq,
+                ref shipMs, ref clockCarry, ref shotCount, shotsPerSec: 8,
+                increments: sustained, drops: null);
+            Check("~1 s of held fire spawns the owner's " + shotsSoFar + " shots exactly, not one"
+                + " per packet (got " + fired + " over " + sustained.Length + " packets)",
+                fired == shotsSoFar && shotsSoFar > 1);
         }
 
-        // Script one tap (or one burst): `markedPackets` packets carrying firing=true, then
-        // enough clear packets for the peer to have stopped firing. Returns the bullets the
-        // PUPPET spawned over the whole sequence.
-        private static int Tap(InMemoryTransport peer, NetWire wire, ComponentBin bin, Game game,
+        // Script a burst: one packet per entry of `increments`, each advancing the peer's
+        // cumulative counter by that many shots, with `drops[i]` suppressing the SEND -- the
+        // counter still moves, which is the whole point. Then enough quiet packets for the puppet
+        // to have spent everything it owes. Returns the bullets the PUPPET spawned.
+        private static int Burst(InMemoryTransport peer, NetWire wire, ComponentBin bin, Game game,
             PinnedNetHost clock, PlayerShip puppet, int peerSlot, ref ushort shipSeq,
-            ref uint shipMs, ref float clockCarry, int shotsPerSec, int markedPackets)
+            ref uint shipMs, ref float clockCarry, ref byte shotCount, int shotsPerSec,
+            int[] increments, bool[] drops)
         {
-            // Settle first: the previous leg's burst may have left the cadence gate mid-period,
-            // which would move this leg's count. Six clear packets is ~200 ms -- enough for the
-            // rates the legs actually use (8/s = 125 ms, 18/s = 55.6 ms), NOT for the whole 1..18
-            // domain, whose slowest period is a full second. A future leg at a low fire rate must
-            // raise this or it inherits a live cadence gate. The sweep below then starts the
-            // count from a clean world.
-            for (int i = 0; i < 6; i++)
+            // Settle: a few packets with the counter unchanged, so the puppet enters the burst
+            // owing nothing from the previous leg.
+            for (int i = 0; i < 4; i++)
             {
-                Deliver(peer, wire, clock, ref shipSeq, ref shipMs, ref clockCarry, false, shotsPerSec);
+                Deliver(peer, wire, clock, ref shipSeq, ref shipMs, ref clockCarry, shotCount, shotsPerSec);
                 DriveTicks(puppet, bin);
             }
             SweepBullets(bin, game, peerSlot);
 
-            for (int i = 0; i < markedPackets; i++)
+            for (int i = 0; i < increments.Length; i++)
             {
-                Deliver(peer, wire, clock, ref shipSeq, ref shipMs, ref clockCarry, true, shotsPerSec);
+                shotCount = (byte)(shotCount + increments[i]);
+                if (drops == null || !drops[i])
+                {
+                    Deliver(peer, wire, clock, ref shipSeq, ref shipMs, ref clockCarry, shotCount, shotsPerSec);
+                }
+                else
+                {
+                    // A dropped packet still costs its interval of wall clock and its ticks -- the
+                    // sender sent it, the wire ate it.
+                    Skip(clock, ref shipSeq, ref shipMs, ref clockCarry);
+                }
                 DriveTicks(puppet, bin);
             }
-            // Let the re-fire finish: the peer keeps holding the last marked sample until a clear
-            // one arrives, and the bullet it owes for it may land a tick later.
-            for (int i = 0; i < 4; i++)
+            // Let the puppet finish: it spends at most one owed shot per tick, so a burst that
+            // arrived bunched needs a few quiet packets to drain.
+            for (int i = 0; i < 8; i++)
             {
-                Deliver(peer, wire, clock, ref shipSeq, ref shipMs, ref clockCarry, false, shotsPerSec);
+                Deliver(peer, wire, clock, ref shipSeq, ref shipMs, ref clockCarry, shotCount, shotsPerSec);
                 DriveTicks(puppet, bin);
             }
 
@@ -374,30 +504,45 @@ namespace EvilAliensWeb.Compat.Net
         //
         // THE CLOCK ADVANCE MUST MATCH THE TICKS, or the rig runs a cadence production cannot
         // emit. A send interval is the smallest whole number of frames >= StreamIntervalMs, i.e.
-        // TicksPerSend ticks = 33.33 ms at 60 Hz -- NOT the nominal 33. Advancing the pinned
-        // clock by 33 while DriveTicks advanced game time by 33.33 left the two 1% apart and the
-        // packets landing where the sender never puts them. The clock is whole ms, so the
-        // fraction is carried rather than truncated per packet.
+        // TicksPerSend ticks = 33.33 ms at 60 Hz -- NOT the nominal 33. The clock is whole ms, so
+        // the fraction is carried rather than truncated per packet.
         private static void Deliver(InMemoryTransport peer, NetWire wire, PinnedNetHost clock,
-            ref ushort shipSeq, ref uint shipMs, ref float clockCarry, bool firing, int shotsPerSec)
+            ref ushort shipSeq, ref uint shipMs, ref float clockCarry, byte shotCount, int shotsPerSec)
         {
-            clockCarry += SendIntervalMs;
-            long step = (long)clockCarry;
-            clockCarry -= step;
-            shipMs += (uint)step;
+            long step = AdvanceClock(ref shipMs, ref clockCarry);
             peer.SendStream(NetProtocol.EncodeShipState(shipSeq++, shipMs, PeerAt, Vector2.Zero,
-                4.712389f, alive: true, firing: firing, shotsPerSec, 450f));
+                4.712389f, alive: true, shotCount: shotCount, shotsPerSec, 450f));
             wire.Pump();
             clock.Advance(step);
             NetSession.Update();
         }
 
+        // A packet the sender sent and the stream lane lost: time passes, the sequence and the
+        // sample clock move on, nothing arrives.
+        private static void Skip(PinnedNetHost clock, ref ushort shipSeq, ref uint shipMs,
+            ref float clockCarry)
+        {
+            long step = AdvanceClock(ref shipMs, ref clockCarry);
+            shipSeq++;
+            clock.Advance(step);
+            NetSession.Update();
+        }
+
+        private static long AdvanceClock(ref uint shipMs, ref float clockCarry)
+        {
+            clockCarry += SendIntervalMs;
+            long step = (long)clockCarry;
+            clockCarry -= step;
+            shipMs += (uint)step;
+            return step;
+        }
+
         // The two game ticks that fill one send interval. DriveRemoteShip runs from the puppet's
-        // own Update, so this is the real per-tick re-fire path and not a stand-in for it.
+        // own Update, so this is the real per-tick apply path and not a stand-in for it.
         private static void DriveTicks(PlayerShip puppet, ComponentBin bin)
         {
             GameTime gt = new GameTime(TimeSpan.Zero, TimeSpan.FromMilliseconds(TickMs));
-            for (int i = 0; i < 2; i++)
+            for (int i = 0; i < TicksPerSend; i++)
             {
                 puppet.Update(gt);
                 bin.TopOfTickFlush();
@@ -451,6 +596,7 @@ namespace EvilAliensWeb.Compat.Net
         {
             try
             {
+                DebugInput.Hold("Mouse1", down: false);
                 if (NetSession.Active)
                 {
                     NetSession.Stop("fire suite teardown");
@@ -468,6 +614,8 @@ namespace EvilAliensWeb.Compat.Net
                         bin.Remove((GameComponent)(object)s);
                     }
                 }
+                // The LOCAL ship's bullets too -- leg 2 fires real ones out of the player's ship.
+                SweepBullets(bin, bin.Game, 0);
                 oracle.ReleasePlayer(ControlDevice.Remote);
                 oracle.ReleasePlayer(ControlDevice.RemoteFriend);
                 bin.TopOfTickFlush();

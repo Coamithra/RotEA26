@@ -66,14 +66,11 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     continue;
                 }
-                // Same cadence-derived hold as the primary ship (card a5c2a39b) -- SendFriendState
-                // feeds NetApplyRemoteState through NetSession.Friends' DriveFriendPuppet, i.e.
-                // the identical re-fire gate, so a flat hold doubles a couch player's tap and
-                // adds one bullet to the tail of every AI friend's burst.
-                bool firing = now - s.NetLastFireMs < FiringHoldMsFor(s.NetShotsPerSec);
-                float aim = (firing || s.NetLastFireMs > 0) ? s.NetLastFireAim : 4.712389f;
+                // The cumulative shot count, exactly as the primary ship streams it (card
+                // a45b78f6) -- DriveFriendShip feeds the identical NetApplyRemoteState, so a
+                // couch player's tap and an AI friend's burst are replicated shot for shot.
                 transport.SendStream(NetProtocol.EncodeFriendState((byte)slot, friendTxSeq++, (uint)(now - sessionStartAt),
-                    s.GetPosition(), s.NetVelocity, aim, firing, s.NetShotsPerSec, s.NetBulletLife));
+                    s.GetPosition(), s.NetVelocity, s.NetLastFireAim, s.NetShotCount, s.NetShotsPerSec, s.NetBulletLife));
             }
         }
 
@@ -262,7 +259,8 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         // Called from PlayerShip.Update for ControlDevice.RemoteFriend ships (mirrors DriveRemoteShip):
-        // position from this slot's interpolation buffer, shots re-fired locally from the fire state.
+        // position from this slot's interpolation buffer, shots respawned locally from the newest
+        // sample's cumulative shot count.
         public static void DriveFriendShip(PlayerShip ship, GameTime gameTime)
         {
             if (!Active)
@@ -294,7 +292,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             Vector2 pos = ch.Buffer.Sample(ch.RenderMs, out _);
             ShipSample newest = ch.Buffer.Newest;
-            ship.NetApplyRemoteState(pos, newest.Aim, newest.Firing, ch.ShotsPerSec, ch.BulletLife);
+            ship.NetApplyRemoteState(pos, newest.Aim, newest.ShotCount, ch.ShotsPerSec, ch.BulletLife);
         }
 
         // Peer loss in a LISTED session (card 4d904410): the host keeps playing its own level, so

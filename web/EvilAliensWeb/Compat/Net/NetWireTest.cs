@@ -360,7 +360,7 @@ namespace EvilAliensWeb.Compat.Net
             // sorts on, so it is part of the layout that matters most.
             byte[] ship = Round(NetProtocol.EncodeShipState(
                 4242, 1234567u, new Vector2(123.5f, -45.25f), new Vector2(0.125f, -0.5f),
-                1.75f, alive: true, firing: true, shotsPerSec: 17, bulletLife: 640f), reliable: false);
+                1.75f, alive: true, shotCount: 200, shotsPerSec: 17, bulletLife: 640f), reliable: false);
             bool shipOk = false;
             if (ship != null && NetProtocol.TryDecodeShipState(ship, out ushort shipSeq,
                 out ShipSample s, out int sps, out float blife))
@@ -368,7 +368,7 @@ namespace EvilAliensWeb.Compat.Net
                 shipOk = shipSeq == 4242 && s.T == 1234567.0
                     && Near(s.Pos.X, 123.5f) && Near(s.Pos.Y, -45.25f)
                     && Near(s.Vel.X, 0.125f) && Near(s.Vel.Y, -0.5f)
-                    && Near(s.Aim, 1.75f) && s.Alive && s.Firing
+                    && Near(s.Aim, 1.75f) && s.Alive && s.ShotCount == 200
                     && sps == 17 && Near(blife, 640f);
             }
             check("MsgShipState round-trips every field", shipOk);
@@ -378,7 +378,7 @@ namespace EvilAliensWeb.Compat.Net
             // still decodes, so both are pinned.
             byte[] friend = Round(NetProtocol.EncodeFriendState(
                 3, 77, 999u, new Vector2(-8f, 16f), new Vector2(-0.25f, 0.75f),
-                -2.5f, firing: false, shotsPerSec: 5, bulletLife: 300f), reliable: false);
+                -2.5f, shotCount: 137, shotsPerSec: 5, bulletLife: 300f), reliable: false);
             bool friendOk = false;
             if (friend != null && NetProtocol.TryDecodeFriendState(friend, out byte fslot,
                 out ushort fseq, out ShipSample fs, out int fsps, out float fblife))
@@ -386,7 +386,7 @@ namespace EvilAliensWeb.Compat.Net
                 friendOk = fslot == 3 && fseq == 77 && fs.T == 999.0
                     && Near(fs.Pos.X, -8f) && Near(fs.Pos.Y, 16f)
                     && Near(fs.Vel.X, -0.25f) && Near(fs.Vel.Y, 0.75f)
-                    && Near(fs.Aim, -2.5f) && fs.Alive && !fs.Firing
+                    && Near(fs.Aim, -2.5f) && fs.Alive && fs.ShotCount == 137
                     && fsps == 5 && Near(fblife, 300f);
             }
             check("MsgFriendState round-trips every field (slot-shifted body)", friendOk);
@@ -675,7 +675,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 wire[0].SendStream(NetProtocol.EncodeShipState(
                     (ushort)i, order[i], new Vector2(order[i], 0f), Vector2.Zero, 0f,
-                    alive: true, firing: false, shotsPerSec: 8, bulletLife: 450f));
+                    alive: true, shotCount: 0, shotsPerSec: 8, bulletLife: 450f));
             }
             wire.Pump();
             check("every stream frame was delivered and decoded", accepted + refused == order.Length);
@@ -692,7 +692,7 @@ namespace EvilAliensWeb.Compat.Net
             for (int i = 0; i < sorted.Length; i++)
             {
                 byte[] frame = NetProtocol.EncodeShipState((ushort)i, sorted[i], Vector2.Zero,
-                    Vector2.Zero, 0f, alive: true, firing: false, shotsPerSec: 8, bulletLife: 450f);
+                    Vector2.Zero, 0f, alive: true, shotCount: 0, shotsPerSec: 8, bulletLife: 450f);
                 if (NetProtocol.TryDecodeShipState(frame, out _, out ShipSample s, out _, out _)
                     && monotone.Add(s))
                 {

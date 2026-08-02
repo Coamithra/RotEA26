@@ -1,10 +1,11 @@
 # PROBE: a powerup the OTHER player collects must have its ship-side effect on this screen too --
 # the "2"/Linker arm, the option count, and the level-up sparkle.
 #
-# PINS: cards 83271f3d (netplay: the "2" powerup), 10f9dba4 (nr of options not synched) and
-# d53431b4 (show the little animation when a remote player powers up). One root cause for the
-# first two: NetSession.ApplyRemotePowerup mirrored ONLY the HUD icon, so the collector's ship --
-# a puppet on this screen -- got the readout and none of the effect.
+# PINS: cards 83271f3d (netplay: the "2" powerup), 10f9dba4 (nr of options not synched),
+# d53431b4 (show the little animation when a remote player powers up) and c5228350 (a JIP peer
+# sees only the level-derived options). One root cause for the first two: NetSession
+# .ApplyRemotePowerup mirrored ONLY the HUD icon, so the collector's ship -- a puppet on this
+# screen -- got the readout and none of the effect.
 #
 # WHAT IT ASSERTS (Compat/Net/NetPickupTest.cs carries the full reasoning):
 #   1. NEGATIVE FIRST -- the owner arms locally, the puppet is still unarmed, and flying into it
@@ -19,23 +20,40 @@
 #      second half is the base GameScene.NetApplyTetherBreak body this card added: it used to be
 #      empty outside TeamChallenge, so a Linker tether hit only one screen saw left the other
 #      player pulled toward an anchor already let go of.
-#   4. THE ONE A SINGLE-PATH TEST COULD NOT CATCH. On a real observer BOTH mirrors run -- the
-#      per-pickup one from these cards and the per-LEVEL one from card 1a3ad45a (MsgHudState ->
-#      NetSetPowerupLevel -> PowerUp) -- so the risk of fixing the reported "observer sees fewer
-#      options" is inverting it into "observer sees more". The leg drives the full sequence in
-#      real-session order (owner: real CollidesWith pickups + real combo-driven level-ups;
-#      observer: real EvClaim frames + the real MsgHudState content) and requires both counts to
-#      move by the SAME amount, with the PRE-CARD mirror run over the same shape first as the
-#      control. Measured owner +6 / observer +6 over 3 pickups + 3 level-ups; under the pre-card
-#      mutation the observer reads +3, i.e. exactly the level-derived half.
+#   4. The option count over the full sequence in real-session order (owner: real CollidesWith
+#      pickups + real combo-driven level-ups; observer: real EvClaim frames + a REAL MsgHudState
+#      packet through the production encoder, decoder and rx drain), requiring both counts to move
+#      by the SAME amount, with the PRE-CARD mirror run over the same shape first as the control.
+#      Measured owner +6 / observer +6 over 3 pickups + 3 level-ups; with the reconcile mutated
+#      out the observer reads +3, i.e. exactly the level-derived half.
 #   5. The sparkle plays on a ONE-step remote level-up and NOT on a multi-step catch-up (a
 #      join-in-progress peer adopting a slot already at level 4 would otherwise fire four at once
 #      for events that happened before it was watching).
+#   6. CARD c5228350's OWN SUBJECT -- JOIN IN PROGRESS. Option ships are no longer derived from
+#      the claim at all: MsgHudState carries the owner's per-LAYER option COUNT (protocol v16) and
+#      the observer reconciles its puppet to it. The leg takes real pickups on the owner with NO
+#      claim delivered -- what a peer that joined mid-level gets, since it replays none -- asserts
+#      the observer is behind (the reported bug), then requires ONE packet to catch it up per
+#      layer. Two derived sources for one population is the defect; do not re-add the claim-side
+#      spawn "for latency".
+#   7. PR #264's residual: a pickup landing within one ~10Hz packet of a level-up to 3/4 made the
+#      observer derive the count from a STALE optionLevel. Pinned with the pre-card arithmetic
+#      transcribed beside it (PreCardPickupOptions), which must give a DIFFERENT answer there.
+#   8. The reconcile runs DOWNWARD too -- an observer shoots at its own local Option copies (2-hp
+#      KillableAlien), so owner authority has to drive the count both ways or it stays wrong
+#      forever -- and an explicit outer-layer count, which is the only way to exercise layer 1
+#      end to end (reaching option level 4 on the owner is a run this suite cannot script).
 #
-# MUTATION-TESTED FIVE WAYS, each isolated, each failing only the legs that name it: dropping the
-# ship-side mirror fails 1/3/4 (3 -> observer +3); removing the OwnsSlot gate fails 2; emptying
-# GameScene.NetApplyTetherBreak fails 3's break half; doEffect always-false fails 5's one-step
-# leg; doEffect always-true fails 5's catch-up leg.
+# MUTATION-TESTED, each isolated, each failing only the legs that name it: dropping the ship-side
+# mirror fails 1/3; removing the OwnsSlot gate fails 2; emptying GameScene.NetApplyTetherBreak
+# fails 3's break half; doEffect always-false fails 5's one-step leg; doEffect always-true fails
+# 5's catch-up leg; making PlayerShip.NetSetOptionCounts a no-op fails 9 legs across 4/6/7/8
+# (observer +3 in leg 4, the level-derived half); ignoring the outer layer in it fails exactly
+# leg 8's explicit-count check.
+# WHAT NO LEG CATCHES, stated rather than left to be discovered: re-adding the claim-driven
+# Option spawn passes everything, because the reconcile absorbs it within one packet. That is the
+# authority working, not a gap in the suite -- but it means the "one source of truth" property is
+# a code-review invariant here, not a probed one.
 #
 # DESTRUCTIVE, so it gets a process to itself (the runner gives every probe one anyway): it pairs
 # a real session onto the live level, seats a Remote puppet, spends real pickups into the live
@@ -65,11 +83,14 @@ expect 2\. the OwnsSlot gate
 expect 3\. with both ships armed the connector forms
 expect 4\. option count -- owner vs observer over the FULL remote sequence
 expect 5\. the sparkle
+expect 6\. join-in-progress -- pickups taken with NO claim delivered
+expect 7\. the pickup-vs-level-up race
+expect 8\. surplus options on the observer are dropped
 expect 9\. teardown
 # A TALLY, never a bare `expect-not FAIL`: an absence assertion passes on a run where the eval
 # never happened, and this suite short-circuits its own legs on a bad precondition. Raise the
 # count when checks are added.
-expect \[netpickup\] 23 passed, 0 failed
+expect \[netpickup\] 33 passed, 0 failed
 expect-not FAIL
 expect-not SKIP
 quit

@@ -73,14 +73,27 @@ namespace EvilAliensWeb.Compat.Net
                 new int[NetProtocol.HudLevelCount]
             };
 
-            byte[] packet = NetProtocol.EncodeHudState(slots, combos, types, progress, levels, 3);
+            // Per-layer Option counts (v16, card c5228350). Asymmetric per layer so a swap
+            // between the two cannot pass; the hostile-byte case is a RAW packet below, because
+            // the encoder clamps too and a value put through it can never reach the decoder's
+            // guard (measured: an encoder-side 200 tests nothing).
+            int[][] optionCounts =
+            {
+                new[] { 3, 1 },
+                new[] { 2, 0 },
+                new int[NetProtocol.HudOptionLayers],
+                new int[NetProtocol.HudOptionLayers]
+            };
+
+            byte[] packet = NetProtocol.EncodeHudState(slots, combos, types, progress, levels, optionCounts, 3);
             check("packet is [type][count] + 3 x HudSlotBytes",
                 packet.Length == 2 + 3 * NetProtocol.HudSlotBytes && packet[0] == NetProtocol.MsgHudState && packet[1] == 3);
             check("declared count validates against the byte length",
                 NetProtocol.TryDecodeHudCount(packet, out int count) && count == 3);
 
             int[] rx = new int[NetProtocol.HudLevelCount];
-            bool got0 = NetProtocol.TryDecodeHudState(packet, 0, rx, out byte s0, out int c0, out Powerup.PowerupType? t0, out float p0);
+            int[] rxOpt = new int[NetProtocol.HudOptionLayers];
+            bool got0 = NetProtocol.TryDecodeHudState(packet, 0, rx, rxOpt, out byte s0, out int c0, out Powerup.PowerupType? t0, out float p0);
             check("entry 0 slot/combo/type round-trip",
                 got0 && s0 == 1 && c0 == 37 && t0 == Powerup.PowerupType.Range);
             // progress is quantised to a byte, so 0.5 comes back as 128/255 -- within half a step.
@@ -91,6 +104,8 @@ namespace EvilAliensWeb.Compat.Net
                 levels0 &= rx[t] == levels[0][t];
             }
             check("entry 0 levels round-trip in enum order", levels0);
+            check("entry 0 option counts round-trip per LAYER (3 inner / 1 outer)",
+                got0 && rxOpt[0] == 3 && rxOpt[1] == 1);
 
             // Entry 1 gets its OWN scratch array. Sharing `rx` made every assertion below depend
             // on decode ORDER -- the out-of-range-level check 20 lines down read `rx` after an
@@ -98,7 +113,8 @@ namespace EvilAliensWeb.Compat.Net
             // FAILING on main since it landed. A buffer per entry removes the dependency rather
             // than documenting it.
             int[] rx1 = new int[NetProtocol.HudLevelCount];
-            bool got1 = NetProtocol.TryDecodeHudState(packet, 1, rx1, out byte s1, out int c1, out Powerup.PowerupType? t1, out _);
+            int[] rxOpt1 = new int[NetProtocol.HudOptionLayers];
+            bool got1 = NetProtocol.TryDecodeHudState(packet, 1, rx1, rxOpt1, out byte s1, out int c1, out Powerup.PowerupType? t1, out _);
             check("entry 1 decodes independently (slot 3, no active powerup)",
                 got1 && s1 == 3 && !t1.HasValue);
             // Card 88f87ba2: an activeType that is neither a real type nor the sentinel folds
@@ -108,17 +124,30 @@ namespace EvilAliensWeb.Compat.Net
             bogusType[entry0ActiveTypeOffset] = 200;
             int[] rxBogus = new int[NetProtocol.HudLevelCount];
             check("an out-of-enum activeType decodes as 'no powerup', not as a cast",
-                NetProtocol.TryDecodeHudState(bogusType, 0, rxBogus, out _, out _, out Powerup.PowerupType? tBad, out _)
+                NetProtocol.TryDecodeHudState(bogusType, 0, rxBogus, new int[NetProtocol.HudOptionLayers],
+                    out _, out _, out Powerup.PowerupType? tBad, out _)
                     && !tBad.HasValue);
             // A byte-wide field would have returned 255 here and underpaid the slot's boss share.
             check("a combo past 255 survives the wire intact", got1 && c1 == 400);
             check("out-of-range level clamps to 4", got1 && rx1[NetProtocol.HudLevelCount - 1] == 4);
+            check("entry 1 option counts round-trip independently (2 inner / 0 outer)",
+                got1 && rxOpt1[0] == 2 && rxOpt1[1] == 0);
+            // The hostile byte, hand-written past the encoder: it drives real component spawns on
+            // a puppet, off a stranger's wire (the public game browser).
+            byte[] hugeOptions = (byte[])packet.Clone();
+            const int entry0Options = 2 + 5 + NetProtocol.HudLevelCount;
+            hugeOptions[entry0Options] = 200;
+            int[] rxOptHuge = new int[NetProtocol.HudOptionLayers];
+            check("an absurd option count off the wire clamps to HudMaxOptionsPerLayer",
+                NetProtocol.TryDecodeHudState(hugeOptions, 0, new int[NetProtocol.HudLevelCount],
+                    rxOptHuge, out _, out _, out _, out _)
+                    && rxOptHuge[0] == NetProtocol.HudMaxOptionsPerLayer);
 
-            bool got2 = NetProtocol.TryDecodeHudState(packet, 2, rx, out _, out int c2, out _, out _);
+            bool got2 = NetProtocol.TryDecodeHudState(packet, 2, rx, rxOpt, out _, out int c2, out _, out _);
             check("a combo past ushort saturates rather than wrapping", got2 && c2 == ushort.MaxValue);
 
             check("index past the declared count is rejected",
-                !NetProtocol.TryDecodeHudState(packet, 3, rx, out _, out _, out _, out _));
+                !NetProtocol.TryDecodeHudState(packet, 3, rx, rxOpt, out _, out _, out _, out _));
             byte[] truncated = new byte[packet.Length - 1];
             Array.Copy(packet, truncated, truncated.Length);
             check("a truncated packet is rejected whole", !NetProtocol.TryDecodeHudCount(truncated, out _));
@@ -129,7 +158,11 @@ namespace EvilAliensWeb.Compat.Net
             wrongType[0] = NetProtocol.MsgShipState;
             check("another message type is not decoded as HUD state", !NetProtocol.TryDecodeHudCount(wrongType, out _));
             check("a short level buffer is refused rather than over-written",
-                !NetProtocol.TryDecodeHudState(packet, 0, new int[NetProtocol.HudLevelCount - 1], out _, out _, out _, out _));
+                !NetProtocol.TryDecodeHudState(packet, 0, new int[NetProtocol.HudLevelCount - 1], rxOpt,
+                    out _, out _, out _, out _));
+            check("a short option-count buffer is refused rather than over-written",
+                !NetProtocol.TryDecodeHudState(packet, 0, rx, new int[NetProtocol.HudOptionLayers - 1],
+                    out _, out _, out _, out _));
 
             // Apply for real against the live ScoreVisualiser, on the LAST slot -- unseated in
             // every 2-peer session, so its panel is not drawn.

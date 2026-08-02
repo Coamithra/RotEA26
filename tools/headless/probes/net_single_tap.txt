@@ -81,7 +81,7 @@ eval NetFire
 # here as "the protocol moved" and check that the move was deliberate before editing the literal.
 # It has already moved twice since: card e79bb994's snapshot flags byte took v13, and card
 # c1a38ef9's motion parameters (sent Lazer rates + the FlyingSpider path anchor) took v14.
-expect \[net\] session start role=host .* protocol=v15 transport=InMemory
+expect \[net\] session start role=host .* protocol=v16 transport=InMemory
 expect \[netfire\] replicated shot count
 expect 1\. the wrapped-delta decision over the whole u8 domain
 expect 2\. the SENDER -- the local ship's counter against the bullets it spawned

@@ -967,6 +967,59 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	internal int NetOptionCount => options[0].Count + options[1].Count;
 
+	// Per ORBIT LAYER, which is what MsgHudState carries (card c5228350): the layer decides the
+	// orbit radius, so a total would let the observer rebuild the owner's outer ring inside.
+	// Out of range reads 0 rather than throwing -- the caller's index comes off the wire's
+	// HudOptionLayers, which is allowed to outlive this ship's layer count.
+	internal int NetOptionLayerCount(int layer)
+	{
+		if (layer < 0 || layer >= options.Length)
+		{
+			return 0;
+		}
+		return options[layer].Count;
+	}
+
+	// Online co-op (card c5228350): drive this puppet's Option population to what its OWNER
+	// reports, per layer. The owner is authoritative, so this both ADDS the options a
+	// join-in-progress peer never saw claimed and DROPS any this peer has over -- an observer
+	// shoots at its own local copies, and only the owner's count settles it.
+	//
+	// NetSession.HandleHudState is the only caller and gates on !OwnsSlot, so it never touches a
+	// ship whose own CollidesWith/PowerUp maintain the real population. Counts arrive already
+	// clamped at the decode boundary (NetProtocol.HudMaxOptionsPerLayer).
+	internal void NetSetOptionCounts(int layer0, int layer1)
+	{
+		bool changed = false;
+		for (int layer = 0; layer < options.Length; layer++)
+		{
+			int want = Math.Max(0, layer == 0 ? layer0 : layer1);
+			List<Option> list = options[layer];
+			while (list.Count > want)
+			{
+				Option surplus = list[list.Count - 1];
+				list.RemoveAt(list.Count - 1);
+				// A silent despawn, not a kill: nothing shot this one down here, so it must not
+				// explode, score or make a noise. OnComponentRemoved's own list maintenance is a
+				// no-op for it now, which is why the removal from `list` leads.
+				surplus.NetDespawn();
+				changed = true;
+			}
+			while (list.Count < want)
+			{
+				Option option = Option.NewOption(collection, base.Game);
+				option.Setup(this, 0f, layer + 1, player);
+				collection.Add((GameComponent)(object)option);
+				list.Add(option);
+				changed = true;
+			}
+		}
+		if (changed)
+		{
+			RedressOptions();
+		}
+	}
+
 	internal float NetBulletLife => bulletlifetime;
 
 	// How many shots a puppet owes, given the count that just arrived and the last one it acted
@@ -2227,10 +2280,11 @@ public class PlayerShip : AlienDrawableGameComponent
 		}
 	}
 
-	// The Option pickup's spawn, factored out of DoSpecial so the online-co-op mirror
-	// (NetApplyRemotePickup) runs the SAME count rather than a second copy of this arithmetic --
-	// the two drifting apart is precisely the bug card 10f9dba4 reported, one peer showing fewer
-	// options than the other.
+	// The Option pickup's spawn. LOCAL ONLY since card c5228350 -- a puppet's population is
+	// reconciled to its owner's reported per-layer count (NetSetOptionCounts) rather than derived
+	// from this arithmetic a second time. Still its own method because the count depends on
+	// optionLevel, which is what made deriving it remotely wrong (card 10f9dba4: an observer's
+	// optionLevel lags the owner's by up to one HUD packet).
 	private void SpawnPickupOptions()
 	{
 		int perLayer = 1;
@@ -2256,22 +2310,26 @@ public class PlayerShip : AlienDrawableGameComponent
 		RedressOptions();
 	}
 
-	// Online co-op (cards 83271f3d / 10f9dba4): the OTHER peer's player collected a powerup, and
+	// Online co-op (cards 83271f3d / 10f9dba4 / c5228350): the OTHER peer's player collected a powerup, and
 	// this ship is their puppet here. Mirror the SHIP-side half of the local pickup path
 	// (DoSpecial(pickup: true)) so the puppet is not a player with a HUD icon and none of the
 	// effect. NetSession.ApplyRemotePowerup is the only caller and gates on !OwnsSlot, so this
 	// never runs for a ship whose pickup already went through CollidesWith.
 	//
-	// Only the two types that are not already replicated by some other means are acted on:
+	// Only ONE type is not already replicated by some other means:
 	//   Linker    -- readyToConnect is set NOWHERE else, so without this the "2" powerup's glow
 	//                never appears on the puppet AND PlayerShip.CollidesWith's
 	//                (readyToConnect & other.readyToConnect) is false on BOTH peers, i.e. the
 	//                connector is unreachable in an online session (card 83271f3d).
-	//   Option    -- the pickup's 1-4 options. The LEVEL-driven ones already arrive over
-	//                MsgHudState (ScoreVisualiser.NetSetPowerupLevel -> PowerUp), and a pickup
-	//                never changes a level, so the two paths are disjoint and add up (card
-	//                10f9dba4).
-	// The other four are deliberately inert here:
+	// The other five are deliberately inert here:
+	//   Option    -- the whole population rides MsgHudState as a per-layer COUNT since card
+	//                c5228350, and the owner is authoritative over it (NetSetOptionCounts). This
+	//                path used to spawn the pickup's own 1-4 alongside the level-driven ones
+	//                arriving over the HUD packet, which added up correctly in steady state and
+	//                could not work at all for a JOIN-IN-PROGRESS peer -- it replays no claims,
+	//                so it reconstructed the level half alone and always saw fewer. Two derived
+	//                sources for one population is the defect; do not restore this case as a
+	//                "low latency estimate" beside the count.
 	//   FirePower -- shotspersec rides MsgShipState (NetApplyRemoteState) already.
 	//   Range     -- bulletlifetime likewise.
 	//   Blast     -- AddBomb is deliberately not mirrored: the SPEND side (NetDoBlast) does not
@@ -2285,9 +2343,6 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 		case Powerup.PowerupType.Linker:
 			readyToConnect = true;
-			break;
-		case Powerup.PowerupType.Option:
-			SpawnPickupOptions();
 			break;
 		}
 	}

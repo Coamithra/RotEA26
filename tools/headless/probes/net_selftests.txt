@@ -129,8 +129,11 @@ expect \[kicktest\] PASS \(29/29 checks\)
 # extras byte off a stranger's wire that no descriptor can build would otherwise delete a working
 # puppet and MarkRemove its id.
 expect \[netsnap\] PASS \(40 passed, 0 failed\)
-# per-slot HUD wire format + OwnsSlot + the real PowerupData exp curve (card 1a3ad45a)
-expect -> ALL PASS \(36 passed, 0 failed\)
+# per-slot HUD wire format + OwnsSlot + the real PowerupData exp curve (card 1a3ad45a), plus the
+# per-layer option counts v16 appended to that entry (card c5228350) and their decode-boundary
+# clamp -- asserted off a RAW packet, since the encoder clamps too and a value put through it can
+# never reach the decoder's guard.
+expect -> ALL PASS \(40 passed, 0 failed\)
 # the score-reconciliation policy, and the old max() ratchet as its control (card b0ab09ec)
 expect \[netscore\] PASS \(5/5\)
 expect \[netscore\] wire PASS \(9/9\)

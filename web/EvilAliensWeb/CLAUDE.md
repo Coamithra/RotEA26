@@ -478,9 +478,10 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `eaScore()`+`eaNetScore.test()` (per-slot score/combo dump + the co-op score-reconciliation
   self-test),
   `eaNetCombo.test()` (the co-op per-slot combo + powerup self-test — card 1a3ad45a),
-  `eaNetPickup()` (the remote-powerup-pickup suite — cards 83271f3d / 10f9dba4 / d53431b4: the
-  "2"/Linker arm and the connector it unblocks, the option count over the COMBINED claim + HUD
-  sequence, and the level-up sparkle. **Destructive** — it pairs a real host session onto the
+  `eaNetPickup()` (the remote-powerup-pickup suite — cards 83271f3d / 10f9dba4 / d53431b4 /
+  c5228350: the "2"/Linker arm and the connector it unblocks, the option count (now owner-
+  authoritative over `MsgHudState`, incl. the join-in-progress catch-up and the downward
+  reconcile), and the level-up sparkle. **Destructive** — it pairs a real host session onto the
   live level and spends real pickups into the live panels, so run it in a throwaway
   `?level=Level2&invuln` boot),
   `eaNetFire()` (the replicated shot count — cards a5c2a39b / a45b78f6: one tap used to reach the

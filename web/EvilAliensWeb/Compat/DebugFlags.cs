@@ -22,6 +22,9 @@ namespace EvilAliensWeb.Compat
 	//   ?demo=<1|2|3>  pin WHICH attract demo the idle menu drops into (Demo1/Demo2/Demo3),
 	//                  which is otherwise an unseeded random roll per launch. NOT the
 	//                  off-switch of ?nodemo/?noattract -- those disable attract entirely.
+	//   ?seed=<n>      seed the gameplay RNG (RandomHelper) so two runs of the same boot reach
+	//                  the same world -- what makes a level-level eahl screenshot A/B measure
+	//                  the change rather than the divergence. No flag = unseeded, as shipped.
 	//   ?level=<Name>  boot straight into a level, bypassing the menu entirely
 	//                  (<Name> is a Levels enum value, case-insensitive: Level1, Level2,
 	//                   Level3, ClassicAliens, SpaceDodge, Braineroids, Tutorial, ...)
@@ -854,6 +857,37 @@ namespace EvilAliensWeb.Compat
 		// and ComputeEligible refuses Demo1/2/3 outright so an attract demo can never be
 		// advertised to a peer in the first place.
 		public static int? DemoPick { get; private set; }
+
+		// ?seed=<n>: make the GAMEPLAY RNG reproducible for this boot (card d937c721).
+		// RandomHelper.Random is `new Random()`, so two eahl runs of one level never reach the
+		// same world -- a screenshot A/B on any rig with spawners measures that divergence as
+		// much as the change under test (measured on ?level=OwnLevel&noattract: mean |diff| 0.2,
+		// MAX 210 of 255; ?level=Level3&wallsonly is BISTABLE, 1 run in 6 differing). Both noise
+		// floors were larger than the effect being measured on card b7e9b106, which is what this
+		// flag exists to end. null => unseeded, so a shipped build is unchanged.
+		//
+		// Applied at PARSE time (RandomHelper.Reseed), unlike ?mute's apply-in-Game1: RandomHelper
+		// is a pure static needing no graphics device, and every host parses before the first
+		// tick, so this is the earliest point that catches boot-time draws too.
+		//
+		// It reaches RandomHelper's stream ONLY -- see Reseed's comment for why Quad's,
+		// ShipConnector's, Juice's and SplashScene's own Randoms stay unseeded.
+		//
+		// OUT of `Active`, deliberately, and the two halves of that both matter:
+		//  - It does not HIJACK anything. A seeded boot plays a normal, winnable level with no
+		//    unlock, no invulnerability and no foreknowledge -- one valid world instead of
+		//    another. The precedent is ?difficulty=, which changes every enemy in the run and is
+		//    likewise out.
+		//  - `Active` REFUSES ONLINE PLAY (NetSession.HandleHello rejects menu pairing,
+		//    NetListing.ComputeEligible refuses to list). The reproducible-world case this flag
+		//    exists for is loudest in the netplay desync work, where a two-peer capture pair is
+		//    incomparable without it -- putting it in `Active` would forbid exactly that. And it
+		//    could not desync a session anyway: co-op here is distributed-authority replication,
+		//    NOT lockstep (Compat/Net/CLAUDE.md), so the two peers ALREADY run two different
+		//    unseeded streams today.
+		// The mitigation for staying out is the unconditional "[debug] ?seed=" line in Parse: no
+		// run can be seeded without saying so, whether or not the `Active` dump prints.
+		public static int? Seed { get; private set; }
 
 		// Cast "Brain Spawn" viewer (?castbrain): boot into the end-credits Cast screen parked
 		// on the braineroid entry, reusing HarnessScene. Non-null => SkipSplash + AutoStart and
@@ -2942,6 +2976,25 @@ namespace EvilAliensWeb.Compat
 							DemoPick.HasValue ? InForce(DemoPick) : "the random roll");
 					}
 					break;
+				case "seed":
+					// Any int is a legal seed, negatives included -- so this flag has no range
+					// predicate and does NOT belong in logic_probe's rejection SWEEP (whose
+					// shared shape is "a negative is clamped or refused"); it has its own leg
+					// there instead. Only an unparseable value reaches the diagnostic, and it
+					// must be REPORTED for the usual reason turned up a notch: a run labelled
+					// ?seed=... but silently unseeded is an A/B measuring the very noise the
+					// flag was added to remove, and the numbers would look like a real effect.
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var sd))
+					{
+						Seed = sd;
+						EvilAliens.RandomHelper.Reseed(sd);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "an integer",
+							Seed.HasValue ? InForce(Seed) : "an unseeded Random (the shipped default)");
+					}
+					break;
 				case "tutorialtraining":
 					TutorialTraining = IsOn(val);
 					break;
@@ -3304,6 +3357,16 @@ namespace EvilAliensWeb.Compat
 				Console.WriteLine("[debug] ?unlockall is on -- everything is unlocked for this "
 					+ "session ONLY, and NOTHING will be saved (no hiscores, no level completion, "
 					+ "no awardments). Reload without the flag to keep progress.");
+			}
+			// Its own line, ABOVE the Active dump and not gated on it: ?seed is deliberately out
+			// of `Active` (see the property), so the dump may never print -- and a run whose
+			// world is pinned must say so in the log, or a capture taken from it cannot be told
+			// apart from a normal one after the fact.
+			if (Seed.HasValue)
+			{
+				Console.WriteLine("[debug] ?seed=" + Seed.Value.ToString(CultureInfo.InvariantCulture)
+					+ " -- the gameplay RNG (RandomHelper) is seeded, so two runs of this boot "
+					+ "reach the same world. Reload without the flag for normal random play.");
 			}
 			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || AiFastForward > 1;
 			if (Active)

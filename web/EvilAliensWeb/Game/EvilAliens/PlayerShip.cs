@@ -86,6 +86,19 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private int optionLevel;
 
+	// ---- ship motion model -------------------------------------------------------------------
+	// The 2008 values, promoted from bare literals in ResetShip/Update to named consts (card
+	// ada9e839). Nothing about the flight model changed -- these exist because the AI's arrival
+	// deadzone is SIZED off them: `Move(null, ...)` applies deceleration alone, so a ship at full
+	// speed coasts 0.5 * MaxSpeed^2 / Deceleration = 11.3px before it halts, and the deadzone has
+	// to cover that or the ship crosses it and oscillates. logic_probe's ProbeAiFieldComposition
+	// asserts exactly that relation, which it can only do if the two numbers are reachable.
+	public const float ShipMaxSpeed = 0.33f;
+
+	public const float ShipDeceleration = 0.0047999998f;
+
+	public const float ShipAcceleration = 0.003f;
+
 	// ---- AI tuning (card f4d1721f) ---------------------------------------------------------
 	// Repo convention: baked Default* consts + nullable ?ai* overrides in DebugFlags, so a
 	// shipped build with no query string is byte-identical to one with these consts inlined.
@@ -748,9 +761,9 @@ public class PlayerShip : AlienDrawableGameComponent
 		invulnerabilityTimer.Reset();
 		shoottimer.Duration = 1000f / (float)shotspersec;
 		ResetAiState();
-		base.MaxSpeed = 0.33f;
-		base.Deceleration = 0.0047999998f;
-		base.Acceleration = 0.003f;
+		base.MaxSpeed = ShipMaxSpeed;
+		base.Deceleration = ShipDeceleration;
+		base.Acceleration = ShipAcceleration;
 		CollisionBox collisionBox = retrieveBoundsFromTexture();
 		TopLeft = collisionBox.TopLeft;
 		BottomRight = collisionBox.BottomRight;
@@ -931,7 +944,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		}
 		else
 		{
-			base.MaxSpeed = 0.33f;
+			base.MaxSpeed = ShipMaxSpeed;
 			Move((float?)startdir, gameTime);
 			base.Update(gameTime);
 		}

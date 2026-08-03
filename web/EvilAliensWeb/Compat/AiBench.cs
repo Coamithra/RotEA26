@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Linq;
 using System.Text;
 using EvilAliens;
 using Microsoft.Xna.Framework;
@@ -39,6 +40,10 @@ internal static class AiBench
 	// noise, not a reversal (~0.6 degrees).
 	private const float ReversalDeadbandRad = 0.01f;
 
+	// Enough for any soak anyone runs here (the worst matrix row is ~90 deaths); the cap exists so
+	// an unattended run cannot grow the list without bound.
+	private const int MaxDeathPositions = 4000;
+
 	private sealed class ShipRec
 	{
 		public int Slot;
@@ -54,6 +59,7 @@ internal static class AiBench
 		// standstill", and an empty field arguing with nothing is not that.
 		public long RepelTicks;
 		public long RepelZeroedTicks;
+		public readonly Dictionary<string, ThreatTermRec> ThreatTerms = new Dictionary<string, ThreatTermRec>();
 		public Vector2 LastPos;
 		public Vector2 LastSteer;
 		public double SteerMs;
@@ -82,6 +88,11 @@ internal static class AiBench
 		// bot still fly into the grounded spider boss" — a death to a stray bullet and a death
 		// to the boss are the same number, which is why that report was unverifiable.
 		public readonly Dictionary<string, int> Killers = new Dictionary<string, int>();
+		// WHERE each death happened, in 800x600 design space (card ada9e839). `killers=` says what
+		// killed the bot and `deaths=` how often; neither can tell edge-hugging from a mid-field
+		// lane collision, and those want opposite fixes. Rendered by
+		// tools/sim/ai_death_heatmap.py. Capped so a long soak cannot grow it without bound.
+		public readonly List<Vector2> DeathPositions = new List<Vector2>();
 	}
 
 	private static readonly Dictionary<int, ShipRec> ships = new Dictionary<int, ShipRec>();
@@ -111,6 +122,15 @@ internal static class AiBench
 		powerupsSpawned = 0;
 		headlessTotal = TimeSpan.Zero;
 		lastScene = null;
+	}
+
+	// One repellent path for one threat TYPE: how often it fired and how hard. Mean strength
+	// is the number to compare against the 0.8 seek; Max says whether it ever bites at all.
+	private sealed class ThreatTermRec
+	{
+		public long Count;
+		public double StrengthTotal;
+		public float StrengthMax;
 	}
 
 	private static ShipRec Rec(PlayerShip ship)
@@ -186,6 +206,36 @@ internal static class AiBench
 		}
 	}
 
+	// DoAIMove's baddy loop, once per THREAT that actually contributed a repellent (card
+	// ada9e839). Answers the question a total-magnitude counter cannot: a threat type is handled
+	// either by EvadeMovingThreat (steer off its projected PATH) or by the radial distance field,
+	// never both -- the evade returns true and the caller skips the field. So "the bot ignores
+	// asteroids" has two completely different causes with the same symptom, and this says which:
+	// a type that never appears under `field` is being handled as a MOVER, and its radial
+	// magnitude is irrelevant no matter how it is tuned.
+	// `strength` is the term's magnitude before it joins the repulsion sum, so the mean is
+	// directly comparable to the 0.8 seek it has to out-vote.
+	internal static void NoteThreatTerm(PlayerShip ship, AlienDrawableGameComponent baddy, bool viaEvade, float strength)
+	{
+		if (!Enabled)
+		{
+			return;
+		}
+		ShipRec rec = Rec(ship);
+		string key = baddy.GetType().Name + (viaEvade ? "(evade)" : "(field)");
+		if (!rec.ThreatTerms.TryGetValue(key, out ThreatTermRec t))
+		{
+			t = new ThreatTermRec();
+			rec.ThreatTerms[key] = t;
+		}
+		t.Count++;
+		t.StrengthTotal += strength;
+		if (strength > t.StrengthMax)
+		{
+			t.StrengthMax = strength;
+		}
+	}
+
 	// PlayerShip.CollidesWith, `other is Wall`, BEFORE the invulnerability gate.
 	internal static void NoteWallContact(PlayerShip ship)
 	{
@@ -227,6 +277,10 @@ internal static class AiBench
 			? (boss.AiStanding ? "SpiderBoss(standing)" : "SpiderBoss")
 			: ((killer as string) ?? ((killer != null) ? killer.GetType().Name : "unknown"));
 		rec.Killers[name] = (rec.Killers.TryGetValue(name, out int n) ? n : 0) + 1;
+		if (rec.DeathPositions.Count < MaxDeathPositions)
+		{
+			rec.DeathPositions.Add(ship.GetPosition());
+		}
 	}
 
 	// DoAIMove, once per tick per AI ship while a level-HALTING boss is on screen. `standoff` is
@@ -375,6 +429,39 @@ internal static class AiBench
 			// other counter, so a build where it never fires and one where it fires constantly
 			// look identical without this.
 			sb.Append(" repelzero=").Append(Fmt((r.RepelTicks > 0L) ? (100.0 * (double)r.RepelZeroedTicks / (double)r.RepelTicks) : 0.0, 0)).Append('%');
+			// Per-type repellent breakdown: `<Type>(<path>)=<n>@<mean>/<max>`. The PATH is the point --
+			// a type appearing only as (evade) is never touched by the radial field's tuning.
+			// Death POSITIONS, design space, semicolon-separated. Space-free and bracket-free so
+			// eaAiBench.matrix's `split(' ')` parser is unaffected. Read by
+			// tools/sim/ai_death_heatmap.py straight off the eahl transcript.
+			if (r.DeathPositions.Count > 0)
+			{
+				sb.Append(" deathpos=");
+				for (int d = 0; d < r.DeathPositions.Count; d++)
+				{
+					if (d > 0)
+					{
+						sb.Append(';');
+					}
+					sb.Append(Fmt(r.DeathPositions[d].X, 0)).Append(',').Append(Fmt(r.DeathPositions[d].Y, 0));
+				}
+			}
+			if (r.ThreatTerms.Count > 0)
+			{
+				sb.Append(" threats=");
+				bool first = true;
+				foreach (KeyValuePair<string, ThreatTermRec> tt in r.ThreatTerms.OrderByDescending(k => k.Value.Count))
+				{
+					if (!first)
+					{
+						sb.Append(',');
+					}
+					first = false;
+					sb.Append(tt.Key).Append('=').Append(tt.Value.Count).Append('@')
+						.Append(Fmt(tt.Value.StrengthTotal / (double)tt.Value.Count, 2)).Append('/')
+						.Append(Fmt(tt.Value.StrengthMax, 2));
+				}
+			}
 			// Where the ship is and what it last asked for. A jitter number cannot distinguish a
 			// smooth flier from a bot wedged in a corner pushing into the wall; these two can.
 			sb.Append(" ticks=").Append(r.SteerTicks);

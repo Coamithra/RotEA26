@@ -345,6 +345,20 @@ public class PlayerShip : AlienDrawableGameComponent
 	// Exponent of the (1-t)^p falloff. Higher = the field bites later and harder.
 	public const float DefaultThreatFieldFalloff = 3f;
 
+	// PER-TYPE repellent scale for ASTEROIDS (card ada9e839). Multiplies the asteroid's own
+	// repulsion -- radial field and closest-approach evade alike -- and nothing else's.
+	//
+	// WHY A TYPE-SPECIFIC KNOB AND NOT A GLOBAL ONE. Measured on SpaceDodge (the asteroid-belt
+	// challenge), an asteroid's radial term contributes a MEAN of 0.42 against the 0.8 seek it
+	// has to out-vote, so the bot correctly computes that a powerup across the belt is worth the
+	// trip and is then correct all the way into the rock. The belt is the one place in the game
+	// where a dense field of lethal-on-contact obstacles must out-argue an ordinary detour, and
+	// the global alternative was already measured and DECLINED: `?aifieldfall=` 3 -> 2 made
+	// CrazyGame deaths 6.19 -> 7.75 and SpiderBoss(standing) deaths 41 -> 53. Steeper mountains
+	// HERE, rather than a special case that stops the bot wanting the powerup at all -- threat
+	// awareness belongs in the repellent's shape, never in a gate on another force.
+	public const float DefaultAsteroidThreatScale = 1f;
+
 	private static float ThreatFieldBasePx => EvilAliensWeb.Compat.DebugFlags.AiThreatFieldPx ?? Skill.FieldPx;
 
 	private static float ThreatFieldSizeScale => EvilAliensWeb.Compat.DebugFlags.AiThreatFieldSize ?? DefaultThreatFieldSizeScale;
@@ -1651,7 +1665,11 @@ public class PlayerShip : AlienDrawableGameComponent
 				// for something crossing the screen the radial term points ALONG its path, so
 				// keeping it around actively fights the evade it is supposed to back up. Anything
 				// slow, static, or not actually on a collision course falls through to the field.
-				if (EvadeMovingThreat(ref repel, baddy, dodgeAngle, minSteerStrength, maxSteerStrength))
+				// ?aievade=0 disables the closest-approach path entirely, so everything falls
+				// through to the radial field. A MEASUREMENT seam (card ada9e839): this special
+				// case predates the field composition and has never been measured inside it.
+				if (EvilAliensWeb.Compat.DebugFlags.AiEvadeMovers != false
+					&& EvadeMovingThreat(ref repel, baddy, dodgeAngle, minSteerStrength, maxSteerStrength))
 				{
 					continue;
 				}
@@ -1690,6 +1708,8 @@ public class PlayerShip : AlienDrawableGameComponent
 					{
 						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, dist / field);
 					}
+					strength *= ThreatTypeScale(baddy);
+					EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy, viaEvade: false, strength);
 					repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - baddy.Position) + dodgeAngle);
 				}
 			}
@@ -2049,6 +2069,8 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			strength = MathHelper.Max(strength, ThreatPanicStrength);
 		}
+		strength *= ThreatTypeScale(baddy);
+		EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy, viaEvade: true, strength);
 		repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(side) + dodgeAngle);
 		return true;
 	}
@@ -2057,6 +2079,18 @@ public class PlayerShip : AlienDrawableGameComponent
 	// code used one flat 150px for everything, which is nothing next to the spider boss -- by the
 	// time the field pushed at all the ship was inside the hitbox, and the fight read as the bot
 	// having no idea what it was doing.
+	// Per-type repellent multiplier. One switch, applied to BOTH repulsion paths (the radial
+	// field and EvadeMovingThreat), so a type cannot end up scaled on one and not the other --
+	// which on an asteroid would be a silent half-fix, since the belt uses both.
+	private static float ThreatTypeScale(AlienDrawableGameComponent baddy)
+	{
+		if (baddy is Asteroid)
+		{
+			return EvilAliensWeb.Compat.DebugFlags.AiAsteroidThreatScale ?? DefaultAsteroidThreatScale;
+		}
+		return 1f;
+	}
+
 	private static float ThreatFieldRange(AlienDrawableGameComponent baddy)
 	{
 		return ThreatFieldBasePx + ThreatRadius(baddy) * ThreatFieldSizeScale;

@@ -1375,6 +1375,18 @@ namespace EvilAliensWeb.Compat
 
 		public static float? AiThreatFieldFalloff { get; private set; }
 
+		// ?aiasteroidscale=<f>  per-type repellent multiplier for ASTEROIDS only (card ada9e839).
+		//                       The belt is the one place a dense field of lethal obstacles has to
+		//                       out-argue an ordinary powerup detour, and a GLOBAL falloff change
+		//                       was already measured and declined elsewhere.
+		public static float? AiAsteroidThreatScale { get; private set; }
+
+		// ?aievade=0  turn OFF EvadeMovingThreat, the closest-approach path, so every threat is
+		//             handled by the radial field alone. Card ada9e839's measurement seam -- that
+		//             special case was measured under the 0.95 park and never inside the field
+		//             composition that replaced it.
+		public static bool? AiEvadeMovers { get; private set; }
+
 		// ?netscript (card 11.3): replace the booted level's event list with a compressed
 		// ~60s script that fires every replicated beat type (message, warning, background
 		// ops, checkpoints, music switch, victory) -- the purpose-built two-tab
@@ -2736,6 +2748,23 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(AiSteerNoiseFloor ?? EvilAliens.PlayerShip.DefaultSteerNoiseFloor));
+					}
+					break;
+				case "aievade":
+					if (IsOn(val) || IsExplicitlyOff(val))
+					{
+						AiEvadeMovers = IsOn(val);
+					}
+					break;
+				case "aiasteroidscale":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiast) && aiast >= 0f)
+					{
+						AiAsteroidThreatScale = MathHelper.Min(aiast, 20f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiAsteroidThreatScale ?? EvilAliens.PlayerShip.DefaultAsteroidThreatScale));
 					}
 					break;
 				case "aiseekdeadzone":

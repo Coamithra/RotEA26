@@ -265,7 +265,10 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   `?aismooth= ?aismoothurgent= ?aireact= ?aigapmargin= ?aiscanrows= ?aicrosspenalty=
   ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall= ?aiseekapproach=
   ?aiseekpowerup= ?aipowerupreach= ?airepeldelta= ?ainoisefloor= ?aiseekdeadzone=
-  ?aiasteroidscale= ?aiasteroidrange= ?aiasteroidfall= ?aievade=`. Pair with `?aiplayer`.
+  ?aiasteroidscale= ?aiasteroidrange= ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge=
+  ?ailaneescape= ?aiconelead= ?aiconemaxlen= ?aiconewidth= ?aiconetaper= ?aiconefallalong=
+  ?aiconefallacross= ?aiconescale= ?aiconespread= ?aiconewidthmin= ?aiwedgestrength=
+  ?aiwedgefall=`. Pair with `?aiplayer`.
   **The bench also reports `killers=<Type>:<n>` (with `SpiderBoss(standing)` split out),
   `pickups=<n>/<spawned>(<pct>%)` and `boss=<px> bossfar=<pct>`** (cards 31ceb6ff / ada9e839) --
   which is what turned "the AI runs into the stationary spider boss" and "the AI ignores
@@ -275,12 +278,22 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   deliberate destination was silently deleted. Repellents now sum and are floored on their own
   (`?airepeldelta=`), attractors are never floored and stop inside a deadzone sized by the ship's
   11.3px stopping distance, and `?ainoisefloor=` catches the equilibrium case. `?aipark=` is gone.
-  Powerup pickups 72% -> 98%; **SpaceDodge ships at 1/8 victories vs 4/8 base**, caused by circular
-  asteroid fields (mean 0.42 vs the 0.8 seek) and NOT by the composition -- the designated fix is
-  card e425781b. **Three axes were swept -- magnitude, range and falloff -- and none reaches the
-  gate**, so the `?aiasteroid*` seams must NOT be tuned to chase it. `EvadeMovingThreat` was
+  Powerup pickups 72% -> 98%. `EvadeMovingThreat` was
   re-measured and KEPT (CrazyGame deaths 3.75 with it vs 14.25 without; flat on SpaceDodge only
   because asteroids are too slow to pass its speed gate).
+  **EVERY MOVER PROJECTS A DIRECTIONAL REPELLENT -- a mesa along its own velocity, not just a
+  circle** (card e425781b). A circle can say "I am here" and not "I am about to be THERE", and the
+  bot's mean edge distance from an asteroid (252px) sits outside the radial field's 199px warning
+  perimeter, so it lived where no circle reached. The cone is full strength across the swept body,
+  plateaus ALONG the trajectory and spikes away ACROSS it (so threading a gap stays possible), and
+  its length scales with speed -- one rule, no per-type code. Lane-hugging sweeps additionally get
+  an asymmetric WEDGE closing everything between the path and that screen edge.
+  **SpaceDodge 2/16 -> 16/16 victories, 33.75 -> 3.19 deaths** (seeds 1-8 x2); Level 1 improves too
+  (7.62 -> 2.00 deaths). Shipped WITH two stated regressions: CrazyGame deaths 4.75 -> 8.50 and
+  `SpiderBoss(standing)` 12 -> 22, both on levels whose victory verdict is unchanged.
+  **Do NOT tune the radial asteroid field -- FOUR axes were swept across three cards (magnitude,
+  range, falloff, curve family) and none reaches the gate**; the `?aiasteroid*` seams exist to A/B
+  against, not to ship a value.
   Details + all the tables: web CLAUDE.md.
   **Per-tier AI skill** (card c10e3e7f): the threat-field and aim-spread knobs resolve through
   `PlayerShip.AiSkillByDifficulty[]`, keyed off `Settings.EffectiveDifficulty` (the LOCK-aware

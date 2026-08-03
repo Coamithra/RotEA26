@@ -1732,8 +1732,11 @@ public class PlayerShip : AlienDrawableGameComponent
 			// next cycle. Same treatment as the sweep lane, on the other axis -- flat across the
 			// band, because every part of it is equally lethal.
 			// ?ailaneescape=0 drops both hand-rolled spider escapes, so the lane wedge added by
-			// card e425781b can be measured against them instead of on top of them. A MEASUREMENT
-			// seam for the supersession A/B; the escapes are the incumbent until it clears them.
+			// card e425781b can be measured against them instead of on top of them. Built as a
+			// temporary seam for that supersession A/B, and PERMANENT because the A/B kept them:
+			// dropping the escapes doubles SpiderBoss(standing) deaths (12 -> 24 over 8 paired
+			// runs) and costs 26 points of powerup pickup. The wedge is an ADDITION, not a
+			// replacement.
 			if (EvilAliensWeb.Compat.DebugFlags.AiLaneEscape != false
 				&& baddy is SpiderBoss && ((SpiderBoss)baddy).AiVerticalLaneActive)
 			{

@@ -1881,6 +1881,9 @@ the rest are tier-independent.
     computes that a powerup across the belt is worth the trip. The designated fix is **card
     e425781b** (velocity-cone repellent shapes) -- the death heatmap shows mid-field lane
     collisions with clean edges, which is geometry a circular field cannot express.
+    **That card LANDED and this is now history: SpaceDodge reads 16/16.** See "DIRECTIONAL
+    REPELLENT SHAPES" below for the shape that did it; everything in this bullet about the
+    radial field remains true and is exactly why a shape was needed.
     **Do NOT tune the asteroid field to chase it -- THREE axes were swept and none reaches the
     gate.** Magnitude (`?aiasteroidscale=` 1.5-4x) is whack-a-mole: asteroid kills 130 -> 99 while
     UFO kills 3 -> 19, 0 victories at every value. Shape (`?aiasteroidrange=` x{1.5,2,3} x
@@ -1931,7 +1934,7 @@ the rest are tier-independent.
     which path protects the ship, and a repellent change measured on one rig says nothing about
     the other.
   - Flags: `?airepeldelta= ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
-    ?aiasteroidfall= ?aievade=`, plus
+    ?aiasteroidfall= ?aievade=`, the cone/wedge family above, plus
     `?aiseekapproach= ?aiseekpowerup= ?aipowerupreach=`. Wiring that `logic_probe` cannot reach is
     covered by `tools/headless/probes/ai_boss_approach.txt`.
   - **`DefaultSeekApproachWeight` 1.1 is a PARK-CLEARANCE number, not a calibrated one** -- it was
@@ -1942,6 +1945,112 @@ the rest are tier-independent.
   - **Boss PROXIMITY is descriptive, never a gate.** `bossfar%` and `boss=<px>` describe where the
     ship is; the bot moving closer to a boss to dodge, collect or line up a shot is the field
     working. Gate boss work on OUTCOMES -- `SpiderBoss(standing)` deaths -- not on distance.
+- **DIRECTIONAL REPELLENT SHAPES: every mover projects a MESA along its own velocity** (card
+  e425781b). This is the fix the three failed radial campaigns above were pointing at, and it is
+  the largest single win the bot has had: **SpaceDodge 2/16 -> 16/16 victories, 33.75 -> 3.19
+  deaths** (eahl, Very_Hard, 600s cap, seeds 1-8 x2, same-side pairs agreeing on every seed), with
+  the death heatmap over those runs going 540 -> 51.
+  - **WHY A SHAPE AND NOT MORE STRENGTH.** A circle can only say "I am here"; it cannot say "I am
+    about to be THERE". The bot's measured mean edge distance from an asteroid is 252px while the
+    radial field falls under the 0.8 seek at 199px -- it spends its life outside the only warning
+    it has, and the deaths cluster MID-FIELD with clean edges. Four axes across three cards
+    (magnitude, range, falloff, curve family) could not move that, because none of them changes
+    the field's SHAPE.
+  - **THE CONE, in cone-local coordinates.** With `axis` the unit travel direction, `u` how far
+    AHEAD the ship is and `w` how far to the SIDE: the corridor's half-width tapers from the
+    body's own half-extent at `u=0` to a point at the cone's length, the across-axis falloff is
+    measured from that corridor's EDGE outward, and length = speed * `ConeLeadMs`. So it is at
+    FULL strength anywhere inside the swept body (the card's mesa principle -- inside is death, so
+    curve values there are wasted dynamic range) and it lengthens with speed by construction. One
+    rule covers asteroids, bullets, UFOs and the boss's screen-crossing sweep with **no per-type
+    code**; a fast mover automatically projects a long cone.
+  - **THREE DECISIONS THAT ARE NOT ARBITRARY, all spelled out at the code:**
+    - **The push is purely TRANSVERSE.** The mesa's along-axis gradient points FORWARD, down the
+      mover's own track -- following it asks a 0.33px/ms ship to outrun a 0.38px/ms asteroid, and
+      it is the identical failure the radial field already has against a screen-crosser. Only the
+      sideways component is taken, which is what `EvadeMovingThreat` does and for the same reason.
+    - **PLATEAU along the axis (`1 - t^p`, p=2), SPIKE across it (`(1-t)^p`, p=3).** Authority far
+      out along the trajectory is the whole point; transverse clearance must stay cheap or
+      threading a gap between two rocks stops being possible and the shape is just a wider circle.
+      Note the along-axis family is the 2008 one that card e88e21ca measured and rejected -- but
+      rejected as a RADIAL curve, where a plateau merely widens a circle. On a trajectory axis it
+      is the idea, so that result does not carry.
+    - **It ADDS to the radial field rather than replacing it** -- the shape is a circle with a hat
+      on it, so both halves are real. Consequence for reading `threats=`: `(cone)` and `(wedge)`
+      are NOT exclusive with `(field)` the way `(evade)` is, so ask which path carries the WEIGHT,
+      not which one appears.
+  - **THE LANE WEDGE is the one asymmetric case.** A symmetric cone offers the gap between a
+    lane-hugging path and the screen edge as an escape, and that gap is a trap -- the ship dodges
+    into it and is crushed against the wall. So when a swept band leaves less than a survivable
+    gap on one side, everything from the path to that edge is closed at FULL strength and the only
+    downhill direction is out of the lane; past the band's far edge it degrades with the cone's
+    own across-axis falloff, so a ship that has already left is nudged rather than shoved back.
+    - **Which edge is SCREEN GEOMETRY, not a type test**, and the survivable gap is derived
+      (`2 * (shipHalfExtent + the 11.3px stopping distance)`), so the boss's three fixed lanes and
+      its sweep-to-the-right-edge landing all resolve themselves -- including reproducing the
+      hand-rolled escape's "always break LEFT out of a landing".
+    - **A band NARROWER than the room a ship needs raises no wedge at all.** It is an obstacle to
+      cross, not a corridor. Without that gate every UFO in SpaceDodge wedged (3263 contributions
+      at mean 4.25) simply for entering from the top, which out-votes the entire rest of the field.
+    - **The MIDDLE lane raises no wedge** -- it hugs neither edge, so either side is an escape.
+      The hand-rolled escape forced it DOWNWARD unconditionally; the existing `TopEdgeAvoidStrength`
+      band supplies that bias instead. Called out because it is exactly the kind of quiet
+      behavioural difference a future reader comes hunting for; pinned as its own `logic_probe`
+      check.
+  - **`AlienDrawableGameComponent.TryGetAiSweptPath` is the seam that feeds it, and its contract
+    is ANNOUNCED rather than observed.** Default = `(Position, ObservedVelocity, half-extent)`,
+    i.e. no per-type code for anything in the game. `SpiderBoss` is the ONE override, because all
+    three defaults are wrong for a scripted set-piece: its `Update` early-returns through the whole
+    "Danger!" hold, so its observed velocity is ZERO exactly when the warning matters; its lethal
+    band SNAPS to one of three fixed lanes rather than tracking `Position.Y`; and its landing
+    sweeps to the right screen edge, so the swept band is not symmetric about the body. That is
+    choreography-as-data, which is what the field principle asks for -- the knowledge lives in the
+    shape's INPUTS, not in a special case inside `DoAIMove`.
+  - **BOTH SUPERSESSION CANDIDATES WERE MEASURED AND BOTH SURVIVED -- nothing was deleted.** The
+    card's ruling was to delete them outright; the match-the-number bar refuted it, which is what
+    that bar is for. The cone is an ADDITION.
+    - `EvadeMovingThreat`, CrazyGame seeds 1-4 x2: evade on / cone off **4.75 deaths, 8/8**; cone
+      on / `?aievade=0` **38.00, 0/8**; neither 49.75, 0/8. So the cone helps a lot and replaces
+      nothing.
+    - The spider lane escapes, `?level=Level2&spiderboss` 180 sim-s, same seeds (standing deaths
+      summed over the 8 runs): escapes on / cone off 6.50 deaths / standing 12 / pickup 60.9%;
+      escapes off / wedge on 6.75 / 24 / 35.0%; both on 5.12 / 22 / 60.9%.
+    - `?ailaneescape=0` is therefore a PERMANENT A/B seam rather than the temporary one it was
+      built as -- the escapes it disables now live on beside the wedge.
+  - **SHIPPED WITH TWO STATED REGRESSIONS**, both on levels whose victory verdict is unchanged and
+    both smaller than what the shape buys:
+    - **CrazyGame deaths 4.75 -> 8.50** (victories 8/8 either way; it is a `Lives = -1` level).
+    - **`SpiderBoss(standing)` deaths 12 -> 22**, while TOTAL spider deaths IMPROVE 6.50 -> 5.12.
+      It is NOT the wedge -- `?aiwedge=0` makes it worse still (28). A standing boss sweeps nothing
+      and so projects no cone at all, so these are deaths to the ship being pushed INTO a parked
+      boss by OTHER objects' cones.
+  - **THE ACROSS-AXIS WIDTH IS THE ONE UNDERIVED NUMBER, and the two rigs disagree about it.**
+    SpaceDodge, paired seeds x2: 75px 21.50 deaths (2/4), 150px 8.56 (12/16), **300px 3.44
+    (16/16)**, 450px 6.00 -- an INTERIOR optimum, not a gradient left half-walked. Magnitude
+    reaches the same outcome and was declined (`?aiconescale=2.5` also 16/16, at 3.62) on the
+    grounds cards ada9e839 and e88e21ca both used. But **CrazyGame wants the opposite width**
+    (1.00 death at 60px against 8.50 at 300): it fields 30 simultaneous ~5px-half bullets, and a
+    300px skirt on each buries the ship in transverse pushes that cancel.
+    **The obvious generalisation was BUILT AND MEASURED AND DECLINED -- do not re-derive it.**
+    Scaling the reach with the hull the way `ThreatFieldRange` does, floored so a swarm keeps a
+    usable skirt (`?aiconespread=` x `?aiconewidthmin=`, 6 cells, both rigs in one pass) really
+    does fix CrazyGame -- 8.50 -> 1.00, better than having no cone at all -- and the FLOOR is the
+    axis that matters, not the multiplier. The best cell (k6.4 / 60px) reads 14/16 at 7.62 on the
+    full SpaceDodge gate against the flat width's 16/16 at 3.19, and then fails the third gate
+    outright: `SpiderBoss(standing)` 12 shipped-main / 22 flat / **34** scaled, by the mechanism
+    in the bullet above -- a wider UFO skirt shoves the ship into the parked boss harder, visible
+    as that arm's `UFO(wedge)` mean climbing 1.12 -> 1.96. So the flat number ships and both
+    seams stay INERT. The rig disagreement is real and open.
+  - Flags: `?aicone=` (master A/B control) `?aiwedge=` `?ailaneescape=` `?aiconelead=`
+    `?aiconemaxlen=` `?aiconewidth=` `?aiconetaper=` `?aiconefallalong=` `?aiconefallacross=`
+    `?aiconescale=` `?aiconespread=` `?aiconewidthmin=` `?aiwedgestrength=` `?aiwedgefall=`.
+    `logic_probe`'s **`ProbeAiConeShape`** pins the shape at FIXED POINTS -- the mesa, the
+    transverse-only push, nothing behind a mover, length scaling with speed, the wedge's flat
+    trapped side and its far-side degradation, the middle lane, and the small-mover negative
+    control. Fixed points rather than any aggregate, because a field's MEAN strength over a run is
+    a selection effect (far contributions stop existing rather than getting weaker), so two shapes
+    can only be compared point by point. It calls `PlayerShip.EvaluateSweptShape` directly -- the
+    shape is a pure function of geometry, with no ship, component or `Game` involved.
 - **`AiBench` answers "what is killing it" and "does it collect anything" now** (same cards).
   `killers=<Type>:<n>` is a histogram taken where the ship actually dies (`asplosionCauser`), and
   **`SpiderBoss` is split by state** -- `SpiderBoss(standing)` vs `SpiderBoss` -- because walking
@@ -2057,7 +2166,9 @@ the rest are tier-independent.
   ?aigapmargin= ?aiscanrows= ?aicrosspenalty= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx=
   ?aifieldsize= ?aifieldfall= ?aiseekapproach= ?aiseekpowerup= ?aipowerupreach= ?airepeldelta=
   ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
-  ?aiasteroidfall= ?aievade=`
+  ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge= ?ailaneescape= ?aiconelead= ?aiconemaxlen=
+  ?aiconewidth= ?aiconetaper= ?aiconefallalong= ?aiconefallacross= ?aiconescale= ?aiconespread=
+  ?aiconewidthmin= ?aiwedgestrength= ?aiwedgefall=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
   A malformed value on any of them is REPORTED and ignored, never swallowed, per the file-wide
   value-carrying-flag convention (see "Debug flags & tuning conventions" above; cards 48b7c6b1 +

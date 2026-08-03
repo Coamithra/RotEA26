@@ -127,12 +127,41 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private const float SteerUrgentDemand = 9f;
 
-	// At or below this total demand the ship parks instead of thrusting. Just above SeekWeight.
-	public const float DefaultSteerParkDemand = 0.95f;
+	// REPULSION CANCELLATION FLOOR (card ada9e839). Repellents are summed on their own, and if
+	// that resultant comes out at or below this the ship is not pushed at all. It exists for the
+	// case the steering field cannot otherwise express: two threats shoving from opposite sides
+	// resolve to a near-zero vector whose DIRECTION is noise, and Move() discards magnitude and
+	// thrusts at full acceleration along the angle -- so "barely pushed" reads as "sprint that
+	// way" and the ship jitters between two walls instead of holding still between them.
+	//
+	// 0.2 IS THE 2008 VALUE, restored. The original DoAIMove ended with
+	// `if (direction.Length() <= 0.2f) direction = Vector2.Zero;`. This port raised that to 0.95
+	// -- above the 0.8 seek -- which turned a noise floor into a VETO that deleted every
+	// deliberate destination the bot had (see the seek weights below, and the card). The number
+	// is back where it started; what changed is that it now applies to the repulsion sum ALONE
+	// rather than to the whole steer, so it can never censor an attractor again.
+	public const float DefaultRepulseCancelDelta = 0.2f;
+
+	// WHOLE-SUM equilibrium guard, applied last (see the end of DoAIMove for the placement
+	// argument). Same 0.2, same job at a different level: a steer that has cancelled to noise is
+	// full throttle in an arbitrary direction, because Move() keeps only the angle. It is BELOW
+	// every deliberate force by construction -- the weakest attractor is SeekWeight 0.8 and a
+	// surviving repellent already beats DefaultRepulseCancelDelta -- so it can only ever fire on
+	// real cancellation, never censor a lone vote. That bound is the whole difference from the
+	// 0.95 this port shipped, and it is asserted by logic_probe's ProbeAiFieldComposition.
+	//
+	// FUTURE HAZARD, stated because the probe is the only thing that would catch it: an attractor
+	// that FADES with distance (there is none today -- the seek is a flat 0.8 however far away its
+	// target is) would drop under this floor at range and be parked exactly as the 0.95 park
+	// parked everything. Such a term must either keep its full-strength magnitude above the floor
+	// or accept being inert at range as a deliberate choice.
+	public const float DefaultSteerNoiseFloor = 0.2f;
 
 	private static float SteerSmoothUrgentMs => EvilAliensWeb.Compat.DebugFlags.AiSteerSmoothUrgentMs ?? DefaultSteerSmoothUrgentMs;
 
-	private static float SteerParkDemand => EvilAliensWeb.Compat.DebugFlags.AiParkDemand ?? DefaultSteerParkDemand;
+	private static float RepulseCancelDelta => EvilAliensWeb.Compat.DebugFlags.AiRepelCancelDelta ?? DefaultRepulseCancelDelta;
+
+	private static float SteerNoiseFloor => EvilAliensWeb.Compat.DebugFlags.AiSteerNoiseFloor ?? DefaultSteerNoiseFloor;
 
 	// How far ahead the wall logic looks, as MILLISECONDS of closing travel rather than a fixed
 	// pixel count. The 2008 code probed `41.67 * MaxSpeed` = ~13.75px against wall tiles that are
@@ -231,54 +260,57 @@ public class PlayerShip : AlienDrawableGameComponent
 	// Lateral push while a big UFO is winding up, to make its locked-at-fire aim stale.
 	private const float LazerDodgeStrength = 7f;
 
-	// Station-keeping "arrive" behaviour. Deadzone is generous because the exact station is
-	// arbitrary -- an idle ship parked 20px off is indistinguishable from one parked on the spot,
-	// and chasing the last few pixels is precisely what looked like fidgeting.
-	private const float SeekArriveDeadzonePx = 30f;
+	// Station-keeping "arrive" behaviour, and THE anti-pingpong mechanism for the seek attractor
+	// (card ada9e839). Inside this radius the pull is switched off entirely, so the ship coasts
+	// the last stretch instead of thrusting at a point it is already on top of, sailing past it
+	// and turning round -- the visible idle fidget.
+	//
+	// IT IS SIZED BY STOPPING DISTANCE, not by taste. `Move(null, ...)` applies deceleration
+	// alone, so a ship entering the deadzone at full speed travels
+	// 0.5 * ShipMaxSpeed^2 / ShipDeceleration = 11.3px before it halts. Any radius comfortably
+	// above that is stable (the ship cannot coast out the far side); the radius is what decides
+	// how close to the target it comes to rest. 2008 used 10px -- i.e. the author sized it to
+	// exactly this figure -- and the port widened it to 30 while the 0.95 park was in force,
+	// which is a confounded measurement, since a lone 0.8 seek was being zeroed outright and
+	// could not fidget. Both were re-measured on the jitter gate once the park was gone; see the
+	// card's closing comment for the numbers behind the baked value.
+	// Pinned against the motion constants by logic_probe's ProbeAiFieldComposition.
+	public const float DefaultSeekArriveDeadzonePx = 30f;
+
+	private static float SeekArriveDeadzonePx => EvilAliensWeb.Compat.DebugFlags.AiSeekDeadzonePx ?? DefaultSeekArriveDeadzonePx;
 
 	// Kept at the 2008 weight so the seek still loses to threat avoidance exactly as before.
 	private const float SeekWeight = 0.8f;
 
 	// ---- seek weights for a target the bot CHOSE (cards ada9e839 / 31ceb6ff) ----------------
 	//
-	// THE BUG THESE FIX. SeekWeight sits BELOW SteerParkDemand on purpose -- that is what makes an
-	// idle ship coast to a stop instead of fidgeting around an arbitrary spot. But every
-	// deliberate destination in DoAIMove also rides `steerTarget`: a powerup, a level-halting
-	// boss's standoff point, a partner to dock with, a blastable cluster. They all inherited the
-	// station's weight, so the park zeroed them too and the ship simply did not go, unless
-	// something ELSE happened to be pushing that same tick. That is the whole of "the AI is
-	// uninterested in powerups" -- and it is also why the boss-approach term added by card
-	// f4d1721f could never be seen to do anything: it was correct code the park deleted.
+	// THE BUG THAT WAS HERE, AND HOW IT IS GONE. Every deliberate destination in DoAIMove rides
+	// ONE `steerTarget` carrying ONE weight: the idle station, a powerup, a level-halting boss's
+	// standoff point, a partner to dock with, a blastable cluster. The port ended DoAIMove with a
+	// 0.95 "park" that zeroed the whole steer whenever it came out at or below that -- so a lone
+	// 0.8 seek produced NO MOTION AT ALL and the bot simply did not go anywhere unless something
+	// else happened to be pushing that tick. That is the whole of "the AI is uninterested in
+	// powerups", and it is why the boss-approach term card f4d1721f added was correct code the
+	// park deleted.
 	//
-	// WHAT ACTUALLY SHIPPED, AND WHY IT IS ONE DESTINATION AND NOT ALL OF THEM. Raising the seek
-	// for EVERY steerTarget was the first shape tried and it is measurably wrong: a level-halting
-	// boss is a COMMITMENT (nothing advances until it dies, so paying safety for it is the
-	// point), while a powerup, a blastable cluster and a Linker rendezvous are DETOURS whose
-	// value has to beat their risk -- and it does not. So only the boss standoff below gets a
-	// weight above the park. Everything else still rides SeekWeight and is still parked, exactly
-	// as before this card. The full measurement, including the two rigs that disagree about what
-	// a good pickup rate even is, is on card ada9e839.
-
-	// POWERUPS -- the DECLINED half, kept as a seam rather than a fix (card ada9e839, which
-	// returns to the backlog carrying the numbers). Baked AT SeekWeight, so it is inert and the
-	// shipped bot is unchanged here; ?aiseekpowerup= is what reproduces the tables.
-	// MEASURED (eahl, Very_Hard, N=16). Level 1 ?invuln, share of spawned powerups taken:
-	// 0.8 -> 69%, 1.1 -> 89%, 1.6 -> 95%. Level 1 ?invuln OFF: deaths 3.88 -> 5.44 (at 1.1) /
-	// 5.75 (at 1.6, with the standoff held down, so this is the DETOUR's own cost). And the
-	// gate it fails, SpaceDodge (600 s cap, N=8, VICTORIES): 6/8 -> 2/8 at 1.1, 4/8 at 1.6,
-	// deaths 14.9 -> 28.4 / 20.0. Its powerups sit in an asteroid field where a LOW pickup rate
-	// is correct play, so no single scalar satisfies both levels. The researched next design is
-	// a threat-aware seek (suppress the detour while any threat field is pushing), not a
-	// different number here.
+	// Card ada9e839 removed the park rather than tuning around it: attraction and repulsion now
+	// compose properly (repellents are summed and floored on their own, attractors are never
+	// floored, and each attractor's anti-pingpong mechanism is its own DEADZONE). So these
+	// weights are RELATIVE authority within the sum now, and nothing here has to clear a
+	// threshold to be heard at all.
 	public const float DefaultSeekPowerupWeight = SeekWeight;
 
 	// THE LEVEL-HALTING BOSS STANDOFF (card 31ceb6ff). Judged on the challenge-level COMPLETION
 	// MATRIX, not on deaths: eight of the nine challenge levels run with score.Lives = -1, so a
 	// death there is free and the failure that matters is a level that never finishes. Closing on
 	// a boss costs deaths by design.
-	// Deliberately LOW but still clear of SteerParkDemand (0.95). That floor is not tunable: at
-	// or below it the park zeroes this vote again and card 31ceb6ff regresses to inert code,
-	// which is the exact defect being fixed. Pinned by logic_probe's ProbeAiSeekWeights.
+	// Above SeekWeight because a halting boss is a COMMITMENT (nothing in the level advances
+	// until it dies), while a powerup or a rendezvous is a DETOUR whose value has to beat its
+	// risk. It used to have a second job -- clearing the 0.95 park, which was the only reason it
+	// moved the ship at all -- and card ada9e839 retired that job; the value is unchanged so the
+	// configuration card 31ceb6ff measured is preserved.
+	// Its own anti-pingpong mechanism is the standoff RADIUS: the term switches off once the ship
+	// is inside gun range, so it never pulls toward a point it is sitting on.
 	public const float DefaultSeekApproachWeight = 1.1f;
 
 	private static float SeekPowerupWeight => EvilAliensWeb.Compat.DebugFlags.AiSeekPowerupWeight ?? DefaultSeekPowerupWeight;
@@ -1423,6 +1455,25 @@ public class PlayerShip : AlienDrawableGameComponent
 		float steerRange = 150f;
 		float minSteerStrength = 0f;
 		float maxSteerStrength = 4f;
+		// REPELLENTS ARE SUMMED SEPARATELY FROM ATTRACTORS (card ada9e839). Everything that pushes
+		// the ship AWAY from something -- every threat field, the lazer terms, the spider boss's
+		// lane escapes, the screen edges -- accumulates here and is folded into `direction` once,
+		// below, after the cancellation floor has had its say. Attractors (the seek and the
+		// powerup's own pull) go straight into `direction` and are never floored; each of them
+		// stops attracting inside its own deadzone instead.
+		//
+		// WHY THE SPLIT IS THE FIX. The two families fail differently. A repellent pair that
+		// shoves from opposite sides resolves to a near-zero vector whose direction is noise, and
+		// Move() throws magnitude away and thrusts full-tilt along the angle -- so the ship
+		// rattles between two walls it should just sit between. An attractor cannot fail that way
+		// (it is one pull toward one point), so a floor big enough to fix the first family can
+		// only ever silently delete the second, which is exactly what the 0.95 park did.
+		//
+		// NOT in here, deliberately: SteerThroughWall (a committed gap PLAN with its own
+		// hysteresis, not a field), and the top-edge band and ClampIntoWallSpace, which both run
+		// AFTER the low-pass on purpose -- moving either across that boundary would change wall
+		// and ceiling behaviour this card has no business touching.
+		Vector2 repel = Vector2.Zero;
 		Vector2 steerTarget = new Vector2(float.MaxValue, float.MaxValue);
 		// How hard to pull toward whatever steerTarget ends up being. It carries the WEIGHT rather
 		// than a flag because the answer is not two-valued: the idle station and every DETOUR park
@@ -1490,7 +1541,7 @@ public class PlayerShip : AlienDrawableGameComponent
 					{
 						across = -across;
 					}
-					direction += LazerDodgeStrength * across;
+					repel += LazerDodgeStrength * across;
 				}
 			}
 			// The vertical strips: the fixed X-600 landing column, and the climb that opens the
@@ -1515,7 +1566,7 @@ public class PlayerShip : AlienDrawableGameComponent
 					// and it fights the screen bounds all the way out instead of easing off once
 					// the ship is clearly out of the way.
 					float urge = ThreatFieldStrength(Math.Abs(offLane) / VerticalLaneClearancePx, SweepLaneAvoidStrength);
-					direction += new Vector2(away * urge, 0f);
+					repel += new Vector2(away * urge, 0f);
 				}
 			}
 			// Act on the boss's own telegraph. During the "Danger!" arrow the spider boss sits
@@ -1538,7 +1589,7 @@ public class PlayerShip : AlienDrawableGameComponent
 					// easing off as the ship clears the band, so it hands over cleanly to the
 					// screen-edge terms instead of shoving all the way into them.
 					float urge = ThreatFieldStrength(Math.Abs(offLane) / SweepLaneClearancePx, SweepLaneAvoidStrength);
-					direction += new Vector2(0f, away * urge);
+					repel += new Vector2(0f, away * urge);
 				}
 			}
 			// Card f4d1721f: track the nearest level-HALTING boss so the ship can close on it if
@@ -1579,7 +1630,7 @@ public class PlayerShip : AlienDrawableGameComponent
 					{
 						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, d / LazerAvoidRangePx);
 					}
-					direction += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - shortestpoint) + dodgeAngle);
+					repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - shortestpoint) + dodgeAngle);
 				}
 			}
 			else
@@ -1600,7 +1651,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				// for something crossing the screen the radial term points ALONG its path, so
 				// keeping it around actively fights the evade it is supposed to back up. Anything
 				// slow, static, or not actually on a collision course falls through to the field.
-				if (EvadeMovingThreat(ref direction, baddy, dodgeAngle, minSteerStrength, maxSteerStrength))
+				if (EvadeMovingThreat(ref repel, baddy, dodgeAngle, minSteerStrength, maxSteerStrength))
 				{
 					continue;
 				}
@@ -1639,7 +1690,7 @@ public class PlayerShip : AlienDrawableGameComponent
 					{
 						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, dist / field);
 					}
-					direction += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - baddy.Position) + dodgeAngle);
+					repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - baddy.Position) + dodgeAngle);
 				}
 			}
 		}
@@ -1681,6 +1732,11 @@ public class PlayerShip : AlienDrawableGameComponent
 			// PowerupReachPx, not the 150px `steerRange` the 2008 code shared with the screen-edge
 			// margin -- see the const. Beyond this the powerup is still the steerTarget above, so
 			// the ship heads for it; this term only shapes the approach.
+			// An ATTRACTOR, so it goes into `direction` and is never floored (card ada9e839). It
+			// needs no explicit deadzone: its target CEASES TO EXIST when the ship reaches it --
+			// contact collects the powerup and `oracle.GetPowerups()` stops returning it -- so
+			// there is no point it can oscillate about. That is the one attractor here whose
+			// deadzone is implicit rather than written down; note it before copying the shape.
 			float powerupReach = PowerupReachPx;
 			if (distToPowerup <= powerupReach)
 			{
@@ -1772,17 +1828,17 @@ public class PlayerShip : AlienDrawableGameComponent
 			float distToTarget = (delta).Length();
 			if (distToTarget > SeekArriveDeadzonePx)
 			{
-				// Plain positional pull, as in 2008 -- but with a wider deadzone. The 10px original
-				// meant an idle ship chased the last few pixels of an arbitrary station forever,
-				// sailing past and turning round: the visible "why is it fidgeting when nothing is
-				// happening". A velocity-damped ARRIVE was tried here and reverted -- it contains
+				// Plain positional pull, as in 2008. THE deliberate-destination attractor: it goes
+				// into `direction` and is never floored (card ada9e839), because its anti-pingpong
+				// mechanism is the deadzone above -- switched off inside it, full strength outside,
+				// a hard edge. That is sound here precisely BECAUSE the deadzone covers the ship's
+				// stopping distance: a ship crossing the edge at full speed coasts 11.3px and
+				// halts well inside a 30px zone, so it can never cross back out under its own
+				// momentum and re-trigger. See DefaultSeekArriveDeadzonePx.
+				// A velocity-damped ARRIVE was tried here instead and reverted -- it contains
 				// -SpeedVector, so it brakes the ship whenever it is moving relative to its station,
 				// which is most of a boss fight. That measured coast 28% -> 59% and 24 -> 70 deaths:
 				// the bot was being held at a standstill and could not accelerate out of trouble.
-				// Widening the deadzone kills the fidget without ever opposing a real manoeuvre.
-				// The weight was chosen where the target was (card ada9e839): a chosen objective
-				// has to clear SteerParkDemand or the park zeroes the only vote asking for it,
-				// while the idle station must stay below it or the fidget comes back.
 				direction += steerTargetWeight
 					* MyMath.AngleToVector(MyMath.VectorToAngle(steerTarget - base.Position));
 			}
@@ -1802,7 +1858,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				{
 					push = MathHelper.Lerp(maxSteerStrength, minSteerStrength, base.Position.X / edgeMargin);
 				}
-				direction += push * new Vector2(1f, 0f);
+				repel += push * new Vector2(1f, 0f);
 			}
 			if (base.Position.X > 800f - edgeMargin)
 			{
@@ -1811,7 +1867,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				{
 					push = MathHelper.Lerp(maxSteerStrength, minSteerStrength, Math.Abs((800f - base.Position.X) / edgeMargin));
 				}
-				direction += push * new Vector2(-1f, 0f);
+				repel += push * new Vector2(-1f, 0f);
 			}
 			if (base.Position.Y < edgeMargin)
 			{
@@ -1820,7 +1876,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				{
 					push = MathHelper.Lerp(maxSteerStrength, minSteerStrength, base.Position.Y / edgeMargin);
 				}
-				direction += push * new Vector2(0f, 1f);
+				repel += push * new Vector2(0f, 1f);
 			}
 			if (base.Position.Y > bottomEdge - edgeMargin)
 			{
@@ -1829,9 +1885,25 @@ public class PlayerShip : AlienDrawableGameComponent
 				{
 					push = MathHelper.Lerp(maxSteerStrength, minSteerStrength, Math.Abs((bottomEdge - base.Position.Y) / edgeMargin));
 				}
-				direction += push * new Vector2(0f, -1f);
+				repel += push * new Vector2(0f, -1f);
 			}
 		}
+		// THE REPULSION CANCELLATION FLOOR, and then the combine (card ada9e839). Everything that
+		// pushes AWAY has now had its say; if the resultant of all of it is at or below the delta,
+		// the repellents have argued each other to a standstill and the ship is not pushed at all.
+		// Applied to `repel` alone and BEFORE the low-pass, which is the only placement that means
+		// anything: the point is to stop a noise-directioned residual from ever entering the sum,
+		// and a floor downstream of the blend would be judging a lagged mixture of this tick's
+		// cancellation and the last few ticks' real pushes.
+		bool repelZeroed = (repel).Length() <= RepulseCancelDelta;
+		// Reported BEFORE the zeroing, because afterwards "two threats cancelled out" and "nothing
+		// was pushing" are the same vector.
+		EvilAliensWeb.Compat.AiBench.NoteRepel(this, repel, repelZeroed);
+		if (repelZeroed)
+		{
+			repel = Vector2.Zero;
+		}
+		direction += repel;
 		// Low-pass the summed steer (card f4d1721f). Everything above votes with a vector, Move()
 		// consumes only the resulting ANGLE, and nothing damped how fast that angle could move --
 		// so near-cancelling votes used to spin the heading at ~1050 deg/s inside a wall. Blending
@@ -1876,13 +1948,25 @@ public class PlayerShip : AlienDrawableGameComponent
 			// Committing it makes the escape the new baseline to smooth from.
 			aiSteer = direction;
 		}
-		// PARK when the only thing pulling is the station itself. Move() throws the magnitude away
-		// and thrusts at full acceleration along the angle, so a weak-but-nonzero steer is not a
-		// gentle nudge -- it is full throttle at an arbitrary point the ship is already next to,
-		// which it then sails past and comes back to, forever. That is the visible up-down bounce.
-		// The threshold sits just above the station pull (SeekWeight 0.8), so a lone seek coasts to
-		// a stop while the seek plus ANYTHING else -- an edge push, a threat, a wall -- still flies.
-		if ((direction).Length() <= SteerParkDemand)
+		// THE EQUILIBRIUM GUARD -- the 2008 line, restored verbatim in value and position (card
+		// ada9e839). Move() discards magnitude and thrusts at full acceleration along the ANGLE,
+		// so a steer that has cancelled down to a whisker is not a gentle nudge, it is a sprint in
+		// a direction that is numerical noise. At or below the floor the ship holds still, which
+		// for a potential field is the CORRECT answer at an equilibrium point.
+		//
+		// IT CANNOT CENSOR A REAL FORCE, and that is by construction rather than by luck: every
+		// deliberate attractor weighs at least SeekWeight 0.8, and any repellent that survived the
+		// repulsion floor above already exceeds 0.2. So the only way to land here is genuine
+		// cancellation between an attractor and a repellent that both really are pushing.
+		// logic_probe's ProbeAiFieldComposition asserts both bounds; the port's 0.95 -- which was
+		// ABOVE the 0.8 seek and therefore deleted every deliberate destination the bot had -- is
+		// exactly what that assertion exists to stop coming back.
+		//
+		// AFTER the low-pass, deliberately. The blend's output decays exponentially toward zero
+		// and never reaches it, so a floor placed before it would hand the smoother a clean zero
+		// and still leave the ship thrusting full-tilt down a decaying residual for many frames
+		// afterwards. Applied here, the ship actually stops.
+		if ((direction).Length() <= SteerNoiseFloor)
 		{
 			direction = Vector2.Zero;
 		}
@@ -1900,7 +1984,9 @@ public class PlayerShip : AlienDrawableGameComponent
 	// -- straight down the boss's own track -- and only starts pushing at all inside 150px, by
 	// which time a mover that size cannot be avoided. Steering perpendicular to its travel moves
 	// the ship off the line while there is still time, which is what a player does.
-	private bool EvadeMovingThreat(ref Vector2 direction, AlienDrawableGameComponent baddy, float dodgeAngle, float minSteerStrength, float maxSteerStrength)
+	// `repel` is DoAIMove's repulsion accumulator, not its final steer -- this is a push-away
+	// term and is subject to the cancellation floor like every other one (card ada9e839).
+	private bool EvadeMovingThreat(ref Vector2 repel, AlienDrawableGameComponent baddy, float dodgeAngle, float minSteerStrength, float maxSteerStrength)
 	{
 		// Engage on the THREAT's own speed, never the relative speed. This matters: relative
 		// velocity is non-zero for a STATIONARY threat whenever the ship is moving, so gating on
@@ -1963,7 +2049,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			strength = MathHelper.Max(strength, ThreatPanicStrength);
 		}
-		direction += strength * MyMath.AngleToVector(MyMath.VectorToAngle(side) + dodgeAngle);
+		repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(side) + dodgeAngle);
 		return true;
 	}
 

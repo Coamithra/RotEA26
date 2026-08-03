@@ -47,6 +47,13 @@ internal static class AiBench
 		public int Shots;
 		public long SteerTicks;
 		public long CoastTicks;
+		// Ticks on which the repulsion resultant fell at or below RepulseCancelDelta and every
+		// repellent was therefore dropped (card ada9e839). Counted only when something was
+		// actually pushing, so a calm screen does not read as constant cancellation -- the
+		// question the metric answers is "how often do the threat fields argue themselves to a
+		// standstill", and an empty field arguing with nothing is not that.
+		public long RepelTicks;
+		public long RepelZeroedTicks;
 		public Vector2 LastPos;
 		public Vector2 LastSteer;
 		public double SteerMs;
@@ -157,6 +164,26 @@ internal static class AiBench
 		}
 		rec.LastHeading = heading;
 		rec.HasHeading = true;
+	}
+
+	// DoAIMove, at the repulsion cancellation floor (card ada9e839). `preFloor` is the repulsion
+	// resultant BEFORE the floor is applied, which is the only form that can answer the question:
+	// a tick with nothing repelling and a tick where two threats cancelled each other out are
+	// both Vector2.Zero AFTERWARDS, and only the second is this mechanism doing its job. Ticks
+	// where nothing pushed at all are counted in NEITHER total -- folding them in would turn the
+	// rate into a measure of how empty the screen was.
+	internal static void NoteRepel(PlayerShip ship, Vector2 preFloor, bool zeroed)
+	{
+		if (!Enabled || preFloor == Vector2.Zero)
+		{
+			return;
+		}
+		ShipRec rec = Rec(ship);
+		rec.RepelTicks++;
+		if (zeroed)
+		{
+			rec.RepelZeroedTicks++;
+		}
 	}
 
 	// PlayerShip.CollidesWith, `other is Wall`, BEFORE the invulnerability gate.
@@ -342,6 +369,12 @@ internal static class AiBench
 			// "smooth" if the ship was actually steering -- a bot standing still also scores zero,
 			// and that failure mode has already been mistaken for a fix once on this card.
 			sb.Append(" coast=").Append(Fmt((r.SteerTicks > 0L) ? (100.0 * (double)r.CoastTicks / (double)r.SteerTicks) : 0.0, 0)).Append('%');
+			// Share of PUSHED ticks on which the repulsion floor fired, i.e. the repellents
+			// cancelled each other out and none was applied (card ada9e839). The mechanism that
+			// replaced the 0.95 park is otherwise unobservable: it changes no pixel and moves no
+			// other counter, so a build where it never fires and one where it fires constantly
+			// look identical without this.
+			sb.Append(" repelzero=").Append(Fmt((r.RepelTicks > 0L) ? (100.0 * (double)r.RepelZeroedTicks / (double)r.RepelTicks) : 0.0, 0)).Append('%');
 			// Where the ship is and what it last asked for. A jitter number cannot distinguish a
 			// smooth flier from a bot wedged in a corner pushing into the wall; these two can.
 			sb.Append(" ticks=").Append(r.SteerTicks);
@@ -532,6 +565,7 @@ internal static class AiBench
 		sb.Append(" revs=").Append(Fmt((sec > 0.0) ? ((double)r.Reversals / sec) : 0.0, 2));
 		sb.Append(" turn=").Append(Fmt((sec > 0.0) ? (MathHelper.ToDegrees(r.TurnRadTotal) / sec) : 0.0, 0));
 		sb.Append(" coast=").Append(Fmt((r.SteerTicks > 0L) ? (100.0 * (double)r.CoastTicks / (double)r.SteerTicks) : 0.0, 0));
+		sb.Append(" repelzero=").Append(Fmt((r.RepelTicks > 0L) ? (100.0 * (double)r.RepelZeroedTicks / (double)r.RepelTicks) : 0.0, 0));
 		sb.Append(" idle=").Append(Fmt((r.TicksWithTarget > 0L)
 			? (100.0 * (double)r.IdleWithTargetTicks / (double)r.TicksWithTarget)
 			: 0.0, 0));

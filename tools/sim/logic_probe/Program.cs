@@ -119,7 +119,7 @@ internal static class Program
             return rc;
         }
 
-        rc = ProbeAiSeekWeights(asm);
+        rc = ProbeAiFieldComposition(asm);
         if (rc != 0)
         {
             return rc;
@@ -630,7 +630,9 @@ internal static class Program
         {
             new { Flag = "aismooth",       Prop = "AiSteerSmoothMs",       Good = "111", Want = (object)111f,  Baked = "90"   },
             new { Flag = "aismoothurgent", Prop = "AiSteerSmoothUrgentMs", Good = "22",  Want = (object)22f,   Baked = "15"   },
-            new { Flag = "aipark",         Prop = "AiParkDemand",          Good = "3",   Want = (object)3f,    Baked = "0.95" },
+            new { Flag = "airepeldelta",   Prop = "AiRepelCancelDelta",    Good = "3",   Want = (object)3f,    Baked = "0.2"  },
+            new { Flag = "ainoisefloor",   Prop = "AiSteerNoiseFloor",     Good = "4",   Want = (object)4f,    Baked = "0.2"  },
+            new { Flag = "aiseekdeadzone", Prop = "AiSeekDeadzonePx",      Good = "77",  Want = (object)77f,   Baked = "30"   },
             new { Flag = "aireact",        Prop = "AiWallReactionMs",      Good = "333", Want = (object)333f,  Baked = "420"  },
             new { Flag = "aigapmargin",    Prop = "AiGapSwitchMargin",     Good = "7",   Want = (object)7f,    Baked = "1.5"  },
             new { Flag = "aiscanrows",     Prop = "AiWallScanRows",        Good = "9",   Want = (object)9,     Baked = ""     },
@@ -763,30 +765,43 @@ internal static class Program
     //   leg 3  a negative value      -> the same, for the flags whose guard refuses one
     // Reading back also sidesteps every inline clamp (?holofilter caps at 2, ?aifriends at 3, ...)
     // without this file having to know a single one of them.
-    // The AI's seek weights against its park threshold (cards 31ceb6ff / ada9e839).
+    // The AI steering field's COMPOSITION rules (cards ada9e839 / 31ceb6ff / f4d1721f).
     //
-    // WHAT THIS IS AND IS NOT. It is an ORDERING property over four constants, not a restatement
-    // of any one of them: DoAIMove expresses "go to my idle station", "go and fetch that powerup"
-    // and "close on that level-halting boss" through the SAME steerTarget, and the park
-    // (`direction.Length() <= SteerParkDemand -> Vector2.Zero`) has to zero the first two and NOT
-    // the third. Before card 31ceb6ff all of them rode SeekWeight 0.8 under a 0.95 park, so the
-    // boss-approach term added by card f4d1721f was correct code the park silently deleted.
+    // WHAT THE FIELD DOES, so the assertions below read as more than arithmetic. DoAIMove sums
+    // two families of force. REPELLENTS (every threat field, the lazer terms, the spider boss's
+    // lane escapes, the screen edges) accumulate on their own and are dropped wholesale if their
+    // resultant falls to DefaultRepulseCancelDelta or below -- opposing pushes that cancel leave
+    // a vector whose DIRECTION is noise, and Move() discards magnitude and thrusts at full
+    // acceleration along the angle. ATTRACTORS (the idle station, a powerup, a halting boss's
+    // standoff) are never floored; each stops pulling inside its own DEADZONE instead. The two
+    // are then summed, and DefaultSteerNoiseFloor catches the leftover equilibrium case.
     //
-    // WHY IT MATTERS THAT IT IS PINNED HERE. The three constants live apart and are individually
-    // plausible; nudging the park to 1.7 "to settle the idle fidget" would revert this card
-    // completely, change nothing else, and produce no error, no visual difference and no console
-    // line. The only symptom is a bot that stops going places, which is what the original report
-    // was.
+    // WHAT THIS PROBE IS AND IS NOT. It is a set of ORDERING properties over constants that live
+    // hundreds of lines apart and are each individually plausible, not a restatement of any one
+    // of them. It cannot invoke DoAIMove (that needs a Game, an Oracle and a live scene), so it
+    // proves the CONFIGURATION is coherent, never that the field is wired up;
+    // `tools/headless/probes/ai_boss_approach.txt` covers the wiring by soaking the real bot.
     //
-    // LIMIT, stated rather than papered over: DoAIMove needs a Game, an Oracle and a live scene,
-    // so it cannot be invoked here -- this proves the CONFIGURATION is coherent, never that the
-    // split is wired up. `tools/headless/probes/ai_boss_approach.txt` covers the wiring, by
-    // soaking the real bot against a boss it has to close on.
-    private static int ProbeAiSeekWeights(Assembly asm)
+    // WHY IT MATTERS THAT IT IS PINNED HERE. This replaces ProbeAiSeekWeights, whose premise --
+    // that a 0.95 "park" SHOULD zero the station and the powerup and should NOT zero the boss
+    // standoff -- was the bug, not the contract. That park sat ABOVE the 0.8 seek, so a lone seek
+    // produced no motion at all and every deliberate destination the bot had was silently
+    // deleted; the boss-approach weight only ever "worked" by being raised clear of it. Raising a
+    // floor back above the weakest attractor would reintroduce that exactly: no error, no visual
+    // difference, no console line, and the only symptom a bot that quietly stops going places.
+    // Assertion 2 is the guard for it.
+    private static int ProbeAiFieldComposition(Assembly asm)
     {
         Type ship = asm.GetType("EvilAliens.PlayerShip", true);
         const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-        string[] names = { "SeekWeight", "DefaultSteerParkDemand", "DefaultSeekPowerupWeight", "DefaultSeekApproachWeight", "DefaultPowerupReachPx" };
+        string[] names =
+        {
+            "SeekWeight", "DefaultSeekPowerupWeight", "DefaultSeekApproachWeight",
+            "DefaultPowerupReachPx", "DefaultRepulseCancelDelta", "DefaultSteerNoiseFloor",
+            "DefaultSeekArriveDeadzonePx", "ShipMaxSpeed", "ShipDeceleration",
+            "TopEdgeAvoidStrength", "SweepLaneAvoidStrength",
+            "LazerAvoidStrength", "LazerDodgeStrength"
+        };
         var vals = new Dictionary<string, float>();
         foreach (string n in names)
         {
@@ -799,47 +814,81 @@ internal static class Program
             vals[n] = (float)f.GetRawConstantValue();
         }
 
-        Console.WriteLine("[logic_probe] AI seek weights vs the park threshold (card ada9e839)");
-        float station = vals["SeekWeight"], park = vals["DefaultSteerParkDemand"];
-        float powerup = vals["DefaultSeekPowerupWeight"], approach = vals["DefaultSeekApproachWeight"];
+        Console.WriteLine("[logic_probe] AI steering field composition (card ada9e839)");
+        float station = vals["SeekWeight"], powerup = vals["DefaultSeekPowerupWeight"];
+        float approach = vals["DefaultSeekApproachWeight"];
+        float repelDelta = vals["DefaultRepulseCancelDelta"], noiseFloor = vals["DefaultSteerNoiseFloor"];
+        float deadzone = vals["DefaultSeekArriveDeadzonePx"];
 
-        // The predicate DoAIMove's park actually applies, named once so the checks below and the
-        // control cannot drift into being two different tests.
-        Func<float, bool> movesTheShip = w => w > park;
+        // 1. THE DEADZONE COVERS THE STOPPING DISTANCE. This is the property that makes the
+        // attractors' hard-edged deadzone sound instead of an oscillator: `Move(null, ...)`
+        // applies deceleration alone, so a ship entering at full speed coasts v^2 / 2a further.
+        // If the deadzone is smaller than that the ship sails out the FAR side still under the
+        // attractor's pull, turns round, and pingpongs -- which is the symptom the 0.95 park was
+        // wrongly reached for. Derived from the real motion constants rather than restated, so
+        // retuning the flight model re-derives the bound instead of silently invalidating it.
+        float stoppingPx = vals["ShipMaxSpeed"] * vals["ShipMaxSpeed"] / (2f * vals["ShipDeceleration"]);
+        Check("the seek deadzone covers the ship's stopping distance",
+            deadzone > stoppingPx,
+            "DefaultSeekArriveDeadzonePx " + deadzone + " vs a stopping distance of "
+            + stoppingPx.ToString("0.0") + "px (ShipMaxSpeed " + vals["ShipMaxSpeed"]
+            + " / ShipDeceleration " + vals["ShipDeceleration"]
+            + ") -- below it the ship coasts out the far side and pingpongs about its target");
 
-        Check("the idle STATION pull parks (station <= park)", !movesTheShip(station),
-            "SeekWeight " + station + " vs SteerParkDemand " + park
-            + " -- above it and an idle ship fidgets around an arbitrary spot forever");
-        Check("the boss STANDOFF clears the park (approach > park)", movesTheShip(approach),
-            "DefaultSeekApproachWeight " + approach + " vs SteerParkDemand " + park
-            + " -- at or below it the park zeroes the only vote asking the ship to close on a"
-            + " level-halting boss, and card 31ceb6ff is inert code again");
-        // Not a tuned bound, a structural one: Move() throws the magnitude away and thrusts at
-        // full acceleration along the ANGLE, so a seek that can out-vote the threat field is a
-        // bot that flies into things to reach them.
-        Check("closing never outranks not dying (approach < the threat field's 4)", approach < 4f,
+        // 2. NO FLOOR CAN CENSOR A LONE DELIBERATE FORCE. The whole-sum floor must sit below the
+        // weakest ATTRACTOR (they are never floored on their own, but they still cross this one)
+        // and below the weakest full-strength REPELLENT. Both bounds together are what make the
+        // floor an equilibrium guard rather than the veto this port shipped for two cards.
+        float weakestAttractor = Math.Min(station, Math.Min(powerup, approach));
+        Check("the whole-sum floor is below the weakest ATTRACTOR",
+            weakestAttractor > noiseFloor,
+            "weakest attractor " + weakestAttractor + " vs DefaultSteerNoiseFloor " + noiseFloor
+            + " -- at or below it a lone seek is zeroed and the bot stops going places, which is"
+            + " precisely the 0.95 park of cards ada9e839 / 31ceb6ff");
+        // The repellents' full-strength magnitudes. maxSteerStrength (4) is a DoAIMove local, so
+        // the threat field's and the screen edges' shared peak is spelled here; the rest are
+        // reflected.
+        const float MaxSteerStrength = 4f;
+        float weakestRepellent = Math.Min(MaxSteerStrength,
+            Math.Min(vals["TopEdgeAvoidStrength"],
+            Math.Min(vals["SweepLaneAvoidStrength"],
+            Math.Min(vals["LazerAvoidStrength"], vals["LazerDodgeStrength"]))));
+        Check("every REPELLENT's full strength clears the repulsion cancellation delta",
+            weakestRepellent > repelDelta,
+            "weakest repellent " + weakestRepellent + " vs DefaultRepulseCancelDelta " + repelDelta
+            + " -- at or below it a lone threat at point-blank range is dropped and the bot stops"
+            + " dodging that type entirely");
+        Check("a repellent that survives its own floor also clears the whole-sum floor",
+            repelDelta >= noiseFloor,
+            "DefaultRepulseCancelDelta " + repelDelta + " vs DefaultSteerNoiseFloor " + noiseFloor
+            + " -- otherwise a repellent can pass the first floor and be eaten by the second,"
+            + " which is a veto wearing two names");
+
+        // 3. Closing on a boss never outranks not dying. Not a tuned bound, a structural one:
+        // Move() throws the magnitude away and thrusts at full acceleration along the ANGLE, so a
+        // seek that can out-vote the threat field is a bot that flies into things to reach them.
+        Check("closing never outranks not dying (approach < the threat field's 4)",
+            approach < MaxSteerStrength,
             "DefaultSeekApproachWeight " + approach);
-        // The DECLINED half, asserted as declined. Raising it is a real change with a measured
-        // cost (card ada9e839's SpaceDodge table), so it must not drift up unnoticed -- and the
-        // ?aiseekpowerup= override still moves it, which is how that card gets re-measured.
-        Check("the powerup detour is still parked, i.e. shipped behaviour is unchanged there",
-            !movesTheShip(powerup),
-            "DefaultSeekPowerupWeight " + powerup + " -- measured at 1.1 and 1.6 and DECLINED"
-            + " (SpaceDodge victories 6/8 -> 2/8 and 4/8); see the const before raising it");
+        Check("a COMMITMENT outranks a DETOUR (approach > powerup)", approach > powerup,
+            "DefaultSeekApproachWeight " + approach + " vs DefaultSeekPowerupWeight " + powerup
+            + " -- a halting boss stops the level advancing at all, a pickup does not");
         Check("the powerup reach is its own quantity, not the screen-edge margin",
             vals["DefaultPowerupReachPx"] > 0f,
             "DefaultPowerupReachPx " + vals["DefaultPowerupReachPx"]
             + " (baked at the 2008 steerRange value -- 300 was measured inert, see the const)");
 
-        // NEGATIVE CONTROL: run the SHIPPED weight and the PRE-CARD one (the standoff at the
-        // station's weight) through the same predicate and require them to disagree. Asserting
-        // only that the pre-card value fails would restate the station check above -- it is the
-        // same two constants -- so the discriminating claim is that the card MOVED the standoff
-        // across the threshold, which one build can satisfy and the other cannot.
-        Check("the card moved the standoff ACROSS the park (control: pre-card did not clear it)",
-            movesTheShip(approach) && !movesTheShip(station),
-            "shipped " + approach + " clears the " + park + " park, pre-card " + station
-            + " did not -- that gap is the whole fix");
+        // NEGATIVE CONTROL. Every bound above is a one-sided inequality a build could satisfy
+        // vacuously by making the floors tiny, so run the PRE-CARD configuration -- the 0.95 park
+        // as a whole-sum floor -- through assertion 2's own predicate and require it to FAIL.
+        // That is the discriminating claim: this build's floor admits the weakest attractor and
+        // the one shipped for two cards did not.
+        const float PreCardParkDemand = 0.95f;
+        Check("control: the pre-card 0.95 park FAILS the floor bound this probe enforces",
+            !(weakestAttractor > PreCardParkDemand) && weakestAttractor > noiseFloor,
+            "weakest attractor " + weakestAttractor + " is at or below the pre-card park "
+            + PreCardParkDemand + " (so that build zeroed it) and above the shipped floor "
+            + noiseFloor + " (so this build does not) -- that gap is the whole fix");
         return 0;
     }
 

@@ -1390,6 +1390,19 @@ namespace EvilAliensWeb.Compat
 
 		public static float? AiAsteroidFalloff { get; private set; }
 
+		// ?aifieldcurve=classic      restore the 2008 threat-field SHAPE, max*(1-t^2), globally;
+		// ?aiasteroidcurve=classic   the same for ASTEROIDS only (wins over the global switch);
+		// ?aiasteroidflatpx=<px>     replace the asteroid field's size-scaled range with a flat
+		//                            absolute one -- 150 reproduces the 2008 field exactly.
+		// The port swapped a PLATEAU for a SPIKE (75% vs 12% strength at half range) and
+		// ?aifieldfall= only ever swept the exponent inside the port's family, so the original
+		// shape had never been measured. Card e88e21ca.
+		public static bool? AiClassicFieldCurve { get; private set; }
+
+		public static bool? AiAsteroidClassicCurve { get; private set; }
+
+		public static float? AiAsteroidFlatRangePx { get; private set; }
+
 		// ?aievade=0  turn OFF EvadeMovingThreat, the closest-approach path, so every threat is
 		//             handled by the radial field alone. Card ada9e839's measurement seam -- that
 		//             special case was measured under the 0.95 park and never inside the field
@@ -2769,6 +2782,35 @@ namespace EvilAliensWeb.Compat
 						// A typo here would leave the evade path ON while the run is LABELLED as
 						// having it off -- i.e. a measurement seam quietly measuring the other arm.
 						RejectFlagValue(key, val, "on/off", (AiEvadeMovers ?? true) ? "on" : "off");
+					}
+					break;
+				case "aifieldcurve":
+				case "aiasteroidcurve":
+					if (val == "classic" || val == "port")
+					{
+						if (key == "aifieldcurve")
+						{
+							AiClassicFieldCurve = val == "classic";
+						}
+						else
+						{
+							AiAsteroidClassicCurve = val == "classic";
+						}
+					}
+					else
+					{
+						RejectFlagValue(key, val, "classic/port",
+							((key == "aifieldcurve" ? AiClassicFieldCurve : AiAsteroidClassicCurve) ?? false) ? "classic" : "port");
+					}
+					break;
+				case "aiasteroidflatpx":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiafp) && aiafp > 0f)
+					{
+						AiAsteroidFlatRangePx = MathHelper.Min(aiafp, 2000f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0", InForce(AiAsteroidFlatRangePx));
 					}
 					break;
 				case "aiasteroidrange":

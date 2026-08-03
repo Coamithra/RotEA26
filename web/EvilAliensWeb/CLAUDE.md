@@ -1891,6 +1891,36 @@ the rest are tier-independent.
     (0.44 -> 0.45). Wider and shallower does not help either; the belt needs a different SHAPE of
     repellent, which is card e425781b. Edge-death share stayed clean throughout (14%, no corner
     clustering), so the widened fields were not herding the ship into edges.
+  - **THE 2008 FIELD CURVE WAS RESTORED AS A SEAM AND MEASURED -- IT IS NOT THE SPACEDODGE FIX**
+    (card e88e21ca). The port swapped the curve FAMILY, not just its exponent: 2008 was
+    `max*(1-t^2)` (a plateau -- 75% strength at half range), the port is `max*(1-t)^p` (a spike --
+    12% at p=3), and `?aifieldfall=` only ever swept p *within* the port's family, so the original
+    SHAPE had never been tested. `?aifieldcurve=classic` (global), `?aiasteroidcurve=` and
+    `?aiasteroidflatpx=` (the flat 2008 150px range) restore it. SpaceDodge, seeds 1-4 x2:
+    classic+flat150 asteroids-only 31.75 deaths, classic asteroids-only 35.75, classic GLOBAL
+    38.75, control 34.50 -- **0/4 victories on every arm**. Not the fix.
+  - **BOTH CURVES ARE EDGE-ANCHORED AT FULL STRENGTH, and the port's warning band is the WIDER
+    one** -- so "the force at the object's edge is now so low the ship flies into it" is refuted
+    by measurement, and the mechanism is elsewhere. `dist` subtracts the body term (2008 did the
+    same, identically), so t=0 IS the collision edge and the live bench reads `max=4.00` there for
+    both asteroid and SpiderBoss. Strength by edge distance, and the "warning perimeter" where
+    each curve falls below the 0.8 seek:
+
+    | edge dist | port, asteroid (R=480) | port, boss (R=406) | 2008 (flat 150) |
+    |---|---|---|---|
+    | 0px | 4.00 | 4.00 | 4.00 |
+    | 50px | 2.88 | 2.70 | 3.56 |
+    | 100px | 1.99 | 1.71 | 2.22 |
+    | 200px | 0.79 | 0.52 | **0 (out of range)** |
+    | **falls under 0.8 at** | **199px** | **169px** | **134px** |
+
+    The 2008 curve is stronger up close and DEAD past 150px; the port is gentler up close and
+    still pushing at 400. **The ship's measured mean edge distance is 252px from an asteroid and
+    216px from the boss -- outside BOTH warning perimeters**, which is why neither curve fixes
+    SpaceDodge and why the restored one is slightly worse: at the distances the bot actually flies
+    the 2008 field contributes exactly nothing. (Beware the mean-strength readout here: restoring
+    the flat 150px range RAISES `Asteroid(field)` mean from 0.42 to 1.63, but that is a SELECTION
+    effect -- far contributions stop existing rather than getting stronger.)
   - **`EvadeMovingThreat` (closest-approach dodging) does the heavy lifting, rig-specifically.**
     Re-measured under the new composition with the `?aievade=0` seam: on **CrazyGame** (fast
     bullets, what it was originally justified on) deaths are **3.75 with it vs 14.25 without**,

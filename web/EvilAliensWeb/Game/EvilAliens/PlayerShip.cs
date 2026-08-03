@@ -1718,13 +1718,13 @@ public class PlayerShip : AlienDrawableGameComponent
 				float field = ThreatFieldRange(baddy);
 				if (dist <= field)
 				{
-					float strength = ThreatFieldStrength(dist / field, maxSteerStrength, ThreatTypeFalloff(baddy));
+					float strength = ThreatFieldStrength(dist / field, maxSteerStrength, ThreatTypeFalloff(baddy), ThreatTypeClassicCurve(baddy));
 					if (altSteering)
 					{
 						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, dist / field);
 					}
 					strength *= ThreatTypeScale(baddy);
-					EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy, viaEvade: false, strength);
+					EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy, viaEvade: false, strength, field, dist);
 					repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - baddy.Position) + dodgeAngle);
 				}
 			}
@@ -2136,7 +2136,15 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private static float ThreatFieldRange(AlienDrawableGameComponent baddy)
 	{
-		return (ThreatFieldBasePx + ThreatRadius(baddy) * ThreatFieldSizeScale) * ThreatTypeRangeScale(baddy);
+		// A per-type ABSOLUTE range replaces the size-scaled formula outright -- that is what the
+		// 2008 field was: a flat 150px for everything, regardless of how big it is. Both are
+		// measured the same way (EDGE distance; the original subtracted Width/2*sqrt2 exactly as
+		// this port does), so the two are directly comparable.
+		float flat = (baddy is Asteroid)
+			? (EvilAliensWeb.Compat.DebugFlags.AiAsteroidFlatRangePx ?? 0f)
+			: 0f;
+		float baseRange = (flat > 0f) ? flat : (ThreatFieldBasePx + ThreatRadius(baddy) * ThreatFieldSizeScale);
+		return baseRange * ThreatTypeRangeScale(baddy);
 	}
 
 	// Strength across that field: FULL up close, dropping away fast so the outer half is
@@ -2149,13 +2157,39 @@ public class PlayerShip : AlienDrawableGameComponent
 	// which is the shape the name "falloff" implies -- p=3 is down to 12% at half range.
 	private static float ThreatFieldStrength(float t, float maxSteerStrength)
 	{
-		return ThreatFieldStrength(t, maxSteerStrength, ThreatFieldFalloff);
+		return ThreatFieldStrength(t, maxSteerStrength, ThreatFieldFalloff, ClassicFieldCurve);
 	}
 
-	private static float ThreatFieldStrength(float t, float maxSteerStrength, float falloff)
+	// THE TWO CURVE FAMILIES ARE DIFFERENT SHAPES, NOT DIFFERENT EXPONENTS (card e88e21ca).
+	//   classic (2008): max * (1 - t^2)  -- MyMath.PowerCurve. A fat PLATEAU: 75% strength at half
+	//                   range, still 36% at 80%. The whole field pushes.
+	//   port:           max * (1 - t)^p  -- a SPIKE: 12% at half range with p=3. Only the inner
+	//                   fifth pushes meaningfully.
+	// `?aifieldfall=` only ever swept p WITHIN the port's family, so the 2008 SHAPE had never been
+	// tested at all -- and the port's own comment argues against PowerCurve on the grounds that
+	// its falloff gets shallower as p rises, which is a reason to not raise p, not a reason to
+	// change family. The user's testimony is that the 2008 bot beat SpaceDodge with circles only.
+	private static float ThreatFieldStrength(float t, float maxSteerStrength, float falloff, bool classic)
 	{
+		if (classic)
+		{
+			return MyMath.PowerCurve(maxSteerStrength, 0f, 2f, t);
+		}
 		float u = 1f - MathHelper.Clamp(t, 0f, 1f);
 		return maxSteerStrength * (float)Math.Pow(u, falloff);
+	}
+
+	private static bool ClassicFieldCurve => EvilAliensWeb.Compat.DebugFlags.AiClassicFieldCurve ?? false;
+
+	// Per-type curve family, falling back to the global switch.
+	private static bool ThreatTypeClassicCurve(AlienDrawableGameComponent baddy)
+	{
+		if (baddy is Asteroid)
+		{
+			return EvilAliensWeb.Compat.DebugFlags.AiAsteroidClassicCurve
+				?? EvilAliensWeb.Compat.DebugFlags.AiClassicFieldCurve ?? false;
+		}
+		return ClassicFieldCurve;
 	}
 
 	// Rough half-extent of a threat, so a boss the size of a quarter of the screen is given more

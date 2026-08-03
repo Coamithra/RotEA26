@@ -659,7 +659,7 @@ internal static class Program
             // "names the value in force" leg does not describe it.
             new { Flag = "aiconelead",     Prop = "AiConeLeadMs",          Good = "456", Want = (object)456f,  Baked = "700"  },
             new { Flag = "aiconemaxlen",   Prop = "AiConeMaxLenPx",        Good = "654", Want = (object)654f,  Baked = "800"  },
-            new { Flag = "aiconewidth",    Prop = "AiConeWidthPx",         Good = "271", Want = (object)271f,  Baked = "150"  },
+            new { Flag = "aiconewidth",    Prop = "AiConeWidthPx",         Good = "271", Want = (object)271f,  Baked = "300"  },
             new { Flag = "aiconetaper",    Prop = "AiConeTaper",           Good = "0.25",Want = (object)0.25f, Baked = ""     },
             new { Flag = "aiconefallalong",Prop = "AiConeFallAlong",       Good = "5",   Want = (object)5f,    Baked = ""     },
             new { Flag = "aiconefallacross",Prop = "AiConeFallAcross",     Good = "6",   Want = (object)6f,    Baked = ""     },
@@ -1037,13 +1037,22 @@ internal static class Program
 
         // 3. ACROSS THE AXIS IT MUST GET CHEAP FAST, or threading a gap between two rocks stops
         // being possible and the shape is just a wider circle -- which is the failure mode three
-        // separate radial sweeps already measured.
-        float across0 = Field(At(60f, AsteroidHalf, AsteroidSpeed, AsteroidHalf, false), "ConeStrength");
-        float across120 = Field(At(60f, AsteroidHalf + 120f, AsteroidSpeed, AsteroidHalf, false), "ConeStrength");
+        // separate radial sweeps already measured. Offsets are FRACTIONS of the across-axis
+        // width, not pixels: that width is a tunable, and a probe pinned to the value it happened
+        // to be swept to would fail on the next honest retune instead of on a broken shape.
+        float coneWidth = (float)ship.GetField("DefaultConeWidthPx", anyStatic).GetRawConstantValue();
+        float laneWidth = coneWidth;
+        // Read at 1px ahead so the corridor has not tapered yet and the offset from the body edge
+        // IS the across-axis distance -- otherwise the taper quietly shifts every reading.
+        float across0 = Field(At(1f, AsteroidHalf, AsteroidSpeed, AsteroidHalf, false), "ConeStrength");
+        float acrossHalf = Field(At(1f, AsteroidHalf + coneWidth * 0.5f, AsteroidSpeed, AsteroidHalf, false), "ConeStrength");
+        float acrossFull = Field(At(1f, AsteroidHalf + coneWidth, AsteroidSpeed, AsteroidHalf, false), "ConeStrength");
         Check("across the axis the cone decays far faster than along it",
-            across120 < across0 * 0.15f,
-            "at 60px ahead: " + across0.ToString("0.00") + " at the corridor edge vs "
-            + across120.ToString("0.00") + " 120px outside it");
+            acrossHalf < across0 * 0.2f && acrossFull == 0f,
+            "at the corridor edge " + across0.ToString("0.00") + ", at half the across-axis width ("
+            + (coneWidth * 0.5f).ToString("0") + "px) " + acrossHalf.ToString("0.00")
+            + ", at the full width " + acrossFull.ToString("0.00")
+            + " -- against 75% of peak at half the cone's LENGTH");
 
         // 4. DIRECTION. The push is purely TRANSVERSE -- following the mesa's along-axis gradient
         // would send the ship further down the mover's own track, and it cannot outrun an
@@ -1105,23 +1114,24 @@ internal static class Program
 
         // 9. AND IT DEGRADES ON THE FAR SIDE. This is the subtlest part of the shape and the
         // likeliest to regress silently: a ship that has ALREADY escaped must be nudged, not
-        // shoved, or the wedge becomes a wall on the safe side too.
-        float justOut = Field(At(300f, LaneHalf + 10f, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
-        float wellOut = Field(At(300f, LaneHalf + 100f, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
-        float farOut = Field(At(300f, LaneHalf + 200f, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
+        // shoved, or the wedge becomes a wall on the safe side too. Offsets are fractions of the
+        // across-axis width, for the reason given at check 3.
+        float justOut = Field(At(300f, LaneHalf + laneWidth * 0.05f, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
+        float wellOut = Field(At(300f, LaneHalf + laneWidth * 0.5f, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
+        float farOut = Field(At(300f, LaneHalf + laneWidth, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
         Check("past the band's far edge the wedge falls off, strictly and to nothing",
             justOut < centre && wellOut < justOut && farOut == 0f,
-            "on the centre line " + centre.ToString("0.00") + " -> 10px out "
-            + justOut.ToString("0.00") + " -> 100px out " + wellOut.ToString("0.00")
-            + " -> 200px out " + farOut.ToString("0.00"));
+            "on the centre line " + centre.ToString("0.00") + " -> just out "
+            + justOut.ToString("0.00") + " -> half the width out " + wellOut.ToString("0.00")
+            + " -> a full width out " + farOut.ToString("0.00"));
+        // The far-side falloff must BE the cone's across-axis one rather than a second rule of its
+        // own -- both read at the same fraction of the width, and the cone's at 1px ahead so its
+        // corridor has not tapered.
+        float coneRatio = acrossHalf / Math.Max(across0, 0.0001f);
         Check("control: the far-side falloff is the CONE's across-axis one, not a second rule",
-            Math.Abs(wellOut / Math.Max(centre, 0.0001f)
-                - Field(At(60f, AsteroidHalf + 100f, AsteroidSpeed, AsteroidHalf, false), "ConeStrength")
-                  / Math.Max(Field(At(60f, 0f, AsteroidSpeed, AsteroidHalf, false), "ConeStrength"), 0.0001f)) < 0.02f,
+            Math.Abs(wellOut / Math.Max(centre, 0.0001f) - coneRatio) < 0.01f,
             "wedge decays to " + (wellOut / Math.Max(centre, 0.0001f)).ToString("0.000")
-            + " of peak 100px out, the cone to "
-            + (Field(At(60f, AsteroidHalf + 100f, AsteroidSpeed, AsteroidHalf, false), "ConeStrength")
-               / Math.Max(Field(At(60f, 0f, AsteroidSpeed, AsteroidHalf, false), "ConeStrength"), 0.0001f)).ToString("0.000"));
+            + " of peak half a width out, the cone to " + coneRatio.ToString("0.000"));
 
         // 10. THE MIDDLE LANE IS NOT A LANE. It hugs neither edge, so it gets the symmetric cone
         // and the ship may leave either way. Stating it because the hand-rolled escape this shape

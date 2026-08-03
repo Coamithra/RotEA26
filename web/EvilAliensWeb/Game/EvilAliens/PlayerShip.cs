@@ -406,9 +406,32 @@ public class PlayerShip : AlienDrawableGameComponent
 	// project a cone longer than the world.
 	public const float DefaultConeMaxLenPx = 800f;
 
-	// How far OUTSIDE the swept corridor the cone still pushes, i.e. the scale of the ACROSS-axis
-	// falloff. Not derived -- see the card for the sweep that chose it.
-	public const float DefaultConeWidthPx = 150f;
+	// How far OUTSIDE the swept corridor the cone still pushes -- the scale of the ACROSS-axis
+	// falloff. THE ONE VALUE HERE THAT IS NOT DERIVED FROM ANYTHING, so it was swept rather than
+	// picked, and then swept again on a second rig when the first answer proved rig-specific.
+	//
+	// SPACEDODGE, deaths / victories, paired seeds x2:
+	//     75px  21.50 (2/4)  |  150px  8.56 (12/16)  |  300px  3.44 (16/16)  |  450px  6.00 (4/4)
+	// An INTERIOR optimum -- 450 is worse than 300 -- so this is a width that fits the belt, not a
+	// "wider is better" gradient left half-walked.
+	//
+	// THE MAGNITUDE AXIS WAS SWEPT ALONGSIDE IT AND DECLINED AT EQUAL OUTCOME: `?aiconescale=2.5`
+	// also reaches 16/16, at 3.62 deaths against this shape's 3.44. Same call cards ada9e839 and
+	// e88e21ca both made -- a taller mountain is whack-a-mole across levels, ejecting the ship out
+	// of one hazard into the traffic around it, while transverse reach is a change of SHAPE.
+	//
+	// AND THE OBVIOUS GENERALISATION WAS TRIED AND IS WORSE, which is worth knowing before anyone
+	// reaches for it again. CrazyGame wants the OPPOSITE width (deaths 1.00 at 60px, 2.25 at 150,
+	// 8.50 at 300): it fields 30 simultaneous ~5px-half bullets, and a 300px skirt on each buries
+	// the ship in transverse pushes that mostly cancel. The natural fix is the one the radial
+	// field already made -- scale the reach with the mover's hull, as ThreatFieldRange does. So
+	// that was built and measured: `halfExtent * 6.4` (which reproduces 300px at an asteroid's
+	// ~47px half-extent) drops SpaceDodge to 12/16 at 10.12 deaths. Asteroid half-extents VARY,
+	// and the small rocks -- the ones the belt is mostly made of -- lose the wide skirt that is
+	// doing the work. A flat number is not elegant here; it is what measures better.
+	// The rig disagreement is real and unresolved; `?aiconewidth=` is how the next attempt reaches
+	// it, and the CrazyGame cost is stated in the card rather than hidden.
+	public const float DefaultConeWidthPx = 300f;
 
 	// How the corridor narrows toward the far end: 1 is the true triangle of the design sketch
 	// (a point at full length), 0 a parallel capsule.
@@ -2309,6 +2332,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		}
 		Vector2 acrossVec = d - u * axis;
 		float w = (acrossVec).Length();
+		float acrossReach = ConeWidthPx;
 		// The unit direction OUT of the corridor, i.e. the way the cone pushes.
 		Vector2 side;
 		if (w > 0.001f)
@@ -2333,9 +2357,9 @@ public class PlayerShip : AlienDrawableGameComponent
 		float along = 1f - (float)Math.Pow(MathHelper.Clamp(u / coneLen, 0f, 1f), ConeFallAlong);
 		if (along > 0f)
 		{
-			float across = (edgeAcross >= ConeWidthPx)
+			float across = (edgeAcross >= acrossReach)
 				? 0f
-				: (float)Math.Pow(1f - edgeAcross / ConeWidthPx, ConeFallAcross);
+				: (float)Math.Pow(1f - edgeAcross / acrossReach, ConeFallAcross);
 			if (across > 0f)
 			{
 				result.ConeStrength = maxSteerStrength * ConeScale * along * across;
@@ -2408,13 +2432,13 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			wedgeAcross = 1f;
 		}
-		else if (outward - halfWidth >= ConeWidthPx)
+		else if (outward - halfWidth >= acrossReach)
 		{
 			wedgeAcross = 0f;
 		}
 		else
 		{
-			wedgeAcross = (float)Math.Pow(1f - (outward - halfWidth) / ConeWidthPx, ConeFallAcross);
+			wedgeAcross = (float)Math.Pow(1f - (outward - halfWidth) / acrossReach, ConeFallAcross);
 		}
 		if (wedgeAcross > 0f)
 		{

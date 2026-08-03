@@ -937,8 +937,9 @@ internal static class Program
             return 2;
         }
         Type shapeType = eval.ReturnType;
-        Type vec2 = asm.GetType("Microsoft.Xna.Framework.Vector2", false)
-            ?? eval.GetParameters()[0].ParameterType;
+        // Off the method signature, not by name: Vector2 lives in the KNI assembly, not in the
+        // one being probed, so a name lookup here always misses.
+        Type vec2 = eval.GetParameters()[0].ParameterType;
         object V(float x, float y) => Activator.CreateInstance(vec2, x, y);
         float Field(object shape, string name) =>
             (float)shapeType.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
@@ -1043,7 +1044,6 @@ internal static class Program
         // width, not pixels: that width is a tunable, and a probe pinned to the value it happened
         // to be swept to would fail on the next honest retune instead of on a broken shape.
         float coneWidth = (float)ship.GetField("DefaultConeWidthPx", anyStatic).GetRawConstantValue();
-        float laneWidth = coneWidth;
         // Read at 1px ahead so the corridor has not tapered yet and the offset from the body edge
         // IS the across-axis distance -- otherwise the taper quietly shifts every reading.
         float across0 = Field(At(1f, AsteroidHalf, AsteroidSpeed, AsteroidHalf, false), "ConeStrength");
@@ -1118,9 +1118,9 @@ internal static class Program
         // likeliest to regress silently: a ship that has ALREADY escaped must be nudged, not
         // shoved, or the wedge becomes a wall on the safe side too. Offsets are fractions of the
         // across-axis width, for the reason given at check 3.
-        float justOut = Field(At(300f, LaneHalf + laneWidth * 0.05f, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
-        float wellOut = Field(At(300f, LaneHalf + laneWidth * 0.5f, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
-        float farOut = Field(At(300f, LaneHalf + laneWidth, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
+        float justOut = Field(At(300f, LaneHalf + coneWidth * 0.05f, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
+        float wellOut = Field(At(300f, LaneHalf + coneWidth * 0.5f, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
+        float farOut = Field(At(300f, LaneHalf + coneWidth, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
         Check("past the band's far edge the wedge falls off, strictly and to nothing",
             justOut < centre && wellOut < justOut && farOut == 0f,
             "on the centre line " + centre.ToString("0.00") + " -> just out "

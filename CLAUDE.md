@@ -288,7 +288,7 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   plateaus ALONG the trajectory and spikes away ACROSS it (so threading a gap stays possible), and
   its length scales with speed -- one rule, no per-type code. Lane-hugging sweeps additionally get
   an asymmetric WEDGE closing everything between the path and that screen edge.
-  **SpaceDodge 2/16 -> 16/16 victories, 33.75 -> 3.19 deaths** (seeds 1-8 x2); Level 1 improves too
+  **SpaceDodge 2/16 -> 16/16 victories, 33.75 -> 3.25 deaths** (seeds 1-8 x2); Level 1 improves too
   (7.62 -> 2.00 deaths). Shipped WITH two stated regressions: CrazyGame deaths 4.75 -> 8.50 and
   `SpiderBoss(standing)` 12 -> 22, both on levels whose victory verdict is unchanged.
   **Do NOT tune the radial asteroid field -- FOUR axes were swept across three cards (magnitude,

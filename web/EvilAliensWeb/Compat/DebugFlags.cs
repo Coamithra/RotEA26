@@ -2915,13 +2915,16 @@ namespace EvilAliensWeb.Compat
 					}
 					break;
 				case "aiconetaper":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aict) && aict >= 0f)
+					// REFUSED above 1 rather than clamped: 1 is the top of the taper's real range (a true
+					// triangle), not a guard rail far outside anything anyone would type, so silently
+					// clamping ?aiconetaper=2 would measure 1 under a run labelled 2.
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aict) && aict >= 0f && aict <= 1f)
 					{
-						AiConeTaper = MathHelper.Min(aict, 1f);
+						AiConeTaper = aict;
 					}
 					else
 					{
-						RejectFlagValue(key, val, "a number >= 0",
+						RejectFlagValue(key, val, "a number 0..1",
 							InForce(AiConeTaper ?? EvilAliens.PlayerShip.DefaultConeTaper));
 					}
 					break;

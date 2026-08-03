@@ -439,8 +439,8 @@ public class PlayerShip : AlienDrawableGameComponent
 	// BAKED INERT, AND THE SWEEP THAT SETTLED IT IS THE INTERESTING PART. The flat width is right
 	// for SpaceDodge and wrong for CrazyGame (see DefaultConeWidthPx), so the obvious move is to
 	// scale the reach with the mover -- as ThreatFieldRange already does -- with a FLOOR so a swarm
-	// of small fast objects keeps a usable skirt. Swept k x floor, paired seeds 1-4 x2, deaths
-	// (victories where not 8/8):
+	// of small fast objects keeps a usable skirt. Swept k x floor, paired seeds 1-4 x2 (8 runs),
+	// deaths, with victories noted only where not 8/8:
 	//     cell          | SpaceDodge      | CrazyGame
 	//     flat (shipped)|  4.25           |  8.50
 	//     k4.5 / 60px   |  5.25 (6/8)     |  1.00
@@ -450,7 +450,9 @@ public class PlayerShip : AlienDrawableGameComponent
 	//     k8   / 60px   |  8.00           |  1.00
 	//     k8   / 120px  | 14.62 (4/8)     |  3.75
 	// So scaling really does fix CrazyGame (8.50 -> 1.00, better than no cone at all) and the floor
-	// is the axis that matters. The best cell, k6.4/60, then FAILED the third gate: SpiderBoss
+	// is the axis that matters. On the FULL SpaceDodge gate (seeds 1-8 x2) k6.4/60 reads 14/16,
+	// coincidentally also at 7.62 deaths, against the flat width's 16/16 at 3.25. It then FAILED
+	// the third gate outright: SpiderBoss
 	// (standing) deaths over the same 8 runs read 12 on shipped main, 22 flat and **34** scaled.
 	// That is the mechanism below, amplified -- a standing boss sweeps nothing and so projects no
 	// cone at all, and the wider UFO skirt shoves the ship into it harder. No cell cleared, so the
@@ -2426,6 +2428,15 @@ public class PlayerShip : AlienDrawableGameComponent
 		// aimed at a bullet or a small rock drifting near the ceiling out-votes the entire rest of
 		// the field. Measured before this gate existed, every UFO in SpaceDodge was wedging (3263
 		// contributions at mean 4.25) purely for entering from the top.
+		//
+		// IT IS A SIZE THRESHOLD, NOT A "ONLY THE SPIDER BOSS" TEST, and the difference is worth
+		// knowing before reading a threats= line. The bar is ~63px of half-extent, which bullets and
+		// ordinary rocks miss and which a BIG UFO or a reallyBig asteroid clears -- so those still
+		// raise a wedge when their path hugs an edge (measured on this build: UFO(wedge) 443
+		// contributions at mean 1.81 on the spider rig, Asteroid(wedge) 296 at mean 0.98 on
+		// SpaceDodge). That is the rule working rather than leaking: a 90px-wide UFO sweeping the
+		// ceiling really does leave a gap the ship cannot cross in time. What the gate removes is
+		// the population that made the term meaningless, not every non-boss.
 		if (halfWidth < survivableGap)
 		{
 			return result;

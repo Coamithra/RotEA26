@@ -922,7 +922,8 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			// The union of the body box and the sweep box that runs to the right screen edge.
 			float bodyLeft = base.Position.X + 20f * scale - 120f * scale;
 			float right = 800f;
-			anchor = new Vector2((bodyLeft + right) * 0.5f, base.Position.Y);
+			// The Y is the BOX centre, not Position -- the land/flyup boxes hang 60*scale above it.
+			anchor = new Vector2((bodyLeft + right) * 0.5f, base.Position.Y - 60f * scale);
 			velocity = new Vector2(0f, moveSpeed);
 			halfWidth = (right - bodyLeft) * 0.5f;
 			return true;
@@ -930,7 +931,11 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		case SpiderBossState.jump:
 		case SpiderBossState.flyup:
 			// The climb has no sweep, so the band is just the body and either side is an escape.
-			anchor = base.Position;
+			// Both boxes are offset from Position; anchor on the box, or the band sits 20px off
+			// centre across its own travel axis.
+			anchor = base.Position + ((state == SpiderBossState.jump)
+				? new Vector2(20f * scale, 40f * scale)
+				: new Vector2(20f * scale, -60f * scale));
 			velocity = new Vector2(0f, 0f - moveSpeed);
 			halfWidth = 120f * scale;
 			return true;

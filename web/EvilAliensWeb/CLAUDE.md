@@ -1947,7 +1947,7 @@ the rest are tier-independent.
     working. Gate boss work on OUTCOMES -- `SpiderBoss(standing)` deaths -- not on distance.
 - **DIRECTIONAL REPELLENT SHAPES: every mover projects a MESA along its own velocity** (card
   e425781b). This is the fix the three failed radial campaigns above were pointing at, and it is
-  the largest single win the bot has had: **SpaceDodge 2/16 -> 16/16 victories, 33.75 -> 3.19
+  the largest single win the bot has had: **SpaceDodge 2/16 -> 16/16 victories, 33.75 -> 3.25
   deaths** (eahl, Very_Hard, 600s cap, seeds 1-8 x2, same-side pairs agreeing on every seed), with
   the death heatmap over those runs going 540 -> 51.
   - **WHY A SHAPE AND NOT MORE STRENGTH.** A circle can only say "I am here"; it cannot say "I am
@@ -1992,11 +1992,19 @@ the rest are tier-independent.
     - **A band NARROWER than the room a ship needs raises no wedge at all.** It is an obstacle to
       cross, not a corridor. Without that gate every UFO in SpaceDodge wedged (3263 contributions
       at mean 4.25) simply for entering from the top, which out-votes the entire rest of the field.
-    - **The MIDDLE lane raises no wedge** -- it hugs neither edge, so either side is an escape.
-      The hand-rolled escape forced it DOWNWARD unconditionally; the existing `TopEdgeAvoidStrength`
-      band supplies that bias instead. Called out because it is exactly the kind of quiet
-      behavioural difference a future reader comes hunting for; pinned as its own `logic_probe`
-      check.
+      **But it is a SIZE threshold (~63px of half-extent), NOT an "only the spider boss" test** --
+      a big UFO or a reallyBig asteroid clears it and does raise a wedge when its path hugs an
+      edge (`UFO(wedge)` 443 contributions at mean 1.81 on the spider rig, `Asteroid(wedge)` 296
+      at 0.98 on SpaceDodge). That is the rule working, not leaking: a 90px-wide UFO sweeping the
+      ceiling really does leave a gap the ship cannot cross in time. Expect those rows in
+      `threats=` and do not read them as the gate having failed.
+    - **The MIDDLE lane raises no wedge** -- it hugs neither edge, so either side is an escape,
+      where the hand-rolled escape forces it DOWNWARD unconditionally. **In the shipped build that
+      is not a behavioural change**, because the supersession A/B kept the escapes (below) and so
+      the middle lane is still forced down exactly as before -- the wedge simply adds nothing
+      there. Called out because it is the kind of quiet difference a future reader comes hunting
+      for, and because it WOULD become live if the escapes were ever retired; pinned as its own
+      `logic_probe` check.
   - **`AlienDrawableGameComponent.TryGetAiSweptPath` is the seam that feeds it, and its contract
     is ANNOUNCED rather than observed.** Default = `(Position, ObservedVelocity, half-extent)`,
     i.e. no per-type code for anything in the game. `SpiderBoss` is the ONE override, because all
@@ -2014,13 +2022,13 @@ the rest are tier-independent.
       nothing.
     - The spider lane escapes, `?level=Level2&spiderboss` 180 sim-s, same seeds (standing deaths
       summed over the 8 runs): escapes on / cone off 6.50 deaths / standing 12 / pickup 60.9%;
-      escapes off / wedge on 6.75 / 24 / 35.0%; both on 5.12 / 22 / 60.9%.
+      escapes off / wedge on 6.75 / 24 / 35.0%; both on 5.00 / 22 / 60.9%.
     - `?ailaneescape=0` is therefore a PERMANENT A/B seam rather than the temporary one it was
       built as -- the escapes it disables now live on beside the wedge.
   - **SHIPPED WITH TWO STATED REGRESSIONS**, both on levels whose victory verdict is unchanged and
     both smaller than what the shape buys:
     - **CrazyGame deaths 4.75 -> 8.50** (victories 8/8 either way; it is a `Lives = -1` level).
-    - **`SpiderBoss(standing)` deaths 12 -> 22**, while TOTAL spider deaths IMPROVE 6.50 -> 5.12.
+    - **`SpiderBoss(standing)` deaths 12 -> 22**, while TOTAL spider deaths IMPROVE 6.50 -> 5.00.
       It is NOT the wedge -- `?aiwedge=0` makes it worse still (28). A standing boss sweeps nothing
       and so projects no cone at all, so these are deaths to the ship being pushed INTO a parked
       boss by OTHER objects' cones.
@@ -2033,10 +2041,12 @@ the rest are tier-independent.
     300px skirt on each buries the ship in transverse pushes that cancel.
     **The obvious generalisation was BUILT AND MEASURED AND DECLINED -- do not re-derive it.**
     Scaling the reach with the hull the way `ThreatFieldRange` does, floored so a swarm keeps a
-    usable skirt (`?aiconespread=` x `?aiconewidthmin=`, 6 cells, both rigs in one pass) really
-    does fix CrazyGame -- 8.50 -> 1.00, better than having no cone at all -- and the FLOOR is the
-    axis that matters, not the multiplier. The best cell (k6.4 / 60px) reads 14/16 at 7.62 on the
-    full SpaceDodge gate against the flat width's 16/16 at 3.19, and then fails the third gate
+    usable skirt (`?aiconespread=` x `?aiconewidthmin=`, 6 cells, both rigs in one pass, seeds 1-4
+    x2) really does fix CrazyGame -- 8.50 -> 1.00, better than having no cone at all -- and the
+    FLOOR is the axis that matters, not the multiplier. The best cell (k6.4 / 60px) took 8/8 at
+    7.62 deaths on THAT screening set and then **14/16, also at 7.62, on the full seeds 1-8 x2**
+    gate -- the equal means are a coincidence of two run sets, not one figure quoted twice --
+    against the flat width's 16/16 at 3.25. It then fails the third gate
     outright: `SpiderBoss(standing)` 12 shipped-main / 22 flat / **34** scaled, by the mechanism
     in the bullet above -- a wider UFO skirt shoves the ship into the parked boss harder, visible
     as that arm's `UFO(wedge)` mean climbing 1.12 -> 1.96. So the flat number ships and both

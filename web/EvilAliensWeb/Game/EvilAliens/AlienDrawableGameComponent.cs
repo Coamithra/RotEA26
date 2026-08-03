@@ -223,7 +223,10 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		anchor = Position;
 		velocity = _observedVelocity;
 		halfWidth = AiHalfExtent();
-		return true;
+		// Behaviour-neutral -- the consumer discards a negligible speed anyway -- but it keeps the
+		// "false means no meaningful swept path" contract above true of the DEFAULT and not only of
+		// its callers, so an override can rely on it.
+		return (velocity).LengthSquared() > 0.000001f;
 	}
 
 	// Rough half-extent of this thing's hull, mirroring the collision-type switch the AI's radial

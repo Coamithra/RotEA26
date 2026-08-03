@@ -660,6 +660,8 @@ internal static class Program
             new { Flag = "aiconelead",     Prop = "AiConeLeadMs",          Good = "456", Want = (object)456f,  Baked = "700"  },
             new { Flag = "aiconemaxlen",   Prop = "AiConeMaxLenPx",        Good = "654", Want = (object)654f,  Baked = "800"  },
             new { Flag = "aiconewidth",    Prop = "AiConeWidthPx",         Good = "271", Want = (object)271f,  Baked = "300"  },
+            new { Flag = "aiconespread",   Prop = "AiConeSpread",          Good = "6.4", Want = (object)6.4f,  Baked = ""     },
+            new { Flag = "aiconewidthmin", Prop = "AiConeWidthMinPx",      Good = "77",  Want = (object)77f,   Baked = "120"  },
             new { Flag = "aiconetaper",    Prop = "AiConeTaper",           Good = "0.25",Want = (object)0.25f, Baked = ""     },
             new { Flag = "aiconefallalong",Prop = "AiConeFallAlong",       Good = "5",   Want = (object)5f,    Baked = ""     },
             new { Flag = "aiconefallacross",Prop = "AiConeFallAcross",     Good = "6",   Want = (object)6f,    Baked = ""     },
@@ -685,7 +687,7 @@ internal static class Program
             return 2;
         }
 
-        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 28 knobs (card 48b7c6b1)");
+        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 30 knobs (card 48b7c6b1)");
 
         // One counter and its OWN first-problem detail per leg: a shared sink attaches the
         // diagnosis to whichever Check happens to print it, which in a mutation run put the only

@@ -433,6 +433,34 @@ public class PlayerShip : AlienDrawableGameComponent
 	// it, and the CrazyGame cost is stated in the card rather than hidden.
 	public const float DefaultConeWidthPx = 300f;
 
+	// Optional SIZE SCALING of that reach: 0 = off (the flat width above), otherwise the reach is
+	// halfExtent * this, floored at DefaultConeWidthMinPx and capped at the flat width.
+	//
+	// BAKED INERT, AND THE SWEEP THAT SETTLED IT IS THE INTERESTING PART. The flat width is right
+	// for SpaceDodge and wrong for CrazyGame (see DefaultConeWidthPx), so the obvious move is to
+	// scale the reach with the mover -- as ThreatFieldRange already does -- with a FLOOR so a swarm
+	// of small fast objects keeps a usable skirt. Swept k x floor, paired seeds 1-4 x2, deaths
+	// (victories where not 8/8):
+	//     cell          | SpaceDodge      | CrazyGame
+	//     flat (shipped)|  4.25           |  8.50
+	//     k4.5 / 60px   |  5.25 (6/8)     |  1.00
+	//     k4.5 / 120px  |  8.50 (6/8)     |  3.75
+	//     k6.4 / 60px   |  7.62           |  1.00
+	//     k6.4 / 120px  | 10.00 (7/8)     |  3.75
+	//     k8   / 60px   |  8.00           |  1.00
+	//     k8   / 120px  | 14.62 (4/8)     |  3.75
+	// So scaling really does fix CrazyGame (8.50 -> 1.00, better than no cone at all) and the floor
+	// is the axis that matters. The best cell, k6.4/60, then FAILED the third gate: SpiderBoss
+	// (standing) deaths over the same 8 runs read 12 on shipped main, 22 flat and **34** scaled.
+	// That is the mechanism below, amplified -- a standing boss sweeps nothing and so projects no
+	// cone at all, and the wider UFO skirt shoves the ship into it harder. No cell cleared, so the
+	// flat width ships and this stays a seam.
+	public const float DefaultConeSpread = 0f;
+
+	// The floor that scaling clamps to, so a swarm of small fast movers keeps a usable skirt
+	// instead of each projecting a corridor narrower than the ship.
+	public const float DefaultConeWidthMinPx = 120f;
+
 	// How the corridor narrows toward the far end: 1 is the true triangle of the design sketch
 	// (a point at full length), 0 a parallel capsule.
 	public const float DefaultConeTaper = 1f;
@@ -484,6 +512,10 @@ public class PlayerShip : AlienDrawableGameComponent
 	private static float ConeMaxLenPx => EvilAliensWeb.Compat.DebugFlags.AiConeMaxLenPx ?? DefaultConeMaxLenPx;
 
 	private static float ConeWidthPx => EvilAliensWeb.Compat.DebugFlags.AiConeWidthPx ?? DefaultConeWidthPx;
+
+	private static float ConeSpread => EvilAliensWeb.Compat.DebugFlags.AiConeSpread ?? DefaultConeSpread;
+
+	private static float ConeWidthMinPx => EvilAliensWeb.Compat.DebugFlags.AiConeWidthMinPx ?? DefaultConeWidthMinPx;
 
 	private static float ConeTaper => EvilAliensWeb.Compat.DebugFlags.AiConeTaper ?? DefaultConeTaper;
 
@@ -2332,7 +2364,14 @@ public class PlayerShip : AlienDrawableGameComponent
 		}
 		Vector2 acrossVec = d - u * axis;
 		float w = (acrossVec).Length();
+		// THE ACROSS-AXIS REACH. Flat by default; ConeSpread > 0 scales it with the band this mover
+		// actually sweeps, floored so a swarm of small fast objects keeps a usable skirt and capped at
+		// the flat width so a big one never exceeds the value that was swept. See DefaultConeSpread.
 		float acrossReach = ConeWidthPx;
+		if (ConeSpread > 0f)
+		{
+			acrossReach = MathHelper.Clamp(halfWidth * ConeSpread, ConeWidthMinPx, ConeWidthPx);
+		}
 		// The unit direction OUT of the corridor, i.e. the way the cone pushes.
 		Vector2 side;
 		if (w > 0.001f)

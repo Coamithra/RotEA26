@@ -1435,6 +1435,13 @@ namespace EvilAliensWeb.Compat
 
 		public static float? AiConeWidthPx { get; private set; }
 
+		// ?aiconespread=<f>    scale the across-axis reach with the mover's own half-extent instead
+		//                      of using the flat width (0 = off, the shipped default), and
+		// ?aiconewidthmin=<px> the floor that scaling clamps to.
+		public static float? AiConeSpread { get; private set; }
+
+		public static float? AiConeWidthMinPx { get; private set; }
+
 		public static float? AiConeTaper { get; private set; }
 
 		public static float? AiConeFallAlong { get; private set; }
@@ -2883,6 +2890,28 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number > 0",
 							InForce(AiConeWidthPx ?? EvilAliens.PlayerShip.DefaultConeWidthPx));
+					}
+					break;
+				case "aiconespread":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aicsp) && aicsp >= 0f)
+					{
+						AiConeSpread = MathHelper.Min(aicsp, 200f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiConeSpread ?? EvilAliens.PlayerShip.DefaultConeSpread));
+					}
+					break;
+				case "aiconewidthmin":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aicwm) && aicwm >= 0f)
+					{
+						AiConeWidthMinPx = MathHelper.Min(aicwm, 2000f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiConeWidthMinPx ?? EvilAliens.PlayerShip.DefaultConeWidthMinPx));
 					}
 					break;
 				case "aiconetaper":

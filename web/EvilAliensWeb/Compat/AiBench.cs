@@ -219,14 +219,41 @@ internal static class AiBench
 	// magnitude is irrelevant no matter how it is tuned.
 	// `strength` is the term's magnitude before it joins the repulsion sum, so the mean is
 	// directly comparable to the 0.8 seek it has to out-vote.
-	internal static void NoteThreatTerm(PlayerShip ship, AlienDrawableGameComponent baddy, bool viaEvade, float strength, float range = 0f, float edgeDist = 0f)
+	// Card e425781b added the two DIRECTIONAL paths, and they are not exclusive with `Field` the
+	// way `Evade` is: a mover contributes its radial term AND its cone (and its wedge, in a lane),
+	// which is the point -- the shape is a circle with a hat on it, not a replacement circle. So
+	// reading this breakdown means asking which path carries the WEIGHT, not which one appears.
+	internal enum ThreatPath
+	{
+		Field,
+		Evade,
+		Cone,
+		Wedge
+	}
+
+	private static string PathLabel(ThreatPath path)
+	{
+		switch (path)
+		{
+		case ThreatPath.Evade:
+			return "(evade)";
+		case ThreatPath.Cone:
+			return "(cone)";
+		case ThreatPath.Wedge:
+			return "(wedge)";
+		default:
+			return "(field)";
+		}
+	}
+
+	internal static void NoteThreatTerm(PlayerShip ship, AlienDrawableGameComponent baddy, ThreatPath path, float strength, float range = 0f, float edgeDist = 0f)
 	{
 		if (!Enabled)
 		{
 			return;
 		}
 		ShipRec rec = Rec(ship);
-		string key = baddy.GetType().Name + (viaEvade ? "(evade)" : "(field)");
+		string key = baddy.GetType().Name + PathLabel(path);
 		if (!rec.ThreatTerms.TryGetValue(key, out ThreatTermRec t))
 		{
 			t = new ThreatTermRec();

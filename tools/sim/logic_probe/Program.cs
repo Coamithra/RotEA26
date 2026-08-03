@@ -125,6 +125,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeAiConeShape(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         rc = ProbeFlagRejectionSweep(asm);
         if (rc != 0)
         {
@@ -647,6 +653,21 @@ internal static class Program
             new { Flag = "aiseekpowerup",  Prop = "AiSeekPowerupWeight",  Good = "2.5", Want = (object)2.5f,  Baked = "0.8"  },
             new { Flag = "aiseekapproach", Prop = "AiSeekApproachWeight", Good = "2.6", Want = (object)2.6f,  Baked = "1.1"  },
             new { Flag = "aipowerupreach", Prop = "AiPowerupReachPx",      Good = "444", Want = (object)444f,  Baked = "150"  },
+            // The directional repellent shapes (card e425781b). The three on/off members of the
+            // family -- ?aicone= ?aiwedge= ?ailaneescape= -- are deliberately absent, following
+            // ?aievade=: the IsOn/IsExplicitlyOff spelling has its own convention and this table's
+            // "names the value in force" leg does not describe it.
+            new { Flag = "aiconelead",     Prop = "AiConeLeadMs",          Good = "456", Want = (object)456f,  Baked = "700"  },
+            new { Flag = "aiconemaxlen",   Prop = "AiConeMaxLenPx",        Good = "654", Want = (object)654f,  Baked = "800"  },
+            new { Flag = "aiconewidth",    Prop = "AiConeWidthPx",         Good = "271", Want = (object)271f,  Baked = "300"  },
+            new { Flag = "aiconespread",   Prop = "AiConeSpread",          Good = "6.4", Want = (object)6.4f,  Baked = ""     },
+            new { Flag = "aiconewidthmin", Prop = "AiConeWidthMinPx",      Good = "77",  Want = (object)77f,   Baked = "120"  },
+            new { Flag = "aiconetaper",    Prop = "AiConeTaper",           Good = "0.25",Want = (object)0.25f, Baked = ""     },
+            new { Flag = "aiconefallalong",Prop = "AiConeFallAlong",       Good = "5",   Want = (object)5f,    Baked = ""     },
+            new { Flag = "aiconefallacross",Prop = "AiConeFallAcross",     Good = "6",   Want = (object)6f,    Baked = ""     },
+            new { Flag = "aiconescale",    Prop = "AiConeScale",           Good = "2.75",Want = (object)2.75f, Baked = ""     },
+            new { Flag = "aiwedgestrength",Prop = "AiLaneWedgeStrength",   Good = "29",  Want = (object)29f,   Baked = "18"   },
+            new { Flag = "aiwedgefall",    Prop = "AiLaneWedgeFallAlong",  Good = "7",   Want = (object)7f,    Baked = ""     },
         };
         // Baked "" = no default-absence check available for that row: aiscanrows/aicrosspenalty
         // bake 4, aifieldfall bakes 3 and aiff sits at 0, all single digits that occur inside the
@@ -666,7 +687,7 @@ internal static class Program
             return 2;
         }
 
-        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 17 knobs (card 48b7c6b1)");
+        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 30 knobs (card 48b7c6b1)");
 
         // One counter and its OWN first-problem detail per leg: a shared sink attaches the
         // diagnosis to whichever Check happens to print it, which in a mutation run put the only
@@ -701,17 +722,17 @@ internal static class Program
                 else { badNeg ??= row.Flag + "=-1: prop=" + get(row.Prop) + " said: " + FirstLine(outNeg); }
             }
         }
-        Check("a valid value lands on all 14", landed == rows.Length,
+        Check("a valid value lands on all " + rows.Length, landed == rows.Length,
             landed + "/" + rows.Length + (badLanded != null ? "; " + badLanded : ""));
         Check("a valid value reports NO rejection (the control)", quiet == rows.Length,
             quiet + "/" + rows.Length + " clean -- a helper that printed unconditionally fails here"
             + (badQuiet != null ? "; " + badQuiet : ""));
-        Check("a bad value is refused AND reported on all 14", reported == rows.Length,
+        Check("a bad value is refused AND reported on all " + rows.Length, reported == rows.Length,
             reported + "/" + rows.Length + (badReported != null ? "; " + badReported : ""));
         Check("the message names the value IN FORCE, not the baked default", named == rows.Length,
             named + "/" + rows.Length + " (Parse never resets a property, so a repeated flag keeps the"
             + " earlier value)" + (badNamed != null ? "; " + badNamed : ""));
-        Check("a NEGATIVE value is refused AND reported on all 13 guarded flags", negatives == rows.Length - 1,
+        Check("a NEGATIVE value is refused AND reported on all " + (rows.Length - 1) + " guarded flags", negatives == rows.Length - 1,
             negatives + "/" + (rows.Length - 1) + " (?aiff has no range guard -- it clamps)"
             + (badNeg != null ? "; " + badNeg : ""));
 
@@ -892,6 +913,260 @@ internal static class Program
             "weakest attractor " + weakestAttractor + " is at or below the pre-card park "
             + PreCardParkDemand + " (so that build zeroed it) and above the shipped floor "
             + noiseFloor + " (so this build does not) -- that gap is the whole fix");
+        return 0;
+    }
+
+    // ---- the directional repellent shapes (card e425781b) ----------------------------------
+    //
+    // PlayerShip.EvaluateSweptShape is a pure function of geometry, so the whole design is
+    // checkable here with no game, no browser and no rig -- and it MUST be checked at FIXED
+    // POINTS rather than by any aggregate. The card's own readout trap says why: a field's mean
+    // strength over a run is a selection effect (far contributions stop existing rather than
+    // getting weaker), so two shapes can only be compared by evaluating both at the same places.
+    //
+    // Reflection rather than a mirrored formula, deliberately: a transcription of the maths here
+    // would agree with itself forever while the shipped shape drifted.
+    private static int ProbeAiConeShape(Assembly asm)
+    {
+        Type ship = asm.GetType("EvilAliens.PlayerShip", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo eval = ship.GetMethod("EvaluateSweptShape", anyStatic);
+        if (eval == null)
+        {
+            Console.WriteLine("FAIL: could not reflect PlayerShip.EvaluateSweptShape -- renamed or no longer static?");
+            return 2;
+        }
+        Type shapeType = eval.ReturnType;
+        // Off the method signature, not by name: Vector2 lives in the KNI assembly, not in the
+        // one being probed, so a name lookup here always misses.
+        Type vec2 = eval.GetParameters()[0].ParameterType;
+        object V(float x, float y) => Activator.CreateInstance(vec2, x, y);
+        float Field(object shape, string name) =>
+            (float)shapeType.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .GetValue(shape);
+        object VField(object shape, string name) =>
+            shapeType.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .GetValue(shape);
+        float VX(object v) => (float)vec2.GetField("X").GetValue(v);
+        float VY(object v) => (float)vec2.GetField("Y").GetValue(v);
+
+        const float MaxSteerStrength = 4f;
+        // A ship-sized half-extent, so the wedge's survivable-gap arithmetic is exercised at a
+        // realistic value rather than zero.
+        const float ShipHalf = 20f;
+
+        // Evaluate at a point expressed in the SHAPE's own frame: `ahead` px along the travel
+        // direction, `sideways` px across it. The mover here travels +X from the origin, so the
+        // frame is the identity and a reader can check any row by hand.
+        object At(float ahead, float sideways, float speed, float halfWidth, bool wedge,
+            float anchorX = 0f, float anchorY = 300f)
+        {
+            return eval.Invoke(null, new object[]
+            {
+                V(anchorX + ahead, anchorY + sideways), V(0f, 0f), V(anchorX, anchorY),
+                V(speed, 0f), halfWidth, ShipHalf, MaxSteerStrength, wedge
+            });
+        }
+
+        Console.WriteLine("[logic_probe] AI directional repellent shapes (card e425781b)");
+
+        // The asteroid case the card is designed around: 0.38 px/ms, a ~30px half-extent.
+        const float AsteroidSpeed = 0.38f;
+        const float AsteroidHalf = 30f;
+        float LeadMs = (float)ship.GetField("DefaultConeLeadMs", anyStatic).GetRawConstantValue();
+        float coneLen = AsteroidSpeed * LeadMs;
+
+        // 1. THE MESA. Full strength anywhere inside the swept body, because a repellent's
+        // meaningful domain starts at the collision EDGE -- inside is death, and curve values
+        // there are wasted dynamic range. So the on-axis value and the value at the corridor's
+        // own edge must be identical, and both must be the peak.
+        object onAxis = At(1f, 0f, AsteroidSpeed, AsteroidHalf, false);
+        object atEdge = At(1f, AsteroidHalf * 0.995f, AsteroidSpeed, AsteroidHalf, false);
+        Check("the cone is a MESA: full strength on the axis and at the swept body's edge alike",
+            Math.Abs(Field(onAxis, "ConeStrength") - Field(atEdge, "ConeStrength")) < 0.05f
+                && Field(onAxis, "ConeStrength") > MaxSteerStrength * 0.98f,
+            "on-axis " + Field(onAxis, "ConeStrength").ToString("0.00") + " vs at the body edge "
+            + Field(atEdge, "ConeStrength").ToString("0.00") + " of a peak " + MaxSteerStrength);
+
+        // 2. THE BAND THE CARD EXISTS FOR, and it is measured against the REAL radial field
+        // rather than against a number copied out of the card. The circle falls under the 0.8
+        // seek at 199px while the bot's measured mean edge distance from an asteroid is 252px --
+        // i.e. it spends its life outside the only warning it has. The cone's whole job is to
+        // have authority out there, ALONG the trajectory, while leaving the transverse direction
+        // cheap. Note this does NOT claim the cone reaches 252px on its own: its own perimeter is
+        // ~238px, and what carries the rest is that the term is measured from a mover's PATH, so
+        // the ship meets it long before the circle grows.
+        MethodInfo fieldStrength = ship.GetMethod("ThreatFieldStrength", anyStatic, null,
+            new[] { typeof(float), typeof(float), typeof(float), typeof(bool) }, null);
+        if (fieldStrength == null)
+        {
+            Console.WriteLine("FAIL: could not reflect PlayerShip.ThreatFieldStrength(t, max, falloff, classic)");
+            return 2;
+        }
+        // The asteroid's shipped radial field: ThreatFieldBasePx 190 + halfExtent * 1.8, on the
+        // (1-t)^3 curve. Reflected, so retuning the field re-derives the comparison.
+        float fieldPx = (float)ship.GetField("VeryHardThreatFieldBasePx", anyStatic).GetRawConstantValue();
+        float sizeScale = (float)ship.GetField("DefaultThreatFieldSizeScale", anyStatic).GetRawConstantValue();
+        float falloff = (float)ship.GetField("DefaultThreatFieldFalloff", anyStatic).GetRawConstantValue();
+        float radialRange = fieldPx + AsteroidHalf * sizeScale;
+        float Radial(float edgeDist) => edgeDist >= radialRange ? 0f : (float)fieldStrength.Invoke(
+            null, new object[] { edgeDist / radialRange, MaxSteerStrength, falloff, false });
+        // Where each shape stops out-voting the seek. `Cone` is read on the axis, where its
+        // along-distance and the circle's edge-distance are the same quantity.
+        float Cone(float ahead) => Field(At(ahead, 0f, AsteroidSpeed, AsteroidHalf, false), "ConeStrength");
+        float Perimeter(Func<float, float> f)
+        {
+            float last = 0f;
+            for (float x = 1f; x < 900f; x += 1f)
+            {
+                if (f(x) >= 0.8f)
+                {
+                    last = x;
+                }
+            }
+            return last;
+        }
+        float conePerimeter = Perimeter(Cone), radialPerimeter = Perimeter(Radial);
+        Check("the cone's warning perimeter reaches FURTHER than the circle's",
+            conePerimeter > radialPerimeter,
+            "the cone holds 0.8 out to " + conePerimeter.ToString("0") + "px along the path, the"
+            + " radial field to " + radialPerimeter.ToString("0") + "px from the hull -- and the"
+            + " bot's measured mean edge distance is 252px, outside both");
+        Check("and in the 200-250px band it is worth several times the circle",
+            Cone(200f) > Radial(200f) * 2f && Cone(200f) > 0.8f,
+            "at 200px: cone " + Cone(200f).ToString("0.00") + " vs radial "
+            + Radial(200f).ToString("0.00") + "; at 250px: cone " + Cone(250f).ToString("0.00")
+            + " vs radial " + Radial(250f).ToString("0.00"));
+
+        // 3. ACROSS THE AXIS IT MUST GET CHEAP FAST, or threading a gap between two rocks stops
+        // being possible and the shape is just a wider circle -- which is the failure mode three
+        // separate radial sweeps already measured. Offsets are FRACTIONS of the across-axis
+        // width, not pixels: that width is a tunable, and a probe pinned to the value it happened
+        // to be swept to would fail on the next honest retune instead of on a broken shape.
+        float coneWidth = (float)ship.GetField("DefaultConeWidthPx", anyStatic).GetRawConstantValue();
+        // Read at 1px ahead so the corridor has not tapered yet and the offset from the body edge
+        // IS the across-axis distance -- otherwise the taper quietly shifts every reading.
+        float across0 = Field(At(1f, AsteroidHalf, AsteroidSpeed, AsteroidHalf, false), "ConeStrength");
+        float acrossHalf = Field(At(1f, AsteroidHalf + coneWidth * 0.5f, AsteroidSpeed, AsteroidHalf, false), "ConeStrength");
+        float acrossFull = Field(At(1f, AsteroidHalf + coneWidth, AsteroidSpeed, AsteroidHalf, false), "ConeStrength");
+        Check("across the axis the cone decays far faster than along it",
+            acrossHalf < across0 * 0.2f && acrossFull == 0f,
+            "at the corridor edge " + across0.ToString("0.00") + ", at half the across-axis width ("
+            + (coneWidth * 0.5f).ToString("0") + "px) " + acrossHalf.ToString("0.00")
+            + ", at the full width " + acrossFull.ToString("0.00")
+            + " -- against 75% of peak at half the cone's LENGTH");
+
+        // 4. DIRECTION. The push is purely TRANSVERSE -- following the mesa's along-axis gradient
+        // would send the ship further down the mover's own track, and it cannot outrun an
+        // asteroid (0.38 px/ms against ShipMaxSpeed 0.33). A component along the travel direction
+        // would be that mistake.
+        object above = At(120f, -50f, AsteroidSpeed, AsteroidHalf, false);
+        object below = At(120f, 50f, AsteroidSpeed, AsteroidHalf, false);
+        object dirAbove = VField(above, "ConeDir");
+        object dirBelow = VField(below, "ConeDir");
+        Check("the cone pushes ACROSS the path, never along it",
+            Math.Abs(VX(dirAbove)) < 0.001f && Math.Abs(VX(dirBelow)) < 0.001f,
+            "push at 50px above the axis = (" + VX(dirAbove).ToString("0.00") + ", "
+            + VY(dirAbove).ToString("0.00") + "), below = (" + VX(dirBelow).ToString("0.00")
+            + ", " + VY(dirBelow).ToString("0.00") + ")");
+        Check("and it pushes AWAY from the axis on whichever side the ship is",
+            VY(dirAbove) < 0f && VY(dirBelow) > 0f, "as above");
+
+        // 5. BEHIND A MOVER IS SAFE. Nothing is coming that way, and the body itself is the
+        // radial field's business.
+        Check("nothing is projected behind the mover",
+            Field(At(-100f, 0f, AsteroidSpeed, AsteroidHalf, true), "ConeStrength") == 0f
+                && Field(At(-100f, 0f, AsteroidSpeed, AsteroidHalf, true), "WedgeStrength") == 0f,
+            "100px behind an asteroid on its own axis");
+
+        // 6. LENGTH SCALES WITH SPEED, which is what makes one rule cover a drifting rock and a
+        // screen-crossing boss with no per-type code.
+        float slowLen = Field(At(1f, 0f, 0.2f, AsteroidHalf, false), "ConeLength");
+        float fastLen = Field(At(1f, 0f, 0.8f, AsteroidHalf, false), "ConeLength");
+        Check("cone length scales with the mover's speed",
+            fastLen > slowLen * 3.9f && fastLen < slowLen * 4.1f,
+            "0.2px/ms -> " + slowLen.ToString("0") + "px, 0.8px/ms -> " + fastLen.ToString("0")
+            + "px (a 4x speed for a 4x length)");
+
+        // ---- the LANE WEDGE ----
+        // The spider boss's top lane: a 186.67px band snapped to y=93.3, i.e. hugging the ceiling.
+        const float LaneHalf = 186.66667f / 2f;
+        const float TopLaneY = 186.66667f * 0.5f;
+        const float BossSpeed = 0.78f;
+
+        // 7. A LANE FLYBY IS ASYMMETRIC, and it must force the ship AWAY from the hugged edge.
+        // A symmetric cone would offer the gap between the path and the ceiling as an escape, and
+        // that gap is a trap -- the ship dodges into it and is crushed as the boss arrives.
+        object inLane = At(300f, 0f, BossSpeed, LaneHalf, true, 0f, TopLaneY);
+        object wedgeDir = VField(inLane, "WedgeDir");
+        Check("a lane flyby hugging the TOP edge forces the ship DOWN, out of the lane",
+            Field(inLane, "WedgeStrength") > 0f && VY(wedgeDir) > 0.99f,
+            "wedge " + Field(inLane, "WedgeStrength").ToString("0.00") + " pushing ("
+            + VX(wedgeDir).ToString("0.00") + ", " + VY(wedgeDir).ToString("0.00") + ")");
+
+        // 8. THE TRAPPED SIDE IS CLOSED AT FULL STRENGTH ALL THE WAY TO THE EDGE, which is the
+        // sketch: everything between the flight path and the nearer screen edge is off limits, so
+        // the only downhill direction is out.
+        float trapped = Field(At(300f, -LaneHalf - 40f, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
+        float centre = Field(At(300f, 0f, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
+        Check("the wedge is FLAT across the whole trapped side (path to hugged edge)",
+            Math.Abs(trapped - centre) < 0.001f && trapped > 0f,
+            "40px above the band " + trapped.ToString("0.00") + " vs on the centre line "
+            + centre.ToString("0.00"));
+
+        // 9. AND IT DEGRADES ON THE FAR SIDE. This is the subtlest part of the shape and the
+        // likeliest to regress silently: a ship that has ALREADY escaped must be nudged, not
+        // shoved, or the wedge becomes a wall on the safe side too. Offsets are fractions of the
+        // across-axis width, for the reason given at check 3.
+        float justOut = Field(At(300f, LaneHalf + coneWidth * 0.05f, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
+        float wellOut = Field(At(300f, LaneHalf + coneWidth * 0.5f, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
+        float farOut = Field(At(300f, LaneHalf + coneWidth, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
+        Check("past the band's far edge the wedge falls off, strictly and to nothing",
+            justOut < centre && wellOut < justOut && farOut == 0f,
+            "on the centre line " + centre.ToString("0.00") + " -> just out "
+            + justOut.ToString("0.00") + " -> half the width out " + wellOut.ToString("0.00")
+            + " -> a full width out " + farOut.ToString("0.00"));
+        // The far-side falloff must BE the cone's across-axis one rather than a second rule of its
+        // own -- both read at the same fraction of the width, and the cone's at 1px ahead so its
+        // corridor has not tapered.
+        float coneRatio = acrossHalf / Math.Max(across0, 0.0001f);
+        Check("control: the far-side falloff is the CONE's across-axis one, not a second rule",
+            Math.Abs(wellOut / Math.Max(centre, 0.0001f) - coneRatio) < 0.01f,
+            "wedge decays to " + (wellOut / Math.Max(centre, 0.0001f)).ToString("0.000")
+            + " of peak half a width out, the cone to " + coneRatio.ToString("0.000"));
+
+        // 10. THE MIDDLE LANE IS NOT A LANE. It hugs neither edge, so it gets the symmetric cone
+        // and the ship may leave either way. Stating it because the hand-rolled escape this shape
+        // replaced forced the middle lane DOWNWARD unconditionally, and that difference is
+        // exactly the kind of quiet behavioural change a future reader will come hunting for.
+        const float MidLaneY = 186.66667f * 1.5f;
+        Check("the MIDDLE lane raises no wedge -- it hugs no edge, so either side is an escape",
+            Field(At(300f, 0f, BossSpeed, LaneHalf, true, 0f, MidLaneY), "WedgeStrength") == 0f,
+            "band centred at y=" + MidLaneY.ToString("0") + " leaves "
+            + (MidLaneY - LaneHalf).ToString("0") + "px above and "
+            + (600f - MidLaneY - LaneHalf).ToString("0") + "px below");
+
+        // 11. NEGATIVE CONTROL, and the one that stops the wedge eating the game. A band narrower
+        // than the room a ship needs is an OBSTACLE, not a corridor -- the ship can cross its path
+        // -- so it must raise no wedge however close to an edge it drifts. Before this gate
+        // existed every UFO in SpaceDodge wedged at mean 4.25 simply for entering from the top,
+        // which out-votes the entire rest of the field.
+        Check("control: a small mover hugging the ceiling raises NO wedge, however close",
+            Field(At(120f, 0f, AsteroidSpeed, AsteroidHalf, true, 0f, 10f), "WedgeStrength") == 0f,
+            "a " + AsteroidHalf + "px half-extent asteroid centred 10px from the top edge;"
+            + " the survivable gap is 2*(ship 20px + an 11.3px stopping distance)");
+        Check("control: the same geometry at a LANE's half-extent does raise one",
+            Field(At(120f, 0f, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength") > 0f,
+            "so the discriminator is the band's width, not its position");
+
+        // 12. AND THE WEDGE MUST OUT-VOTE THE FIELD IT SITS IN. The whole band is simply death,
+        // so it has to beat the station pull, a powerup detour and the edge pushes combined --
+        // which is why it is held at the strength the hand-rolled escapes used.
+        float wedgeStrength = (float)ship.GetField("DefaultLaneWedgeStrength", anyStatic).GetRawConstantValue();
+        Check("the wedge out-ranks every other steering term",
+            wedgeStrength > MaxSteerStrength,
+            "DefaultLaneWedgeStrength " + wedgeStrength + " against the threat field's peak "
+            + MaxSteerStrength + " -- being in the lane is not a risk to weigh, it is a death");
         return 0;
     }
 

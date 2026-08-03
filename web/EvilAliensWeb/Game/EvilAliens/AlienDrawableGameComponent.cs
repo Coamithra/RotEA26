@@ -206,6 +206,50 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	internal Vector2 ObservedVelocity => _observedVelocity;
 
+	// THE SWEPT PATH THE AI SHAPES ITS REPELLENT AROUND (card e425781b). `anchor` is the centre of
+	// the band this thing is about to sweep, `velocity` how fast and which way it sweeps, and
+	// `halfWidth` half the band's extent across that direction. The default is simply where it is
+	// and how it is observed to be moving, so every mover in the game gets a velocity cone with no
+	// per-type code at all.
+	//
+	// THE CONTRACT IS "ANNOUNCED", NOT "OBSERVED", AND THAT IS THE WHOLE POINT OF IT BEING VIRTUAL:
+	// an override may report a path it is about to take but is not yet taking (a telegraphed
+	// attack held stationary through its warning) or a band its Position is not centred on (a
+	// scripted lane it snaps to), because the field can only shape what it is told about.
+	// Returning false means "no meaningful swept path", which is the honest answer for anything
+	// standing still.
+	internal virtual bool TryGetAiSweptPath(out Vector2 anchor, out Vector2 velocity, out float halfWidth)
+	{
+		anchor = Position;
+		velocity = _observedVelocity;
+		halfWidth = AiHalfExtent();
+		// Behaviour-neutral -- the consumer discards a negligible speed anyway -- but it keeps the
+		// "false means no meaningful swept path" contract above true of the DEFAULT and not only of
+		// its callers, so an override can rely on it.
+		return (velocity).LengthSquared() > 0.000001f;
+	}
+
+	// Rough half-extent of this thing's hull, mirroring the collision-type switch the AI's radial
+	// field uses. Lives here rather than in PlayerShip so an override of the seam above can size
+	// its own band against the same measure.
+	internal float AiHalfExtent()
+	{
+		ICollisionType type = GetCollisionType();
+		if (type is CollisionBox)
+		{
+			return ((CollisionBox)type).Width / 2f;
+		}
+		if (type is CollisionMultibox)
+		{
+			return ((CollisionMultibox)type).Items[0].Width / 2f;
+		}
+		if (type is CollisionSimpleCircle)
+		{
+			return ((CollisionSimpleCircle)type).Radius;
+		}
+		return 0f;
+	}
+
 	private float _minimumSpeed;
 
 	private float _maximumSpeed;

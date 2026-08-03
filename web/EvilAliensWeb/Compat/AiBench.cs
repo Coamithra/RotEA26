@@ -131,6 +131,10 @@ internal static class AiBench
 		public long Count;
 		public double StrengthTotal;
 		public float StrengthMax;
+		// Field RANGE and the ship's EDGE distance, so the warning perimeter can be read off a
+		// real run instead of derived from constants that may not be what the type actually gets.
+		public double RangeTotal;
+		public double EdgeDistTotal;
 	}
 
 	private static ShipRec Rec(PlayerShip ship)
@@ -215,7 +219,7 @@ internal static class AiBench
 	// magnitude is irrelevant no matter how it is tuned.
 	// `strength` is the term's magnitude before it joins the repulsion sum, so the mean is
 	// directly comparable to the 0.8 seek it has to out-vote.
-	internal static void NoteThreatTerm(PlayerShip ship, AlienDrawableGameComponent baddy, bool viaEvade, float strength)
+	internal static void NoteThreatTerm(PlayerShip ship, AlienDrawableGameComponent baddy, bool viaEvade, float strength, float range = 0f, float edgeDist = 0f)
 	{
 		if (!Enabled)
 		{
@@ -230,6 +234,8 @@ internal static class AiBench
 		}
 		t.Count++;
 		t.StrengthTotal += strength;
+		t.RangeTotal += range;
+		t.EdgeDistTotal += edgeDist;
 		if (strength > t.StrengthMax)
 		{
 			t.StrengthMax = strength;
@@ -459,7 +465,9 @@ internal static class AiBench
 					first = false;
 					sb.Append(tt.Key).Append('=').Append(tt.Value.Count).Append('@')
 						.Append(Fmt(tt.Value.StrengthTotal / (double)tt.Value.Count, 2)).Append('/')
-						.Append(Fmt(tt.Value.StrengthMax, 2));
+						.Append(Fmt(tt.Value.StrengthMax, 2))
+						.Append("r").Append(Fmt(tt.Value.RangeTotal / (double)tt.Value.Count, 0))
+						.Append("d").Append(Fmt(tt.Value.EdgeDistTotal / (double)tt.Value.Count, 0));
 				}
 			}
 			// Where the ship is and what it last asked for. A jitter number cannot distinguish a

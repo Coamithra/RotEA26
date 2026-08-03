@@ -374,6 +374,106 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	public const float DefaultAsteroidFalloff = DefaultThreatFieldFalloff;
 
+	// ---- DIRECTIONAL REPELLENT SHAPES: the velocity cone and the lane wedge (card e425781b) ----
+	//
+	// WHAT PROBLEM THIS SOLVES, because three attempts at the obvious answer failed first. A
+	// circular field can only say "I am here"; it cannot say "I am about to be THERE". Measured on
+	// SpaceDodge, the bot's mean edge distance from an asteroid is 252px while the radial field
+	// falls under the 0.8 seek at 199px -- so the ship spends its life OUTSIDE every warning
+	// perimeter, and no amount of magnitude, range, falloff or curve-family tuning moves that
+	// (cards ada9e839 and e88e21ca between them swept all four and reached 3/8 victories against a
+	// 4/8 base). The deaths are mid-field lane collisions, which is geometry, not strength.
+	//
+	// THE SHAPE. Every mover projects a MESA along its own velocity: full strength across the body
+	// it is sweeping, tapering with distance ahead, cheap to either side. So a repellent's
+	// meaningful domain starts at the collision EDGE (inside is death, and curve values there are
+	// wasted dynamic range) and extends along the TRAJECTORY, which is where the ship actually is.
+	// It is universal on motion -- asteroids, bullets, UFOs and the spider boss's sweep all fall
+	// out of the same evaluation with no per-type code, because a fast mover automatically
+	// projects a long cone. See AddSweptRepellent.
+
+	// Cone LENGTH per unit speed, as a time horizon: length = speed * this, so it scales with
+	// speed by construction. Deliberately the SAME 700ms as DefaultThreatLeadMs rather than a new
+	// number -- that is the already-swept "how far ahead is a moving threat worth reacting to"
+	// horizon (card 21bb6849 measured a broad optimum around it on CrazyGame), and this is the
+	// same question asked by a shape instead of by a special case. At an asteroid's 0.38px/ms it
+	// is 266px of closed lane, against a ship that covers 231px in the same time -- i.e. the
+	// warning arrives while the escape is still affordable.
+	public const float DefaultConeLeadMs = DefaultThreatLeadMs;
+
+	// Ceiling on that length. 800 is the design field's own width, past which the shape is off
+	// screen and cannot describe anything; it exists so a very fast mover (a bullet) does not
+	// project a cone longer than the world.
+	public const float DefaultConeMaxLenPx = 800f;
+
+	// How far OUTSIDE the swept corridor the cone still pushes, i.e. the scale of the ACROSS-axis
+	// falloff. Not derived -- see the card for the sweep that chose it.
+	public const float DefaultConeWidthPx = 150f;
+
+	// How the corridor narrows toward the far end: 1 is the true triangle of the design sketch
+	// (a point at full length), 0 a parallel capsule.
+	public const float DefaultConeTaper = 1f;
+
+	// THE TWO FALLOFFS ARE DIFFERENT FAMILIES ON PURPOSE, and this is the crux of the shape.
+	//   ALONG the axis: `1 - t^p`, a PLATEAU (p=2 keeps 75% at half the cone's length). The whole
+	//     point is to have authority far out along the trajectory, which is the band the radial
+	//     field abandons; a spike here would reproduce exactly the field this replaces.
+	//   ACROSS the axis: `(1-t)^p`, a SPIKE (p=3 is down to 12% at half the width). Threading a
+	//     gap between two rocks has to stay possible, so sideways clearance must get cheap fast.
+	// Note the along-axis family is the 2008 `MyMath.PowerCurve` one, which card e88e21ca measured
+	// and rejected -- but rejected as a RADIAL curve, where a plateau merely widens a circle. On a
+	// trajectory axis it is the whole idea, so that result does not carry.
+	public const float DefaultConeFallAlong = 2f;
+
+	public const float DefaultConeFallAcross = DefaultThreatFieldFalloff;
+
+	// Peak magnitude as a multiple of maxSteerStrength: 1.0 makes the corridor ahead exactly as
+	// repellent as the hull itself, which is the honest statement -- being there when it arrives
+	// and being inside it now are the same death.
+	public const float DefaultConeScale = 1f;
+
+	// ---- the LANE WEDGE ----
+	// A symmetric cone is WRONG for a mover whose path hugs a screen edge: it offers the gap
+	// between path and edge as an escape, and that gap is a trap -- the ship dodges into it and is
+	// crushed against the wall as the mover arrives. So when the swept band leaves too little room
+	// on one side, the shape becomes asymmetric: everything between the path and the hugged edge
+	// is closed at full strength, and the only downhill direction is out of the lane.
+	// WHICH EDGE IS SCREEN GEOMETRY, not a type test -- it is whichever side the swept band leaves
+	// less than a survivable gap on, so the spider boss's three fixed lanes and its
+	// sweep-to-the-right-edge landing all resolve themselves.
+
+	// Peak wedge magnitude. Held at the value the hand-rolled spider lane escapes used, so that
+	// replacing them is a change of SHAPE and not of strength -- it still has to beat the station
+	// pull, a powerup detour and the edge pushes combined, because the whole band is simply death.
+	public const float DefaultLaneWedgeStrength = 18f;
+
+	// The wedge's own along-axis exponent. Same plateau family as the cone's; separate because the
+	// wedge runs the full length of the play field rather than a speed-scaled cone length, so the
+	// two are shaping very different spans.
+	public const float DefaultLaneWedgeFallAlong = DefaultConeFallAlong;
+
+	private static bool ConeEnabled => EvilAliensWeb.Compat.DebugFlags.AiConeShapes ?? true;
+
+	private static bool LaneWedgeEnabled => EvilAliensWeb.Compat.DebugFlags.AiLaneWedge ?? true;
+
+	private static float ConeLeadMs => EvilAliensWeb.Compat.DebugFlags.AiConeLeadMs ?? DefaultConeLeadMs;
+
+	private static float ConeMaxLenPx => EvilAliensWeb.Compat.DebugFlags.AiConeMaxLenPx ?? DefaultConeMaxLenPx;
+
+	private static float ConeWidthPx => EvilAliensWeb.Compat.DebugFlags.AiConeWidthPx ?? DefaultConeWidthPx;
+
+	private static float ConeTaper => EvilAliensWeb.Compat.DebugFlags.AiConeTaper ?? DefaultConeTaper;
+
+	private static float ConeFallAlong => EvilAliensWeb.Compat.DebugFlags.AiConeFallAlong ?? DefaultConeFallAlong;
+
+	private static float ConeFallAcross => EvilAliensWeb.Compat.DebugFlags.AiConeFallAcross ?? DefaultConeFallAcross;
+
+	private static float ConeScale => EvilAliensWeb.Compat.DebugFlags.AiConeScale ?? DefaultConeScale;
+
+	private static float LaneWedgeStrength => EvilAliensWeb.Compat.DebugFlags.AiLaneWedgeStrength ?? DefaultLaneWedgeStrength;
+
+	private static float LaneWedgeFallAlong => EvilAliensWeb.Compat.DebugFlags.AiLaneWedgeFallAlong ?? DefaultLaneWedgeFallAlong;
+
 	private static float ThreatFieldBasePx => EvilAliensWeb.Compat.DebugFlags.AiThreatFieldPx ?? Skill.FieldPx;
 
 	private static float ThreatFieldSizeScale => EvilAliensWeb.Compat.DebugFlags.AiThreatFieldSize ?? DefaultThreatFieldSizeScale;
@@ -1576,7 +1676,11 @@ public class PlayerShip : AlienDrawableGameComponent
 			// The vertical strips: the fixed X-600 landing column, and the climb that opens the
 			// next cycle. Same treatment as the sweep lane, on the other axis -- flat across the
 			// band, because every part of it is equally lethal.
-			if (baddy is SpiderBoss && ((SpiderBoss)baddy).AiVerticalLaneActive)
+			// ?ailaneescape=0 drops both hand-rolled spider escapes, so the lane wedge added by
+			// card e425781b can be measured against them instead of on top of them. A MEASUREMENT
+			// seam for the supersession A/B; the escapes are the incumbent until it clears them.
+			if (EvilAliensWeb.Compat.DebugFlags.AiLaneEscape != false
+				&& baddy is SpiderBoss && ((SpiderBoss)baddy).AiVerticalLaneActive)
 			{
 				float laneX = ((SpiderBoss)baddy).AiVerticalLaneX;
 				float offLane = base.Position.X - laneX;
@@ -1603,7 +1707,8 @@ public class PlayerShip : AlienDrawableGameComponent
 			// prediction says nothing and the distance field is a screen away. Vacating the lane
 			// now is the whole point of the warning, and it is far cheaper than trying to escape
 			// a screen-wide sweep once it has started.
-			if (baddy is SpiderBoss && ((SpiderBoss)baddy).AiSweepIncoming)
+			if (EvilAliensWeb.Compat.DebugFlags.AiLaneEscape != false
+				&& baddy is SpiderBoss && ((SpiderBoss)baddy).AiSweepIncoming)
 			{
 				float laneY = ((SpiderBoss)baddy).AiSweepLaneCentreY;
 				float offLane = base.Position.Y - laneY;
@@ -1683,6 +1788,11 @@ public class PlayerShip : AlienDrawableGameComponent
 				// ?aievade=0 disables the closest-approach path entirely, so everything falls
 				// through to the radial field. A MEASUREMENT seam (card ada9e839): this special
 				// case predates the field composition and has never been measured inside it.
+				// THE DIRECTIONAL SHAPE (card e425781b), evaluated for every threat and ADDED to
+				// the radial field below rather than replacing it -- the shipped shape is a circle
+				// with a velocity-aligned hat on it, so both halves are real. Placed before the
+				// evade so a mover contributes its cone even on the ticks the evade takes over.
+				AddSweptRepellent(ref repel, baddy, dodgeAngle, maxSteerStrength);
 				if (EvilAliensWeb.Compat.DebugFlags.AiEvadeMovers != false
 					&& EvadeMovingThreat(ref repel, baddy, dodgeAngle, minSteerStrength, maxSteerStrength))
 				{
@@ -1724,7 +1834,7 @@ public class PlayerShip : AlienDrawableGameComponent
 						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, dist / field);
 					}
 					strength *= ThreatTypeScale(baddy);
-					EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy, viaEvade: false, strength, field, dist);
+					EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy, EvilAliensWeb.Compat.AiBench.ThreatPath.Field, strength, field, dist);
 					repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - baddy.Position) + dodgeAngle);
 				}
 			}
@@ -2091,9 +2201,247 @@ public class PlayerShip : AlienDrawableGameComponent
 			strength = MathHelper.Max(strength, ThreatPanicStrength);
 		}
 		strength *= ThreatTypeScale(baddy);
-		EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy, viaEvade: true, strength);
+		EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy, EvilAliensWeb.Compat.AiBench.ThreatPath.Evade, strength);
 		repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(side) + dodgeAngle);
 		return true;
+	}
+
+	// THE DIRECTIONAL REPELLENT (card e425781b) -- one mesa along the mover's own swept path, plus
+	// the asymmetric wedge when that path hugs a screen edge. Adds to `repel`, so it composes with
+	// the radial field and everything else exactly as those compose with each other, and is
+	// subject to the same cancellation floor. Called for every threat; a thing that is not moving
+	// contributes nothing and falls through to the radial field alone, as before.
+	//
+	// COORDINATES. With `axis` the unit travel direction and `d` the ship relative to the band's
+	// anchor: `u = dot(d, axis)` is how far AHEAD the ship is and `w = |d - u*axis|` how far to the
+	// SIDE. The corridor's half-width tapers from the body's own half-extent at u=0 to a point at
+	// the cone's length, and the falloff across is measured from the corridor's edge outward -- so
+	// the field is at FULL strength anywhere inside the swept body and none of its dynamic range
+	// is spent on the interior, which is the card's design principle.
+	//
+	// THE PUSH IS PURELY TRANSVERSE, and that is a decision rather than an approximation. The
+	// mesa's own gradient also has an along-axis component, and it points FORWARD -- further down
+	// the mover's track, away from the mover. Following it would ask the ship to outrun the thing
+	// chasing it, which it cannot do (an asteroid moves 0.38px/ms against ShipMaxSpeed 0.33), and
+	// it is the identical failure the radial field already has against a screen-crosser: a push
+	// ALONG the path rather than off it. So only the sideways component is taken, which is also
+	// what a player does and what EvadeMovingThreat did for the same reason.
+	private void AddSweptRepellent(ref Vector2 repel, AlienDrawableGameComponent baddy, float dodgeAngle, float maxSteerStrength)
+	{
+		if (!ConeEnabled)
+		{
+			return;
+		}
+		if (!baddy.TryGetAiSweptPath(out var anchor, out var velocity, out var halfWidth))
+		{
+			return;
+		}
+		SweptShape shape = EvaluateSweptShape(base.Position, SpeedVector, anchor, velocity,
+			halfWidth, AiHalfExtent(), maxSteerStrength, LaneWedgeEnabled);
+		float typeScale = ThreatTypeScale(baddy);
+		if (shape.ConeStrength > 0f)
+		{
+			float strength = shape.ConeStrength * typeScale;
+			EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy,
+				EvilAliensWeb.Compat.AiBench.ThreatPath.Cone, strength, shape.ConeLength, shape.ConeEdgeDist);
+			repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(shape.ConeDir) + dodgeAngle);
+		}
+		if (shape.WedgeStrength > 0f)
+		{
+			float strength = shape.WedgeStrength * typeScale;
+			EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy,
+				EvilAliensWeb.Compat.AiBench.ThreatPath.Wedge, strength, shape.WedgeLength, shape.WedgeEdgeDist);
+			repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(shape.WedgeDir) + dodgeAngle);
+		}
+	}
+
+	// What the shape evaluates to at one point: the two terms with their directions, plus the two
+	// quantities the bench reports beside every other repellent (the term's own reach, and how far
+	// outside the shape the ship is).
+	internal struct SweptShape
+	{
+		internal float ConeStrength;
+
+		internal Vector2 ConeDir;
+
+		internal float ConeLength;
+
+		internal float ConeEdgeDist;
+
+		internal float WedgeStrength;
+
+		internal Vector2 WedgeDir;
+
+		internal float WedgeLength;
+
+		internal float WedgeEdgeDist;
+	}
+
+	// THE SHAPE ITSELF, as a pure function of geometry -- no ship, no component, no Game. That is
+	// deliberate: it is the whole decision this card makes, and a decision is verified as DATA.
+	// `logic_probe`'s ProbeAiConeShape calls exactly this and tabulates it at FIXED distances,
+	// which is also the only honest way to compare two fields here -- see the card's warning that
+	// a mean field strength is a selection effect, not a measurement.
+	// `shipVel` is used solely to break the tie when the ship sits exactly on the centre line.
+	internal static SweptShape EvaluateSweptShape(Vector2 shipPos, Vector2 shipVel, Vector2 anchor,
+		Vector2 velocity, float halfWidth, float shipHalfExtent, float maxSteerStrength, bool wedgeEnabled)
+	{
+		SweptShape result = default(SweptShape);
+		float speed = (velocity).Length();
+		if (speed < 0.001f)
+		{
+			// Not moving: it has no path to project, and its radial field already describes it.
+			return result;
+		}
+		Vector2 axis = velocity / speed;
+		float coneLen = MathHelper.Min(speed * ConeLeadMs, ConeMaxLenPx);
+		if (coneLen < 1f)
+		{
+			return result;
+		}
+		Vector2 d = shipPos - anchor;
+		float u = Vector2.Dot(d, axis);
+		if (u <= 0f)
+		{
+			// Behind the mover. Nothing is coming this way, and the body itself is the radial
+			// field's business.
+			return result;
+		}
+		Vector2 acrossVec = d - u * axis;
+		float w = (acrossVec).Length();
+		// The unit direction OUT of the corridor, i.e. the way the cone pushes.
+		Vector2 side;
+		if (w > 0.001f)
+		{
+			side = acrossVec / w;
+		}
+		else
+		{
+			// Dead on the centre line, so the shape itself cannot pick a side -- take the one the
+			// ship is already drifting toward, so the escape never fights its own momentum. When
+			// it is not drifting either the sign is settled deterministically, rather than left
+			// to the direction of a float rounding error.
+			side = new Vector2(0f - axis.Y, axis.X);
+			if (Vector2.Dot(side, shipVel) < 0f)
+			{
+				side = -side;
+			}
+		}
+		// ---- the cone ----
+		float taperedHalf = halfWidth * MathHelper.Max(0f, 1f - ConeTaper * (u / coneLen));
+		float edgeAcross = MathHelper.Max(0f, w - taperedHalf);
+		float along = 1f - (float)Math.Pow(MathHelper.Clamp(u / coneLen, 0f, 1f), ConeFallAlong);
+		if (along > 0f)
+		{
+			float across = (edgeAcross >= ConeWidthPx)
+				? 0f
+				: (float)Math.Pow(1f - edgeAcross / ConeWidthPx, ConeFallAcross);
+			if (across > 0f)
+			{
+				result.ConeStrength = maxSteerStrength * ConeScale * along * across;
+				result.ConeDir = side;
+				result.ConeLength = coneLen;
+				result.ConeEdgeDist = edgeAcross;
+			}
+		}
+		// ---- the lane wedge ----
+		if (!wedgeEnabled)
+		{
+			return result;
+		}
+		// A gap only counts as an escape if the ship can survive in it: its own body, plus the
+		// distance it needs to stop, on each side. Derived from the real motion constants rather
+		// than chosen, exactly as DefaultSeekArriveDeadzonePx is.
+		float stoppingDistance = 0.5f * ShipMaxSpeed * ShipMaxSpeed / ShipDeceleration;
+		float survivableGap = 2f * (shipHalfExtent + stoppingDistance);
+		// A WEDGE IS FOR A LANE, AND A LANE IS A BAND TOO WIDE TO GO AROUND. Anything narrower
+		// than the room a ship needs is an obstacle, not a corridor: the ship can simply cross its
+		// path, so offering only ONE escape direction would be a lie -- and an 18-strength shove
+		// aimed at a bullet or a small rock drifting near the ceiling out-votes the entire rest of
+		// the field. Measured before this gate existed, every UFO in SpaceDodge was wedging (3263
+		// contributions at mean 4.25) purely for entering from the top.
+		if (halfWidth < survivableGap)
+		{
+			return result;
+		}
+		// Which way is "out of the lane", if either. Measured at the cross-section the SHIP is at
+		// (`anchor + u*axis`), not at the anchor -- a mover typically enters from off-screen, and
+		// an anchor outside the play field reports zero room on its near side, which would wedge
+		// everything that ever crossed a boundary.
+		Vector2 bandPoint = anchor + u * axis;
+		Vector2 across1 = new Vector2(0f - axis.Y, axis.X);
+		float room1 = PlayfieldExitDistance(bandPoint, across1) - halfWidth;
+		float room2 = PlayfieldExitDistance(bandPoint, -across1) - halfWidth;
+		Vector2 outDir;
+		if (room1 < survivableGap && room1 <= room2)
+		{
+			// Side 1 is the trap, so the escape is side 2.
+			outDir = -across1;
+		}
+		else if (room2 < survivableGap)
+		{
+			outDir = across1;
+		}
+		else
+		{
+			// Both sides are survivable: an ordinary free mover, and the symmetric cone above is
+			// the right shape. True of a mid-screen lane as much as of an asteroid.
+			return result;
+		}
+		// The wedge runs the whole remaining length of the play field rather than the cone's
+		// speed-scaled length: the lane is lethal for its entire extent, so closing only the near
+		// stretch would invite the ship to sit in the far half of a corridor it cannot leave in
+		// time -- and the boss's "Danger!" telegraph, which is the whole warning the player gets,
+		// happens while it is still a screen away.
+		float wedgeLen = MathHelper.Max(PlayfieldExitDistance(anchor, axis), coneLen);
+		float wedgeAlong = 1f - (float)Math.Pow(MathHelper.Clamp(u / wedgeLen, 0f, 1f), LaneWedgeFallAlong);
+		if (wedgeAlong <= 0f)
+		{
+			return result;
+		}
+		// FULL strength everywhere from the trapped edge across to the far side of the band, then
+		// the cone's ordinary transverse falloff beyond it -- so the only downhill direction is
+		// OUT, and a ship that has already left is nudged rather than shoved back.
+		float outward = Vector2.Dot(d, outDir);
+		float wedgeAcross;
+		if (outward <= halfWidth)
+		{
+			wedgeAcross = 1f;
+		}
+		else if (outward - halfWidth >= ConeWidthPx)
+		{
+			wedgeAcross = 0f;
+		}
+		else
+		{
+			wedgeAcross = (float)Math.Pow(1f - (outward - halfWidth) / ConeWidthPx, ConeFallAcross);
+		}
+		if (wedgeAcross > 0f)
+		{
+			result.WedgeStrength = LaneWedgeStrength * wedgeAlong * wedgeAcross;
+			result.WedgeDir = outDir;
+			result.WedgeLength = wedgeLen;
+			result.WedgeEdgeDist = MathHelper.Max(0f, outward - halfWidth);
+		}
+		return result;
+	}
+
+	// How far from `from` along `dir` the 800x600 design field extends. A slab test, so it is
+	// correct for a diagonal path as well as the axis-aligned ones the game actually produces;
+	// clamped at zero for an anchor that is already outside on that axis (the spider boss starts
+	// its sweeps off-screen).
+	private static float PlayfieldExitDistance(Vector2 from, Vector2 dir)
+	{
+		float best = float.MaxValue;
+		if (Math.Abs(dir.X) > 0.0001f)
+		{
+			best = MathHelper.Min(best, ((dir.X > 0f) ? (800f - from.X) : (0f - from.X)) / dir.X);
+		}
+		if (Math.Abs(dir.Y) > 0.0001f)
+		{
+			best = MathHelper.Min(best, ((dir.Y > 0f) ? (600f - from.Y) : (0f - from.Y)) / dir.Y);
+		}
+		return (best == float.MaxValue) ? 0f : MathHelper.Max(0f, best);
 	}
 
 	// How far from a threat's HULL the AI wants to stay, scaled by how big the hull is. The 2008

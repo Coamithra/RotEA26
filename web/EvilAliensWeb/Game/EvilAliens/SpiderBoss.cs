@@ -885,6 +885,60 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		}
 	}
 
+	// THE BOSS ANNOUNCES ITS SWEPT PATH (card e425781b). This is the one override of
+	// AlienDrawableGameComponent.TryGetAiSweptPath in the game, and it exists because all three
+	// things the default gets from Position/ObservedVelocity are wrong for a scripted set-piece:
+	//   * DURING THE "Danger!" HOLD THE BOSS IS FROZEN. Update early-returns on `waittimer.Active`,
+	//     so for the whole flyPauseMs warning its observed velocity is ZERO and a velocity-shaped
+	//     field would see nothing at all -- yet that hold IS the warning, and leaving the lane
+	//     during it is the entire point. So the velocity reported here is the one it is ABOUT to
+	//     move at, which is what the seam's "announced, not observed" contract is for.
+	//   * THE SWEEP BAND IS SNAPPED, not centred on Position.Y. The collision box picks one of
+	//     three fixed lanes (see the flyleft/flyright case in CollisionType), so a band anchored at
+	//     Position.Y can be m 93px off the strip that actually kills.
+	//   * THE LANDING SWEEPS TO THE RIGHT SCREEN EDGE. Its second collision box runs from the
+	//     boss's right edge to x=800, so the swept band is not symmetric about the body -- the
+	//     anchor and half-width below describe the UNION, which is what makes "the only escape is
+	//     left" fall out of the field's own geometry instead of being hard-coded.
+	// Everything else in the game keeps the default, so this is choreography-as-data, not a
+	// per-type steering rule.
+	internal override bool TryGetAiSweptPath(out Vector2 anchor, out Vector2 velocity, out float halfWidth)
+	{
+		// The Update switch's own figure, recomputed rather than cached: it is read per tick there
+		// too, and DifficultyModifier ramps within a fight.
+		float moveSpeed = 0.78f * Settings.GetInstance().DifficultyModifier;
+		switch (state)
+		{
+		case SpiderBossState.flyleft:
+		case SpiderBossState.flyright:
+			// Half the lane box's HEIGHT -- the band is crossed vertically, so that is the extent
+			// that matters across the direction of travel.
+			anchor = new Vector2(base.Position.X, AiSweepLaneCentreY);
+			velocity = new Vector2((state == SpiderBossState.flyleft) ? (0f - moveSpeed) : moveSpeed, 0f);
+			halfWidth = 186.66667f * 0.5f;
+			return true;
+		case SpiderBossState.land:
+		{
+			// The union of the body box and the sweep box that runs to the right screen edge.
+			float bodyLeft = base.Position.X + 20f * scale - 120f * scale;
+			float right = 800f;
+			anchor = new Vector2((bodyLeft + right) * 0.5f, base.Position.Y);
+			velocity = new Vector2(0f, moveSpeed);
+			halfWidth = (right - bodyLeft) * 0.5f;
+			return true;
+		}
+		case SpiderBossState.jump:
+		case SpiderBossState.flyup:
+			// The climb has no sweep, so the band is just the body and either side is an escape.
+			anchor = base.Position;
+			velocity = new Vector2(0f, 0f - moveSpeed);
+			halfWidth = 120f * scale;
+			return true;
+		default:
+			return base.TryGetAiSweptPath(out anchor, out velocity, out halfWidth);
+		}
+	}
+
 	public Vector2 GetAimPoint()
 	{
 		return base.Position + new Vector2(20f * scale, 40f * scale);

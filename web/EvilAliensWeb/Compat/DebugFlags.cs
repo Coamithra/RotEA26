@@ -1409,6 +1409,47 @@ namespace EvilAliensWeb.Compat
 		//             composition that replaced it.
 		public static bool? AiEvadeMovers { get; private set; }
 
+		// ---- directional repellent shapes (card e425781b) ----
+		// ?aicone=0        turn the whole velocity-cone / lane-wedge shape off, leaving the radial
+		//                  field alone -- the A/B control for everything this card measures.
+		// ?aiwedge=0       keep the cone but drop the asymmetric lane wedge, which is the only way
+		//                  to attribute a spider-boss result to one half of the shape.
+		// ?ailaneescape=0  turn off the hand-rolled spider lane/sweep escapes, so the wedge can be
+		//                  measured against them rather than on top of them.
+		public static bool? AiConeShapes { get; private set; }
+
+		public static bool? AiLaneWedge { get; private set; }
+
+		public static bool? AiLaneEscape { get; private set; }
+
+		// ?aiconelead=<ms>     cone length per unit speed, as a time horizon;
+		// ?aiconemaxlen=<px>   the ceiling on that length;
+		// ?aiconewidth=<px>    how far outside the swept corridor it still pushes;
+		// ?aiconetaper=<f>     1 = a true triangle, 0 = a parallel capsule;
+		// ?aiconefallalong=<p> the ALONG-axis plateau exponent (1 - t^p);
+		// ?aiconefallacross=<p> the ACROSS-axis spike exponent ((1-t)^p);
+		// ?aiconescale=<f>     peak magnitude as a multiple of maxSteerStrength.
+		public static float? AiConeLeadMs { get; private set; }
+
+		public static float? AiConeMaxLenPx { get; private set; }
+
+		public static float? AiConeWidthPx { get; private set; }
+
+		public static float? AiConeTaper { get; private set; }
+
+		public static float? AiConeFallAlong { get; private set; }
+
+		public static float? AiConeFallAcross { get; private set; }
+
+		public static float? AiConeScale { get; private set; }
+
+		// ?aiwedgestrength=<f> the wedge's peak magnitude, and
+		// ?aiwedgefall=<p>     its own along-axis plateau exponent -- separate from the cone's
+		//                      because the wedge spans the play field rather than a cone length.
+		public static float? AiLaneWedgeStrength { get; private set; }
+
+		public static float? AiLaneWedgeFallAlong { get; private set; }
+
 		// ?netscript (card 11.3): replace the booted level's event list with a compressed
 		// ~60s script that fires every replicated beat type (message, warning, background
 		// ops, checkpoints, music switch, victory) -- the purpose-built two-tab
@@ -2782,6 +2823,132 @@ namespace EvilAliensWeb.Compat
 						// A typo here would leave the evade path ON while the run is LABELLED as
 						// having it off -- i.e. a measurement seam quietly measuring the other arm.
 						RejectFlagValue(key, val, "on/off", (AiEvadeMovers ?? true) ? "on" : "off");
+					}
+					break;
+				case "aicone":
+				case "aiwedge":
+				case "ailaneescape":
+					if (IsOn(val) || IsExplicitlyOff(val))
+					{
+						if (key == "aicone")
+						{
+							AiConeShapes = IsOn(val);
+						}
+						else if (key == "aiwedge")
+						{
+							AiLaneWedge = IsOn(val);
+						}
+						else
+						{
+							AiLaneEscape = IsOn(val);
+						}
+					}
+					else
+					{
+						// Same hazard as ?aievade=: a typo would leave the shape ON while the run
+						// is LABELLED as having it off, i.e. a measurement seam quietly measuring
+						// the other arm.
+						RejectFlagValue(key, val, "on/off",
+							((key == "aicone" ? AiConeShapes : (key == "aiwedge" ? AiLaneWedge : AiLaneEscape)) ?? true) ? "on" : "off");
+					}
+					break;
+				case "aiconelead":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aicl) && aicl >= 0f)
+					{
+						AiConeLeadMs = MathHelper.Min(aicl, 5000f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiConeLeadMs ?? EvilAliens.PlayerShip.DefaultConeLeadMs));
+					}
+					break;
+				case "aiconemaxlen":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aicml) && aicml >= 0f)
+					{
+						AiConeMaxLenPx = MathHelper.Min(aicml, 4000f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiConeMaxLenPx ?? EvilAliens.PlayerShip.DefaultConeMaxLenPx));
+					}
+					break;
+				case "aiconewidth":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aicw) && aicw > 0f)
+					{
+						AiConeWidthPx = MathHelper.Min(aicw, 2000f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(AiConeWidthPx ?? EvilAliens.PlayerShip.DefaultConeWidthPx));
+					}
+					break;
+				case "aiconetaper":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aict) && aict >= 0f)
+					{
+						AiConeTaper = MathHelper.Min(aict, 1f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiConeTaper ?? EvilAliens.PlayerShip.DefaultConeTaper));
+					}
+					break;
+				case "aiconefallalong":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aicfa) && aicfa >= 0f)
+					{
+						AiConeFallAlong = MathHelper.Min(aicfa, 20f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiConeFallAlong ?? EvilAliens.PlayerShip.DefaultConeFallAlong));
+					}
+					break;
+				case "aiconefallacross":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aicfc) && aicfc >= 0f)
+					{
+						AiConeFallAcross = MathHelper.Min(aicfc, 20f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiConeFallAcross ?? EvilAliens.PlayerShip.DefaultConeFallAcross));
+					}
+					break;
+				case "aiconescale":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aics) && aics >= 0f)
+					{
+						AiConeScale = MathHelper.Min(aics, 20f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiConeScale ?? EvilAliens.PlayerShip.DefaultConeScale));
+					}
+					break;
+				case "aiwedgestrength":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiws) && aiws >= 0f)
+					{
+						AiLaneWedgeStrength = MathHelper.Min(aiws, 100f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiLaneWedgeStrength ?? EvilAliens.PlayerShip.DefaultLaneWedgeStrength));
+					}
+					break;
+				case "aiwedgefall":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiwf) && aiwf >= 0f)
+					{
+						AiLaneWedgeFallAlong = MathHelper.Min(aiwf, 20f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiLaneWedgeFallAlong ?? EvilAliens.PlayerShip.DefaultLaneWedgeFallAlong));
 					}
 					break;
 				case "aifieldcurve":

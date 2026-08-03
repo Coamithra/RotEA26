@@ -2,9 +2,15 @@
 #
 # PINS:   card 31ceb6ff. The term itself was added by card f4d1721f and was correct code the
 #         whole time -- but it expresses "close on that boss" by writing `steerTarget`, and every
-#         steerTarget vote used to weigh SeekWeight 0.8 against a SteerParkDemand of 0.95. So
-#         DoAIMove's last act zeroed it, and the ship never went. Card 31ceb6ff gives the
-#         standoff its own weight (DefaultSeekApproachWeight 1.1) above that park.
+#         steerTarget vote used to weigh SeekWeight 0.8 against a whole-sum "park" of 0.95. So
+#         DoAIMove's last act zeroed it, and the ship never went. Card 31ceb6ff gave the
+#         standoff its own weight (DefaultSeekApproachWeight 1.1) above that park; card ada9e839
+#         then DELETED the park itself (the 2008 value was 0.2, not 0.95) and rebuilt DoAIMove as
+#         a proper attraction/repulsion composition, so this probe now guards the term against a
+#         different failure: it is no longer "did the weight clear a threshold", it is "does the
+#         standoff still out-vote what is pushing back". NOTE the 1.1 is a park-CLEARANCE number
+#         and is mis-calibrated under the new composition -- card b56633fb recalibrates it, and
+#         this probe's thresholds should be revisited with it.
 #
 # WHY A PROBE AND NOT A SCREENSHOT: the failure is a ship that does not move, on a rig where a
 # dozen other terms are also pushing, so a frame shows nothing and `deaths`/`prog` move for
@@ -16,7 +22,7 @@
 # pinned is that the counters EXIST and the boss was seen at all. A dead term and a live one
 # differ here by ~10px of mean distance, which is far inside this rig's run-to-run spread, so an
 # assertion tight enough to catch the regression would be flaky. The regression is caught by
-# logic_probe's ProbeAiSeekWeights instead (the weight-vs-park ordering, which is the mechanism);
+# logic_probe's ProbeAiFieldComposition instead (the weight-vs-park ordering, which is the mechanism);
 # this probe's job is to prove that ordering is WIRED to a real boss, which logic_probe cannot do.
 #
 # STANDING RESULT, so the numbers below are readable (eahl, Very_Hard, ?invuln, 180 sim-s):

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Linq;
 using System.Text;
 using EvilAliens;
 using Microsoft.Xna.Framework;
@@ -39,6 +40,10 @@ internal static class AiBench
 	// noise, not a reversal (~0.6 degrees).
 	private const float ReversalDeadbandRad = 0.01f;
 
+	// Enough for any soak anyone runs here (the worst matrix row is ~90 deaths); the cap exists so
+	// an unattended run cannot grow the list without bound.
+	private const int MaxDeathPositions = 4000;
+
 	private sealed class ShipRec
 	{
 		public int Slot;
@@ -47,6 +52,14 @@ internal static class AiBench
 		public int Shots;
 		public long SteerTicks;
 		public long CoastTicks;
+		// Ticks on which the repulsion resultant fell at or below RepulseCancelDelta and every
+		// repellent was therefore dropped (card ada9e839). Counted only when something was
+		// actually pushing, so a calm screen does not read as constant cancellation -- the
+		// question the metric answers is "how often do the threat fields argue themselves to a
+		// standstill", and an empty field arguing with nothing is not that.
+		public long RepelTicks;
+		public long RepelZeroedTicks;
+		public readonly Dictionary<string, ThreatTermRec> ThreatTerms = new Dictionary<string, ThreatTermRec>();
 		public Vector2 LastPos;
 		public Vector2 LastSteer;
 		public double SteerMs;
@@ -75,6 +88,11 @@ internal static class AiBench
 		// bot still fly into the grounded spider boss" — a death to a stray bullet and a death
 		// to the boss are the same number, which is why that report was unverifiable.
 		public readonly Dictionary<string, int> Killers = new Dictionary<string, int>();
+		// WHERE each death happened, in 800x600 design space (card ada9e839). `killers=` says what
+		// killed the bot and `deaths=` how often; neither can tell edge-hugging from a mid-field
+		// lane collision, and those want opposite fixes. Rendered by
+		// tools/sim/ai_death_heatmap.py. Capped so a long soak cannot grow it without bound.
+		public readonly List<Vector2> DeathPositions = new List<Vector2>();
 	}
 
 	private static readonly Dictionary<int, ShipRec> ships = new Dictionary<int, ShipRec>();
@@ -104,6 +122,15 @@ internal static class AiBench
 		powerupsSpawned = 0;
 		headlessTotal = TimeSpan.Zero;
 		lastScene = null;
+	}
+
+	// One repellent path for one threat TYPE: how often it fired and how hard. Mean strength
+	// is the number to compare against the 0.8 seek; Max says whether it ever bites at all.
+	private sealed class ThreatTermRec
+	{
+		public long Count;
+		public double StrengthTotal;
+		public float StrengthMax;
 	}
 
 	private static ShipRec Rec(PlayerShip ship)
@@ -159,6 +186,56 @@ internal static class AiBench
 		rec.HasHeading = true;
 	}
 
+	// DoAIMove, at the repulsion cancellation floor (card ada9e839). `preFloor` is the repulsion
+	// resultant BEFORE the floor is applied, which is the only form that can answer the question:
+	// a tick with nothing repelling and a tick where two threats cancelled each other out are
+	// both Vector2.Zero AFTERWARDS, and only the second is this mechanism doing its job. Ticks
+	// where nothing pushed at all are counted in NEITHER total -- folding them in would turn the
+	// rate into a measure of how empty the screen was.
+	internal static void NoteRepel(PlayerShip ship, Vector2 preFloor, bool zeroed)
+	{
+		if (!Enabled || preFloor == Vector2.Zero)
+		{
+			return;
+		}
+		ShipRec rec = Rec(ship);
+		rec.RepelTicks++;
+		if (zeroed)
+		{
+			rec.RepelZeroedTicks++;
+		}
+	}
+
+	// DoAIMove's baddy loop, once per THREAT that actually contributed a repellent (card
+	// ada9e839). Answers the question a total-magnitude counter cannot: a threat type is handled
+	// either by EvadeMovingThreat (steer off its projected PATH) or by the radial distance field,
+	// never both -- the evade returns true and the caller skips the field. So "the bot ignores
+	// asteroids" has two completely different causes with the same symptom, and this says which:
+	// a type that never appears under `field` is being handled as a MOVER, and its radial
+	// magnitude is irrelevant no matter how it is tuned.
+	// `strength` is the term's magnitude before it joins the repulsion sum, so the mean is
+	// directly comparable to the 0.8 seek it has to out-vote.
+	internal static void NoteThreatTerm(PlayerShip ship, AlienDrawableGameComponent baddy, bool viaEvade, float strength)
+	{
+		if (!Enabled)
+		{
+			return;
+		}
+		ShipRec rec = Rec(ship);
+		string key = baddy.GetType().Name + (viaEvade ? "(evade)" : "(field)");
+		if (!rec.ThreatTerms.TryGetValue(key, out ThreatTermRec t))
+		{
+			t = new ThreatTermRec();
+			rec.ThreatTerms[key] = t;
+		}
+		t.Count++;
+		t.StrengthTotal += strength;
+		if (strength > t.StrengthMax)
+		{
+			t.StrengthMax = strength;
+		}
+	}
+
 	// PlayerShip.CollidesWith, `other is Wall`, BEFORE the invulnerability gate.
 	internal static void NoteWallContact(PlayerShip ship)
 	{
@@ -200,6 +277,10 @@ internal static class AiBench
 			? (boss.AiStanding ? "SpiderBoss(standing)" : "SpiderBoss")
 			: ((killer as string) ?? ((killer != null) ? killer.GetType().Name : "unknown"));
 		rec.Killers[name] = (rec.Killers.TryGetValue(name, out int n) ? n : 0) + 1;
+		if (rec.DeathPositions.Count < MaxDeathPositions)
+		{
+			rec.DeathPositions.Add(ship.GetPosition());
+		}
 	}
 
 	// DoAIMove, once per tick per AI ship while a level-HALTING boss is on screen. `standoff` is
@@ -342,6 +423,45 @@ internal static class AiBench
 			// "smooth" if the ship was actually steering -- a bot standing still also scores zero,
 			// and that failure mode has already been mistaken for a fix once on this card.
 			sb.Append(" coast=").Append(Fmt((r.SteerTicks > 0L) ? (100.0 * (double)r.CoastTicks / (double)r.SteerTicks) : 0.0, 0)).Append('%');
+			// Share of PUSHED ticks on which the repulsion floor fired, i.e. the repellents
+			// cancelled each other out and none was applied (card ada9e839). The mechanism that
+			// replaced the 0.95 park is otherwise unobservable: it changes no pixel and moves no
+			// other counter, so a build where it never fires and one where it fires constantly
+			// look identical without this.
+			sb.Append(" repelzero=").Append(Fmt((r.RepelTicks > 0L) ? (100.0 * (double)r.RepelZeroedTicks / (double)r.RepelTicks) : 0.0, 0)).Append('%');
+			// Death POSITIONS, design space, semicolon-separated. Space-free and bracket-free so
+			// eaAiBench.matrix's `split(' ')` parser is unaffected. Read by
+			// tools/sim/ai_death_heatmap.py straight off the eahl transcript.
+			if (r.DeathPositions.Count > 0)
+			{
+				sb.Append(" deathpos=");
+				for (int d = 0; d < r.DeathPositions.Count; d++)
+				{
+					if (d > 0)
+					{
+						sb.Append(';');
+					}
+					sb.Append(Fmt(r.DeathPositions[d].X, 0)).Append(',').Append(Fmt(r.DeathPositions[d].Y, 0));
+				}
+			}
+			// Per-type repellent breakdown: `<Type>(<path>)=<n>@<mean>/<max>`. The PATH is the point --
+			// a type appearing only as (evade) is never touched by the radial field's tuning.
+			if (r.ThreatTerms.Count > 0)
+			{
+				sb.Append(" threats=");
+				bool first = true;
+				foreach (KeyValuePair<string, ThreatTermRec> tt in r.ThreatTerms.OrderByDescending(k => k.Value.Count))
+				{
+					if (!first)
+					{
+						sb.Append(',');
+					}
+					first = false;
+					sb.Append(tt.Key).Append('=').Append(tt.Value.Count).Append('@')
+						.Append(Fmt(tt.Value.StrengthTotal / (double)tt.Value.Count, 2)).Append('/')
+						.Append(Fmt(tt.Value.StrengthMax, 2));
+				}
+			}
 			// Where the ship is and what it last asked for. A jitter number cannot distinguish a
 			// smooth flier from a bot wedged in a corner pushing into the wall; these two can.
 			sb.Append(" ticks=").Append(r.SteerTicks);
@@ -532,6 +652,7 @@ internal static class AiBench
 		sb.Append(" revs=").Append(Fmt((sec > 0.0) ? ((double)r.Reversals / sec) : 0.0, 2));
 		sb.Append(" turn=").Append(Fmt((sec > 0.0) ? (MathHelper.ToDegrees(r.TurnRadTotal) / sec) : 0.0, 0));
 		sb.Append(" coast=").Append(Fmt((r.SteerTicks > 0L) ? (100.0 * (double)r.CoastTicks / (double)r.SteerTicks) : 0.0, 0));
+		sb.Append(" repelzero=").Append(Fmt((r.RepelTicks > 0L) ? (100.0 * (double)r.RepelZeroedTicks / (double)r.RepelTicks) : 0.0, 0));
 		sb.Append(" idle=").Append(Fmt((r.TicksWithTarget > 0L)
 			? (100.0 * (double)r.IdleWithTargetTicks / (double)r.TicksWithTarget)
 			: 0.0, 0));

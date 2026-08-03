@@ -1332,23 +1332,37 @@ namespace EvilAliensWeb.Compat
 		// A big field with a FAST falloff is the point: the bot keeps well clear of something
 		// the size of the spider boss, while the outer half of the field stays cheap enough that
 		// it can still dive in to shoot and to weave through bullets.
-		// ?aismoothurgent=<ms> the smoothing floor used when the push is strong, and
-		// ?aipark=<demand>     the total push at or below which the ship parks instead of
-		//                      thrusting. Together these are the "damp when calm, fly when not"
-		//                      balance -- see PlayerShip.DoAIMove.
+		// ?aismoothurgent=<ms> the smoothing floor used when the push is strong -- half of the
+		//                      "damp when calm, fly when not" balance in PlayerShip.DoAIMove.
 		public static float? AiSteerSmoothUrgentMs { get; private set; }
 
-		public static float? AiParkDemand { get; private set; }
+		// The two cancellation floors (card ada9e839, both baked 0.2):
+		//   ?airepeldelta=<d>   the REPULSION resultant at or below which the repellents have
+		//                       argued each other to a standstill and none of them is applied.
+		//   ?ainoisefloor=<d>   the WHOLE steer at or below which the ship holds still, applied
+		//                       last. Both exist because Move() discards magnitude and thrusts at
+		//                       full acceleration along the ANGLE, so a cancelled-to-noise vector
+		//                       is a sprint in an arbitrary direction rather than a gentle nudge.
+		// `?aipark=` was the pre-card spelling of the second one, and it is GONE rather than
+		// renamed: it was baked at 0.95, i.e. ABOVE the 0.8 seek, so it did not floor noise -- it
+		// deleted every deliberate destination the bot had. A query still passing it would be
+		// asking for the bug back under a name that no longer means the same thing.
+		public static float? AiRepelCancelDelta { get; private set; }
+
+		public static float? AiSteerNoiseFloor { get; private set; }
+
+		// ?aiseekdeadzone=<px>  the radius inside which the seek attractor stops pulling -- the
+		//                       anti-pingpong mechanism for every deliberate destination, and the
+		//                       one knob that has to stay above the ship's 11.3px stopping
+		//                       distance (PlayerShip.DefaultSeekArriveDeadzonePx).
+		public static float? AiSeekDeadzonePx { get; private set; }
 
 		// ?aiseekpowerup=<w>    the pull toward a POWERUP the bot has chosen to fetch, and
 		// ?aiseekapproach=<w>   the pull toward a destination it COMMITS to -- a halting boss's
 		//                       standoff point, a partner to dock with, a blastable cluster.
-		//                       Both sit above SteerParkDemand; the idle station keeps the
-		//                       weaker SeekWeight and its parking behaviour.
 		// ?aipowerupreach=<px>  how far out a powerup exerts its own direct pull, on top of
 		//                       being eligible as that chosen target.
-		// All card ada9e839 -- see PlayerShip.DefaultSeekPowerupWeight for why one shared seek
-		// weight made every deliberate destination unreachable, and why there are now two.
+		// All card ada9e839 -- see PlayerShip.DefaultSeekPowerupWeight for the history.
 		public static float? AiSeekPowerupWeight { get; private set; }
 
 		public static float? AiSeekApproachWeight { get; private set; }
@@ -1360,6 +1374,27 @@ namespace EvilAliensWeb.Compat
 		public static float? AiThreatFieldSize { get; private set; }
 
 		public static float? AiThreatFieldFalloff { get; private set; }
+
+		// ?aiasteroidscale=<f>  per-type repellent multiplier for ASTEROIDS only (card ada9e839).
+		//                       The belt is the one place a dense field of lethal obstacles has to
+		//                       out-argue an ordinary powerup detour, and a GLOBAL falloff change
+		//                       was already measured and declined elsewhere.
+		public static float? AiAsteroidThreatScale { get; private set; }
+
+		// ?aiasteroidrange=<f>  multiplier on the asteroid field's RANGE, and
+		// ?aiasteroidfall=<p>   the asteroid field's own falloff exponent (lower = earlier and
+		//                       gentler). The shape axes to ?aiasteroidscale='s magnitude axis --
+		//                       a taller mountain of the same width shoves the ship out of the
+		//                       belt, a wider shallower one leans on it the whole way across.
+		public static float? AiAsteroidRangeScale { get; private set; }
+
+		public static float? AiAsteroidFalloff { get; private set; }
+
+		// ?aievade=0  turn OFF EvadeMovingThreat, the closest-approach path, so every threat is
+		//             handled by the radial field alone. Card ada9e839's measurement seam -- that
+		//             special case was measured under the 0.95 park and never inside the field
+		//             composition that replaced it.
+		public static bool? AiEvadeMovers { get; private set; }
 
 		// ?netscript (card 11.3): replace the booted level's event list with a compressed
 		// ~60s script that fires every replicated beat type (message, warning, background
@@ -2702,15 +2737,82 @@ namespace EvilAliensWeb.Compat
 							InForce(AiSteerSmoothUrgentMs ?? EvilAliens.PlayerShip.DefaultSteerSmoothUrgentMs));
 					}
 					break;
-				case "aipark":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aipk) && aipk >= 0f)
+				case "airepeldelta":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var airpd) && airpd >= 0f)
 					{
-						AiParkDemand = MathHelper.Min(aipk, 20f);
+						AiRepelCancelDelta = MathHelper.Min(airpd, 20f);
 					}
 					else
 					{
 						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiParkDemand ?? EvilAliens.PlayerShip.DefaultSteerParkDemand));
+							InForce(AiRepelCancelDelta ?? EvilAliens.PlayerShip.DefaultRepulseCancelDelta));
+					}
+					break;
+				case "ainoisefloor":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ainf) && ainf >= 0f)
+					{
+						AiSteerNoiseFloor = MathHelper.Min(ainf, 20f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiSteerNoiseFloor ?? EvilAliens.PlayerShip.DefaultSteerNoiseFloor));
+					}
+					break;
+				case "aievade":
+					if (IsOn(val) || IsExplicitlyOff(val))
+					{
+						AiEvadeMovers = IsOn(val);
+					}
+					else
+					{
+						// A typo here would leave the evade path ON while the run is LABELLED as
+						// having it off -- i.e. a measurement seam quietly measuring the other arm.
+						RejectFlagValue(key, val, "on/off", (AiEvadeMovers ?? true) ? "on" : "off");
+					}
+					break;
+				case "aiasteroidrange":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiar) && aiar > 0f)
+					{
+						AiAsteroidRangeScale = MathHelper.Min(aiar, 20f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(AiAsteroidRangeScale ?? EvilAliens.PlayerShip.DefaultAsteroidRangeScale));
+					}
+					break;
+				case "aiasteroidfall":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiaf) && aiaf >= 0f)
+					{
+						AiAsteroidFalloff = MathHelper.Min(aiaf, 20f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiAsteroidFalloff ?? EvilAliens.PlayerShip.DefaultAsteroidFalloff));
+					}
+					break;
+				case "aiasteroidscale":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiast) && aiast >= 0f)
+					{
+						AiAsteroidThreatScale = MathHelper.Min(aiast, 20f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiAsteroidThreatScale ?? EvilAliens.PlayerShip.DefaultAsteroidThreatScale));
+					}
+					break;
+				case "aiseekdeadzone":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aisdz) && aisdz >= 0f)
+					{
+						AiSeekDeadzonePx = MathHelper.Min(aisdz, 400f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiSeekDeadzonePx ?? EvilAliens.PlayerShip.DefaultSeekArriveDeadzonePx));
 					}
 					break;
 				case "aiseekpowerup":

@@ -22,7 +22,7 @@
 # pinned is that the counters EXIST and the boss was seen at all. A dead term and a live one
 # differ here by ~10px of mean distance, which is far inside this rig's run-to-run spread, so an
 # assertion tight enough to catch the regression would be flaky. The regression is caught by
-# logic_probe's ProbeAiSeekWeights instead (the weight-vs-park ordering, which is the mechanism);
+# logic_probe's ProbeAiFieldComposition instead (the weight-vs-park ordering, which is the mechanism);
 # this probe's job is to prove that ordering is WIRED to a real boss, which logic_probe cannot do.
 #
 # STANDING RESULT, so the numbers below are readable (eahl, Very_Hard, ?invuln, 180 sim-s):

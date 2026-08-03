@@ -1891,7 +1891,7 @@ the rest are tier-independent.
     (0.44 -> 0.45). Wider and shallower does not help either; the belt needs a different SHAPE of
     repellent, which is card e425781b. Edge-death share stayed clean throughout (14%, no corner
     clustering), so the widened fields were not herding the ship into edges.
-  - **`EvadeMovingThreat` (closest-approach dodging) is LOAD-BEARING, and it is rig-specific.**
+  - **`EvadeMovingThreat` (closest-approach dodging) does the heavy lifting, rig-specifically.**
     Re-measured under the new composition with the `?aievade=0` seam: on **CrazyGame** (fast
     bullets, what it was originally justified on) deaths are **3.75 with it vs 14.25 without**,
     victories 2/4 vs 0/4 -- its original 27 -> 4 claim survives intact. On **SpaceDodge** it is
@@ -2026,9 +2026,10 @@ the rest are tier-independent.
 - Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aireact=
   ?aigapmargin= ?aiscanrows= ?aicrosspenalty= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx=
   ?aifieldsize= ?aifieldfall= ?aiseekapproach= ?aiseekpowerup= ?aipowerupreach= ?airepeldelta=
-  ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aievade=`
+  ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
+  ?aiasteroidfall= ?aievade=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
-  A malformed value on any of the 17 is REPORTED and ignored, never swallowed, per the file-wide
+  A malformed value on any of them is REPORTED and ignored, never swallowed, per the file-wide
   value-carrying-flag convention (see "Debug flags & tuning conventions" above; cards 48b7c6b1 +
   4e401005). The one wrinkle specific to this family: `?aiaim`/`?aifieldpx` name "the per-tier
   skill row" as the in-force setting when no override stands. Pinned by `ProbeAiFlagRejection`.

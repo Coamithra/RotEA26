@@ -429,8 +429,6 @@ internal static class AiBench
 			// other counter, so a build where it never fires and one where it fires constantly
 			// look identical without this.
 			sb.Append(" repelzero=").Append(Fmt((r.RepelTicks > 0L) ? (100.0 * (double)r.RepelZeroedTicks / (double)r.RepelTicks) : 0.0, 0)).Append('%');
-			// Per-type repellent breakdown: `<Type>(<path>)=<n>@<mean>/<max>`. The PATH is the point --
-			// a type appearing only as (evade) is never touched by the radial field's tuning.
 			// Death POSITIONS, design space, semicolon-separated. Space-free and bracket-free so
 			// eaAiBench.matrix's `split(' ')` parser is unaffected. Read by
 			// tools/sim/ai_death_heatmap.py straight off the eahl transcript.
@@ -446,6 +444,8 @@ internal static class AiBench
 					sb.Append(Fmt(r.DeathPositions[d].X, 0)).Append(',').Append(Fmt(r.DeathPositions[d].Y, 0));
 				}
 			}
+			// Per-type repellent breakdown: `<Type>(<path>)=<n>@<mean>/<max>`. The PATH is the point --
+			// a type appearing only as (evade) is never touched by the radial field's tuning.
 			if (r.ThreatTerms.Count > 0)
 			{
 				sb.Append(" threats=");

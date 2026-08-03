@@ -262,9 +262,10 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   (ticks the real loop at a fixed 60Hz dt with no Draw) — a backgrounded tab throttles rAF *and*
   MessageChannel to ~1Hz, so any rendered soak measures nothing. `?aiff=<n>` is the watchable
   fast-forward (n sims per drawn frame, each at a synthesised 60Hz dt). Tuning overrides
-  `?aismooth= ?aismoothurgent= ?aipark= ?aireact= ?aigapmargin= ?aiscanrows= ?aicrosspenalty=
+  `?aismooth= ?aismoothurgent= ?aireact= ?aigapmargin= ?aiscanrows= ?aicrosspenalty=
   ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall= ?aiseekapproach=
-  ?aiseekpowerup= ?aipowerupreach=`. Pair with `?aiplayer`.
+  ?aiseekpowerup= ?aipowerupreach= ?airepeldelta= ?ainoisefloor= ?aiseekdeadzone=
+  ?aiasteroidscale= ?aiasteroidrange= ?aiasteroidfall= ?aievade=`. Pair with `?aiplayer`.
   **The bench also reports `killers=<Type>:<n>` (with `SpiderBoss(standing)` split out),
   `pickups=<n>/<spawned>(<pct>%)` and `boss=<px> bossfar=<pct>`** (cards 31ceb6ff / ada9e839) --
   which is what turned "the AI runs into the stationary spider boss" and "the AI ignores

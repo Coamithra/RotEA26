@@ -799,7 +799,7 @@ internal static class Program
             "SeekWeight", "DefaultSeekPowerupWeight", "DefaultSeekApproachWeight",
             "DefaultPowerupReachPx", "DefaultRepulseCancelDelta", "DefaultSteerNoiseFloor",
             "DefaultSeekArriveDeadzonePx", "ShipMaxSpeed", "ShipDeceleration",
-            "TopEdgeAvoidStrength", "SweepLaneAvoidStrength",
+            "SweepLaneAvoidStrength",
             "LazerAvoidStrength", "LazerDodgeStrength"
         };
         var vals = new Dictionary<string, float>();
@@ -848,11 +848,14 @@ internal static class Program
         // The repellents' full-strength magnitudes. maxSteerStrength (4) is a DoAIMove local, so
         // the threat field's and the screen edges' shared peak is spelled here; the rest are
         // reflected.
+        // TopEdgeAvoidStrength is deliberately NOT in this min: it is added AFTER the low-pass
+        // and so never passes through RepulseCancelDelta at all. Folding it in would mix the two
+        // populations this card just separated, and it could not fail today (20 against a min of
+        // 4), which is exactly how a wrong invariant gets copied.
         const float MaxSteerStrength = 4f;
         float weakestRepellent = Math.Min(MaxSteerStrength,
-            Math.Min(vals["TopEdgeAvoidStrength"],
             Math.Min(vals["SweepLaneAvoidStrength"],
-            Math.Min(vals["LazerAvoidStrength"], vals["LazerDodgeStrength"]))));
+            Math.Min(vals["LazerAvoidStrength"], vals["LazerDodgeStrength"])));
         Check("every REPELLENT's full strength clears the repulsion cancellation delta",
             weakestRepellent > repelDelta,
             "weakest repellent " + weakestRepellent + " vs DefaultRepulseCancelDelta " + repelDelta

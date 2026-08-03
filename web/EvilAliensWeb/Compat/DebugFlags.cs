@@ -2764,6 +2764,12 @@ namespace EvilAliensWeb.Compat
 					{
 						AiEvadeMovers = IsOn(val);
 					}
+					else
+					{
+						// A typo here would leave the evade path ON while the run is LABELLED as
+						// having it off -- i.e. a measurement seam quietly measuring the other arm.
+						RejectFlagValue(key, val, "on/off", (AiEvadeMovers ?? true) ? "on" : "off");
+					}
 					break;
 				case "aiasteroidrange":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiar) && aiar > 0f)

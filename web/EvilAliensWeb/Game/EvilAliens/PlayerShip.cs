@@ -366,6 +366,10 @@ public class PlayerShip : AlienDrawableGameComponent
 	// the 0.8 seek -- without the steep close-range shove.
 	// Range is a MULTIPLIER on ThreatFieldRange; falloff REPLACES the exponent in (1-t)^p, where
 	// lower = bites earlier and more gently.
+	// LIMIT: the shape axes reach the MAIN path only. The `altSteering` branch overwrites the
+	// falloff-shaped strength with a linear Lerp, so under it ?aiasteroidfall= does nothing while
+	// ?aiasteroidscale= still bites. Harmless today -- `altSteering` is a dead 2008 local that is
+	// never set true -- but a sweep run under a revived alt path would be measuring half a config.
 	public const float DefaultAsteroidRangeScale = 1f;
 
 	public const float DefaultAsteroidFalloff = DefaultThreatFieldFalloff;
@@ -1989,6 +1993,12 @@ public class PlayerShip : AlienDrawableGameComponent
 		// deliberate attractor weighs at least SeekWeight 0.8, and any repellent that survived the
 		// repulsion floor above already exceeds 0.2. So the only way to land here is genuine
 		// cancellation between an attractor and a repellent that both really are pushing.
+		// Read that as CONVERGED magnitude, because this runs downstream of the low-pass: a lone
+		// 0.8 seek starting from rest blends to only ~0.135 on its first tick and IS zeroed for
+		// that one frame. `aiSteer` itself is not zeroed, so the next tick continues converging
+		// and the ship is moving within a few frames -- a start-up delay, not a censored force.
+		// ProbeAiFieldComposition asserts the bound on the unsmoothed weights, which is the
+		// property that actually has to hold.
 		// logic_probe's ProbeAiFieldComposition asserts both bounds; the port's 0.95 -- which was
 		// ABOVE the 0.8 seek and therefore deleted every deliberate destination the bot had -- is
 		// exactly what that assertion exists to stop coming back.

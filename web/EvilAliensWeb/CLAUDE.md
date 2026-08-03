@@ -1839,58 +1839,79 @@ the rest are tier-independent.
   60Hz dt -- not the frame's own, which `IsFixedTimeStep=false` inflates by ~n.
 - **Damping is DEMAND-DRIVEN, and both halves matter.** `Move()` discards the steer's magnitude
   and thrusts at full acceleration along its ANGLE, so a weak-but-nonzero steer is not a gentle
-  nudge -- it is full throttle. Hence: **park** below `DefaultSteerParkDemand` (just above the
-  0.8 station pull), so an idle ship coasts to a stop instead of sailing past its station and
-  back forever; and **smooth adaptively**, collapsing the time constant from
+  nudge -- it is full throttle. Hence: **two cancellation floors** (below), so a steer that has
+  argued itself down to noise reads as "hold still" rather than "sprint that way"; and
+  **smooth adaptively**, collapsing the time constant from
   `DefaultSteerSmoothMs` toward `DefaultSteerSmoothUrgentMs` as the push grows, because heavy
   damping is exactly wrong when something is bearing down. Two things were tried against the same
   idle-fidget symptom and are documented in place as REVERTED -- don't re-derive them: a
   velocity-damped "arrive" at the station (it contains `-SpeedVector`, so it brakes every real
   manoeuvre: coast 28% -> 59%, spider-boss deaths 24 -> 70) and a tighter deadzone alone.
-- **THE PARK ZEROES EVERY 0.8-WEIGHT SEEK, AND THAT SILENTLY DELETED A WHOLE BEHAVIOUR**
-  (cards 31ceb6ff / ada9e839). `DoAIMove` expresses every deliberate destination -- the idle
-  station, a powerup, a level-halting boss's standoff point, a Linker rendezvous, a blastable
-  cluster -- as ONE `steerTarget` carrying ONE weight, `SeekWeight` 0.8. The park's threshold is
-  `DefaultSteerParkDemand` 0.95. So unless something ELSE happened to be pushing that same tick,
-  the last line of `DoAIMove` set `direction = Vector2.Zero` and the ship did not go. That is not
-  a mistuning: it means the boss-approach term card f4d1721f added was **correct code the park
-  deleted**, and it never showed up in review because the park and the seek live 300 lines apart
-  and each is individually right.
-  - **The fix is a per-destination weight (`steerTargetWeight`), not a lower park.** Lowering the
-    park or raising `SeekWeight` brings back the idle fidget the park exists to stop. Only the
-    halting-boss standoff got a weight above it (`DefaultSeekApproachWeight` **1.1**); the idle
-    station and every DETOUR still ride 0.8 and still park, i.e. are byte-unchanged.
-  - **Measured (eahl, `?level=Level3&brainboss&aiplayer&aibench&difficulty=Very_Hard&invuln`,
-    180 sim-s, N=26 per arm): `idle%` 36.6 -> 26.7** (sd ~12.5, p ~ 0.006) -- `idle%` being ticks
-    with a shootable target and no shot fired, which is the symptom the original report described.
-  - **`bossfar` reads ~99% at BOTH weights and that is NOT the fix failing.** The BrainBoss sits
-    at the top of the screen and `TopEdgeAvoidStrength` (20) permanently out-votes the approach
-    (1.1), so the ship essentially never reaches its standoff radius; what the weight buys is
-    ~10px of mean closing and the idle-rate drop above. The top band is where UFOs spawn and being
-    pinned there is a death, so the approach term SHOULD lose that argument.
-  - **Powerup attraction was measured and DECLINED -- do not "finish the job" by raising
-    `DefaultSeekPowerupWeight`** (it is baked at `SeekWeight`, i.e. inert, purely as a seam). It
-    works on the level it was reported on and breaks a different one, which is why no scalar
-    ships. Level 1 (`?invuln`, N=16, share of spawned powerups collected): 0.8 -> **69%**,
-    1.1 -> 89%, 1.6 -> **95%**. Level 1 without `?invuln` (N=16): deaths **3.88 -> 5.44** (1.1) /
-    5.75 (1.6 with the standoff held down, so that is the DETOUR's own cost), progress 30.1 ->
-    ~24.6 of 64. And the completion-matrix gate, SpaceDodge (600 s cap, N=8, VICTORIES):
-    **6/8 -> 2/8** at 1.1 and 4/8 at 1.6, deaths 14.9 -> 28.4 / 20.0. SpaceDodge's powerups sit in
-    an asteroid field where a LOW pickup rate is correct play, so the two rigs disagree about what
-    a good number even is. **The researched next design is a threat-aware seek** (suppress the
-    detour while any threat field is pushing), not another value.
-  - Widening the powerup's own pull range 150 -> 300px was measured **INERT** (95% vs 94%); it is
-    named `DefaultPowerupReachPx` now only so it stops secretly being the screen-edge margin.
-  - **Falloff was measured and DECLINED too.** `?aifieldfall=` 3 -> 2 (i.e. flee earlier) was the
-    candidate for "the AI only dodges bullets when they are very close": CrazyGame deaths 6.19 ->
-    7.75 and victories 12 -> 11 of 16, spider boss deaths flat (6.06 -> 5.69) but
-    `SpiderBoss(standing)` deaths **41 -> 53**, i.e. worse on the exact metric it was meant to fix.
-    The current falloff is behaving as designed.
-  - Flags: `?aiseekapproach=<w>` `?aiseekpowerup=<w>` `?aipowerupreach=<px>`. Pinned by
-    `logic_probe`'s **`ProbeAiSeekWeights`** (the weight-vs-park ORDERING, with the pre-card
-    configuration as the negative control -- this is the regression guard, because the failure is
-    a bot that quietly stops going places) and `tools/headless/probes/ai_boss_approach.txt` (the
-    wiring, which logic_probe cannot reach).
+- **THE FIELD PRINCIPLE: threat awareness belongs in the REPELLENT's shape, never in a gate on
+  another force** (card ada9e839). `DoAIMove` is a potential field -- valleys at things worth
+  reaching, mountains at things worth avoiding -- and the two families compose by SUMMING. Any
+  mechanism that instead censors one force because another exists (a global threshold, a
+  "suppress the seek while threatened" gate) breaks the composition and produces a bot that
+  silently stops doing something. If the bot flies somewhere it should not, the answer is a
+  steeper mountain there, not a veto on the valley.
+  - **REPELLENTS** (every threat field, the lazer terms, the boss's lane escapes, the screen
+    edges) sum into their own accumulator, and if that resultant falls to
+    `DefaultRepulseCancelDelta` (0.2) or below the whole lot is dropped -- opposing pushes that
+    cancel leave a vector whose DIRECTION is noise. **ATTRACTORS** (idle station, powerup, boss
+    standoff) are never floored; each stops pulling inside its own DEADZONE. Then the two are
+    summed and `DefaultSteerNoiseFloor` (0.2, applied AFTER the low-pass so the ship can actually
+    reach zero rather than chase a decaying residual) catches the leftover equilibrium case.
+  - **Each attractor's deadzone is sized by the ship's STOPPING DISTANCE**, which is
+    `0.5 * ShipMaxSpeed^2 / ShipDeceleration` = **11.3px**. Below that the ship coasts out the far
+    side still under the pull and pingpongs; `DefaultSeekArriveDeadzonePx` is 30. The powerup's
+    pull needs none (contact collects it, so the target stops existing) and the boss standoff's is
+    its standoff radius. `logic_probe`'s **`ProbeAiFieldComposition`** derives the bound from the
+    real motion constants and pins it, along with "no floor sits above the weakest force".
+  - **What this replaced, in one line:** the port ended `DoAIMove` with a 0.95 "park" where the
+    2008 original had **0.2** -- above the 0.8 seek, so a lone seek produced no motion at all and
+    every deliberate destination (station, powerup, boss standoff) was silently deleted. Restored
+    to 0.2. `?aipark=` is GONE rather than renamed, because at 0.95 it was a veto, not a floor.
+  - **MEASURED (eahl, Very_Hard, paired seeds 1-8 x2).** Powerup pickups on Level 1 `?invuln`:
+    **72.4% -> 97.6%**. `SpiderBoss(standing)` deaths 22 -> 18. The jitter pair rose (revs/s
+    1.71 -> 3.70) but the baseline bot was PARKED for 73-80% of ticks (`coast` 73% -> 42%), so
+    that is a bot that moves versus one that did not -- the old "must not regress" bar was void.
+  - **SHIPPED WITH SPACEDODGE AT 1/8 VICTORIES vs 4/8 base**, deliberately and with the number
+    stated. The cause is NOT the composition: an asteroid's radial field contributes a **mean of
+    0.42** against the **0.8** seek it must out-vote (`threats=` breakdown), so the bot correctly
+    computes that a powerup across the belt is worth the trip. The designated fix is **card
+    e425781b** (velocity-cone repellent shapes) -- the death heatmap shows mid-field lane
+    collisions with clean edges, which is geometry a circular field cannot express.
+    **Do NOT tune the asteroid field to chase it -- THREE axes were swept and none reaches the
+    gate.** Magnitude (`?aiasteroidscale=` 1.5-4x) is whack-a-mole: asteroid kills 130 -> 99 while
+    UFO kills 3 -> 19, 0 victories at every value. Shape (`?aiasteroidrange=` x{1.5,2,3} x
+    `?aiasteroidfall=` {3,2,1} x magnitude {1.0,1.5}, 18 cells) tops out at **3/8** on full
+    validation. **The "raise the mean field past the 0.8 seek" mechanism is REFUTED, not merely
+    unachieved**: across that grid a higher mean field correlates with MORE deaths (mean 0.45 ->
+    27.5 deaths, mean 2.79 -> 39.75), and the best cell barely moved the mean at all
+    (0.44 -> 0.45). Wider and shallower does not help either; the belt needs a different SHAPE of
+    repellent, which is card e425781b. Edge-death share stayed clean throughout (14%, no corner
+    clustering), so the widened fields were not herding the ship into edges.
+  - **`EvadeMovingThreat` (closest-approach dodging) is LOAD-BEARING, and it is rig-specific.**
+    Re-measured under the new composition with the `?aievade=0` seam: on **CrazyGame** (fast
+    bullets, what it was originally justified on) deaths are **3.75 with it vs 14.25 without**,
+    victories 2/4 vs 0/4 -- its original 27 -> 4 claim survives intact. On **SpaceDodge** it is
+    FLAT (33.75 vs 34.5). The `threats=` breakdown says why: on CrazyGame the evade path handles
+    6159 bullet contributions at mean **2.05**, against the radial field's 0.21, whereas asteroids
+    are slow enough that most of the belt never passes its speed gate. So a threat's SPEED decides
+    which path protects the ship, and a repellent change measured on one rig says nothing about
+    the other.
+  - Flags: `?airepeldelta= ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
+    ?aiasteroidfall= ?aievade=`, plus
+    `?aiseekapproach= ?aiseekpowerup= ?aipowerupreach=`. Wiring that `logic_probe` cannot reach is
+    covered by `tools/headless/probes/ai_boss_approach.txt`.
+  - **`DefaultSeekApproachWeight` 1.1 is a PARK-CLEARANCE number, not a calibrated one** -- it was
+    chosen only to sit above the 0.95 park. Under the new composition the boss standoff is
+    mis-calibrated by construction (at the point the ship is asked to reach, the boss repellent is
+    **2.9** against that 1.1, so the net force points AWAY -- which is why `bossfar` reads ~99%).
+    The recalibration is **card b56633fb**, which carries the worked arithmetic.
+  - **Boss PROXIMITY is descriptive, never a gate.** `bossfar%` and `boss=<px>` describe where the
+    ship is; the bot moving closer to a boss to dodge, collect or line up a shot is the field
+    working. Gate boss work on OUTCOMES -- `SpiderBoss(standing)` deaths -- not on distance.
 - **`AiBench` answers "what is killing it" and "does it collect anything" now** (same cards).
   `killers=<Type>:<n>` is a histogram taken where the ship actually dies (`asplosionCauser`), and
   **`SpiderBoss` is split by state** -- `SpiderBoss(standing)` vs `SpiderBoss` -- because walking
@@ -2002,9 +2023,10 @@ the rest are tier-independent.
     `skill effective=<tier> field= aim=` row, which reports the RESOLVED values; verifying the
     attract-demo case means booting `?menu&aibench&difficulty=Easy` and watching it flip from
     `effective=Easy` to `effective=Hard` as `Demo1` starts.
-- Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aipark= ?aireact=
+- Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aireact=
   ?aigapmargin= ?aiscanrows= ?aicrosspenalty= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx=
-  ?aifieldsize= ?aifieldfall= ?aiseekapproach= ?aiseekpowerup= ?aipowerupreach=`
+  ?aifieldsize= ?aifieldfall= ?aiseekapproach= ?aiseekpowerup= ?aipowerupreach= ?airepeldelta=
+  ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aievade=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
   A malformed value on any of the 17 is REPORTED and ignored, never swallowed, per the file-wide
   value-carrying-flag convention (see "Debug flags & tuning conventions" above; cards 48b7c6b1 +

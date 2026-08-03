@@ -1381,6 +1381,15 @@ namespace EvilAliensWeb.Compat
 		//                       was already measured and declined elsewhere.
 		public static float? AiAsteroidThreatScale { get; private set; }
 
+		// ?aiasteroidrange=<f>  multiplier on the asteroid field's RANGE, and
+		// ?aiasteroidfall=<p>   the asteroid field's own falloff exponent (lower = earlier and
+		//                       gentler). The shape axes to ?aiasteroidscale='s magnitude axis --
+		//                       a taller mountain of the same width shoves the ship out of the
+		//                       belt, a wider shallower one leans on it the whole way across.
+		public static float? AiAsteroidRangeScale { get; private set; }
+
+		public static float? AiAsteroidFalloff { get; private set; }
+
 		// ?aievade=0  turn OFF EvadeMovingThreat, the closest-approach path, so every threat is
 		//             handled by the radial field alone. Card ada9e839's measurement seam -- that
 		//             special case was measured under the 0.95 park and never inside the field
@@ -2754,6 +2763,28 @@ namespace EvilAliensWeb.Compat
 					if (IsOn(val) || IsExplicitlyOff(val))
 					{
 						AiEvadeMovers = IsOn(val);
+					}
+					break;
+				case "aiasteroidrange":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiar) && aiar > 0f)
+					{
+						AiAsteroidRangeScale = MathHelper.Min(aiar, 20f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(AiAsteroidRangeScale ?? EvilAliens.PlayerShip.DefaultAsteroidRangeScale));
+					}
+					break;
+				case "aiasteroidfall":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiaf) && aiaf >= 0f)
+					{
+						AiAsteroidFalloff = MathHelper.Min(aiaf, 20f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiAsteroidFalloff ?? EvilAliens.PlayerShip.DefaultAsteroidFalloff));
 					}
 					break;
 				case "aiasteroidscale":

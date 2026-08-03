@@ -359,6 +359,17 @@ public class PlayerShip : AlienDrawableGameComponent
 	// awareness belongs in the repellent's shape, never in a gate on another force.
 	public const float DefaultAsteroidThreatScale = 1f;
 
+	// The other two axes of the SAME per-type field (card ada9e839). Magnitude alone only makes
+	// the same short mountain taller, which is what ejected the ship out of the belt into the
+	// UFO traffic around it; RANGE and FALLOFF change its SHAPE. A wider, shallower asteroid
+	// field raises the mean pressure the bot feels across the belt -- which is what has to beat
+	// the 0.8 seek -- without the steep close-range shove.
+	// Range is a MULTIPLIER on ThreatFieldRange; falloff REPLACES the exponent in (1-t)^p, where
+	// lower = bites earlier and more gently.
+	public const float DefaultAsteroidRangeScale = 1f;
+
+	public const float DefaultAsteroidFalloff = DefaultThreatFieldFalloff;
+
 	private static float ThreatFieldBasePx => EvilAliensWeb.Compat.DebugFlags.AiThreatFieldPx ?? Skill.FieldPx;
 
 	private static float ThreatFieldSizeScale => EvilAliensWeb.Compat.DebugFlags.AiThreatFieldSize ?? DefaultThreatFieldSizeScale;
@@ -1703,7 +1714,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				float field = ThreatFieldRange(baddy);
 				if (dist <= field)
 				{
-					float strength = ThreatFieldStrength(dist / field, maxSteerStrength);
+					float strength = ThreatFieldStrength(dist / field, maxSteerStrength, ThreatTypeFalloff(baddy));
 					if (altSteering)
 					{
 						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, dist / field);
@@ -2091,9 +2102,31 @@ public class PlayerShip : AlienDrawableGameComponent
 		return 1f;
 	}
 
+	// Per-type RANGE multiplier, folded into ThreatFieldRange so every caller agrees on how big
+	// the field is -- `dist <= field` and `dist / field` must be the same field or the falloff is
+	// evaluated against a range the gate never used.
+	private static float ThreatTypeRangeScale(AlienDrawableGameComponent baddy)
+	{
+		if (baddy is Asteroid)
+		{
+			return EvilAliensWeb.Compat.DebugFlags.AiAsteroidRangeScale ?? DefaultAsteroidRangeScale;
+		}
+		return 1f;
+	}
+
+	// Per-type FALLOFF exponent. Falls back to the global one for every type that has no override.
+	private static float ThreatTypeFalloff(AlienDrawableGameComponent baddy)
+	{
+		if (baddy is Asteroid)
+		{
+			return EvilAliensWeb.Compat.DebugFlags.AiAsteroidFalloff ?? DefaultAsteroidFalloff;
+		}
+		return ThreatFieldFalloff;
+	}
+
 	private static float ThreatFieldRange(AlienDrawableGameComponent baddy)
 	{
-		return ThreatFieldBasePx + ThreatRadius(baddy) * ThreatFieldSizeScale;
+		return (ThreatFieldBasePx + ThreatRadius(baddy) * ThreatFieldSizeScale) * ThreatTypeRangeScale(baddy);
 	}
 
 	// Strength across that field: FULL up close, dropping away fast so the outer half is
@@ -2106,8 +2139,13 @@ public class PlayerShip : AlienDrawableGameComponent
 	// which is the shape the name "falloff" implies -- p=3 is down to 12% at half range.
 	private static float ThreatFieldStrength(float t, float maxSteerStrength)
 	{
+		return ThreatFieldStrength(t, maxSteerStrength, ThreatFieldFalloff);
+	}
+
+	private static float ThreatFieldStrength(float t, float maxSteerStrength, float falloff)
+	{
 		float u = 1f - MathHelper.Clamp(t, 0f, 1f);
-		return maxSteerStrength * (float)Math.Pow(u, ThreatFieldFalloff);
+		return maxSteerStrength * (float)Math.Pow(u, falloff);
 	}
 
 	// Rough half-extent of a threat, so a boss the size of a quarter of the screen is given more

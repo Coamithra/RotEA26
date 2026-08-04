@@ -115,11 +115,12 @@ namespace EvilAliensWeb.Compat.Net
                 // hp==0 snapshot fallback gets round to it, which is the one case that fallback
                 // exists for and the slowest thing it does.
                 //
-                // The same discriminant as the live emitter: a killable at zero hit points that
-                // is still in the world has deferred its own removal. (An ordinary kill is never
-                // seen here -- the entity leaves liveList at the removal seam a flush later.)
-                if (e.Comp.NetKillable is INetKillable killable && killable.NetHitPoints <= 0
-                    && !e.Comp.IsDead)
+                // The same discriminant as the live emitter, and it is a SEAM rather than a
+                // type test (card ad9c8f8b): the base derives "a killable at zero hit points
+                // still in the world", and a type whose death runs outside KillableAlien
+                // answers for itself. (An ordinary kill is never seen here -- the entity leaves
+                // liveList at the removal seam a flush later.)
+                if (e.Comp.NetIsDying)
                 {
                     NetSession.OnHostDeathBegan(e.Id);
                 }

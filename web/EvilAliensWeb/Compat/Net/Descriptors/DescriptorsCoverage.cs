@@ -190,8 +190,11 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     //   four sprites is current (they don't track state 1:1), and the animation frame.
     // Spawn extras: none (Setup(intro) only seeds the initial state/pos, which NetBaseState overrides).
     // State extras: [state:1][animIndex:1][animFrame:1].
-    // Best-effort: the `dead` debris burst never crosses the wire (an attributed remote death removes
-    //   the puppet); the summoned SpiderHelperMothership replicates as its own type.
+    // The `dead` debris burst DOES play on the client since card ad9c8f8b -- this boss is not a
+    //   KillableAlien, so it announces its own death entry (NetSession.OnHostDeathBegan from
+    //   CollidesWith) and re-runs BeginDeathThroes locally off the beat, through the
+    //   INetEntity.NetIsDying / NetBeginDeferredDeath seam. Best-effort remainder: the summoned
+    //   SpiderHelperMothership replicates as its own type.
     internal sealed class SpiderBossDescriptor : NetTypeDescriptor<SpiderBoss>
     {
         public override AlienDrawableGameComponent CreatePuppet(ComponentBin bin, Game game, in NetBaseState state, byte[] buf, int off, int len)
@@ -234,7 +237,8 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     //   pods" vent (keyed off BossState.spawnstuff) -> STATE EXTRA bit so the pods vent on the client
     //   while the host is spawning a wave. Setup(challenge) only affects the host-side music-rate sweep.
     // Spawn extras: none. State extras: [flags:1]  (bit0 = spawning a wave / pods venting).
-    // Best-effort: the multi-phase asplode does not play (an attributed remote death removes the puppet);
+    // The multi-phase asplode DOES play on the client (the deferred-death release, PR #267;
+    //   watched and pinned by eaNetDeathFx section 8 since card ad9c8f8b). Best-effort remainder:
     //   the spawned brainz/skullz/mines/bullets replicate as their own types.
     internal sealed class BrainBossDescriptor : NetTypeDescriptor<BrainBoss>
     {

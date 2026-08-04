@@ -582,6 +582,22 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return; // already gone; the removal seam owns it from here
             }
+            if (killable == null)
+            {
+                // NOT a KillableAlien -- its whole death lives outside HitBy/KilledBy, so there
+                // is no NetKill to run and the type has to open its own (card ad9c8f8b, the
+                // SpiderBoss). Award-free first, exactly as below: the seam's contract lets an
+                // implementation run its real death path verbatim, AwardScoreToAll included.
+                info.Comp.NetSuppressAward();
+                if (!info.Comp.NetBeginDeferredDeath())
+                {
+                    // No deferred death of its own -- nothing to finish, so releasing it would
+                    // just un-freeze a live enemy into the client's world.
+                    return;
+                }
+                ReleaseDyingPuppet(netId, info);
+                return;
+            }
             if (killable.NetHitPoints > 0)
             {
                 info.Comp.NetSuppressAward();
@@ -617,10 +633,11 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            if (info.Comp.NetKillable is INetKillable killable)
-            {
-                BeginDeferredDeath(netId, info, killable);
-            }
+            // A null killable is a legal case here, not a filter: a type whose deferred death
+            // lives outside KillableAlien answers the beat through NetBeginDeferredDeath
+            // instead (card ad9c8f8b). The snapshot fallback above still needs the
+            // discriminant, because hp is 0 for every non-killable.
+            BeginDeferredDeath(netId, info, info.Comp.NetKillable);
         }
 
         private static bool IsRecentlyRemoved(ushort netId)

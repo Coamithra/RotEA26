@@ -1269,7 +1269,38 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
       so it would have been a rare unreproducible ghost.
     - **`OnRemoteDeath` makes the same decision** when neither the beat nor the snapshot got
       there first -- the last-resort fallback, and the only one before card 303bfb5b.
-  - **Verify with `eaNetDeathFx()`** (`Compat/Net/NetDeathFxTest.cs`, 73 assertions;
+    - **A DEFERRED DEATH THAT DOES NOT RUN THROUGH `KillableAlien` AT ALL: the SpiderBoss, and
+      the `NetIsDying`/`NetBeginDeferredDeath` seam it needed (card ad9c8f8b).** The bullet
+      above says the snapshot fallback's remaining job is "a deferred-death path that reaches
+      its dying state WITHOUT going through KillableAlien, i.e. nothing today". That was wrong:
+      **`SpiderBoss` derives from `AlienDrawableGameComponent`, not `KillableAlien`** -- only a
+      `Lazer` hurts it and its whole death lives in `CollidesWith`. So `HitBy`/`KilledBy`/
+      `NoteDeathBegan` never ran (no `EvDying`), its `NetKillable` was null so
+      `ApplyHostKilledFromSnapshot` returned before the hp test (the fallback was structurally
+      unreachable, not merely slow), and the `EvDeath` at the end of its 5 s debris fall carried
+      `KillerNone` because nothing had called `NoteKill`. **The join peer saw an intact boss
+      stand there for five seconds and then silently vanish** -- no debris, no explosions, no
+      cues.
+      - **Two members on `INetEntity`, no protocol change, protocol stays v18.** `NetIsDying`
+        (the host's "announce this" discriminant, which `NetIdRegistry.ReplayLive` also reads
+        for the join-in-progress re-announce) and `NetBeginDeferredDeath()` (the client's "run
+        your own death"). **The BASE derives both from the killable discriminant** -- a
+        `KillableAlien` at zero hit points still in the world -- which is exactly the test
+        `ReplayLive` used to spell out, so every other type is unchanged by construction and a
+        future such type costs one override.
+      - Host side, `SpiderBoss.CollidesWith` calls `NetSession.OnHostDeathBegan(this)` at its
+        death entry; client side it re-runs `BeginDeathThroes` (the death entry lifted out of
+        `CollidesWith`), **idempotently** -- this peer hit-tests puppets with its own beams, so
+        it may already have run the same death, and a second burst would restart the 5 s fall.
+      - **`NetPuppets.BeginDeferredDeath` now accepts a NULL killable**, claims the award slot
+        and asks the entity; a `false` answer releases NOTHING, or a stray beat would un-freeze
+        live enemies into the client's world. **The hp==0 snapshot fallback still needs the
+        killable discriminant** and is untouched -- hp is 0 for every non-killable, so there is
+        nothing there to read. `EvDying` rides the reliable lane and `ReplayLive` covers the
+        join-in-progress case, so the fallback is not missed.
+      - **`SpiderBoss.NetState` still clamps a wire `dead` back to `standing`, and must**: the
+        wire only ever describes a live boss and the death arrives as the beat.
+  - **Verify with `eaNetDeathFx()`** (`Compat/Net/NetDeathFxTest.cs`, 144 assertions;
     `tools/headless/probes/net_death_fx.txt`). MENU-ONLY and leave-no-trace, the `eaNetSnap`
     shape -- section 2 runs a real HOST session over a `NetWire` and reads the frames the peer
     RECEIVED (including the `EvDying` trigger-latency legs: the beat is on the wire while no
@@ -1282,9 +1313,24 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     proves nothing and a backgrounded joiner tab ticks at ~1 Hz. Every positive has its negative
     beside it -- **the `Enabled` assertions are the load-bearing ones**, since a puppet left
     frozen is still in the world and would satisfy a survival-only check, which IS the bug.
-    Mutation-tested nine ways, failing DISJOINT legs across the two defects and the trigger --
+    Mutation-tested sixteen ways, failing DISJOINT legs across the two defects, the trigger and
+    the coverage --
     notably, making `NetPuppets.OnDeathBegan` a no-op fails section 6 and ONLY section 6, which
     is what proves the two fallbacks are still real rather than dead code behind the fast path.
+    **Sections 8 and 9 are card ad9c8f8b's, and they are what a release-only assertion cannot
+    do**: 8 releases BrainBoss / FakeBoss / JunkBoss (the last being card c146422f's elongated
+    25-explosion death) and TICKS the released component's real `Update` on a fixed 60 Hz dt --
+    the isolation-sim pattern, because a 3-to-20-second choreography is exactly what "never
+    verify motion with timed live screenshots" is about -- asserting the tally keeps CLIMBING at
+    an intermediate checkpoint, that the boss is still in the world there, and that it `Die()`s
+    on its own rather than leaving a corpse in every client's world; 9 is the SpiderBoss seam
+    above, with an `EvilBullet` as the negative that a non-killable with no deferred death of its
+    own is released by nothing. **`BloodExplosion` is not an `Explosion` subclass** and the
+    SpiderBoss's entire debris death is made of it, so the suite counts both. **Leave-no-trace
+    is asserted by RUNNING THE WHOLE SUITE THREE TIMES in one process** (the `eaBinTest` rule):
+    the teardown sweeps `Explosion`/`BloodExplosion`/`BrainAura`, restores the score panels and
+    restarts the music `BrainBoss.KilledBy` stops, and a leak would surface as phantom failures
+    in the second run.
     **Deliberately absent from `net_selftests.txt` despite being menu-runnable** -- unlike the
     suites there it has its own probe, which carries this card's write-up and mutation matrix, so
     listing it in both would run it twice for nothing. (It is NOT absent for `eaNetBgTest`'s
@@ -2333,9 +2379,10 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   state extras grow. **The multi-phase DEATHS are no longer part of that** (cards 303bfb5b /
   13aa596c): a remote death whose `KilledBy` defers its own removal now RELEASES the puppet to
   finish dying locally instead of deleting it mid-animation -- see the deferred-death bullet
-  under "Claims". That is type-agnostic, so the SpiderBoss debris death and the
-  BrainBoss/FakeBoss asplode come with it; neither has been WATCHED on a client, so treat them as
-  covered-by-construction rather than verified. The time-scaling half of
+  under "Claims". **All four bosses have now been WATCHED on a client and are pinned (card
+  ad9c8f8b)**: BrainBoss, FakeBoss and JunkBoss were covered by construction and are verified
+  end to end by `eaNetDeathFx` section 8; SpiderBoss was NOT covered and is the hole that
+  coverage found -- see the not-a-KillableAlien bullet under "Claims". The time-scaling half of
   the old first-wipe `pupPops` burst is FIXED (the puppet driver now dead-reckons on real time,
   above); if a residual first-wipe burst ever shows, it's the reset/id-churn transition (purge +
   checkpoint replay), reproducible in the headless two-peer net sim's reset scenario, not the

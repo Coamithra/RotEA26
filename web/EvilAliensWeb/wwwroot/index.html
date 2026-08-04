@@ -840,6 +840,17 @@
             catch (e) { console.warn('[debug] eaNetWalls failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: the world snapshot's staleness guard + the scale precision raise (card
+        // f5cf7a5c). The per-type scale census over the whole replicable set, the packet seq
+        // driven end to end through a real client session on an in-process wire, and the
+        // backward drag a reordered entry used to cause -- measured against ?netstaleguard=0.
+        // MENU-only, leave-no-trace. No frame can show any of it: the drag is far under
+        // SnapThresholdPx, so pupPops read a contented 0 the whole time.
+        window.eaNetStale = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetStaleTest')); }
+            catch (e) { console.warn('[debug] eaNetStale failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: the pinned many-puppet drive bench (card 25ad0659 step 2c-ii). Puts n real
         // puppets in the world through the real self-heal path and times NetPuppets.Drive,
         // reporting ABSOLUTE us/call, ns/puppet and the share of the 16.7ms frame budget.
@@ -1143,6 +1154,17 @@
                 try { DotNet.invokeMethod('EvilAliensWeb', 'debugRespawnState'); }
                 catch (e) { console.warn('[debug] eaRespawn.state failed (game not booted yet?): ' + e.message); }
             }
+        };
+
+        // Debug: the evil grinning face of death's volley state (card d8344c17).
+        //   eaSkullVolley() — print every live EvilSkull's shots-so-far, the cap it is counting
+        //                     up to, and the difficulty modifier that cap comes from. Nothing
+        //                     about a skull's appearance changes with its volley position, so
+        //                     this is the only way to see a volley starting part-way through.
+        //                     Pair with the ?skullvolley boot flag for a per-shot trace.
+        window.eaSkullVolley = () => {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugSkullVolley'); }
+            catch (e) { console.warn('[debug] eaSkullVolley failed (game not booted yet?): ' + e.message); }
         };
 
         // Debug: live-set the ship-connector lightning knobs (the ?level=TeamChallenge tuner). Drives

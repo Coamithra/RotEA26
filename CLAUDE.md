@@ -241,6 +241,16 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   measured at 23px by `python tools/sim/net_puppet_drive_sim.py --hoststall`). **The deliberate
   bug reproduction** (the `?teampartner=pad` idiom), and IN `DebugFlags.Active` for that reason --
   it must never reach a public lobby. Screen SHAKE is unaffected either way. Details: net CLAUDE.md.
+- **`?netstaleguard=0`** (card f5cf7a5c): turn the world snapshot's staleness guard OFF, so a
+  reordered or late `MsgWorldSnapshot` entry drags a puppet BACKWARDS again. The packet now
+  carries a monotone seq and an entry older than the one already applied for that netId is
+  refused; this restores the pre-card behaviour. **The other deliberate bug reproduction** (the
+  `?nethitstop=1` idiom), and IN `DebugFlags.Active` for the same reason. It is the only boolean
+  in `DebugFlags` that DEFAULTS TRUE, so `Active` tests its negation. The `[net]` line's new
+  `snapStale=` counter reads the same either way -- the flag changes the drag, never the
+  measurement. Console `eaNetStale()` / `eval NetStale` is the suite (it drives the flag through
+  the injected host, so no reboot); protocol v19 also raised `NetBaseState.Scale` 1/256 -> 1/4096
+  with rounding. Details: net CLAUDE.md.
 - **Local co-op + online co-op together** (card 4d904410): `?netlocal=<1-3>` queues that many
   synthetic COUCH joins on this peer once the session is live — a real one is a gamepad Start
   press the rig can't produce. Pair with `?net=host`/`?net=join`; the `[net]` line's new
@@ -393,6 +403,13 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   is CLAMPED to what keeps the widest line on screen and the shipped crawls saturate it at
   0.081-0.095, not the card's 0.2** -- +20% of a 669px line does not fit 800px at any pivot. Read
   `[crawl] skew= effective= fit=` for what is actually drawn; details in web CLAUDE.md.
+- **`?skullvolley`** (card d8344c17): make every `EvilSkull` (the "evil grinning face of death")
+  report each beat of its volley on a `[skull]` line -- `shot=<i>/<cap>`, the fade state, whether
+  a bullet actually left, and a per-rearm line whose `fired=` must always be 0. The volley length
+  is invisible in every frame and moves no metric, so this is the only observable it has. Console
+  `eaSkullVolley()` / `eval SkullVolley` dumps the live skulls' state instead. **The volley CAP
+  ramps 4 -> 9 with level time by design and is not a bug** (table in web CLAUDE.md); pinned by
+  `tools/headless/probes/evilskull_volley.txt`.
 - **`?nomips`** (card 110153c7): `WebContentManager.TryLoadDds` uploads level 0 only, so the one
   mipped asset (`gfx/base/756-v1`, the Level-3 wall sheet) falls back to plain bilinear. The live
   A/B for the tower-shaft aliasing; it is read at LOAD time, so it must be set at boot.

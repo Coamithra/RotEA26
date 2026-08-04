@@ -41,6 +41,10 @@ namespace EvilAliensWeb.Compat
 	//                  (card 68f62e92 refuses every hit-stop there — one peer's world halting
 	//                  while the wire streams on is what rewound the other peer's enemies).
 	//                  THE DELIBERATE BUG REPRODUCTION, and IN `Active` for that reason.
+	//   ?netstaleguard=0  turn the world-snapshot staleness guard OFF, so a reordered or late
+	//                  snapshot entry drags a puppet backwards again (card f5cf7a5c). The other
+	//                  deliberate bug reproduction, and in `Active` for the same reason. ON by
+	//                  default, so `Active` tests its NEGATION.
 	//   ?metalscore    re-enable the chrome-sheen (metal.fx) on the in-game score + "Press Start"
 	//                  text (OFF by default since card 37c4ccca — the chrome's dark mid-band reads
 	//                  crunchy on the tiny HUD glyphs) to A/B against the plain flattened drop shadow
@@ -376,6 +380,14 @@ namespace EvilAliensWeb.Compat
 		// hittimer window. Draw-side only -- no hitpoints change, nothing is damaged.
 		public static bool BrainHitFlash { get; private set; }
 
+		// ?skullvolley: make every EvilSkull ("the evil grinning face of death") report each shot
+		// of its volley on a `[skull]` line -- shot index, the cap it is counting up to, and the
+		// difficulty modifier that cap is derived from (card d8344c17). The volley length is not
+		// visible in any frame and no metric moves when it goes wrong, so this is the only
+		// observable that can defend the fix; `tools/headless/probes/evilskull_volley.txt` is
+		// built on it. Diagnostic only -- reading it changes nothing.
+		public static bool SkullVolley { get; private set; }
+
 		// Master multiplier on the trauma-based screen shake (Compat/Juice.cs). 1 = the
 		// shipped feel, 0 = off, >1 exaggerates while tuning (?shake=, clamped 0..3).
 		// A pure camera/render look, so — like MetalScore/SlowmoTrail — kept OUT of `Active`.
@@ -393,6 +405,18 @@ namespace EvilAliensWeb.Compat
 		// reintroducing a net-desync bug — it must never reach a public lobby or a listed
 		// game. Every legitimate use is a dev `?net=` boot, which is anything-goes.
 		public static bool NetHitstop { get; private set; }
+
+		// The world-snapshot staleness guard (card f5cf7a5c), ON by default -- `?netstaleguard=0`
+		// turns it OFF, restoring the pre-card behaviour where a reordered or late snapshot entry
+		// applies an older position than the one already on screen and drags the puppet backwards.
+		//
+		// DEFAULTS TRUE, which makes it the odd one out in this file: every other boolean here
+		// turns something ON, so `Active` asks "was it set". This one turns a FIX OFF, so `Active`
+		// asks the inverse (`!NetSnapshotStaleGuard`) -- and it is in `Active` for the
+		// `?nethitstop=1` reason, being a deliberate bug reproduction that must never reach a
+		// public lobby. A negative control you cannot run two months later is not a negative
+		// control, which is why it ships rather than living inside the test suite.
+		public static bool NetSnapshotStaleGuard { get; private set; } = true;
 
 		// Gates ONLY the automatic per-kill/boss-kill hit-stop freeze frame fired from
 		// Juice.KillPunch (KillableAlien.HitBy) — NOT player-death hit-stop (PlayerShip
@@ -1679,6 +1703,28 @@ namespace EvilAliensWeb.Compat
 				case "nethitstop":
 					NetHitstop = IsOn(val);
 					break;
+				case "netstaleguard":
+					// NOT the bare `IsOn(val)` every other boolean here uses, and the asymmetry is
+					// the point: for those a typo silently leaves a DIAGNOSTIC off, which costs
+					// nothing, whereas an unrecognised value here would silently turn a shipped FIX
+					// off and restore the backward drag. So only an explicit off spelling disables
+					// it, and anything else is reported and ignored -- the value-carrying flags'
+					// rule, applied to the one boolean that needs it.
+					if (IsExplicitlyOff(val))
+					{
+						NetSnapshotStaleGuard = false;
+					}
+					else if (!IsOn(val))
+					{
+						// Names the setting actually IN FORCE, not the shipped default -- a
+						// repeated flag (?netstaleguard=0&netstaleguard=nope) keeps the earlier
+						// valid value, and a diagnostic that can state the wrong condition is
+						// worse than one that states none.
+						Console.WriteLine("[debug] unknown ?" + key + "= value '" + val
+							+ "' (expected 0/off to disable) -- ignored, the snapshot staleness"
+							+ " guard stays " + (NetSnapshotStaleGuard ? "ON" : "OFF"));
+					}
+					break;
 				case "slowmotrail":
 					SlowmoTrail = IsOn(val);
 					break;
@@ -1897,6 +1943,9 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "brainhitflash":
 					BrainHitFlash = IsOn(val);
+					break;
+				case "skullvolley":
+					SkullVolley = IsOn(val);
 					break;
 				case "blastactive":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ba))
@@ -3811,7 +3860,7 @@ namespace EvilAliensWeb.Compat
 					+ " -- the gameplay RNG (RandomHelper) is seeded, so two runs of this boot "
 					+ "reach the same world. Reload without the flag for normal random play.");
 			}
-			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || AiFastForward > 1;
+			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -3843,6 +3892,10 @@ namespace EvilAliensWeb.Compat
 						+ (NetScript ? " netscript" : "")
 						+ (NetLocal > 0 ? " netlocal=" + NetLocal : "")
 						+ (NetDropGrant ? " netdropgrant" : "")
+						// Prints only when the guard is OFF, i.e. only on the deliberate bug repro. It is
+						// the one flag in this dump whose ABSENCE is the normal state, so a run that
+						// reordered a snapshot on purpose has to be tellable from one that did not.
+						+ (!NetSnapshotStaleGuard ? " netstaleguard=0" : "")
 						+ (Harness != null
 							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "") + " bg=" + HarnessBg
 							: ""));

@@ -693,6 +693,17 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetWallTest.Run();
 		}
 
+		// JS bridge for the world snapshot's staleness guard + the scale precision raise
+		// (eaNetStale, card f5cf7a5c): the per-type scale census, the packet seq end to end
+		// through a real client session, and the backward drag a reordered or late entry used to
+		// produce -- measured against ?netstaleguard=0 as the negative control. Nothing here is
+		// visible in a frame: the sag is well under SnapThresholdPx, so pupPops never moved.
+		[JSInvokable("debugNetStaleTest")]
+		public static string NetStale()
+		{
+			return EvilAliensWeb.Compat.Net.NetStaleTest.Run();
+		}
+
 		// Park a session-ending notice at the menus (card 72143c11), with no peer and no
 		// session -- the only offline way to reach MenuScene.NetUpdate's notice path, since
 		// every production writer of MenuNotice is inside NetSession.Stop(). MenuScene polls
@@ -1416,6 +1427,31 @@ namespace EvilAliensWeb.Compat
 				+ " park=" + (DebugFlags.RespawnPhase.HasValue
 					? DebugFlags.RespawnPhase.Value.ToString()
 					: "live"));
+		}
+
+		// Report every live EvilSkull's volley state as data (`eaSkullVolley()` / `eval
+		// SkullVolley`), card d8344c17. `fired` is the counter that was leaking across the object
+		// pool: a freshly spawned skull must always read fired=0, and a screenshot cannot show
+		// that -- nothing about a skull's appearance changes with its volley position. Also prints
+		// the cap and the modifier it comes from, so a volley that looks long can be told apart
+		// from a volley that IS long (the difficulty time-ramp raises the cap legitimately).
+		// An empty report means no skulls are on screen, which is a real answer, not a failure.
+		[JSInvokable("debugSkullVolley")]
+		public static void SkullVolley()
+		{
+			int n = 0;
+			Microsoft.Xna.Framework.Game game =
+				EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>().ComponentBin.Game;
+			foreach (Microsoft.Xna.Framework.IGameComponent item
+				in (System.Collections.ObjectModel.Collection<Microsoft.Xna.Framework.IGameComponent>)(object)game.Components)
+			{
+				if (item is EvilAliens.EvilSkull skull)
+				{
+					Console.WriteLine("[skull] " + skull.VolleyReport());
+					n++;
+				}
+			}
+			Console.WriteLine("[skull] skulls=" + n + " trace=" + (DebugFlags.SkullVolley ? "on" : "off"));
 		}
 
 		// Report the WORLD clock as data (`eaWorldClock()` / `eval WorldClock`), card d79a2f48.

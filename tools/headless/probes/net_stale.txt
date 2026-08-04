@@ -1,0 +1,100 @@
+# PROBE: the world snapshot's STALENESS GUARD, and the NetBaseState.Scale precision raise that
+# shipped with it.
+#
+# PINS: card f5cf7a5c -- Compat/Net/NetStaleTest, driven by eaNetStale() / `eval NetStale`.
+#
+# WHAT BROKE. MsgWorldSnapshot rides the STREAM lane -- unordered, maxRetransmits:0 -- and carried
+# NO sequence and NO timestamp. So a reordered or late entry handed NetPuppets an OLDER position
+# than the one already on screen: the puppet sagged BACKWARDS and was then blended forward again
+# over the correction window. It is the same defect NetFrameLocal fixed for animation FRAMES
+# (cards c92f3817 / 0dfc4495 / d3add86f); positions had no equivalent guard at all. The packet now
+# carries a monotone u16 seq and the receiver refuses an entry not NEWER than the last one it
+# applied FOR THAT netId.
+#
+# The second half is NetBaseState.Scale, which was a u16 at 1/256 with a TRUNCATING cast -- up to
+# 1/256 of ABSOLUTE error whatever the value, so ~0.2% near scale 1 and 4.94% on a Level-3 wall's
+# 0.053 (cards 4392bd30 / 80749dc4, which opted Wall out rather than fixing the wire). The card
+# asked to WIDEN the field; section 1 is the census that measured who was left, and the answer was
+# a precision RAISE inside the same u16 instead -- 256 -> 4096 with ROUNDING. Zero extra bytes on
+# the very lane whose loss is the other half of this card, 32x the precision, and the rounding
+# also removes the one-directional shrink BIAS that made the wall's error accumulate down 122 rows
+# rather than average out.
+#
+# FAILURE MEANS: read the quoted PASS/FAIL line. NOTHING here throws and NO existing counter moved
+# before this card -- `pupPops` only counts a correction past SnapThresholdPx (100px) and a
+# reorder's error is far below that, so the metric read a contented 0 the entire time the puppets
+# were being dragged backwards. That is why the card was reported from a two-window playtest and
+# is invisible in every log the game already produced.
+#
+# WHY IT IS NOT A logic_probe CASE SET, unlike net_wire: sections 1-5 build real entities and
+# section 2 runs a real NetSession, and constructing either needs a Game. eahl is the only
+# headless runner.
+#
+# THE NEGATIVE CONTROL IS A SHIPPED FLAG, `?netstaleguard=0` (in DebugFlags.Active, the
+# ?nethitstop=1 deliberate-bug-repro idiom). Section 3 drives it through the injected INetHost
+# rather than a reboot, and runs THREE times: the late entry never delivered, delivered and
+# refused, delivered and applied. "The guarded run did not sag" passes on a build where the entry
+# never arrived at all, which is why the un-delivered control is there.
+#
+# MUTATION-TESTED FIVE WAYS, each isolated, and each failing DISJOINT legs:
+#   * the guard's `return false` removed (i.e. pre-card)      4 FAIL (s2 position, s3, s4, s5)
+#   * the guard hard-wired to refuse everything after the 1st 6 FAIL (s2 both, s4 both, ...)
+#   * MathF.Round dropped, quantum kept at 4096               2 FAIL (the 0.2% bound + the
+#                                                                     rounding leg)
+#   * ScaleScale back to 256                                  4 FAIL (both scale legs, the
+#                                                                     quantum leg, the pre-card
+#                                                                     improvement control)
+#   * the wrap-safe (short) compare -> a naive `<=`           2 FAIL (both section-4 legs)
+#
+# NOTE WHAT THE FIRST MUTATION DOES *NOT* FAIL, because it is a property worth keeping: the
+# `snapStale` COUNT is unchanged by the guard. The entry is reported stale whether or not it is
+# then refused, so ?netstaleguard=0 changes the drag and never the measurement it exists to let
+# you take. That was NOT true of the first cut -- the counter sat inside the not-applied arm and
+# the negative control silently stopped reporting -- and it was this mutation run, not review,
+# that found it.
+#
+# NOTE section 1's per-type table is a FLOOR, not a worst case: it reads the scale a puppet is
+# CONSTRUCTED at, so a type whose scale is animated in Update (PlasmaBall's entry telegraph,
+# Parachute's fade) reads its default here. The suite says so at the section.
+#
+# MENU-ONLY and leave-no-trace. It builds real puppets and starts a real (in-process, wire-backed)
+# client session, so it SKIPs itself over a live session, level or attract demo -- `?noattract` is
+# not decoration, without it the idle demo makes every leg skip. Everything it plants is
+# bin.Remove'd BY HAND in the finally, because NetPuppets.Disable() clears the id maps and nothing
+# else.
+#
+# DELIBERATELY ABSENT FROM net_selftests.txt despite being menu-runnable -- it has its own probe,
+# which carries this card's write-up and mutation matrix, so listing it in both would run it twice
+# for nothing. The eaNetDeathFx / eaNetMotion precedent.
+#
+# eahl: --flags "?menu&noattract"
+
+step 200 nodraw
+mark
+eval NetStale
+
+expect \[netstale\] snapshot staleness guard \+ scale precision
+expect 1\. the wire's SCALE precision, swept over the whole replicable set
+expect 2\. the packet seq, end to end through a real client session
+expect 3\. reorder and late delivery
+expect 4\. the u16 seq WRAPS
+expect 5\. an id we do not hold is not judged stale
+
+# The census actually ran over the whole table rather than bailing after a type that would not
+# construct -- the shape a silently-shrinking sweep would take.
+expect the sweep CONSTRUCTED most of the replicable set \(29 of 29\)
+# The measured improvement, pinned as numbers on the type that carries it. If the wire's scale
+# encoding is ever changed again these two move, and the controls need re-reading, not silencing.
+expect \[14\] Wall .* scale 0\.053419 -> wire 0\.053467 \(0\.090%\)  pre-card 0\.050781 \(4\.94%\)
+# The defect itself, as a number: with the guard off a superseded entry really does move the
+# puppet. A build where it did not would make every guard assertion above vacuous.
+expect px of backward drag with the guard off
+
+# The SKIP guard: a run that skipped prints no tally, so this is what tells "the menu was busy"
+# from "the suite passed".
+expect-not SKIP \(run from the main menu
+# A TALLY, never `expect-not FAIL` on its own: an absence assertion passes on a run where the eval
+# never happened at all. Raise it when legs are added; never lower it to make a run green.
+expect \[netstale\] 24 passed, 0 failed
+expect-not FAIL
+quit

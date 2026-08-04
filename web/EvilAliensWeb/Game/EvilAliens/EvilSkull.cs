@@ -35,7 +35,17 @@ internal class EvilSkull : KillableAlien
 
 	private Timer shoottimer2;
 
+	// Shots taken so far in the CURRENT volley. Reset per life in Initialize -- see the note
+	// there; it is the counter that decides when the volley ends.
 	private int bulletsfired;
+
+	// Stable per-instance tag for the ?skullvolley diagnostic, so one skull's volley can be
+	// followed across the many that are usually on screen at once. Instance identity, not life
+	// identity: the pool hands the same tag out again, which is exactly what made the
+	// carried-counter bug legible.
+	private static int volleyNextTag;
+
+	private readonly int volleyTag = volleyNextTag++;
 
 	public bool Fading => fadeintimer.Active | fadeouttimer.Active | fadeouttimer.Finished;
 
@@ -160,6 +170,17 @@ internal class EvilSkull : KillableAlien
 	public override void Initialize()
 	{
 		base.Initialize();
+		// PER-LIFE, like isdead/awarded/netTeleported and every Timer in base.Initialize (card
+		// d8344c17). EvilSkull is pooled, and this counter was the one piece of its state nothing
+		// reset: a skull killed part-way through a volley handed its count to whoever came out of
+		// the pool next, whose own volley then ended that many shots early. Measured on Level 3:
+		// 29% of spawns inherited a count of 1..7, so volley length was effectively random
+		// between 1 and the cap instead of the cap -- which is what the bug report ("sometimes
+		// shoots a massive series of bullets, rather than the expected number") was describing.
+		// The cap itself, (int)(4 * DifficultyModifier), is a separate and DELIBERATE thing: it
+		// climbs with the difficulty time-ramp (see web CLAUDE.md), so a late-level volley really
+		// is 8-9 shots where an opening one is 4.
+		bulletsfired = 0;
 		color = Color.White;
 		base.Acceleration = 6.0000002E-05f;
 		base.Deceleration = 1.8E-05f;
@@ -314,6 +335,7 @@ internal class EvilSkull : KillableAlien
 			}
 			if (shoottimer2.Finished)
 			{
+				bool suppressed = true;
 				if ((base.Position.X > 0f) & (base.Position.Y > 0f) & (base.Position.X < 800f) & (base.Position.Y < 600f))
 				{
 					bool flag = false;
@@ -324,15 +346,29 @@ internal class EvilSkull : KillableAlien
 						Vector2 val = ship.Position - base.Position;
 						flag = num4 | ((val).Length() <= num3);
 					}
-					if (!(flag | fadeintimer.Active))
+					// `Fading`, not `fadeintimer.Active` (card d8344c17). The 2008 gate covered the
+					// fade IN and not the fade OUT, so a skull kept shooting for the whole 800 ms
+					// dissolve, by the end of which `Draw` has ramped its alpha to zero -- bullets
+					// streaming out of something the player cannot SEE, which reads as the nearest
+					// visible skull firing far more than it should. It is also intangible while
+					// fading (`PlayerShip.CollidesWith` and both AI predicates exclude a `Fading`
+					// skull) though still shootable, since `Bullet.CollidesWith` lists the type
+					// unconditionally -- so the player can neither ram it nor aim at it, but a
+					// stray shot does still kill it. One predicate covers both fade halves now.
+					if (!(flag | Fading))
 					{
 						EvilBullet evilBullet = EvilBullet.NewEvilBullet(collection, base.Game);
 						evilBullet.Setup(base.Position, MyMath.SnapAngle(MyMath.VectorToAngle(oracle.GetRandomPlayerPosition() - base.Position), 32));
 						collection.Add((GameComponent)(object)evilBullet);
+						suppressed = false;
 					}
 				}
+				// The COUNTER still advances on a suppressed shot, exactly as in 2008 -- the volley
+				// is a fixed number of beats, not a fixed number of bullets, so a skull that spends
+				// its volley next to the player does not save the shots up for later.
 				bulletsfired++;
-				if (bulletsfired >= (int)(4f * Settings.GetInstance().DifficultyModifier))
+				ReportVolleyShot("normal", suppressed);
+				if (bulletsfired >= VolleyCap)
 				{
 					bulletsfired = 0;
 					shoottimer2.Stop();
@@ -340,6 +376,7 @@ internal class EvilSkull : KillableAlien
 			}
 			if (shoottimer1.Finished)
 			{
+				ReportVolleyRearm("normal");
 				shoottimer2.Reset();
 				shoottimer2.Start();
 			}
@@ -368,11 +405,21 @@ internal class EvilSkull : KillableAlien
 			base.DirectionalVector = directionalVector;
 			if (shoottimer2.Finished)
 			{
-				EvilBullet evilBullet = EvilBullet.NewEvilBullet(collection, base.Game);
-				evilBullet.Setup(base.Position, MyMath.SnapAngle(MyMath.VectorToAngle(oracle.GetRandomPlayerPosition() - base.Position), 32));
-				collection.Add((GameComponent)(object)evilBullet);
+				// Same fade gate as the normal branch above. A classic skull stops all three fade
+				// timers in Setup and so never fades, making this a no-op in shipped play -- it is
+				// here so the invariant ("a skull the player cannot see does not shoot") holds for
+				// the type rather than for one of its two behaviours.
+				bool suppressed = true;
+				if (!Fading)
+				{
+					EvilBullet evilBullet = EvilBullet.NewEvilBullet(collection, base.Game);
+					evilBullet.Setup(base.Position, MyMath.SnapAngle(MyMath.VectorToAngle(oracle.GetRandomPlayerPosition() - base.Position), 32));
+					collection.Add((GameComponent)(object)evilBullet);
+					suppressed = false;
+				}
 				bulletsfired++;
-				if (bulletsfired >= (int)(4f * Settings.GetInstance().DifficultyModifier))
+				ReportVolleyShot("classic", suppressed);
+				if (bulletsfired >= VolleyCap)
 				{
 					bulletsfired = 0;
 					shoottimer2.Stop();
@@ -380,12 +427,54 @@ internal class EvilSkull : KillableAlien
 			}
 			if (shoottimer1.Finished)
 			{
+				ReportVolleyRearm("classic");
 				shoottimer2.Reset();
 				shoottimer2.Start();
 			}
 			break;
 		}
 		}
+	}
+
+	// The volley cap: how many shots this skull takes once shoottimer1 rearms it. Rises with the
+	// difficulty time-ramp, so it is read fresh every shot rather than latched at volley start.
+	private static int VolleyCap => (int)(4f * Settings.GetInstance().DifficultyModifier);
+
+	// ?skullvolley / eaSkullVolley(): one line per shot, the only observable that shows a volley
+	// running short. `shot=i/cap` is the assertion surface -- a run where every volley ends at
+	// `cap/cap` is the fixed behaviour; carried counts show up as volleys whose first shot is not
+	// `shot=1`.
+	// Reported where shoottimer1 REARMS the volley, because that is the one moment the pooling bug
+	// is expressible on a SINGLE line: a fresh volley must always open with the counter at zero, and
+	// a carried count shows up here as `fired=` anything else. It is not visible in the shot stream
+	// -- a carried counter makes a truncated volley look like the seamless continuation of the
+	// previous skull's, which is exactly how it stayed hidden. `evilskull_volley.txt` asserts it.
+	private void ReportVolleyRearm(string mode)
+	{
+		if (DebugFlags.SkullVolley)
+		{
+			Console.WriteLine($"[skull] tag={volleyTag} {mode} rearm fired={bulletsfired} cap={VolleyCap} t={WorldTime.Seconds * 1000f:F0}");
+		}
+	}
+
+	private void ReportVolleyShot(string mode, bool suppressed)
+	{
+		if (DebugFlags.SkullVolley)
+		{
+			// fade= reuses NetFadePhase's own terms so the diagnostic can never drift from the
+			// predicate PlayerShip gates collision on (`Fading`). `fade=out` means the skull is
+			// mid-dissolve and already unshootable; a shot from there is the invisible-fire case.
+			string fade = NetFadePhase switch { 2 => "out", 1 => "in", _ => "none" };
+			Console.WriteLine($"[skull] tag={volleyTag} {mode} shot={bulletsfired}/{VolleyCap} fade={fade} shot_fired={!suppressed} mod={Settings.GetInstance().DifficultyModifier:F2} t={WorldTime.Seconds * 1000f:F0}");
+		}
+	}
+
+	// The live volley state of every skull on screen, as DATA (eaSkullVolley() / eval
+	// SkullVolley). Needs no shot to happen and no level to be reached, so it is how the
+	// per-life reset is checked directly rather than inferred from a shot stream.
+	internal string VolleyReport()
+	{
+		return $"tag={volleyTag} {behaviour} fired={bulletsfired} cap={VolleyCap} armed={shoottimer2.Active}";
 	}
 
 	public override void CollidesWith(ICollidable other)

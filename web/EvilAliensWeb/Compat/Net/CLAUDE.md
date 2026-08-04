@@ -3412,6 +3412,29 @@ widen a tolerance to force green** -- that is suite CALIBRATION work with its ow
 assertions this tool exists for (`prov=`, `owner=`) are exact and clean. It is a standalone tool,
 not a `run_probes.py` probe, so red is a finding rather than broken CI.
 
+- **THE SUITE NEVER RESETS, SO NO RESIDUAL OF ITS IS RESET-CAUSED (card d6372279).** The host
+  boots `?invuln` and `LoseLife` is host-authoritative, so `AllShipsDead` never fires and neither
+  peer ever enters `GameState.Resetting`: measured `resets=0` on **every** `[net]` line of a
+  `--level Level3 --cap 200 --cadence 40 --verbose` run (22 of 22). **This is the fact the
+  tolerance-calibration card (`d108c459`) needs**, because it rules out the reading that the
+  `is on the HOST and not on the joiner` residual is "reset-adjacent" -- it clusters on
+  BattleSkull/EvilSkull because Level 3 is where those live, not because a checkpoint revert wiped
+  them. Two dumps sampling different world instants is the remaining explanation.
+  - **Consequence: the reset choreography is UNCOVERED by this suite.** Reaching it needs
+    `eval KillShips` on BOTH peers (a client's own ship dying is not enough -- the host's
+    invulnerable ship keeps `AllShipsDead` false) **and Medium+**, since `ApplyDifficultyPolicy`
+    turns on `DirectRespawn` at Easy and that branch of `UpdateResetting` purges nothing and
+    reverts no checkpoint. Both peers agree on the tier -- `MenuScene.NetLaunchMirror` calls
+    `SetDifficultyTo` off `EvLaunch` -- so the two reset paths cannot diverge on it.
+  - **What a real two-peer reset does, measured (same card, Level 2 and Level 3, Very_Hard).**
+    Host time: `EvReset` applied on both at t; `UpdateResetting`'s ADC purge fires on the host AND
+    the client at **t+4533 ms, the same millisecond** (`NetApplyReset` zeroes `_timer`, then both
+    run the same 3 s + 1500 ms `Background.XFade` on game time, so the skew is RTT); the startup
+    purge likewise; the host's FIRST post-reset spawn lands **2850 ms (L2) / 3850 ms (L3)** later.
+    The client holds **zero** puppets at its own purge -- the host purges first and announces an
+    `EvDeath` per removal -- and the settled post-reset diff is clean (11 ids vs 11, `prov` empty).
+    So the "client wipes host-spawned entities inside the revert skew" hypothesis is REFUTED;
+    see the comment at `GameScene.UpdateResetting` for why that purge must keep running anyway.
 - **WHY TWO PROCESSES, and why that is not over-engineering.** The claim is "the joiner ends up
   with the host's world", which is a DIFF and needs both worlds to exist -- and one process holds
   one `Game.Components` (see the "TWO PEERS WITH INDEPENDENT WORLDS IN ONE PROCESS IS

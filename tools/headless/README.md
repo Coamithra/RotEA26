@@ -156,6 +156,26 @@ unavailable · `4` `--fake-no-audio-device` could not install its `alsoft.ini`.
 - **Saves start empty every run, by design** — a leftover save silently changes unlock state,
   difficulty and the attract flow between runs. `--saves <dir>` keeps a persistent profile when
   that is the point of the test.
+- **The default save dir is PER PROCESS, and it had to become so** (card de82597f). It was the one
+  fixed path `%TEMP%/eahl-saves`, shared by every eahl on the box, and `HeadlessSaveStore`'s ctor
+  recursively DELETES its dir at boot — so with several runs in flight (eight parallel worktree
+  agents each running a 50-probe suite is the normal condition here) one run's boot deleted
+  another's save tree mid-write. `ScreenshotSaver.SaveScreenShot` opens
+  `<saves>/fs/EvilAliens/<Level>.dat` with `FileShare.None`, so the write threw and
+  `screenshot_alpha.txt` failed *after* printing a perfectly correct `[shot] … alphaMin=255` —
+  the once-seen failure that card records. Measured with a churner performing the same delete a
+  concurrent boot performs: **10/10 runs failed** when it targeted the shared dir, **0/10** when it
+  targeted a per-process one, same binary, ~780 wipes per trial. Each process now claims
+  `%TEMP%/eahl-saves/<pid>-<ticks>` and removes it on exit; a run that dies without unwinding
+  leaks one, swept after 6 h by the next run. `--saves <dir>` is unchanged and never swept.
+- **An `eval` failure names its own cause now, innermost first** (same card). `eval` binds to
+  `DebugInput` by reflection, so *every* failure inside the game used to surface as
+  `err TargetInvocationException: Exception has been thrown by the target of an invocation.` — a
+  line that says only that reflection was involved. The chain is unwrapped (the
+  `TargetInvocationException` layers dropped, any other wrapper kept) and the innermost stack
+  follows, **source-located frames first**: `run_probes.py` prints exactly one line after the
+  `err` it stopped on, so a raw stack would show `SafeFileHandle.CreateFile` where the useful
+  frame is `ScreenshotSaver.cs:line 254`.
 - **The `[hitch]` frame watchdog does not run here.** `LoadProfiler.NoteFrame` is called only from
   `Pages/Index.razor.cs`, which this host replaces — so a run is silent about long ticks no matter
   how long they are. `?loadlog`'s `COLD decode` lines DO work (they are a preload-bracket fact, not

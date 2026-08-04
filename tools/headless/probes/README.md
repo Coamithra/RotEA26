@@ -30,6 +30,18 @@ pair, each of which has a mutation listed in its docstring. Note the check dates
 COMPILED IN — `wwwroot/Content` and the probe files themselves are read live off disk, so
 regenerating an asset never reads as stale.
 
+**A failing probe's FULL output is kept — read the log, not just the tail** (card de82597f). The
+runner prints a 12-line window around the `err` and writes everything the run produced to
+`tools/headless/probes/_failures/<probe>-<timestamp>.log` (gitignored, one file per failure, the
+command line at the top), naming the path under the tail. That exists because the summary throws
+away exactly what a rare flake needs: this card was filed with no evidence beyond "`[netmotion] 32
+passed, 0 failed` never printed", because the run that did not print it was gone the moment the
+runner moved on. `--verbose` is not a substitute — it streams all 50 probes, which is unreadable
+during a soak and keeps nothing afterwards. **`--keep-output` logs passing runs too**, which is
+what you want when soaking for a flake you have not caught yet.
+
+`_failures/` is never pruned automatically. Delete it when you are done soaking.
+
 ## What a probe is for
 
 Most changes in this repo are verified once, by a screenshot or a number, and the proof

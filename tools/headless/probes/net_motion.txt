@@ -27,6 +27,18 @@
 #   * the sweep rate encoded at the px scale instead of the rad  1 FAIL (the driven sweep)
 #   * NetSession.ResolveBaseVelocity drops its anchored branch   1 FAIL (section 5)
 #   * Lazer clears its sweep rate from Initialize again          1 FAIL (the Add-order leg)
+#   * FlyingSpiderDescriptor.CreatePuppet drops its
+#     `len >= SpawnAnchorBytes` guard                             2 FAIL (the negative control
+#                                                                 + its independence sentinel)
+# That last one is card c41a89a2's: section 2's negative control asserts over FOUR independent
+# puppets ("0/4 kept theirs" when it goes red) rather than one, because two independent rolls over
+# the same uniform 0..475 entry height agree inside 1.5px ~0.6% of the time -- a spurious failure
+# once in ~160 runs, seen once in-suite. The guarded regression is deterministic (every puppet
+# adopts the host's anchor), so requiring only ONE to keep its own roll loses no sensitivity while
+# the coincidence collapses to 0.006^4. The band is unchanged; the leg beside it is a sentinel on
+# the INDEPENDENCE that claim rests on -- it is not disjoint from the control (the same mutation
+# makes all four puppets adopt one height, so both go red), and it is not meant to be: it fires
+# on a future change that CORRELATES the rolls while the control still passes.
 # The ResolveBaseVelocity one is the reason section 5 exists and why the host's decision was split out of
 # CaptureBaseState as a pure function: before that split it passed the whole probe suite AND
 # every other leg of this one. A host that goes back to differentiating an anchored entity makes
@@ -50,6 +62,6 @@ expect 4\. Lazer sent rates
 expect 5\. the HOST's velocity decision
 # A TALLY, never `expect-not FAIL` on its own: an absence assertion passes on a run where the
 # eval never happened at all. Raise it when legs are added; never lower it to make a run green.
-expect \[netmotion\] 32 passed, 0 failed
+expect \[netmotion\] 33 passed, 0 failed
 expect-not FAIL
 quit

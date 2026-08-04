@@ -153,12 +153,26 @@ public class InputHandler : IInputHandlerService
 		// in-game ControlDevice.Keyboard player. keysToCheck[i] = physical Keys for MyKeys i.
 		KeyboardState keyboardState = Keyboard.GetState();
 		MouseState state = Mouse.GetState();
+		// A HEADLESS host has no mouse of its own, and KNI's SDL2 backend answers
+		// Mouse.GetState() out of SDL_GetGlobalMouseState -- the DESKTOP pointer and the DESKTOP
+		// button mask, focus-independent -- so eahl was reading whatever the developer's hand was
+		// doing at the time and feeding it into menus and mouse-aim. `eahl` therefore declares
+		// there is no physical mouse (DebugInput.SuppressPhysicalMouse; never set in the browser),
+		// and both halves of the state are neutralised together: the position parks off the design
+		// surface and the buttons read released. Scripted input is unaffected -- eaMouseAt still
+		// wins on position below, and eaPress/eaHold still supply the buttons through
+		// Consume/PeekScripted. The full mechanism, and the two probe failures it caused, are at
+		// DebugInput.SuppressPhysicalMouse.
+		bool physicalMouse = !EvilAliensWeb.Compat.DebugInput.SuppressPhysicalMouse;
 		// Stage 10 presenter: KNI's back buffer is the browser-WINDOW size, and the mouse
 		// arrives in those window pixels — but the game (mouse-aim fire in PlayerShip, the
 		// software cursor in MousePointer) works in 800x600 design space. Undo Game1.Draw's
 		// letterbox scale+offset so the cursor maps to the design point under it; otherwise
 		// the ship fires toward a scaled/shifted phantom point, not where you clicked.
-		mousepos = RenderScale.WindowToDesign(new Vector2((float)(state).X, (float)(state).Y));
+		mousepos = physicalMouse
+			? RenderScale.WindowToDesign(new Vector2((float)(state).X, (float)(state).Y))
+			: new Vector2(EvilAliensWeb.Compat.DebugInput.SuppressedMouseX,
+				EvilAliensWeb.Compat.DebugInput.SuppressedMouseY);
 		// A scripted cursor (eaMouseAt / eval MouseAt) wins over the real mouse, so automation
 		// can put the pointer ON a menu entry or the back tip -- `eaPress('Mouse1')` alone only
 		// ever supplied the button. Never set on an ordinary boot.
@@ -175,8 +189,11 @@ public class InputHandler : IInputHandlerService
 		//  - MouseLatch.Consume folds in a click SHORTER than one tick, which this poll cannot
 		//    see at all (card 724f2abc); both samples read Released while the cursor POSITION
 		//    survives, so a menu row hover-highlights and never invokes.
-		bool mouse1Held = MouseLatch.FilterOffCanvas((int)MyKeys.Mouse1, (int)(state).LeftButton == 1) | MouseLatch.Consume((int)MyKeys.Mouse1);
-		bool mouse2Held = MouseLatch.FilterOffCanvas((int)MyKeys.Mouse2, (int)(state).RightButton == 1) | MouseLatch.Consume((int)MyKeys.Mouse2);
+		//  - `physicalMouse` above gates the POLL itself, so a headless run cannot inherit the
+		//    desktop's held button. It must gate the poll rather than the whole expression: the
+		//    latch is scripted/JS-side and stays live.
+		bool mouse1Held = MouseLatch.FilterOffCanvas((int)MyKeys.Mouse1, physicalMouse && (int)(state).LeftButton == 1) | MouseLatch.Consume((int)MyKeys.Mouse1);
+		bool mouse2Held = MouseLatch.FilterOffCanvas((int)MyKeys.Mouse2, physicalMouse && (int)(state).RightButton == 1) | MouseLatch.Consume((int)MyKeys.Mouse2);
 		// Card 2a4110d0: a click on the bottom-left "(B) back" tip drawn last frame acts as
 		// Esc, which is already "back" everywhere (menus, the pause overlay, the brag screen).
 		// Consumed here so the recorded box lives exactly one frame -- see Compat/BackTipHit.

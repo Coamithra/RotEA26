@@ -132,6 +132,17 @@ dotnet run --project web/DevServer -c Debug --urls http://localhost:5280   # the
     (card 74998f22). Rebuild, or pass `--build`; `--allow-stale` is the deliberate override.
     A probe's PRECONDITION must be pinned and asserted separately, not waited out -- unseeded
     RNG turns "stepped far enough" into a coin flip (card af4c3694).
+  - **`eahl` does NOT read your desktop mouse, and putting that back breaks the suite** (card
+    83054936). KNI's SDL2 backend answers `Mouse.GetState()` from `SDL_GetGlobalMouseState` —
+    the real pointer AND the real buttons, focus-independent — so every headless run used to
+    sample whatever your hand was doing. `MenuSub1.HandleMouse` hover-selects on cursor movement
+    *and* swallows that tick's keypress, so scripted menu navigation landed somewhere else
+    (`menu_backtip.txt` failed **15 of 20** runs); a physically-held button separately ate
+    scripted clicks and scripted fire releases (`net_single_tap.txt`). `HeadlessHost.Boot` now
+    suppresses it: cursor parked off-screen, buttons released, printed as
+    `[eahl] input    physical mouse suppressed`, read back with `eval MouseState`, restored by
+    `--real-mouse` (which is the mutation control, not a normal option). Scripted input
+    (`MouseAt`/`Press`/`Hold`) is unaffected, and the browser never sets it.
   - **GOTCHA — a screenshot in the first ~2 s is a WHITE RECTANGLE and nothing is broken.** Every
     scene calling `Background.Reset()` (level entry AND `?harness=`/`?textshot`) starts in
     `LeavingHyperspace` with `fadeFactor = 0.998`, decaying over ~120 frames. Settle first

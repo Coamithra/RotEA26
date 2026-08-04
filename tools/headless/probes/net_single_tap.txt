@@ -59,6 +59,15 @@
 #     move. That is the respawn hazard the per-slot counter exists for, and nothing else can see
 #     it: a respawn's wrapped delta can land inside the catch-up bound and look like real fire.
 #
+# IT USED TO FLAKE, AND THE CAUSE WAS NOT IN THIS FILE (card 83054936). Leg 2 drives the real ship
+# through the real input path with DebugInput.Hold("Mouse1", ...), and eahl was reading the
+# DEVELOPER'S DESKTOP mouse -- KNI's SDL2 backend answers Mouse.GetState() out of
+# SDL_GetGlobalMouseState, buttons included, focus or no focus. A physically-held left button made
+# the release BETWEEN the two taps a no-op, so "two taps inside one cadence period" became one
+# continuous hold and reported `bullets=2 counter+2`. eahl now suppresses the physical mouse
+# (DebugInput.SuppressPhysicalMouse); nothing here had to change. If this leg ever flakes again,
+# check `[eahl] input physical mouse ...` on the failing run before suspecting the arithmetic.
+#
 # DESTRUCTIVE, so it gets a process to itself (the runner gives every probe one anyway): it pairs a
 # real host session onto the live level, seats a Remote puppet, fires real bullets into the world
 # and drives the LOCAL player's ship through scripted input. Teardown stops the session, sweeps

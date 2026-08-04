@@ -50,6 +50,9 @@ namespace EvilAliensWeb.Headless
         internal bool Present;
         internal bool Audio;
         internal bool FakeNoAudioDevice;
+        // Hand the game the DEVELOPER'S DESKTOP mouse, as every run did before card 83054936.
+        // Off by default -- see HeadlessHost.Boot and DebugInput.SuppressPhysicalMouse.
+        internal bool RealMouse;
     }
 
     internal static class Program
@@ -421,6 +424,7 @@ namespace EvilAliensWeb.Headless
                     case "--present": opt.Present = true; break;
                     case "--audio": opt.Audio = true; break;
                     case "--fake-no-audio-device": opt.FakeNoAudioDevice = true; break;
+                    case "--real-mouse": opt.RealMouse = true; break;
                     case "--help":
                     case "-h":
                         return false;
@@ -508,6 +512,11 @@ OPTIONS
                     make the audio device genuinely fail to open (an alsoft.ini naming a
                     backend that does not exist), so the no-sound-card path can be tested
                     on a box that has one. The run continues, deaf, and says so.
+  --real-mouse      let the game read the DESKTOP mouse. By default it cannot: KNI's SDL2
+                    backend answers Mouse.GetState() from SDL_GetGlobalMouseState, so a
+                    headless run otherwise samples your real pointer AND your real buttons,
+                    focus or no focus -- which silently flaked the probe suite (card
+                    83054936). This restores that, and is the negative control for it.
   --software        rasterize on the CPU via Mesa llvmpipe, for machines with no GPU
   --mesa <dll>      path to Mesa's opengl32.dll (implies --software)
   --jscalls         dump which browser (ea*) calls the game made

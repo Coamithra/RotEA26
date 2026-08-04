@@ -194,7 +194,12 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   way to reach `SubMenuOnlineGames.EnsureArt`'s no-art branch -- otherwise reachable only from a
   real stranger's build off the wire (card 0d166364). Kept apart because those two rows draw
   Mission 1's art under the generic "Mission" title and would be noise in an appearance shot;
-  a value that is neither is reported and treated as bare. `?netjip` pairs with `?level=<Name>`
+  a value that is neither is reported and treated as bare. **`?gamebrowser=thumbs`** (card
+  e7404647) instead gives two of the four entries a synthetic ROOM THUMBNAIL, so one shot shows
+  both halves of the carousel's rule -- prefer the host's live picture, fall back to stock art --
+  which no other offline route reaches. Console: `eaGameBrowserShots()` reads which rows drew
+  which (a failed thumbnail and an absent one look identical), `eaRoomShot()` captures this frame
+  through the real server-pull path. `?netjip` pairs with `?level=<Name>`
   so a debug-booted host still LISTS its game for the two-window join-in-progress test.
 - **Host kick / block** (card 0b8a300b): `?netkickshot` (pair with `?level=<Name>`) parks the
   host's remote-pause kick menu over a live level with no peer, for a screenshot;

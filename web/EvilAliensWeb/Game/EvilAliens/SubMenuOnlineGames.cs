@@ -30,6 +30,13 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 
 	private Texture2D fallbackArt;
 
+	// Card e7404647: the live room thumbnails, uploaded from the RGBA NetGameBrowser holds and
+	// keyed by room code. `revision` is the store's own counter for those pixels, so a refreshed
+	// thumbnail re-uploads and an unchanged one does not -- comparing the buffers themselves
+	// would mean a 120 KB scan per entry per frame.
+	private readonly Dictionary<string, (Texture2D tex, int revision)> thumbTextures
+		= new Dictionary<string, (Texture2D, int)>();
+
 	// Levels seen in a listing that had no bundled art, recorded by EnsureArt as it resolves
 	// them and reported by RefreshGames. Deliberately NOT re-derived at the report site: that
 	// would be a second copy of the same test, and reverting EnsureArt's guard would then leave
@@ -188,14 +195,74 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 		artCache[g.Level] = t ?? fallbackArt;
 	}
 
+	// Card e7404647: a LIVE picture of the host's game wins over the stock level art whenever
+	// one exists -- that is the whole point of the feature. Everything else (no thumbnail yet,
+	// an old server that serves none, a stale one, a level we have no art for) falls through to
+	// the unchanged EnsureArt path from card 0d166364, so the fallback chain is
+	// thumbnail -> level art -> default shot and every link is reachable.
 	private Texture2D ArtFor(NetGameBrowser.GameEntry g)
 	{
+		Texture2D live = ThumbnailFor(g);
+		if (live != null)
+		{
+			return live;
+		}
 		if (artCache.TryGetValue(g.Level, out Texture2D t))
 		{
 			return t;
 		}
 		EnsureArt(g);
 		return artCache[g.Level];
+	}
+
+	// Upload (or re-upload) this room's thumbnail, or null if it has none. GPU work only happens
+	// when the store's revision moves, i.e. once per pulled frame per room.
+	private Texture2D ThumbnailFor(NetGameBrowser.GameEntry g)
+	{
+		if (!NetGameBrowser.TryGetThumbnail(g.Code, out NetGameBrowser.Thumbnail thumb))
+		{
+			DisposeThumbnail(g.Code);
+			return null;
+		}
+		if (thumbTextures.TryGetValue(g.Code, out (Texture2D tex, int revision) held)
+			&& held.revision == thumb.Revision)
+		{
+			return held.tex;
+		}
+		DisposeThumbnail(g.Code);
+		try
+		{
+			Texture2D tex = new Texture2D(base.GraphicsDevice, thumb.Width, thumb.Height);
+			tex.SetData(thumb.Rgba);
+			thumbTextures[g.Code] = (tex, thumb.Revision);
+			return tex;
+		}
+		catch (System.Exception)
+		{
+			// A thumbnail is a nicety; a texture we cannot create just means stock art.
+			return null;
+		}
+	}
+
+	private void DisposeThumbnail(string code)
+	{
+		if (thumbTextures.TryGetValue(code, out (Texture2D tex, int revision) held))
+		{
+			thumbTextures.Remove(code);
+			((GraphicsResource)held.tex)?.Dispose();
+		}
+	}
+
+	// Every thumbnail is this menu's own upload, so it dies with the menu -- the RGBA behind it
+	// lives in NetGameBrowser and is dropped there when browsing stops.
+	protected override void UnloadContent()
+	{
+		foreach ((Texture2D tex, int revision) held in thumbTextures.Values)
+		{
+			((GraphicsResource)held.tex)?.Dispose();
+		}
+		thumbTextures.Clear();
+		base.UnloadContent();
 	}
 
 	// How a listed game's level reads in the diagnostic line: its enum NAME when this build

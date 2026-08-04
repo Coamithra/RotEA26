@@ -11,6 +11,14 @@ third kind of socket -- a *browser* -- can list build-compatible open
 rooms and PING each host through the relay to measure a real RTT.
 Listing never constructs a game session; it is metadata on the same
 room object the relay already owns.
+
+Card e7404647 (room thumbnails) adds one more piece of that metadata: a
+small JPEG of the host's game in progress, so the browse carousel shows
+what a room actually looks like right now instead of stock level art.
+THE SERVER OWNS THE SCHEDULE -- clients never upload unsolicited, they
+only answer a pull -- and the schedule is a GLOBAL budget (one pull per
+second across ALL rooms, round-robin), so the cost of more rooms is
+staleness, never load. Shots live in memory on the Room and die with it.
 """
 
 import asyncio
@@ -38,6 +46,28 @@ RELAY_TYPES = {"sdp", "ice"}
 PING_RATE_WINDOW = 10.0
 PING_RATE_MAX = 1200
 
+# ---- room thumbnails (card e7404647) ---------------------------------------
+# The GLOBAL pull budget: one room per tick, so the whole server costs one
+# thumbnail per second no matter how many games are open. At <=15 listed rooms
+# that is the ~15 s per-room refresh the card asks for; beyond that the per-room
+# interval stretches on its own (30 rooms -> ~30 s), which is the intended
+# degradation. Never scale this with the room count.
+SHOT_PULL_INTERVAL_SECONDS = 1.0
+# A 200x150 quality-60 JPEG is ~10-25 KB; base64 inflates it by 4/3. This is the
+# ceiling for one stored shot (and so, at MAX_ROOMS, ~9.6 MB of worst-case
+# server memory). Over it, the frame is dropped rather than truncated.
+MAX_SHOT_BYTES = 48 * 1024
+# A shot older than this is not worth serving -- the room has almost certainly
+# moved on. Deliberately generous compared with the pull interval: under load
+# the rotation stretches, and a two-minute-old REAL picture still beats generic
+# stock art. The client applies the same bound (NetGameBrowser.StaleAfterSec).
+SHOT_MAX_AGE_SECONDS = 180.0
+# Thumbnails are far bigger than pings, so browser fetches get their own, much
+# tighter allowance: a carousel only fetches a code when its seq CHANGES, so a
+# well-behaved browser sends a handful per minute, not per refresh.
+SHOTGET_RATE_WINDOW = 10.0
+SHOTGET_RATE_MAX = 60
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("rotea.signal")
 
@@ -55,7 +85,8 @@ def _as_str(v) -> str:
 
 class Room:
     __slots__ = ("code", "host", "joiner", "created", "last_beat",
-                 "listed", "level", "difficulty", "players", "proto", "hash")
+                 "listed", "level", "difficulty", "players", "proto", "hash",
+                 "shots", "shot", "shot_at", "shot_seq", "last_pull_seq")
 
     def __init__(self, code: str, host: WebSocket):
         self.code = code
@@ -75,6 +106,40 @@ class Room:
         self.players = 1
         self.proto = ""
         self.hash = ""
+        # Thumbnail state (card e7404647). `shots` is the host's own declaration
+        # that it understands a pull -- an older client never sends it, and the
+        # puller skips those rooms, because that client's signaling layer would
+        # answer an unknown {"t":"shot"} with nothing and take our `bad` reply as
+        # a fatal listing error. So this flag IS the capability negotiation, and
+        # it is what makes either deploy order (server first or game first) safe.
+        self.shots = False
+        self.shot = ""            # base64 JPEG as the host sent it, "" = none
+        self.shot_at = 0.0        # monotonic stamp of the stored shot
+        self.shot_seq = 0         # bumped per stored shot; 0 = never got one
+        # Where this room sits in the rotation: the value of `pull_counter` when
+        # it was last PULLED, not when it last answered -- which is what keeps a
+        # wedged host from starving anyone. It spends its own turn and the
+        # oldest-first pick moves straight on.
+        #
+        # A COUNTER, not a clock, on purpose. Two pulls inside one clock tick
+        # would tie (time.monotonic() is a 15.6 ms GetTickCount64 on Windows),
+        # and min() breaks a tie by insertion order -- i.e. by re-picking the
+        # room it just pulled. At one pull a second that would never bite in
+        # production, but "the rotation is exactly round-robin" then holds only
+        # by luck of the platform's clock, and could not be asserted at all.
+        self.last_pull_seq = 0
+
+    def shot_age(self) -> float:
+        return time.monotonic() - self.shot_at
+
+    def shot_fresh(self) -> bool:
+        return self.shot_seq > 0 and self.shot_age() <= SHOT_MAX_AGE_SECONDS
+
+    def drop_shot(self) -> None:
+        """Forget the stored thumbnail (unlisted, or aged out)."""
+        self.shot = ""
+        self.shot_at = 0.0
+        self.shot_seq = 0
 
     def expired(self) -> bool:
         return time.monotonic() - self.last_beat > ROOM_TTL_SECONDS
@@ -94,6 +159,14 @@ class Room:
             "difficulty": self.difficulty,
             "players": self.players,
             "ageSec": int(self.age_seconds()),
+            # Card e7404647: the thumbnail is NOT inlined here -- a browse
+            # refresh every 4 s carrying every room's JPEG would be exactly the
+            # load this design exists to avoid. The browser sees only the
+            # sequence number and fetches (shotget) the codes whose seq it does
+            # not already hold, so an unchanged thumbnail costs nothing.
+            # seq 0 = this room has no servable shot -> draw the stock art.
+            "shot": self.shot_seq if self.shot_fresh() else 0,
+            "shotAge": int(self.shot_age()) if self.shot_fresh() else 0,
         }
 
     def members(self) -> list[WebSocket]:
@@ -114,6 +187,12 @@ rooms: dict[str, Room] = {}
 # told which browser to route a pong back to without learning anything about it
 # (a random token, not a counter, so it leaks neither identity nor a count).
 browsers: dict[int, WebSocket] = {}
+
+# Monotone tick of the thumbnail pull rotation (card e7404647). A fresh room's
+# 0 sorts ahead of every already-pulled room, so a game that has just been
+# listed is asked first -- which is what the player expects: their room appears
+# in the carousel with a real picture rather than stock art.
+pull_counter = 0
 
 
 def _new_browser_id() -> int:
@@ -151,6 +230,40 @@ async def _expire_room(room: Room) -> None:
         await _close(ws)
 
 
+def _pull_candidates() -> list[Room]:
+    """Listed, joinable, thumbnail-capable rooms -- the pull rotation."""
+    return [r for r in rooms.values() if r.listable() and r.shots and not r.expired()]
+
+
+async def pull_once() -> Room | None:
+    """Ask ONE host for a fresh thumbnail; return the room picked, if any.
+
+    Round-robin by construction: always the candidate whose last pull is
+    oldest. Because `last_shot_pull` is stamped HERE rather than when an answer
+    lands, a host that never answers simply forfeits its own turn -- it can
+    never hold the rotation up for anyone else. Split out of the loop below so
+    test_signal.py can drive a tick directly instead of sleeping for one.
+    """
+    global pull_counter
+    candidates = _pull_candidates()
+    if not candidates:
+        return None
+    room = min(candidates, key=lambda r: r.last_pull_seq)
+    pull_counter += 1
+    room.last_pull_seq = pull_counter
+    await _send_json(room.host, {"t": "shot"})
+    return room
+
+
+async def _shot_puller() -> None:
+    while True:
+        await asyncio.sleep(SHOT_PULL_INTERVAL_SECONDS)
+        try:
+            await pull_once()
+        except Exception:  # a wedged socket must never kill the schedule
+            log.exception("shot pull failed")
+
+
 async def _sweeper() -> None:
     while True:
         await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
@@ -162,13 +275,15 @@ async def _sweeper() -> None:
 
 @contextlib.asynccontextmanager
 async def _lifespan(app: FastAPI):
-    task = asyncio.create_task(_sweeper())
+    tasks = [asyncio.create_task(_sweeper()), asyncio.create_task(_shot_puller())]
     try:
         yield
     finally:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
 
 app = FastAPI(lifespan=_lifespan)
@@ -177,7 +292,9 @@ app = FastAPI(lifespan=_lifespan)
 @app.get("/health")
 async def health():
     listed = sum(1 for r in rooms.values() if r.listable())
-    return {"ok": True, "rooms": len(rooms), "listed": listed, "browsers": len(browsers)}
+    shots = [r for r in rooms.values() if r.shot_fresh()]
+    return {"ok": True, "rooms": len(rooms), "listed": listed, "browsers": len(browsers),
+            "shots": len(shots), "shotBytes": sum(len(r.shot) for r in shots)}
 
 
 @app.websocket("/ws")
@@ -186,18 +303,22 @@ async def ws_endpoint(ws: WebSocket):
     room: Room | None = None       # the room this socket hosts/joined, if any
     browser_id: int | None = None  # set once this socket sends {t:browse}
     ping_times: list[float] = []    # per-socket ping timestamps (rate limiting)
+    shotget_times: list[float] = []  # ditto for thumbnail fetches (card e7404647)
 
     async def bad() -> None:
         await _send_json(ws, {"t": "error", "reason": "bad"})
 
-    def ping_allowed() -> bool:
+    def rate_allowed(stamps: list[float], window: float, cap: int) -> bool:
         now = time.monotonic()
         # Drop stamps outside the window in place, then admit if under the cap.
-        ping_times[:] = [t for t in ping_times if now - t < PING_RATE_WINDOW]
-        if len(ping_times) >= PING_RATE_MAX:
+        stamps[:] = [t for t in stamps if now - t < window]
+        if len(stamps) >= cap:
             return False
-        ping_times.append(now)
+        stamps.append(now)
         return True
+
+    def ping_allowed() -> bool:
+        return rate_allowed(ping_times, PING_RATE_WINDOW, PING_RATE_MAX)
 
     try:
         while True:
@@ -262,6 +383,9 @@ async def ws_endpoint(ws: WebSocket):
                     room.players = _as_int(msg.get("players"), 1)
                     room.proto = _as_str(msg.get("proto"))
                     room.hash = _as_str(msg.get("hash"))
+                    # Opt-in, and only ever set here: a host that stops claiming
+                    # the capability on a later list stops being pulled.
+                    room.shots = bool(msg.get("shots"))
 
             elif t == "unlist":
                 # Hide from browse; the room stays joinable by its code.
@@ -269,6 +393,10 @@ async def ws_endpoint(ws: WebSocket):
                     await bad()
                 else:
                     room.listed = False
+                    # The picture outlives its listing nowhere: an unlisted room
+                    # is one nobody can see, so keeping its thumbnail would only
+                    # mean serving a stale frame if it ever re-lists.
+                    room.drop_shot()
 
             elif t == "beat":
                 if room is None or ws is not room.host:
@@ -308,6 +436,47 @@ async def ws_endpoint(ws: WebSocket):
                     target = rooms.get(code)
                     if target is not None and not target.expired() and target.host is not None:
                         await _send_json(target.host, {"t": "ping", "id": msg.get("id"), "ref": browser_id})
+
+            elif t == "shot":
+                # Card e7404647. From a HOST this is the answer to a pull; from
+                # a browser it is nothing (a browser fetches with `shotget`), so
+                # the direction is never ambiguous. Unsolicited answers are
+                # accepted rather than policed -- the pull IS the rate limiter,
+                # and a client sending more just overwrites its own one slot.
+                if room is None or ws is not room.host:
+                    await bad()
+                else:
+                    data = _as_str(msg.get("data"))
+                    if not data or len(data) > MAX_SHOT_BYTES:
+                        # Dropped whole, never truncated: half a JPEG is not a
+                        # smaller JPEG, it is a broken one. Silent -- an `error`
+                        # reply is fatal to the host's listing (see fail() in
+                        # webrtc.js) and an oversized frame is not worth that.
+                        log.info("room %s shot rejected (%d bytes)", room.code, len(data))
+                    else:
+                        room.shot = data
+                        room.shot_at = time.monotonic()
+                        room.shot_seq += 1
+
+            elif t == "shotget":
+                # browser -> the stored thumbnail for one room code. Only ever
+                # sent for a code whose listing entry carried a non-zero `shot`,
+                # which is what keeps a new client safe against an old server:
+                # that server never emits the field, so this is never sent.
+                if browser_id is None:
+                    await bad()  # must browse before fetching
+                elif not rate_allowed(shotget_times, SHOTGET_RATE_WINDOW, SHOTGET_RATE_MAX):
+                    pass  # silently drop; the carousel keeps the art it has
+                else:
+                    code = str(msg.get("code", "")).strip().upper()
+                    target = rooms.get(code)
+                    if target is not None and target.shot_fresh():
+                        await _send_json(ws, {"t": "shot", "code": code,
+                                              "seq": target.shot_seq, "data": target.shot})
+                    else:
+                        # An explicit empty answer, so the client can retire an
+                        # in-flight request instead of asking again forever.
+                        await _send_json(ws, {"t": "shot", "code": code, "seq": 0, "data": ""})
 
             elif t == "pong":
                 # host -> server -> the browser identified by `ref`.

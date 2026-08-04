@@ -9,6 +9,13 @@ Covers the 11.4 relay protocol AND the card-2001fbd8 registry: list/
 browse/build-filter/unlist/full->delist/ping-relay over the socket, plus
 deterministic unit checks of the TTL-from-last_beat + listable() logic
 (no 600s waits -- the Room object is exercised directly).
+
+Card e7404647 (room thumbnails) adds the pull schedule. Its cases run in
+two halves: ONE case proves the background loop pulls unattended (with
+the interval shortened at startup), and then the loop is parked at an
+hour so every later case can drive `main.pull_once()` by hand and assert
+an exact rotation. Every room used after that point is created after the
+parking, so no stray automatic pull can reach it.
 """
 
 import asyncio
@@ -22,6 +29,9 @@ import websockets
 import main
 
 TIMEOUT = 3.0
+# What the pull loop runs at while case 17 proves it works unattended. Parked at
+# an hour immediately afterwards -- see the module docstring.
+SHORT_PULL_INTERVAL = 0.2
 results: list[tuple[str, bool, str]] = []
 
 
@@ -46,6 +56,32 @@ async def host_room(url):
     msg = await recv_json(ws)
     assert msg.get("t") == "code", msg
     return ws, msg["code"]
+
+
+async def barrier(ws) -> None:
+    """Block until the server has consumed everything sent on `ws` so far.
+
+    `list` draws no reply, so a test that lists and then calls pull_once()
+    directly can run before the server has read the frame at all -- which does
+    not fail loudly, it makes the assertion VACUOUS (the room is simply not a
+    candidate yet). A junk frame does draw a reply, and frames on one socket are
+    served in order, so its arrival proves the `list` before it was applied.
+    """
+    await send(ws, {"t": "__barrier__"})
+    msg = await recv_json(ws)
+    assert msg == {"t": "error", "reason": "bad"}, msg
+
+
+async def listed_host(url, shots: bool, proto="4", hash="h1"):
+    """Host a room and list it, optionally declaring thumbnail support."""
+    ws, code = await host_room(url)
+    frame = {"t": "list", "level": 1, "difficulty": 0, "players": 1,
+             "proto": proto, "hash": hash}
+    if shots:
+        frame["shots"] = 1
+    await send(ws, frame)
+    await barrier(ws)
+    return ws, code
 
 
 async def browse(url, proto="4", hash="h1"):
@@ -80,6 +116,24 @@ def unit_tests() -> None:
     record("listed + empty slot is listable", l.listable())
     l.joiner = object()
     record("full room is not listable", not l.listable())
+
+    # ---- card e7404647: thumbnail freshness on the Room object --------------
+    s = main.Room("DDDDD", None)
+    record("a room with no shot is not fresh", not s.shot_fresh())
+    s.shot = "x"
+    s.shot_seq = 1
+    s.shot_at = time.monotonic()
+    record("a just-stored shot is fresh", s.shot_fresh())
+    s.shot_at = time.monotonic() - (main.SHOT_MAX_AGE_SECONDS + 1)
+    record("a shot past SHOT_MAX_AGE_SECONDS is stale", not s.shot_fresh())
+    # A stale shot must also stop being ADVERTISED, or the client fetches a
+    # thumbnail the server will refuse to serve and shows nothing at all.
+    s.listed = True
+    record("a stale shot advertises as seq 0", s.listing_entry()["shot"] == 0)
+    s.shot_at = time.monotonic()
+    record("a fresh shot advertises its seq", s.listing_entry()["shot"] == 1)
+    s.drop_shot()
+    record("drop_shot clears the stored bytes", s.shot == "" and s.shot_seq == 0)
 
 
 async def run_tests(url: str) -> None:
@@ -317,9 +371,130 @@ async def run_tests(url: str) -> None:
     except Exception as e:
         record("pongs route to the browser that pinged", False, repr(e))
 
+    # ---- card e7404647: server-pulled room thumbnails -----------------------
+
+    # 17. the background schedule pulls with nobody driving it. Runs FIRST, while
+    #     SHOT_PULL_INTERVAL_SECONDS is still the short test value; everything
+    #     below then parks the loop and drives pull_once() by hand.
+    live_host = None
+    try:
+        # Listed WITHOUT the barrier helper: an automatic pull may land between
+        # the list and any barrier reply, and the arriving pull is itself the
+        # proof that the list was applied.
+        live_host, live_code = await host_room(url)
+        await send(live_host, {"t": "list", "level": 1, "difficulty": 0,
+                               "players": 1, "proto": "4", "hash": "h1", "shots": 1})
+        msg = await recv_json(live_host)
+        record("the pull loop asks a listed host unattended",
+               msg == {"t": "shot"}, repr(msg))
+    except Exception as e:
+        record("the pull loop asks a listed host unattended", False, repr(e))
+    # Park the automatic loop for the rest of the run, then let it reach the long
+    # sleep. Every room below is created afterwards, so no stray pull can reach it.
+    main.SHOT_PULL_INTERVAL_SECONDS = 3600
+    await asyncio.sleep(SHORT_PULL_INTERVAL * 3)
+    if live_host is not None:
+        await live_host.close()
+
+    # 18. a host that does not declare `shots` is never pulled
+    try:
+        quiet, _ = await listed_host(url, shots=False)
+        picked = await main.pull_once()
+        record("a host that does not declare shots is never pulled",
+               picked is None, f"picked={picked and picked.code}")
+        await quiet.close()
+    except Exception as e:
+        record("a host that does not declare shots is never pulled", False, repr(e))
+
+    # 19. THE ROTATION IS NOT STARVED BY A WEDGED HOST. Neither of these two ever
+    #     answers; the pull is stamped when it is SENT, so each simply forfeits
+    #     its own turn and the budget keeps moving.
+    try:
+        ha, ca = await listed_host(url, shots=True)
+        hb, cb = await listed_host(url, shots=True)
+        order = []
+        for _ in range(4):
+            picked = await main.pull_once()
+            order.append(picked.code if picked else None)
+        alternates = (order[0] != order[1] and order[1] != order[2]
+                      and order[2] != order[3] and set(order) == {ca, cb})
+        record("a non-answering host does not starve the rotation", alternates, repr(order))
+        await ha.close()
+        await hb.close()
+    except Exception as e:
+        record("a non-answering host does not starve the rotation", False, repr(e))
+
+    # 20. answer a pull -> the shot is advertised and servable
+    try:
+        host, code = await listed_host(url, shots=True)
+        await main.pull_once()
+        await recv_json(host)  # the {"t":"shot"} pull
+        await send(host, {"t": "shot", "data": "SHOT-ONE"})
+        bws, rooms = await browse(url, proto="4", hash="h1")
+        entry = next((r for r in rooms if r.get("code") == code), None)
+        await send(bws, {"t": "shotget", "code": code})
+        got = await recv_json(bws)
+        ok = (entry is not None and entry.get("shot") == 1 and "shotAge" in entry
+              and got.get("t") == "shot" and got.get("code") == code
+              and got.get("seq") == 1 and got.get("data") == "SHOT-ONE")
+        record("an answered pull is advertised and served to a browser", ok,
+               f"entry={entry} got={got}")
+        await bws.close()
+    except Exception as e:
+        record("an answered pull is advertised and served to a browser", False, repr(e))
+        return
+
+    # 21. an oversized frame is dropped WHOLE -- the previous good shot survives
+    try:
+        await send(host, {"t": "shot", "data": "X" * (main.MAX_SHOT_BYTES + 1)})
+        bws, rooms = await browse(url, proto="4", hash="h1")
+        await send(bws, {"t": "shotget", "code": code})
+        got = await recv_json(bws)
+        record("an oversized shot is dropped and the last good one kept",
+               got.get("seq") == 1 and got.get("data") == "SHOT-ONE", repr(got.get("seq")))
+        await bws.close()
+    except Exception as e:
+        record("an oversized shot is dropped and the last good one kept", False, repr(e))
+
+    # 22. unlist drops the stored thumbnail
+    try:
+        await send(host, {"t": "unlist"})
+        bws, _ = await browse(url, proto="4", hash="h1")
+        await send(bws, {"t": "shotget", "code": code})
+        got = await recv_json(bws)
+        record("unlist drops the stored thumbnail",
+               got.get("seq") == 0 and got.get("data") == "", repr(got))
+        await bws.close()
+        await host.close()
+    except Exception as e:
+        record("unlist drops the stored thumbnail", False, repr(e))
+
+    # 23. role enforcement + the empty answer for a code with nothing stored
+    try:
+        stray = await websockets.connect(url)
+        await send(stray, {"t": "shot", "data": "nope"})
+        r1 = await recv_json(stray)
+        await send(stray, {"t": "shotget", "code": "ZZZZZ"})
+        r2 = await recv_json(stray)
+        await stray.close()
+        bws, _ = await browse(url, proto="4", hash="h1")
+        await send(bws, {"t": "shotget", "code": "ZZZZZ"})
+        r3 = await recv_json(bws)
+        await bws.close()
+        bad = {"t": "error", "reason": "bad"}
+        record("shot needs a host, shotget needs a browse, unknown code -> empty",
+               r1 == bad and r2 == bad and r3.get("seq") == 0 and r3.get("data") == "",
+               f"r1={r1} r2={r2} r3={r3}")
+    except Exception as e:
+        record("shot needs a host, shotget needs a browse, unknown code -> empty",
+               False, repr(e))
+
 
 async def main_async() -> int:
     unit_tests()
+    # Shorten the pull schedule BEFORE the app starts, so case 17 can watch the
+    # real background loop do its job without a one-second wait per assertion.
+    main.SHOT_PULL_INTERVAL_SECONDS = SHORT_PULL_INTERVAL
     config = uvicorn.Config("main:app", host="127.0.0.1", port=0, log_level="warning")
     server = uvicorn.Server(config)
     server_task = asyncio.create_task(server.serve())

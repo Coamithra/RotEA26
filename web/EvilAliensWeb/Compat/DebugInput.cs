@@ -879,6 +879,39 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetComboTest.Run();
 		}
 
+		// Room thumbnails (card e7404647): capture THIS frame through the real pull path and
+		// report it as data -- `eval RoomShot` under eahl, eaRoomShot() in the browser. The
+		// capture has to happen inside a Draw, so this only ARMS it; the "[roomshot] probe"
+		// line lands on the next frame. Read `colors=` rather than looking at a screenshot: a
+		// broken capture and a dark starfield are the same picture, and only the distinct-colour
+		// count tells them apart.
+		[JSInvokable("debugRoomShot")]
+		public static string RoomShot()
+		{
+			EvilAliensWeb.Compat.Net.NetRoomShot.ProbeCapture("");
+			return "[roomshot] armed -- see the [roomshot] probe line on the next frame";
+		}
+
+		// The same capture, additionally installed as `code`'s room thumbnail (eaRoomShot.inject).
+		// Pairs with ?gamebrowser to put a REAL game frame in the carousel with no server: that
+		// rig runs at the menu, where there is no level to capture.
+		[JSInvokable("debugRoomShotInject")]
+		public static string RoomShotInject(string code)
+		{
+			EvilAliensWeb.Compat.Net.NetRoomShot.ProbeCapture(code);
+			return "[roomshot] armed for " + code;
+		}
+
+		// Which game-browser rows are drawing a live room thumbnail and which fell back to stock
+		// level art (eaGameBrowserShots() / `eval GameBrowserShots`, card e7404647). A screenshot
+		// cannot answer this -- a row whose thumbnail silently failed to install draws exactly
+		// what a row that never had one draws.
+		[JSInvokable("debugGameBrowserShots")]
+		public static string GameBrowserShots()
+		{
+			return EvilAliensWeb.Compat.Net.NetGameBrowser.ThumbReport();
+		}
+
 		// JS bridge for the co-op kick/block rules (eaKickTest in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugKickTest'). Runs
 		// Compat/Net/NetKickTest.Run() and returns the PASS/FAIL report.

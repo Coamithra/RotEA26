@@ -1258,6 +1258,11 @@ public class Game1 : Game
 			// (open/update/close the listing, drain its phase callbacks, start a session on a
 			// join-in-progress pairing). A plain boot has no GameScene up, so it early-returns.
 			EvilAliensWeb.Compat.Net.NetListing.Tick((Game)(object)this);
+			// Card e7404647: subscribe the room-thumbnail capture to the server's pull callback.
+			// It arms a post-draw capture when a pull lands and does nothing at all otherwise --
+			// a game that is not listed is never pulled, and one that never boots the net layer
+			// never even reaches this (the flag-free single-player invariant is unchanged).
+			EvilAliensWeb.Compat.Net.NetRoomShot.Tick();
 			FrameProfiler.End(FrameSection.UpdNet, profNet);
 			// AI telemetry (card f4d1721f): advance the run clock, latch level progress + verdict,
 			// print the periodic summary. A single branch when ?aibench is off.

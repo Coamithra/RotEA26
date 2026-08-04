@@ -11,11 +11,12 @@
 #            its count to the next skull out of the pool, whose volley then ended that many shots
 #            early. Measured before the fix: 42 of 194 volleys (21.6%) opened part-way through.
 #         2. A FADING SKULL DOES NOT SHOOT. The 2008 fire gate tested `fadeintimer.Active` and
-#            not the fade OUT, so a skull kept firing through its whole 800 ms dissolve and past
-#            it -- while `PlayerShip.CollidesWith` excludes a `Fading` skull, so it could be
-#            neither shot nor crashed into. Measured before the fix: 41 bullets from invisible
-#            sources, 6.1% of the level's skull bullets, including 7 volleys that STARTED after
-#            the skull was already invisible.
+#            not the fade OUT, so a skull kept firing through its whole 800 ms dissolve, by the
+#            end of which Draw has ramped its alpha to zero -- bullets from a source the player
+#            cannot SEE. (It is also un-rammable and invisible to the AI while fading, though
+#            still shootable: Bullet.CollidesWith lists the type unconditionally.) Measured
+#            before the fix: 41 such bullets, 6.1% of the level's skull bullets, including 7
+#            volleys that STARTED after the skull was already invisible.
 #
 # WHY THE REARM LINE CARRIES ASSERTION 1: a carried counter is NOT visible in the shot stream.
 # It makes a truncated volley look like the seamless continuation of the previous skull's, so
@@ -24,12 +25,11 @@
 # invariant is expressible on a single line: a fresh volley must open at fired=0.
 #
 # FAILURE MEANS:
-#   * `rearm fired=` non-zero    -> the per-life reset in EvilSkull.Initialize is gone or is
-#                                   running before base.Initialize. Volley length is random
-#                                   again.
+#   * `rearm fired=` non-zero    -> the per-life reset in EvilSkull.Initialize is gone. Volley
+#                                   length is random again.
 #   * `fade=out shot_fired=True` -> the fire gate is back on `fadeintimer.Active` instead of
 #                                   `Fading`. Bullets are coming out of something the player
-#                                   cannot see or answer.
+#                                   cannot see.
 #   * either `expect` missing    -> the run never reached a skull at all; the negatives above
 #                                   are vacuous and prove nothing. Check the level booted.
 #
@@ -64,4 +64,8 @@ expect-not \[skull\] tag=\d+ (normal|classic) rearm fired=[1-9]
 expect-not fade=out shot_fired=True
 
 # --- Neither fix may let a volley run PAST its cap; that was never broken and must stay so.
-expect-not shot=(1[0-9]|[1-9]\d\d)/
+# Two digits or more is the whole runaway range: the cap is (int)(4 * DifficultyModifier) and
+# the modifier ceiling is 2.4, so a legitimate shot index never reaches 10.
+expect-not shot=\d\d+/
+
+quit

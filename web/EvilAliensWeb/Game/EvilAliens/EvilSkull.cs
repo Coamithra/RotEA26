@@ -348,12 +348,13 @@ internal class EvilSkull : KillableAlien
 					}
 					// `Fading`, not `fadeintimer.Active` (card d8344c17). The 2008 gate covered the
 					// fade IN and not the fade OUT, so a skull kept shooting for the whole 800 ms
-					// dissolve and on past it -- while `PlayerShip.CollidesWith` excludes a `Fading`
-					// skull, so it could not be shot back at or even crashed into. Bullets streamed
-					// out of something the player could neither see nor answer, which reads as the
-					// nearest VISIBLE skull firing far more than it should. One predicate for both
-					// halves now, and it is the same one collision uses: if the player cannot touch
-					// it, it cannot touch the player.
+					// dissolve, by the end of which `Draw` has ramped its alpha to zero -- bullets
+					// streaming out of something the player cannot SEE, which reads as the nearest
+					// visible skull firing far more than it should. It is also intangible while
+					// fading (`PlayerShip.CollidesWith` and both AI predicates exclude a `Fading`
+					// skull) though still shootable, since `Bullet.CollidesWith` lists the type
+					// unconditionally -- so the player can neither ram it nor aim at it, but a
+					// stray shot does still kill it. One predicate covers both fade halves now.
 					if (!(flag | Fading))
 					{
 						EvilBullet evilBullet = EvilBullet.NewEvilBullet(collection, base.Game);
@@ -375,7 +376,7 @@ internal class EvilSkull : KillableAlien
 			}
 			if (shoottimer1.Finished)
 			{
-				ReportVolleyRearm(behaviour == EnemyBehaviour.classic ? "classic" : "normal");
+				ReportVolleyRearm("normal");
 				shoottimer2.Reset();
 				shoottimer2.Start();
 			}
@@ -406,7 +407,7 @@ internal class EvilSkull : KillableAlien
 			{
 				// Same fade gate as the normal branch above. A classic skull stops all three fade
 				// timers in Setup and so never fades, making this a no-op in shipped play -- it is
-				// here so the invariant ("a skull the player cannot hit does not shoot") holds for
+				// here so the invariant ("a skull the player cannot see does not shoot") holds for
 				// the type rather than for one of its two behaviours.
 				bool suppressed = true;
 				if (!Fading)
@@ -426,7 +427,7 @@ internal class EvilSkull : KillableAlien
 			}
 			if (shoottimer1.Finished)
 			{
-				ReportVolleyRearm(behaviour == EnemyBehaviour.classic ? "classic" : "normal");
+				ReportVolleyRearm("classic");
 				shoottimer2.Reset();
 				shoottimer2.Start();
 			}

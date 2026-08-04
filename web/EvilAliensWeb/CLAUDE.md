@@ -1441,11 +1441,18 @@ uses `Enabled=false`, not a pause layer -- so they still play here while a `shot
 
   | tier | volley at level start | volley at the ceiling (~6 min) |
   |---|---|---|
-  | Easy (adaptive) | 2 | **9** |
+  | Easy, STORY levels only | 2 | **9** |
+  | Easy, challenge levels | 1 | 2 |
   | Medium | 2 | 4 |
   | Hard | 3 | 6 |
   | Very_Hard | 4 | **8** |
   | Inzane | 4 | **9** |
+
+  **The two Easy rows differ because `ApplyDifficultyPolicy` is called by `Level1/2/3` ALONE.**
+  On a story level it seeds the modifier at Medium's 0.6 and sets `AdaptiveDifficulty`, which
+  raises the ceiling to Inzane*2 = 2.4; the nine challenge levels instead inherit
+  `GameScene.Initialize`'s `AdaptiveDifficulty = false`, so Easy there runs the bare
+  `4 * 0.35 = 1` up to `2 * 0.35` -> 2. So the headline 9 is a story-level number.
 
   **That ramp is 2008 behaviour and was DECLINED for change by the user on this card** -- it is
   the intended balance, so do not "fix" a 9-shot volley. It is also why a bug report about this
@@ -1460,11 +1467,13 @@ uses `Enabled=false`, not a pause layer -- so they still play here while a `shot
     volleys, 21.6%, opened part-way through) -- which is what made the length feel random. It is
     reset in `Initialize`, beside the `isdead`/`awarded`/`netTeleported` per-life block.
     Separately, the fire gate tested `fadeintimer.Active` and **not the fade OUT**, so a skull
-    shot through its whole 800 ms dissolve and past it while `PlayerShip.CollidesWith` excluded
-    it as `Fading` -- bullets from something that could be neither seen nor shot back at
-    (measured: 41 bullets, 6.1% of the level's skull bullets, including **7 volleys that started
-    after the skull was already invisible**). Both branches now gate on **`Fading`**, the same
-    predicate collision uses: if the player cannot touch it, it cannot touch the player.
+    shot through its whole 800 ms dissolve, by the end of which `Draw` has ramped its alpha to
+    zero -- bullets from a source the player cannot SEE (measured: 41 bullets, 6.1% of the
+    level's skull bullets, including **7 volleys that started after the skull was already
+    invisible**). Both branches now gate on **`Fading`**. Note what that predicate does and does
+    not cover: `PlayerShip.CollidesWith` and both AI predicates exclude a `Fading` skull, so it
+    can be neither rammed nor aimed at by the bot, but **it is still shootable** --
+    `Bullet.CollidesWith` lists the type unconditionally.
   - **Fixing the counter RAISES the average bullet count** (it stops volleys being truncated) --
     intended: the complaint was unpredictability, not volume.
   - **Rig: `?skullvolley`** prints a `[skull]` line per beat (`shot=i/cap`, `fade=`,

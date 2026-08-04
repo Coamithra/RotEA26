@@ -1858,28 +1858,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				{
 					continue;
 				}
-				float dist;
-				if (baddy.GetCollisionType() is CollisionBox)
-				{
-					Vector2 toBaddy = base.Position - baddy.Position;
-					dist = (toBaddy).Length() - ((CollisionBox)baddy.GetCollisionType()).Width / 2f * (float)Math.Sqrt(2.0);
-				}
-				else if (baddy.GetCollisionType() is CollisionMultibox)
-				{
-					Vector2 toBaddy = base.Position - baddy.Position;
-					dist = (toBaddy).Length() - ((CollisionMultibox)baddy.GetCollisionType()).Items[0].Width / 2f * (float)Math.Sqrt(2.0);
-				}
-				else if (baddy.GetCollisionType() is CollisionSimpleCircle)
-				{
-					float radius = ((CollisionSimpleCircle)baddy.GetCollisionType()).Radius;
-					Vector2 toBaddy = base.Position - baddy.Position;
-					dist = MathHelper.Clamp((toBaddy).Length() - radius, 0f, 1000f);
-				}
-				else
-				{
-					Vector2 toBaddy = base.Position - baddy.Position;
-					dist = (toBaddy).Length();
-				}
+				float dist = ThreatEdgeDistance(base.Position, baddy);
 				// Personal-space field, sized to the THREAT (card f4d1721f). The 2008 code gave
 				// everything the same flat 150px, which is nothing to something the size of the
 				// spider boss -- by the time it pushed at all the ship was already inside the
@@ -2615,6 +2594,43 @@ public class PlayerShip : AlienDrawableGameComponent
 				?? EvilAliensWeb.Compat.DebugFlags.AiClassicFieldCurve ?? false;
 		}
 		return ClassicFieldCurve;
+	}
+
+	// Centre-to-EDGE offset of a threat's hull -- what `dist` subtracts from a centre distance to
+	// get the EDGE distance every field here is measured in. Extracted from the four-branch switch
+	// that used to sit inline in DoAIMove (card b56633fb) because the boss-approach anchor has to
+	// convert gun RANGE (a centre distance, from DoAIFire) into that same edge space: two copies of
+	// this switch would let the attractor and the repellent it is solved against drift apart, which
+	// is the one way the crossing could silently stop being at firing range.
+	// Not `ThreatRadius`: that is the half-extent the FIELD SIZE scales with, this is the sqrt(2)
+	// corner-inclusive offset the DISTANCE is measured from. They differ by that factor on a box.
+	private static float ThreatBodyTerm(AlienDrawableGameComponent baddy)
+	{
+		ICollisionType type = baddy.GetCollisionType();
+		if (type is CollisionBox)
+		{
+			return ((CollisionBox)type).Width / 2f * (float)Math.Sqrt(2.0);
+		}
+		if (type is CollisionMultibox)
+		{
+			return ((CollisionMultibox)type).Items[0].Width / 2f * (float)Math.Sqrt(2.0);
+		}
+		if (type is CollisionSimpleCircle)
+		{
+			return ((CollisionSimpleCircle)type).Radius;
+		}
+		return 0f;
+	}
+
+	// Edge distance from a point to a threat. The circle branch CLAMPS and the others do not --
+	// that asymmetry is inherited verbatim from the 2008 code and is preserved on purpose; a box's
+	// edge distance goes negative once the ship is inside the corner radius, which the (1-t)^p
+	// falloff already saturates at full strength.
+	private static float ThreatEdgeDistance(Vector2 from, AlienDrawableGameComponent baddy)
+	{
+		Vector2 toBaddy = from - baddy.Position;
+		float dist = (toBaddy).Length() - ThreatBodyTerm(baddy);
+		return (baddy.GetCollisionType() is CollisionSimpleCircle) ? MathHelper.Clamp(dist, 0f, 1000f) : dist;
 	}
 
 	// Rough half-extent of a threat, so a boss the size of a quarter of the screen is given more

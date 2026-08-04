@@ -5,7 +5,12 @@ Runs one or more ARMS (a set of ?ai* overrides) over one or more RIGS (a level +
 its cap), scores every run with AiBench's machine-readable row, and prints a
 table per rig with the arms side by side.
 
-    python tools/sim/ai_sweep.py --rig spacedodge --arm shipped= --arm og=aifieldpx=150&aifieldsize=0
+    python tools/sim/ai_sweep.py --rig spacedodge \
+        --arm "shipped=" --arm "og=aifieldpx=150&aifieldsize=0"
+
+QUOTE EVERY ARM. An unquoted `&` backgrounds the command at that point in any POSIX shell, so
+the arm silently loses its second override and the sweep measures a half-applied configuration
+that still prints a clean-looking table.
 
 THE PROTOCOL THIS ENFORCES (cards ada9e839 / c1d783ad -- read before quoting a number):
 
@@ -83,6 +88,14 @@ def run_one(rig_flags, seconds, arm_query, seed):
         if "=" in pair:
             k, v = pair.split("=", 1)
             row[k] = v
+    # AiBench.Row() returns EARLY when no ship ever steered (`noship=1`, and no `deaths`) -- the
+    # TeamChallenge force-pause shape. The regex above still matches that, so without this the
+    # whole sweep runs to completion and then dies on a bare KeyError in the report, discarding
+    # every run and naming neither the arm nor the rig that produced it.
+    if "deaths" not in row:
+        raise RuntimeError("AiBench row has no `deaths` (noship=%s) from: %s -- no AI ship ever "
+                           "steered, so this rig/arm combination scores nothing"
+                           % (row.get("noship", "?"), query))
     return row
 
 

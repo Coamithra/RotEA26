@@ -895,13 +895,16 @@ level-select screenshot cropped from the meme splash). Don't hand-edit.
   `distance / scroll`, so averaging a sweep silently weights it onto the slowest rung.
 - **`tools/sim/ai_sweep.py`** (card 05a2b818): the paired-seed AI bench sweep driver — `--rig` x
   `--arm` x `--seeds` through `eahl`, scored off `AiBench`'s machine-readable row. Use it instead
-  of hand-rolling a loop, because it enforces the four measurement rules that a hand-rolled loop
-  silently breaks (web CLAUDE.md, the AI section's measurement bullet):
+  of hand-rolling a loop, because it applies the four measurement rules that a hand-rolled loop
+  silently breaks (web CLAUDE.md, the AI section's measurement bullet) — three enforced, the
+  fourth only FLAGGED:
   **N=60 per arm-rig** (`--seeds 1-30 --captures 2`), **pairing by seed** with `+-1 SEM of the
   paired difference` (seeds are the dominant variance source, so an unpaired comparison of two
   16-run means cannot see a real 3-death effect — during that card a "46% improvement" at N=16
   evaporated at N=60 and the arm that looked worst turned out best), **unstable-seed flagging**
-  (a seed whose own two captures disagree cannot carry a cross-arm conclusion), and
+  — the one that is NOT enforced: a seed whose own two captures disagree is listed under
+  `UNSTABLE`, but it stays in the arm means and in the paired diff, so a conclusion resting on one
+  still comes out of the tool looking clean. Read that list before quoting a diff. And
   **time-to-victory beside deaths** (deaths are a COUNT, not a rate: a build that takes twice as
   long to finish a world dies twice as often in it while dodging just as well — that alone
   explained card c1d783ad's handed-off "SpaceDodge regression", which did not exist).

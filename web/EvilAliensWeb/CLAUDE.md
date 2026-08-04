@@ -1954,7 +1954,9 @@ the rest are tier-independent.
     reach zero rather than chase a decaying residual) catches the leftover equilibrium case.
   - **Each attractor's deadzone is sized by the ship's STOPPING DISTANCE**, which is
     `0.5 * ShipMaxSpeed^2 / ShipDeceleration` = **11.3px**. Below that the ship coasts out the far
-    side still under the pull and pingpongs; `DefaultSeekArriveDeadzonePx` is 30. The powerup's
+    side still under the pull and pingpongs; `DefaultSeekArriveDeadzonePx` is **15** since card
+    05a2b818, i.e. a margin of only 3.7px over that bound -- the 2008 value of 10 measured BETTER
+    and was rejected precisely because it falls UNDER it. The powerup's
     pull needs none (contact collects it, so the target stops existing) and the boss standoff's is
     its standoff radius. `logic_probe`'s **`ProbeAiFieldComposition`** derives the bound from the
     real motion constants and pins it, along with "no floor sits above the weakest force".
@@ -2296,10 +2298,21 @@ the rest are tier-independent.
     was measured. `?ai*` overrides still win over the row.
   - The spread is deliberately **subtle**: a Mechanical Friend that visibly cannot play defeats
     the point of having one. Expect the gradient to show in the readout and NOT to the eye.
-  - **Only `ThreatFieldBasePx` and `AimSpreadRad` scale, and that is a MEASURED result.** Each
-    candidate was isolated by holding the tier fixed (so the level's own difficulty scaling could
-    not confound it) and moving one `?ai*` override: aim `15deg -> 57.3deg` moved Level1 progress
+  - **Only `ThreatFieldBasePx` and `AimSpreadRad` scale.** WHICH two knobs scale is a measured
+    result; the field column's VALUES are not (see the rescale note below). Each candidate was
+    isolated by holding the tier fixed (so the level's own difficulty scaling could not confound
+    it) and moving one `?ai*` override: aim `15deg -> 57.3deg` moved Level1 progress
     `50/64 -> 45/64`; field `190 -> 30px` moved spider-boss deaths `11 -> 14`.
+    **That field pair is PARK-ERA and its 190 is no longer the anchor -- do not quote the
+    numbers.** It survives only as evidence of the knob's DIRECTION at the extreme, and card
+    05a2b818 showed the response is not monotone between 150 and 190 anyway.
+  - **THE FIELD COLUMN IS RESCALED, NOT RE-MEASURED** (card 05a2b818). That card moved the anchor
+    190 -> 150, which would have collapsed the ladder outright (the old Easy row was itself 150),
+    so every field row is multiplied by 150/190: **118 / 129 / 139 / 150 / 150**. That preserves
+    each tier's spacing below the new anchor and nothing more -- the lower rows are the old
+    proportions and carry no evidence of their own. A fresh sweep is not the fix, either: the
+    argument two bullets down, that tier-vs-tier cannot be measured end-to-end because the
+    ENEMIES scale with the same tier, is exactly why only the anchor row is evidence-backed.
   - **`?aireact` and `?aithreatlead` stay OUT of the table -- but NOT because they are inert.**
     That verdict (n=1 each, on the one rig where each knob happens to be inert) was retired by
     card b174b00f, and the tuning campaign it called for (card 21bb6849) confirms both have large
@@ -2448,17 +2461,25 @@ N=60, positive = worse:
 - **`ThreatFieldRange` base 190 -> 150**, size scale 1.8 KEPT. The formula's two parameters
   separate cleanly and pull in opposite directions, so neither era's version is best:
 
+  Paired diffs (N=60) **against the PRE-CARD arm, `190 + 1.8*he`** -- not against the shipped
+  build, which is the `px150` row itself. Positive = that arm is worse than the pre-card one:
+
   | arm | spacedodge | crazygame | spider | level1 | brainboss |
   |---|---|---|---|---|---|
   | `og150` = 2008 exactly (`150 + 0`) | -0.65 +-1.12 | **-3.57 +-1.10** | **+1.28 +-0.59** (vic 4->1) | +0.02 +-0.66 | **-1.60 +-0.38** (vic 6->14) |
-  | `px150` = **shipped** (`150 + 1.8*he`) | -0.68 +-1.32 | **-2.67 +-0.94** | -0.25 +-0.73 (vic 4->6) | +0.68 +-0.62 | +0.67 +-0.42 |
+  | `px150` = what SHIPPED (`150 + 1.8*he`) | -0.68 +-1.32 | **-2.67 +-0.94** | -0.25 +-0.73 (vic 4->6) | +0.68 +-0.62 | +0.67 +-0.42 |
+
+  **The spider victory counts move between sweeps and that is the point, not a typo**: the
+  pre-card arm reads 4/60 here, 6/60 in the combined confirmation run, and the shipped build 6/60
+  here against 3/60 there. Victories on that rig are a 3-6-of-60 event, so their run-to-run spread
+  swamps any difference between these arms -- which is why the deaths column with its SEM is what
+  the verdict rests on, and why no single victory count in this table should be quoted alone.
 
   The BASE is refuted (150 wins CrazyGame on both arms). The SIZE SCALE is validated (dropping it
   costs the spider rig +1.28 deaths and 3 of 4 victories -- big-UFO kills 117 -> 187 -- because a
   flat field is nothing next to a 90px-half UFO) and is simultaneously what makes BrainBoss
   expensive (a ~250px hull draws a ~600px field). **What ships is neither era's formula and it
-  survives on measurement, not doctrine: zero significant losses on any rig, best spider victories
-  of any arm tried.**
+  survives on measurement, not doctrine: zero significant losses on any rig.**
 - **`DefaultSeekArriveDeadzonePx` 30 -> 15.** Monotone on CrazyGame, flat on the other four --
   paired against 30: **10px -3.60 +-0.86, 15px -2.87 +-0.85, 20px -1.97 +-0.96** (victories 36 ->
   50 / 48 / 44 of 60). **10 -- the 2008 value -- measured BEST and was rejected anyway**, on the
@@ -2470,8 +2491,9 @@ N=60, positive = worse:
 **-3.70 +- 1.01** deaths (7.63 -> 3.93), victories 36 -> 50 of 60, win@172s -> 106s; SpaceDodge
 4.70 -> 4.03 and 58 -> 60 victories; Level 1 flat. **Shipped with two stated non-significant
 regressions**, in the e425781b tradition of stating rather than hiding them: spider deaths
-8.37 -> 8.87 (-0.50 +- 0.66, victories 6 -> 3 of 60) and BrainBoss 4.30 -> 5.00 (-0.70 +- 0.40,
-victories 6 -> 2), both driven by the size scale the audit kept.
+8.37 -> 8.87 (**+0.50** +- 0.66, victories 6 -> 3 of 60) and BrainBoss 4.30 -> 5.00 (**+0.70**
++- 0.40, victories 6 -> 2), both driven by the size scale the audit kept. (Positive = the NEW
+build is worse, as everywhere in this section.)
 
 **The difficulty ladder's field column was RESCALED, not re-measured** -- see
 `AiSkillByDifficulty`. Moving the anchor to 150 would otherwise have collapsed it (the old Easy

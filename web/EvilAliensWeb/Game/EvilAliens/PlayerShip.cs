@@ -2159,8 +2159,12 @@ public class PlayerShip : AlienDrawableGameComponent
 				// mechanism is the deadzone above -- switched off inside it, full strength outside,
 				// a hard edge. That is sound here precisely BECAUSE the deadzone covers the ship's
 				// stopping distance: a ship crossing the edge at full speed coasts 11.3px and
-				// halts well inside a 30px zone, so it can never cross back out under its own
-				// momentum and re-trigger. See DefaultSeekArriveDeadzonePx.
+				// halts inside the zone, so it cannot cross back out under its own momentum and
+				// re-trigger. **The margin is 3.7px at the shipped 15px radius**, not the
+				// comfortable one it was at 30 -- which is exactly why card 05a2b818 stopped at
+				// 15 rather than taking the 2008 value of 10 that measured better. Anything at or
+				// below 11.3 breaks this paragraph; ProbeAiFieldComposition derives that bound
+				// from the motion constants and fails on it. See DefaultSeekArriveDeadzonePx.
 				// A velocity-damped ARRIVE was tried here instead and reverted -- it contains
 				// -SpeedVector, so it brakes the ship whenever it is moving relative to its station,
 				// which is most of a boss fight. That measured coast 28% -> 59% and 24 -> 70 deaths:

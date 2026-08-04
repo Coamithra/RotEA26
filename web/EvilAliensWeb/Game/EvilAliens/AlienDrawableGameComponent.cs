@@ -1098,6 +1098,31 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		return NetTakeTeleport();
 	}
 
+	bool EvilAliensWeb.Compat.Net.INetEntity.NetIsDying => NetIsDyingSelf;
+
+	bool EvilAliensWeb.Compat.Net.INetEntity.NetBeginDeferredDeath()
+	{
+		return NetBeginDeferredDeathSelf();
+	}
+
+	// Online co-op (card ad9c8f8b). The default IS the test NetIdRegistry.ReplayLive and
+	// KillableAlien.NoteDeathBegan used to spell out: a killable at zero hit points that is
+	// still in the world has deferred its own removal. A type whose death does not run through
+	// KillableAlien at all overrides both (SpiderBoss is the one).
+	private protected virtual bool NetIsDyingSelf
+	{
+		get
+		{
+			EvilAliensWeb.Compat.Net.INetKillable killable = NetKillableSelf;
+			return killable != null && killable.NetHitPoints <= 0 && !IsDead;
+		}
+	}
+
+	private protected virtual bool NetBeginDeferredDeathSelf()
+	{
+		return false;
+	}
+
 	// The two discriminants. The base answers "no" to both; KillableAlien and Powerup override
 	// with `this`. Virtual rather than a type test inside this class so a future replicable
 	// subtype declares its own answer where its own code lives.

@@ -1478,6 +1478,13 @@ namespace EvilAliensWeb.Compat
 
 		public static float? AiConeScale { get; private set; }
 
+		// ?aiwedgestrength=<f> the wedge's peak magnitude, and
+		// ?aiwedgefall=<p>     its own along-axis plateau exponent -- separate from the cone's
+		//                      because the wedge spans the play field rather than a cone length.
+		public static float? AiLaneWedgeStrength { get; private set; }
+
+		public static float? AiLaneWedgeFallAlong { get; private set; }
+
 		// ?aisweptmax=<px/ms>  the ceiling on a believable OBSERVED speed in the DEFAULT swept-path
 		//                      seam (card c1d783ad). Above it the path is refused, because a raw
 		//                      one-frame position delta reports an enormous velocity for anything
@@ -1489,13 +1496,6 @@ namespace EvilAliensWeb.Compat
 		//                      AlienDrawableGameComponent.AiSweptMaxSpeedPxPerMs for why the
 		//                      number is shared rather than copied.
 		public static float? AiSweptMaxSpeedPxPerMs { get; private set; }
-
-		// ?aiwedgestrength=<f> the wedge's peak magnitude, and
-		// ?aiwedgefall=<p>     its own along-axis plateau exponent -- separate from the cone's
-		//                      because the wedge spans the play field rather than a cone length.
-		public static float? AiLaneWedgeStrength { get; private set; }
-
-		public static float? AiLaneWedgeFallAlong { get; private set; }
 
 		// ?netscript (card 11.3): replace the booted level's event list with a compressed
 		// ~60s script that fires every replicated beat type (message, warning, background
@@ -2988,18 +2988,6 @@ namespace EvilAliensWeb.Compat
 							InForce(AiConeWidthMinPx ?? EvilAliens.PlayerShip.DefaultConeWidthMinPx));
 					}
 					break;
-				case "aisweptmax":
-					// 0 is MEANINGFUL here (guard off), so the predicate is >= 0 rather than > 0.
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiswm) && aiswm >= 0f)
-					{
-						AiSweptMaxSpeedPxPerMs = MathHelper.Min(aiswm, 10000f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number >= 0 (0 = no guard)",
-							InForce(AiSweptMaxSpeedPxPerMs ?? Net.NetSession.MaxObservedSpeedPxPerMs));
-					}
-					break;
 				case "aiconetaper":
 					// REFUSED above 1 rather than clamped: 1 is the top of the taper's real range (a true
 					// triangle), not a guard rail far outside anything anyone would type, so silently
@@ -3067,6 +3055,18 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(AiLaneWedgeFallAlong ?? EvilAliens.PlayerShip.DefaultLaneWedgeFallAlong));
+					}
+					break;
+				case "aisweptmax":
+					// 0 is MEANINGFUL here (guard off), so the predicate is >= 0 rather than > 0.
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiswm) && aiswm >= 0f)
+					{
+						AiSweptMaxSpeedPxPerMs = MathHelper.Min(aiswm, 10000f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0 (0 = no guard)",
+							InForce(AiSweptMaxSpeedPxPerMs ?? Net.NetSession.MaxObservedSpeedPxPerMs));
 					}
 					break;
 				case "aifieldcurve":

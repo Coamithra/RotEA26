@@ -2159,6 +2159,14 @@ the rest are tier-independent.
       was being fed the same phantom. The net layer never saw it: it keeps its own per-entity
       history in `NetIdRegistry`, and its scan hit the identical artefact and reported the same
       14.9. The three-line per-life reset is the fix; the guard is the safety net.
+    - **`EvadeMovingThreat` CONSULTS THE SAME PREDICATE, and it needs it more than the cone does.**
+      A reposition sails through its `ThreatMinSpeed` gate, collapses the time-to-closest-approach
+      to almost nothing and so lands inside `ThreatPanicMs` -- a `ThreatPanicStrength` shove of
+      **16**, four times `maxSteerStrength`, aimed along a course the thing never took. The screen
+      wrappers reach it for real, so the reset alone would not have covered it. Measured on Level 1
+      (the only rig where anything trips the guard), guarded vs `?aisweptmax=0`: 5.62 vs 3.75
+      deaths on one pass and 6.00 vs 5.62 on another -- i.e. inside that rig's own lottery, which
+      is the honest reading rather than a win.
     - **THREE TYPES STILL TRIP IT, all correctly.** The SCREEN WRAPPERS are the reason the card
       exists: a `wrapping` Braineroid and a wrapping `Ball` really do teleport across the screen
       (each already calls `NetNoteTeleport` at the same site), measured at ~52 refusals a run on

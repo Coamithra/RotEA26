@@ -704,7 +704,7 @@ internal static class Program
             return 2;
         }
 
-        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 30 knobs (card 48b7c6b1)");
+        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 31 knobs (card 48b7c6b1)");
 
         // One counter and its OWN first-problem detail per leg: a shared sink attaches the
         // diagnosis to whichever Check happens to print it, which in a mutation run put the only
@@ -1511,6 +1511,17 @@ internal static class Program
         // readings for types that do not reposition, plus the fastest DECLARED speed in the set
         // (EvilSkull's launched MaxSpeed). A guard that deletes one of these is the failure the
         // card warned about -- it silently removes a real threat's directional repellent.
+        // CADENCE CAVEAT, and it matters for reading this table: these are `eaNetVelScan`'s
+        // SUSTAINED readings at the net layer's 60ms snapshot cadence, while the guard runs
+        // against a PER-FRAME (~16.7ms) delta. An accelerating mover therefore reads higher in
+        // the game than it does here -- measured, MarsBoss's entry ramp peaks at 7.8 px/ms for a
+        // single frame and IS refused, against the 2.404 sustained below. So this table's claim
+        // is "no real mover's sustained speed is refused", not "no real mover is ever refused".
+        // The accepted cost is stated at the card and in web/EvilAliensWeb/CLAUDE.md.
+        //
+        // NOTE ALSO that the separation leg below passes at exactly 5.00 >= 2 x 2.50, i.e. with
+        // ZERO margin on the left-hand side: raising any speed in this table breaks it. That is
+        // deliberate (it forces the conversation), not probe rot.
         var genuine = new (string name, float speed)[]
         {
             ("JunkBoss", 0.075f), ("BrainBoss", 0.101f), ("EvilBullet", 0.240f),

@@ -297,13 +297,6 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 			+ " TryGetAiSweptPath, or raise ?aisweptmax=");
 	}
 
-	// For the probes: the report latch is per-process, so a rig that wants to see the line twice
-	// (or to assert its ABSENCE after deliberately tripping it) has to be able to clear it.
-	internal static void ClearImplausibleSweptPathReports()
-	{
-		reportedImplausibleSweptPaths.Clear();
-	}
-
 	// Rough half-extent of this thing's hull, mirroring the collision-type switch the AI's radial
 	// field uses. Lives here rather than in PlayerShip so an override of the seam above can size
 	// its own band against the same measure.

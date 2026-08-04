@@ -46,7 +46,7 @@ EAHL = os.path.join(REPO, "tools", "headless", "bin", "Debug", "net8.0", "eahl.e
 # The dump's own format version. Bumped in NetJipDump.cs when a line's SHAPE changes, and
 # checked rather than assumed -- a differ silently comparing half a world is the failure this
 # tool exists to catch one layer down.
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 
 # A port deliberately outside the range PortForRoom derives into (49152..61151), so --no-pair
 # dials somewhere nothing can be listening whatever room name is in play.
@@ -288,6 +288,18 @@ def diff_entity(h, c, tol):
         bad.append("the joiner's copy is PROVISIONAL (self-healed on default spawn extras and "
                    "never rebuilt by the reliable EvSpawn -- card de4d5d65)")
 
+    # THE EMITTER, and the second of the two assertions this tool exists for (card 9a7ee4c0).
+    # It is `prov=` one hop downstream and the VISIBLE half of it: a beam whose owner the joiner
+    # could not resolve -- because the emitter puppet did not exist when the beam was built --
+    # is card 9ccfe295's ownerless shape, the one that let a big laser UFO shoot itself dead on
+    # the joiner. Compared EXACTLY: `owner=` is a netId, netIds are identity-mapped across the
+    # pair, and the legitimately unowned beams (every SetupSingleShot shooter, GameScene's
+    # warm-up prime) report "-" on BOTH ends. The count of ids this ran on is the run-level
+    # positive control lives in eaNetIdReuse section 7 (see run_join).
+    if h.get("owner") != c.get("owner"):
+        bad.append("owner %s vs %s -- the two ends disagree about this entity's emitter "
+                   "(card 9ccfe295's ownerless beam)" % (h.get("owner"), c.get("owner")))
+
     # EXTRAS ARE COMPARED FOR STRUCTURE (length), NOT CONTENT, and it is worth knowing why
     # rather than rediscovering it. Both blocks are RE-ENCODED off the live entity, and at
     # least two shipped descriptors read drifting state there -- FlyingSpider's spawn anchor
@@ -406,7 +418,7 @@ def max_pos_gap(host, client):
 # ---------------------------------------------------------------------------- the run
 
 
-def run_join(host, room, port, args, index):
+def run_join(host, room, port, args, index, stats):
     """Attach ONE fresh joiner process, settle it, dump both ends, diff. Returns problems."""
     join_flags = "?menu&noattract&netallowdebug&net=jipjoin&room=%s" % room
     client = Peer("join%d" % index, join_flags, port, args.verbose)
@@ -468,17 +480,32 @@ def run_join(host, room, port, args, index):
     if problems:
         return problems
 
+    # HOW MUCH MATERIAL THE `owner=` LEG ACTUALLY HAD: shared ids whose host copy declares an
+    # emitter, i.e. the ids the exact compare above ran on non-vacuously. REPORTED, NOT
+    # ASSERTED, and that is a measurement rather than a soft option: only `Boss` and `MarsBoss`
+    # ever fire an owned beam, and over a full three-level soak (~39 joins) every `Lazer` that
+    # reached a settle dump was a GameScene warm-up prime -- legitimately ownerless on both
+    # ends. A run-level "at least one owner was compared" assertion would therefore be red on a
+    # sampling coincidence, not on a defect. THE LEG'S POSITIVE CONTROL LIVES WHERE ITS MATERIAL
+    # IS DETERMINISTIC: `eaNetIdReuse` section 7, pinned by
+    # tools/headless/probes/net_id_reuse.txt, builds an owned beam on both a host world and a
+    # client world and asserts the dump names the emitter (card 9a7ee4c0).
+    owners = sum(1 for i in set(hd["ents"]) & set(cd["ents"])
+                 if hd["ents"][i].get("owner", "-") != "-")
+    stats["owners"] += owners
+
     problems = diff_worlds(hd, cd, {
         "pos": args.pos_tol, "pos_path": args.pos_tol_path, "rot": args.rot_tol,
         "scale_abs": 0.0005, "scale_rel": args.scale_tol, "frame": args.frame_tol,
         "score": args.score_tol, "hp": args.hp_tol,
     })
-    print("    join %d: host ids=%d joiner ids=%d maxpos=%.2fpx mismatches=%d"
-          % (index, hd["meta"]["ids"], cd["meta"]["ids"], max_pos_gap(hd, cd), len(problems)))
+    print("    join %d: host ids=%d joiner ids=%d maxpos=%.2fpx owners=%d mismatches=%d"
+          % (index, hd["meta"]["ids"], cd["meta"]["ids"], max_pos_gap(hd, cd), owners,
+             len(problems)))
     return problems
 
 
-def run_level(level, args):
+def run_level(level, args, stats):
     room = ("jip%s%d" % (level, args.seed)).lower()
     port = args.net_port
     host_flags = ("?level=%s&invuln&aiplayer&noattract&netjip&seed=%d&net=jiphost&room=%s%s"
@@ -502,7 +529,7 @@ def run_level(level, args):
         client_port = PORT_NOWHERE if args.no_pair else port
         while elapsed < cap_frames:
             index += 1
-            problems = run_join(host, room, client_port, args, index)
+            problems = run_join(host, room, client_port, args, index, stats)
             if problems is LEVEL_OVER:
                 index -= 1          # nothing was tested, so it was not a join
                 print("    %s ended after %d join(s) -- the host finished the level"
@@ -549,7 +576,7 @@ def run_selftest(args):
     args.level = ["Level2"]
     args.cap = args.cadence * 2
     args.settle = 600          # it will never attach; do not spend the full budget waiting
-    failures = run_level("Level2", args)
+    failures = run_level("Level2", args, {"owners": 0})
     paired = any("never paired" in m for _, _, msgs in failures for m in msgs)
     print("  1. joiner on a dead port -> %d failure(s), names the pairing: %s"
           % (len(failures), paired))
@@ -557,7 +584,7 @@ def run_selftest(args):
 
     args.no_pair = False
     args.cap = args.cadence     # the loop cannot run even once
-    failures = run_level("Level2", args)
+    failures = run_level("Level2", args, {"owners": 0})
     nojoin = any("no join was attempted" in m for _, _, msgs in failures for m in msgs)
     print("  2. --cap == --cadence -> %d failure(s), names the empty loop: %s"
           % (len(failures), nojoin))
@@ -643,10 +670,16 @@ def main():
           % (len(levels), args.cadence))
     started = time.time()
     failures = []
+    stats = {"owners": 0}
     for level in levels:
-        failures.extend(run_level(level, args))
+        failures.extend(run_level(level, args, stats))
 
-    print("\n%d join(s) failed, %.0fs wall clock" % (len(failures), time.time() - started))
+    # The `owner=` leg's material for the whole run, so a reader can see at a glance
+    # whether this run exercised it. See run_join for why it is reported and not
+    # asserted, and where that leg's positive control lives instead.
+    print("\n%d join(s) failed, %.0fs wall clock, owner= compared on %d entit%s"
+          % (len(failures), time.time() - started, stats["owners"],
+             "y" if stats["owners"] == 1 else "ies"))
     for level, index, problems in failures:
         print("\nFAIL %s join %d:" % (level, index))
         for msg in problems:

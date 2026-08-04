@@ -252,6 +252,10 @@ internal class Lazer : AlienDrawableGameComponent
 	// with an owner, and SpiderHelperMothership READS `lazer.owner == this`.
 	internal AlienDrawableGameComponent NetOwner => owner;
 
+	// ...and the same answer through the generic seam, so NetJipDump can report an emitter
+	// without naming this type (card 9a7ee4c0).
+	private protected override EvilAliensWeb.Compat.Net.INetEntity NetOwnerSelf => owner;
+
 	// Adopt the emitter a spawn extra named. Only the puppet layer calls this; the host's own
 	// beams get their owner from Setup.
 	internal void NetSetOwner(AlienDrawableGameComponent emitter)

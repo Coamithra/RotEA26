@@ -16,7 +16,7 @@
 #   * no `[net] listed (join-in-progress) host armed` -> ?net=jiphost stopped arming (the
 #     DebugFlags case, NetSession.Start's JipHost branch, or the transport failed to open).
 #     net_jip_sync would then report "the host never paired" with no explanation.
-#   * no `dump v1 ... end` -> NetJipDump threw before its sentinel, or the FORMAT VERSION moved
+#   * no `dump v2 ... end` -> NetJipDump threw before its sentinel, or the FORMAT VERSION moved
 #     without net_jip_sync's FORMAT_VERSION moving with it. Those two are one edit.
 #   * `scene none` or a missing `hud` -> the dump lost a whole section. Both are compared
 #     verbatim between the two peers, so losing one silently removes a dimension from the diff.
@@ -25,9 +25,9 @@
 # MUTATIONS (all rebuild tools/headless first -- it source-links Game/ and Compat/):
 #   * delete the `case "jiphost"` from DebugFlags -> the arm line goes, red on line 1.
 #   * make NetJipDump.AppendExtras return before the scene line -> red on the `scene speed=`
-#     line, while the `dump v1 ... end` sentinel still passes -- which is the point of asserting
+#     line, while the `dump v2 ... end` sentinel still passes -- which is the point of asserting
 #     the sections separately from the sentinel.
-#   * bump NetJipDump.FormatVersion without touching the probe -> red on `dump v1`.
+#   * bump NetJipDump.FormatVersion without touching the probe -> red on `dump v2`.
 #
 # eahl: --flags "?level=Level2&invuln&aiplayer&noattract&seed=7&netjip&net=jiphost&room=jipprobe"
 
@@ -47,7 +47,7 @@ eval NetJipDump
 
 # 2. the SENTINEL, with the format version the differ speaks. Also the peerless state, asserted
 #    positively: no session, no peer, no replicated set.
-expect      \[netjip\] dump v1 role=none active=0 peer=0 ids=0 end
+expect      \[netjip\] dump v2 role=none active=0 peer=0 ids=0 end
 
 # 3. the scenery/music section is POPULATED, not the `none` a dump taken outside a level gives.
 expect      \[netjip\] scene speed=.*base=.*song=

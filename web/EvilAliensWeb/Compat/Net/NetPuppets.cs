@@ -214,6 +214,15 @@ namespace EvilAliensWeb.Compat.Net
             return list;
         }
 
+        // The netId this peer knows a puppet by, for reporting a puppet's relationship to
+        // ANOTHER puppet (NetJipDump's `owner=`). netIds are identity-mapped across the pair, so
+        // an id read here is directly comparable with the host's NetIdRegistry answer.
+        internal static bool TryGetId(GameComponent comp, out ushort netId)
+        {
+            netId = 0;
+            return comp != null && idByComp.TryGetValue(comp, out netId);
+        }
+
         // True while the puppet layer itself is constructing/adding a puppet -- the ONLY
         // path allowed to add replicable types to a client world (see ComponentBin.Add).
         public static bool Constructing => constructing;

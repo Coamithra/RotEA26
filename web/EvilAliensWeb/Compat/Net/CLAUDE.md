@@ -2821,7 +2821,8 @@ the LEVEL-3 WALLS section above.
     entry for the same economy: 2 bytes once against 2 bytes x16.
   - **`?netstaleguard=0` restores the pre-card behaviour**, IN `DebugFlags.Active` for the
     `?nethitstop=1` reason -- it is a deliberate bug reproduction and must never reach a public
-    lobby. It is the only boolean in `DebugFlags` that DEFAULTS TRUE, so `Active` tests its
+    lobby. It is one of only two booleans in `DebugFlags` that DEFAULT TRUE (`?netaimease` is
+    the other -- see CHARGE-GLOW AIM), so `Active` tests its
     negation. **The `snapStale` count is identical either way**: the entry is reported stale
     whether or not it is then refused, so the flag changes the drag and never the measurement it
     exists to let you take. That was not true of the first cut, and the mutation run -- not
@@ -2872,6 +2873,70 @@ the LEVEL-3 WALLS section above.
     automatically, so the suites that are not about ordering (`NetSnapshotTest`, `NetWallTest`,
     `NetDeathFxTest`, `NetPuppetBench`) keep saying what they mean. There is exactly one
     production caller, `NetSession.HandleWorldSnapshot`, and it passes the real packet seq.
+
+## CHARGE-GLOW AIM -- the telegraph sweeps instead of stepping (card eb057163)
+
+Reported as "the twin motherships in level 2 do not change where they are aiming visually as their
+target moves while they charge their laser", seen on P2. **The mechanism was MEASURED before
+anything was changed, because two faults produce that sentence and they need OPPOSITE fixes** --
+and the measurement stays in the suite forever as the control.
+
+- **IT IS STALENESS, NOT A FREEZE.** `MarsBoss.Update`'s charge case recomputes the aim EVERY tick
+  (`normalize(target - Position) * 100`), `MarsBossDescriptor.EncodeStateExtra` re-reads it live off
+  `lazerGenerator.Position - Position`, and `NetChargeGlow.Drive` re-applies it every client tick --
+  so nothing latches anywhere. What is wrong is the CADENCE: the value only CHANGES on that
+  emitter's round-robin snapshot turn. Measured over one full 2500 ms windup at a representative
+  150 ms turn, the pre-card client moved its aim on **15 of 144 ticks, in 7.62px jumps**, with all
+  16 aims the host sent arriving and being applied.
+- **THE FIX IS AN EASE, and the card's own analysis proposed extrapolation instead -- superseded
+  deliberately, do not re-derive it.** The glow now SWEEPS toward each newly replicated aim rather
+  than teleporting to it. An aim is a **chase**, so its angular rate reverses whenever the player
+  does: an extrapolated glow points somewhere the host never aimed and then SNAPS when the real beam
+  fires along the host's true angle. A telegraph that LIES is worse than one that lags -- and the
+  repo's grain runs away from difference-estimators anyway (card e79bb994 replaced the
+  observed-velocity estimator with declared truth, card c1a38ef9 deleted the Lazer rate estimator).
+  The sent-rate treatment in ANCHORED MOTION works for `Lazer` because a beam's growth rate is a
+  genuine step function; an aim is not that shape.
+- **NO WIRE CHANGE, protocol stays v19.** Everything here is a client-side decision about what to do
+  with a value the snapshot already carried.
+- **THE WINDOW IS `NetPuppets.CorrectionWindowMsNow`, not a new constant** -- `max(150ms,
+  2 x SnapshotTurnMs)`, the same window the position error drains over, because the aim arrives on
+  the same turn and therefore has the same staleness. One definition, exposed rather than
+  re-derived: a second copy would drift the moment either constant moved, and a fixed window would
+  degrade with the world size in exactly the way `CorrectionWindowFor` exists to stop. Read LIVE
+  rather than latched -- unlike a position correction there is no fixed error being drained, just a
+  target being chased, so a spawn burst mid-sweep can rescale the rate with nothing to be
+  inconsistent about.
+- **A FRACTION OF WHAT REMAINS**, so it converges and can never overshoot, and so the glow comes to
+  REST when the host's aim does. That is also what makes it **a provable no-op on the two emitters
+  that do not aim** (the big UFO's `lazor` and the JunkBoss' suck swarm sit at a FIXED offset, so
+  target == current), which is what lets all five `NetChargeGlow` call sites share ONE rule with no
+  per-type code.
+- **THE EASED VALUE LIVES ON THE EMITTER, and the charge-ON edge RESETS it** -- the emitters and
+  their child generators are POOLED, so without the reset a boss winding up a second time would
+  sweep its telegraph in from wherever its PREVIOUS beam pointed. Same recycle trap
+  `Lazer.SetupSingleShot`'s `owner` clear and `FlyingSpider`'s anchor reset both document; the
+  mutation run shows it also makes the FIXED-offset emitters sweep in from (0,0), i.e. it is not a
+  corner case.
+- **Cost:** one `Vector2` field per emitter type and one lerp per charging puppet per tick. Nothing
+  is added to a non-charging puppet's tick, and `Drive` is client-only -- the host never calls it.
+- **Verify with `eaNetChargeAim()` / `eval NetChargeAim`** (`Compat/Net/NetChargeAimTest.cs`, 20
+  assertions; `tools/headless/probes/net_charge_aim.txt`). MENU-only and leave-no-trace. **No frame
+  can see any of this** -- a stepping aim and a sweeping aim are the same still picture, the glow is
+  draw-only so no counter moves, and the symptom is on the OTHER peer's screen; data is the only
+  evidence there is. **The negative control is a shipped flag, `?netaimease=0`** (in
+  `DebugFlags.Active`, the `?netstaleguard=0` deliberate-bug-repro idiom, and the SECOND boolean in
+  `DebugFlags` defaulting TRUE). It is driven through the injected `INetHost` (`ChargeAimEase`), so
+  sections 1 and 2 are literally the same frames with the fix off and on -- one session, one puppet,
+  no confound and no reboot. Mutation-tested four ways; note that a merely FASTER ease fails
+  nothing and should not, since it is still a convergent chase -- only `take > 1` overshoots.
+- **HONEST CAVEAT, worth keeping: the pre-card staircase was VISIBLE MOTION, not stillness.** 16
+  steps of 7.62px over the charge is a glow that does track, jerkily. So the ease is a
+  well-evidenced fix for the mechanism that was measured, and whether it fully accounts for the
+  user's "do not change" is NOT settled by it -- if the report persists after a two-screen look,
+  the next suspects are the aim's LAG (one turn plus RTT behind, which no client-side smoothing can
+  remove) and the fact that `MarsBoss` aims at `oracle.GetRandomPlayerShip()`, so half the time the
+  boss genuinely is not tracking the peer who is watching it.
 
 ## Public game browser & join-in-progress
 

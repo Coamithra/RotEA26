@@ -730,6 +730,8 @@ namespace EvilAliensWeb.Compat.Net
 
             public bool SnapshotStaleGuard => inner.SnapshotStaleGuard;
 
+            public bool ChargeAimEase => inner.ChargeAimEase;
+
             public bool NetJip => inner.NetJip;
             public bool NetAllowDebug => inner.NetAllowDebug;
 

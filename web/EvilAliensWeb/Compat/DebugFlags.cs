@@ -410,13 +410,26 @@ namespace EvilAliensWeb.Compat
 		// turns it OFF, restoring the pre-card behaviour where a reordered or late snapshot entry
 		// applies an older position than the one already on screen and drags the puppet backwards.
 		//
-		// DEFAULTS TRUE, which makes it the odd one out in this file: every other boolean here
-		// turns something ON, so `Active` asks "was it set". This one turns a FIX OFF, so `Active`
-		// asks the inverse (`!NetSnapshotStaleGuard`) -- and it is in `Active` for the
+		// DEFAULTS TRUE, which makes it one of only two booleans in this file that do: every other
+		// one turns something ON, so `Active` asks "was it set". This turns a FIX OFF, so `Active`
+		// asks the inverse (`!NetSnapshotStaleGuard`); `?netaimease` below is the other -- and it is in `Active` for the
 		// `?nethitstop=1` reason, being a deliberate bug reproduction that must never reach a
 		// public lobby. A negative control you cannot run two months later is not a negative
 		// control, which is why it ships rather than living inside the test suite.
 		public static bool NetSnapshotStaleGuard { get; private set; } = true;
+
+		// The enemy charge-glow's AIM EASE (card eb057163), ON by default -- `?netaimease=0` turns
+		// it OFF, restoring the pre-card behaviour where a puppet's glow TELEPORTS to each newly
+		// replicated aim instead of sweeping toward it. The aim only arrives on that emitter's
+		// round-robin snapshot turn, so the pre-card path is a staircase: dead still for a turn,
+		// then a jump (measured 15 moving ticks of 144, 7.62px each, at a 150ms turn).
+		//
+		// DEFAULTS TRUE, so `Active` asks the inverse (`!NetChargeAimEase`) -- the
+		// `?netstaleguard=0` shape, and in `Active` for the same reason: it is a deliberate
+		// bug reproduction and must never reach a public lobby. Unlike `?nethitstop=1` it cannot
+		// desync anything (the glow is draw-only), but the two peers would disagree about where an
+		// enemy is aiming, which is exactly what this card was reported for.
+		public static bool NetChargeAimEase { get; private set; } = true;
 
 		// Gates ONLY the automatic per-kill/boss-kill hit-stop freeze frame fired from
 		// Juice.KillPunch (KillableAlien.HitBy) — NOT player-death hit-stop (PlayerShip
@@ -1727,6 +1740,21 @@ namespace EvilAliensWeb.Compat
 						Console.WriteLine("[debug] unknown ?" + key + "= value '" + val
 							+ "' (expected 0/off to disable) -- ignored, the snapshot staleness"
 							+ " guard stays " + (NetSnapshotStaleGuard ? "ON" : "OFF"));
+					}
+					break;
+				case "netaimease":
+					// Same asymmetry as ?netstaleguard above, for the same reason: an unrecognised
+					// value here would silently turn a shipped FIX off, so only an explicit off
+					// spelling disables it and anything else is reported and ignored.
+					if (IsExplicitlyOff(val))
+					{
+						NetChargeAimEase = false;
+					}
+					else if (!IsOn(val))
+					{
+						Console.WriteLine("[debug] unknown ?" + key + "= value '" + val
+							+ "' (expected 0/off to disable) -- ignored, the enemy charge-glow"
+							+ " aim ease stays " + (NetChargeAimEase ? "ON" : "OFF"));
 					}
 					break;
 				case "slowmotrail":
@@ -3864,7 +3892,7 @@ namespace EvilAliensWeb.Compat
 					+ " -- the gameplay RNG (RandomHelper) is seeded, so two runs of this boot "
 					+ "reach the same world. Reload without the flag for normal random play.");
 			}
-			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || AiFastForward > 1;
+			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || !NetChargeAimEase || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -3900,6 +3928,9 @@ namespace EvilAliensWeb.Compat
 						// the one flag in this dump whose ABSENCE is the normal state, so a run that
 						// reordered a snapshot on purpose has to be tellable from one that did not.
 						+ (!NetSnapshotStaleGuard ? " netstaleguard=0" : "")
+						// Same rule as the line above: prints only on the deliberate bug repro, so
+						// a run whose puppets step their aim is tellable from one that sweeps it.
+						+ (!NetChargeAimEase ? " netaimease=0" : "")
 						+ (Harness != null
 							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "") + " bg=" + HarnessBg
 							: ""));

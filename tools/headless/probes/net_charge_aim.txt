@@ -1,0 +1,94 @@
+# PROBE: the enemy laser-charge glow's AIM on a join peer.
+#
+# PINS: card eb057163 -- Compat/Net/NetChargeAimTest, driven by eaNetChargeAim() / `eval
+# NetChargeAim`.
+#
+# THE REPORT was "the twin motherships in level 2 do not change where they are aiming visually as
+# their target moves while they charge their laser", seen on P2. TWO mechanisms produce that
+# sentence and they need OPPOSITE fixes, so section 1 exists to tell them apart before anything is
+# changed -- a FREEZE (the client's aim is written once and never again, so something in the
+# encode/apply/drive chain latches) or STALENESS (the aim is re-applied correctly, but only on that
+# boss's round-robin snapshot turn, so it is a staircase).
+#
+# WHAT IT MEASURED, and the number is asserted below so it cannot quietly change: STALENESS. Over
+# one full 2500ms windup at a representative 150ms turn, the pre-card client moved its aim on
+# **15 of 144 ticks**, in **7.62px** jumps. Not a freeze -- every one of the 16 aims the host sent
+# arrived and was applied. So the fix is client-side and needs NO wire change.
+#
+# THE FIX is an EASE, not the extrapolation the card's own analysis proposed. The glow now sweeps
+# toward each newly replicated aim over NetPuppets' own cadence-derived correction window
+# (max(150ms, 2 x SnapshotTurnMs) -- the same window the position error drains over, because the
+# aim arrives on the same turn and so has the same staleness). Extrapolating an angular RATE was
+# considered and declined: an aim is a CHASE, so its rate reverses whenever the player does, and an
+# extrapolated glow would point somewhere the host never aimed and then snap when the real beam
+# fires along the host's true angle. A telegraph that LIES is worse than one that lags, and the
+# repo's grain runs away from difference-estimators (cards e79bb994, c1a38ef9).
+#
+# FAILURE MEANS: read the quoted PASS/FAIL line. NOTHING here throws and NO counter moves -- the
+# glow is draw-only, so both the defect and the fix are invisible to every metric the game already
+# produces, and a STEPPING aim and a SWEEPING aim are the same still frame. Data is the only
+# evidence there is.
+#
+# THE NEGATIVE CONTROL IS A SHIPPED FLAG, `?netaimease=0` (in DebugFlags.Active, the
+# ?netstaleguard=0 deliberate-bug-repro idiom). The suite drives it through the injected INetHost
+# rather than by rebooting, so sections 1 and 2 are literally the same frames with the fix off and
+# on -- one session, one puppet, no confound. Without section 1, "the fixed aim sweeps smoothly"
+# would pass on a build where the aim never moved at all, which is one of the two faults under test.
+#
+# MUTATION-TESTED FOUR WAYS, each isolated:
+#   * the ease removed entirely (i.e. pre-card)      4 FAIL (every section-2 leg)
+#   * the charge-on edge's recycle reset dropped     3 FAIL (s1 aim count, s4 fixed offset,
+#                                                            s5 first charge) -- note it fails the
+#                                                            FIXED-offset emitter too, which is the
+#                                                            pooled-child trap doing real damage
+#   * the ease made to OVERSHOOT (take > 1)          2 FAIL (the small-step leg + the overshoot leg)
+#   * the ?netaimease=0 flag made inert              4 FAIL (s1's staircase verdict + s2's controls)
+# A merely FASTER ease (take doubled) fails nothing, and should not: it is still a convergent
+# chase. Only take > 1 overshoots.
+#
+# NOTE section 4 is what lets one rule serve five emitters: the big UFO's lazor and the JunkBoss'
+# suck swarm sit at a FIXED offset, so the ease has to be a provable no-op there (measured: 0.000px
+# of drift over 200 ticks) rather than paying for the three aiming emitters with a wobble on two.
+#
+# MENU-ONLY and leave-no-trace. It starts a REAL (in-process, wire-backed) client session and
+# builds real puppets into the live bin, so it SKIPs itself over a live session, level or attract
+# demo -- `?noattract` is not decoration, without it the idle demo makes every leg skip.
+# Everything it plants is bin.Remove'd BY HAND in the finally, because NetPuppets.Disable() clears
+# the id maps and nothing else.
+#
+# DELIBERATELY ABSENT FROM net_selftests.txt despite being menu-runnable -- it has its own probe,
+# which carries this card's write-up and mutation matrix, so listing it in both would run it twice
+# for nothing. The eaNetDeathFx / eaNetStale precedent.
+#
+# eahl: --flags "?menu&noattract"
+
+step 200 nodraw
+mark
+eval NetChargeAim
+
+expect \[netaim\] enemy charge-glow AIM on a join peer
+expect 1\. the mechanism: FREEZE or STALENESS, measured
+expect 2\. the EASE -- the same frames, swept instead of stepped
+expect 3\. the HOST re-reads its live aim every encode
+expect 4\. an emitter whose offset does NOT track is unaffected
+expect 5\. the charge-off edge, and the recycle trap behind it
+
+# THE VERDICT ITSELF, as printed rather than only as a PASS line -- if the mechanism ever changes
+# shape (a freeze creeping in, or the pre-card path somehow sweeping) this is what says so.
+expect pre-card  verdict=STALENESS \(staircase\)
+expect eased     verdict=SWEEPING
+# The defect as a NUMBER, at the conditions the card quotes it at. A build that stopped stepping
+# with the flag off would make every section-2 comparison vacuous.
+expect pre-card .* moved on 15/144 ticks  maxStep=7\.62px
+# ...and the fix as one. Read these together: the same 16 aims, the same ~100px of travel, spread
+# over 135 ticks in 1.25px steps instead of 15 ticks in 7.62px ones.
+expect eased .* moved on 135/144 ticks  maxStep=1\.25px
+
+# The SKIP guard: a run that skipped prints no tally, so this is what tells "the menu was busy"
+# from "the suite passed".
+expect-not SKIP \(run from the main menu
+# A TALLY, never `expect-not FAIL` on its own: an absence assertion passes on a run where the eval
+# never happened at all. Raise it when legs are added; never lower it to make a run green.
+expect \[netaim\] 20 passed, 0 failed
+expect-not FAIL
+quit

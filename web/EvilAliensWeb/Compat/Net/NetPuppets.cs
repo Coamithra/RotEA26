@@ -697,6 +697,13 @@ namespace EvilAliensWeb.Compat.Net
             return MathHelper.Max(CorrectionWindowMs, 2f * NetSession.SnapshotTurnMs(liveCount));
         }
 
+        // The blend window at the CURRENT world size, for a per-type correction that is not a
+        // position (card eb057163: the enemy charge glow's aim offset, which arrives on the same
+        // round-robin turn and so has exactly the same staleness). Exposed rather than re-derived
+        // at the call site so there is ONE definition of the cadence-derived window -- a second
+        // copy would drift the moment either constant above moved.
+        internal static float CorrectionWindowMsNow => CorrectionWindowFor(LiveCount);
+
         private static bool ApplySnapshotState(PuppetInfo info, in NetBaseState state, INetTypeDescriptor desc, byte[] buf, int extraOff, int extraLen, bool isSpawn, bool teleported = false)
         {
             bool popped = false;

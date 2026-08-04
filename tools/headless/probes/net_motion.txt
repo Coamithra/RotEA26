@@ -21,15 +21,15 @@
 # `python tools/sim/net_puppet_drive_sim.py --smoothness`, which asserts it. This suite asserts
 # that the mechanism is wired and exact.
 #
-# MUTATION-TESTED FIVE WAYS, each isolated and each failing a DIFFERENT leg:
+# MUTATION-TESTED SIX WAYS, each isolated (the first five fail a DIFFERENT leg each; the sixth
+# is deliberately non-disjoint -- see below):
 #   * FlyingSpider.NetPathAnchored -> false                     1 FAIL (the predicate)
 #   * ApplyStateExtra spends the swivel correction in one step   1 FAIL (the ease leg)
 #   * the sweep rate encoded at the px scale instead of the rad  1 FAIL (the driven sweep)
 #   * NetSession.ResolveBaseVelocity drops its anchored branch   1 FAIL (section 5)
 #   * Lazer clears its sweep rate from Initialize again          1 FAIL (the Add-order leg)
-#   * FlyingSpiderDescriptor.CreatePuppet drops its
-#     `len >= SpawnAnchorBytes` guard                             2 FAIL (the negative control
-#                                                                 + its independence sentinel)
+#   * CreatePuppet drops its `len >= SpawnAnchorBytes` guard    2 FAIL (the negative control
+#                                                                      + its sentinel)
 # That last one is card c41a89a2's: section 2's negative control asserts over FOUR independent
 # puppets ("0/4 kept theirs" when it goes red) rather than one, because two independent rolls over
 # the same uniform 0..475 entry height agree inside 1.5px ~0.6% of the time -- a spurious failure

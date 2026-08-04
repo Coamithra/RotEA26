@@ -165,10 +165,12 @@ namespace EvilAliensWeb.Compat.Net
                 ownRoll > 0);
             // SENTINEL for the deflake above, not for the wire: the 0.006^N claim holds only
             // while those N rolls are INDEPENDENT. Nothing correlates them today (Initialize's
-            // height roll is unconditional and not PosePinned-gated), so this cannot fail now --
-            // it exists so that a future change which did correlate them (a pin reaching that
-            // roll, a shared-seed refactor) fails HERE rather than silently reverting the leg
-            // above to its ~0.6% coincidence with every assertion still green.
+            // height roll is unconditional and not PosePinned-gated), so this cannot realistically
+            // fail now -- it has the same coincidence shape it guards, at 0.006^3 -- and it exists
+            // so that a future change which DID correlate them (a pin reaching that roll, a
+            // shared-seed refactor) fails HERE rather than silently reverting the leg above to its
+            // ~0.6% coincidence with every assertion still green. It reads a puppet per i > 0, so
+            // it says nothing at UnanchoredSamples < 2.
             check("...and those rolls are INDEPENDENT (sentinel: the deflake's own premise)",
                 distinctHeights > 0);
 
@@ -185,7 +187,10 @@ namespace EvilAliensWeb.Compat.Net
                     && System.Math.Abs(atQuarter - atThreeQuarter) > 10f);
 
             // All of them came out of the recycle pool via CreatePuppet -> NewFlyingSpider, so
-            // they go back -- section 4 does the same with its beams.
+            // they are Remove()d on the way out -- section 4 does the same with its beams. Note
+            // what that does NOT do: nothing here ever entered `collection`, so no
+            // ComponentRemoved fires and none of them lands back in the bin's idleList. They are
+            // dropped rather than returned, and the next run re-`new`s what it needs.
             bin.Remove(puppet);
             for (int i = 0; i < unanchored.Length; i++)
             {

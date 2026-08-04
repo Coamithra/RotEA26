@@ -1385,6 +1385,31 @@ namespace EvilAliensWeb.Compat
 					: "live"));
 		}
 
+		// Report every live EvilSkull's volley state as data (`eaSkullVolley()` / `eval
+		// SkullVolley`), card d8344c17. `fired` is the counter that was leaking across the object
+		// pool: a freshly spawned skull must always read fired=0, and a screenshot cannot show
+		// that -- nothing about a skull's appearance changes with its volley position. Also prints
+		// the cap and the modifier it comes from, so a volley that looks long can be told apart
+		// from a volley that IS long (the difficulty time-ramp raises the cap legitimately).
+		// An empty report means no skulls are on screen, which is a real answer, not a failure.
+		[JSInvokable("debugSkullVolley")]
+		public static void SkullVolley()
+		{
+			int n = 0;
+			Microsoft.Xna.Framework.Game game =
+				EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>().ComponentBin.Game;
+			foreach (Microsoft.Xna.Framework.IGameComponent item
+				in (System.Collections.ObjectModel.Collection<Microsoft.Xna.Framework.IGameComponent>)(object)game.Components)
+			{
+				if (item is EvilAliens.EvilSkull skull)
+				{
+					Console.WriteLine("[skull] " + skull.VolleyReport());
+					n++;
+				}
+			}
+			Console.WriteLine("[skull] skulls=" + n + " trace=" + (DebugFlags.SkullVolley ? "on" : "off"));
+		}
+
 		// Report the WORLD clock as data (`eaWorldClock()` / `eval WorldClock`), card d79a2f48.
 		// The clock every Draw-time cosmetic reads instead of gameTime.TotalGameTime, plus the
 		// freeze depth that gates it -- which is the whole mechanism, and the only part of it a

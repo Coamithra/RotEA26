@@ -376,6 +376,14 @@ namespace EvilAliensWeb.Compat
 		// hittimer window. Draw-side only -- no hitpoints change, nothing is damaged.
 		public static bool BrainHitFlash { get; private set; }
 
+		// ?skullvolley: make every EvilSkull ("the evil grinning face of death") report each shot
+		// of its volley on a `[skull]` line -- shot index, the cap it is counting up to, and the
+		// difficulty modifier that cap is derived from (card d8344c17). The volley length is not
+		// visible in any frame and no metric moves when it goes wrong, so this is the only
+		// observable that can defend the fix; `tools/headless/probes/evilskull_volley.txt` is
+		// built on it. Diagnostic only -- reading it changes nothing.
+		public static bool SkullVolley { get; private set; }
+
 		// Master multiplier on the trauma-based screen shake (Compat/Juice.cs). 1 = the
 		// shipped feel, 0 = off, >1 exaggerates while tuning (?shake=, clamped 0..3).
 		// A pure camera/render look, so — like MetalScore/SlowmoTrail — kept OUT of `Active`.
@@ -1888,6 +1896,9 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "brainhitflash":
 					BrainHitFlash = IsOn(val);
+					break;
+				case "skullvolley":
+					SkullVolley = IsOn(val);
 					break;
 				case "blastactive":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ba))

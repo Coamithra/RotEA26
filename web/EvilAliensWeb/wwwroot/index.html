@@ -1124,6 +1124,17 @@
             }
         };
 
+        // Debug: the evil grinning face of death's volley state (card d8344c17).
+        //   eaSkullVolley() — print every live EvilSkull's shots-so-far, the cap it is counting
+        //                     up to, and the difficulty modifier that cap comes from. Nothing
+        //                     about a skull's appearance changes with its volley position, so
+        //                     this is the only way to see a volley starting part-way through.
+        //                     Pair with the ?skullvolley boot flag for a per-shot trace.
+        window.eaSkullVolley = () => {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugSkullVolley'); }
+            catch (e) { console.warn('[debug] eaSkullVolley failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: live-set the ship-connector lightning knobs (the ?level=TeamChallenge tuner). Drives
         // Compat/DebugInput.SetConnector so the slider panel below (and the console) can retune the
         // docking-link FX without a page reload. Console: eaConnector(2, 6, 1, 2.5, 1) — main bolt

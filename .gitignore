@@ -148,3 +148,7 @@ web/EvilAliensWeb/wwwroot/Content/sfx/peaks/
 # eahl PreloadExport drop (boot_cold.txt calls it; the "download" lands next to --out,
 # or in the cwd when a --script run has none -- i.e. the repo root under run_probes.py).
 /preload_manifest.txt
+
+# eahl probe failure logs (run_probes.py). A failing probe's FULL output is kept here so a rare
+# flake leaves evidence behind instead of only the 12-line tail; --keep-output adds passing runs.
+tools/headless/probes/_failures/

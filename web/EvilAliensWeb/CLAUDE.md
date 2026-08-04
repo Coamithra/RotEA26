@@ -2285,7 +2285,10 @@ the rest are tier-independent.
   `SpiderBoss.cs`. It affects human players too.
 - **The top screen edge gets its own strong push** (`TopEdgeAvoidStrength`): it is where UFOs
   spawn, and the stock edge term caps at `maxSteerStrength` 4, which loses to a lane escape (18)
-  and pins the ship on the ceiling to be exploded by something spawning on it.
+  and pins the ship on the ceiling to be exploded by something spawning on it. **A port addition,
+  and MEASURED (card 2248e5eb): removing it costs deaths on both rigs and takes deaths BY `UFO`
+  from 132 to 356 on the spider rig** -- see the audit table below. `?aitopedgestrength=0` is the
+  2008 arm; the generic 150px/strength-4 screen-bound push underneath it is untouched.
 - **Every avoidance field here shares the `(1-t)^p` falloff shape** (`ThreatFieldStrength`) -- a
   flat push across a band fights the screen bounds instead of easing off once the ship is clear.
 - **Per-tier skill (card c10e3e7f) is keyed off `Settings.EffectiveDifficulty`, NOT
@@ -2384,7 +2387,8 @@ the rest are tier-independent.
   ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
   ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge= ?ailaneescape= ?aiconelead= ?aiconemaxlen=
   ?aiconewidth= ?aiconetaper= ?aiconefallalong= ?aiconefallacross= ?aiconescale= ?aiconespread=
-  ?aiconewidthmin= ?aiwedgestrength= ?aiwedgefall=`
+  ?aiconewidthmin= ?aiwedgestrength= ?aiwedgefall= ?aitopedgepx= ?aitopedgestrength= ?ailazerpx=
+  ?ailazerstrength= ?ailazerdodge=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
   A malformed value on any of them is REPORTED and ignored, never swallowed, per the file-wide
   value-carrying-flag convention (see "Debug flags & tuning conventions" above; cards 48b7c6b1 +
@@ -2512,6 +2516,50 @@ nothing to audit -- verified in `src_decompiled/EvilAliens/PlayerShip.cs` `DoAIM
 the per-seat `dodgeAngle` (+-pi/16, +-pi/6), the four screen-edge repulsions (`steerRange` 150,
 strengths 0..4, `PowerCurve` exp 2, the 560px Floor bottom), the powerup's direct pull, the aim
 spread `Math.PI/12`, `SeekWeight` 0.8 and both 0.2 floors.
+
+#### The last two port additions, audited (card 2248e5eb)
+
+The audit above left two port ADDITIONS unmeasured because neither was reachable by a `?ai*`
+flag. Both now are (`?aitopedgepx=` `?aitopedgestrength=` `?ailazerpx=` `?ailazerstrength=`
+`?ailazerdodge=`), and both were run against the 2008 null hypothesis under 05a2b818's protocol
+-- N=60 (seeds 1-30 x2), paired by seed, `python tools/sim/ai_sweep.py`. **One survived, one was
+refuted and reverted.** Positive = that arm is worse than the shipped build of the day.
+
+| suspect | 2008 arm | level1 (600s) | spider (300s) | verdict |
+|---|---|---|---|---|
+| **top-edge push** (`170px` / strength `20`) | `?aitopedgestrength=0` | **+0.88 +- 0.52** | **+0.67 +- 0.64** | **KEPT** |
+| **beam field + sidestep** (`260px` / `14` / `7`) | `?ailazerpx=150&ailazerstrength=4&ailazerdodge=0` | +0.98 +- 0.65 | **-4.55 +- 0.69** | **REVERTED to 150 / 4 / 0** |
+
+- **The top-edge term is confirmed by its own stated mechanism, not just by the deaths column.**
+  Removing it multiplies exactly the death it was added to prevent: deaths by `UFO` 132 -> 356 on
+  the spider rig and 150 -> 212 on Level 1, because a ship pinned on the ceiling is exploded by
+  whatever spawns on top of it. **The spider margin is thin** (+0.67 +- 0.64 barely excludes
+  zero) and rests on Level 1 agreeing independently plus that histogram; do not quote it alone.
+- **The beam field lost on the rig built around a beam, and the killer histogram says why**:
+  `SpiderBoss(standing)` 290 -> 6 deaths. A 260px field around a beam that the AI is
+  *deliberately standing near* -- it spares one big UFO so the boss walks into the shot -- was
+  shoving the ship off the beam and into the stationary boss, i.e. re-creating card b56633fb's
+  original complaint from the other direction. Victories 3/60 -> 24/60.
+- **Level 1 genuinely prefers the port values (+0.98 +- 0.65) and that regression ships**, stated
+  rather than hidden, in the e425781b tradition: -4.55 on one rig against +0.98 on the other.
+- **What reverted is the MAGNITUDES, not the shape.** 2008 ran `MyMath.PowerCurve`, the classic
+  `max*(1-t^2)` plateau; this term keeps the port's `(1-t)^p` spike, which card 05a2b818 ruled on
+  globally and decisively. So the beam field at 150px now pushes *less* than the original did at
+  the same range. The configuration that was measured is exactly the one that ships, so the
+  number stands -- but it is not "the 2008 treatment restored".
+- **The sidestep is OFF, not deleted**: `DefaultLazerDodgeStrength` is 0 and `?ailazerdodge=7`
+  brings it back. `DoAIMove`'s `> 0` branch is an early-out, not a behaviour difference (the zero
+  vector would steer identically) -- it is there so the term reads as switched off at the point of
+  use. `ProbeAiFieldComposition` now folds that constant into its weakest-repellent min only WHEN
+  IT IS ON: that bound is about a pushing repellent being eaten by a floor, a term that is
+  switched off pushes nothing, and making it a condition means the bound re-arms itself if the
+  sidestep is ever baked back on.
+- **PICK THE RIG WITH `killers=`, NOT WITH INTUITION.** The card specified "Level 3 sections" for
+  the laser arm; the pre-flight refuted it -- `?level=Level3&brainboss` lands **zero** `Lazer`
+  deaths over seeds 1-3 despite spawning big UFOs, as does plain `?level=Level3`. **Level 1 is
+  the laser rig** (`Lazer` is its single largest killer). Worse, **the lazer knobs are inert on
+  Level 1 at a 300s cap** -- no beam exists yet, and all three flags reproduce the shipped row
+  digit for digit. A 300s laser sweep reads "no effect" and would have shipped a wrong verdict.
 
 #### The challenge-level completion matrix (card 9391f95a)
 

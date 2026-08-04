@@ -607,16 +607,17 @@ internal static class Program
         return 0;
     }
 
-    // Card 48b7c6b1 -- the ?ai* TUNING knobs' REJECTION diagnostic. Fourteen flags parsed as
+    // Card 48b7c6b1 -- the ?ai* TUNING knobs' REJECTION diagnostic. They were parsed as
     // `TryParse` plus an optional range guard, with no else, so `?aireact=420x` left the baked
     // default in force and said nothing. That is the failure card 6eb8dc9e named for ?flyspider*:
     // a run that measures the DEFAULT path while carrying the label of the variant under test --
-    // and these fourteen are the ones whose readings get published as sweep rows, where a
+    // and these are the ones whose readings get published as sweep rows, where a
     // silently-ignored value reads as "the knob did nothing".
     //
     // NOT every flag whose name starts with "ai": `?aifriends=<0-3>` (a co-op soak seam, not a
     // tuning knob) is still silent, and so is the boolean `?aiplayer`/`?aibench` pair, which
-    // cannot have a bad value. Say "the 14 tuning knobs", never "the whole ?ai* family".
+    // cannot have a bad value. Say "the ?ai* tuning knobs (the `rows` table below)", never "the
+    // whole ?ai* family" -- and never a literal count, which has gone stale twice already.
     //
     // Silence is invisible in any frame or number, so the assertion has to be made about the
     // OUTPUT. Three legs per flag, driven through the real DebugFlags.Parse:
@@ -691,6 +692,19 @@ internal static class Program
             // back at us. 0 is a MEANINGFUL value here (guard off), so its guard refuses only a
             // negative -- which is the shape this table's negative leg already expects.
             new { Flag = "aisweptmax",     Prop = "AiSweptMaxSpeedPxPerMs",Good = "12",  Want = (object)12f,   Baked = "5"    },
+            // The two remaining port additions (card 2248e5eb). ?aitopedgestrength= and
+            // ?ailazerdodge= take 0 as a MEANINGFUL value (it is the 2008 arm), so like
+            // ?aisweptmax= their guards refuse only a negative -- the shape this table's
+            // negative leg already expects.
+            new { Flag = "aitopedgepx",    Prop = "AiTopEdgeDangerPx",     Good = "233", Want = (object)233f,  Baked = "170"  },
+            new { Flag = "aitopedgestrength",Prop = "AiTopEdgeAvoidStrength",Good = "33",Want = (object)33f,   Baked = "20"   },
+            new { Flag = "ailazerpx",      Prop = "AiLazerAvoidRangePx",   Good = "311", Want = (object)311f,  Baked = "150"  },
+            // Baked "" on the last two: since card 2248e5eb's revert they bake 4 and 0, single
+            // digits that occur elsewhere in the captured output, so the absence check would fire
+            // on text that is not the default -- the same escape aiscanrows/aicrosspenalty/
+            // aifieldfall/aiff already take below.
+            new { Flag = "ailazerstrength",Prop = "AiLazerAvoidStrength",  Good = "23",  Want = (object)23f,   Baked = ""     },
+            new { Flag = "ailazerdodge",   Prop = "AiLazerDodgeStrength",  Good = "29",  Want = (object)29f,   Baked = ""     },
         };
         // Baked "" = no default-absence check available for that row: aiscanrows/aicrosspenalty
         // bake 4, aifieldfall bakes 3 and aiff sits at 0, all single digits that occur inside the
@@ -710,7 +724,7 @@ internal static class Program
             return 2;
         }
 
-        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 31 knobs (card 48b7c6b1)");
+        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 36 knobs (cards 48b7c6b1 / 2248e5eb)");
 
         // One counter and its OWN first-problem detail per leg: a shared sink attaches the
         // diagnosis to whichever Check happens to print it, which in a mutation run put the only
@@ -848,7 +862,7 @@ internal static class Program
             "DefaultPowerupReachPx", "DefaultRepulseCancelDelta", "DefaultSteerNoiseFloor",
             "DefaultSeekArriveDeadzonePx", "ShipMaxSpeed", "ShipDeceleration",
             "SweepLaneAvoidStrength",
-            "LazerAvoidStrength", "LazerDodgeStrength"
+            "DefaultLazerAvoidStrength", "DefaultLazerDodgeStrength"
         };
         var vals = new Dictionary<string, float>();
         foreach (string n in names)
@@ -895,14 +909,23 @@ internal static class Program
         // The repellents' full-strength magnitudes. maxSteerStrength (4) is a DoAIMove local, so
         // the threat field's and the screen edges' shared peak is spelled here; the rest are
         // reflected.
-        // TopEdgeAvoidStrength is deliberately NOT in this min: it is added AFTER the low-pass
+        // DefaultTopEdgeAvoidStrength is deliberately NOT in this min: it is added AFTER the low-pass
         // and so never passes through RepulseCancelDelta at all. Folding it in would mix the two
         // populations this card just separated, and it could not fail today (20 against a min of
         // 4), which is exactly how a wrong invariant gets copied.
+        // DefaultLazerDodgeStrength is folded in only WHEN IT IS ON: card 2248e5eb's measurement
+        // took it to 0 and DoAIMove now skips the term outright. This bound is about a repellent
+        // that PUSHES being silently eaten by a floor, and a term that is switched off pushes
+        // nothing, so including it unconditionally would assert 0 > 0.2 and fail a configuration
+        // that is correct. The condition is the contract rather than a comment promising someone
+        // will remember: bake the sidestep back on and the bound re-arms itself.
         const float MaxSteerStrength = 4f;
         float weakestRepellent = Math.Min(MaxSteerStrength,
-            Math.Min(vals["SweepLaneAvoidStrength"],
-            Math.Min(vals["LazerAvoidStrength"], vals["LazerDodgeStrength"])));
+            Math.Min(vals["SweepLaneAvoidStrength"], vals["DefaultLazerAvoidStrength"]));
+        if (vals["DefaultLazerDodgeStrength"] > 0f)
+        {
+            weakestRepellent = Math.Min(weakestRepellent, vals["DefaultLazerDodgeStrength"]);
+        }
         Check("every REPELLENT's full strength clears the repulsion cancellation delta",
             weakestRepellent > repelDelta,
             "weakest repellent " + weakestRepellent + " vs DefaultRepulseCancelDelta " + repelDelta

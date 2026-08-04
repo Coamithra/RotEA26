@@ -87,7 +87,7 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   value must differ from the const while an override is in force; it restores both overrides to
   null on the way out, so a later `Probe*` does not inherit them.
 - **Fifth and sixth case sets: the flag-REJECTION diagnostics** -- `ProbeAiFlagRejection` (card
-  48b7c6b1, the 14 `?ai*` tuning knobs) and `ProbeFlagRejectionSweep` (card 4e401005, the
+  48b7c6b1, the `?ai*` tuning knobs -- see its `rows` table, never a count quoted here) and `ProbeFlagRejectionSweep` (card 4e401005, the
   remaining 79 + five non-numeric specials). Same subject as the `?flyspider*` set, at file scale:
   a malformed value must be REFUSED, REPORTED, and the message must name the setting actually in
   force. **The sweep proves that last part without restating a single constant** -- it sets a

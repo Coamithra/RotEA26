@@ -2688,11 +2688,19 @@ ruling; the two shipped estimators it replaces were both bent around avoiding wi
   field SATURATES rather than wrapping -- a wrapping cast flips the SIGN, turning a sweep into a
   counter-sweep.
 - **VERIFY IN TWO PLACES, and they answer different questions.**
-  **`eaNetMotion()` / `tools/headless/probes/net_motion.txt`** (32 assertions,
+  **`eaNetMotion()` / `tools/headless/probes/net_motion.txt`** (33 assertions,
   `Compat/Net/NetMotionTest.cs`) asserts the mechanism is WIRED AND EXACT: the predicate with a
   UFO as the control, both descriptors' real byte layouts, a driven puppet growing/sweeping/bobbing
   at the SENT parameters, the ease being a nudge, and the host's velocity decision -- each with the
-  PRE-CARD block beside it as its control. Mutation-tested five ways, each failing a different leg.
+  PRE-CARD block beside it as its control. Mutation-tested six ways, each isolated (the sixth is
+  deliberately non-disjoint -- see below).
+  **Section 2's spawn-anchor negative control asserts over FOUR independent puppets** (card
+  c41a89a2): host and puppet both roll `RandomHelper.RandomNextFloat(0, 475)` for the entry
+  height, so a single pair agrees inside the 1.5px band ~0.6% of the time -- a spurious FAILURE,
+  seen once in-suite. The regression it guards (`FlyingSpiderDescriptor.CreatePuppet` losing its
+  `len >= SpawnAnchorBytes` gate) is deterministic across all four, so requiring only ONE to keep
+  its own roll keeps the band and every bit of sensitivity while the coincidence collapses to
+  0.006^4. The leg beside it is a SENTINEL on that independence, not on the wire.
   **`python tools/sim/net_puppet_drive_sim.py --smoothness`** asserts it is WORTH HAVING: anchored
   rows at N=16/32/64/128 (0.0076 / 0.0049 / 0.0025 / 0.0014 against the estimator's flat ~0.013,
   i.e. within 1.6x of the host control at the biggest world) plus a SHOT-NUDGE scenario with

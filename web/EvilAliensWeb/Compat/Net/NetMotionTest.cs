@@ -129,14 +129,50 @@ namespace EvilAliensWeb.Compat.Net
 
             // NEGATIVE CONTROL, and it is what makes the two legs above mean something: a puppet
             // built from the PRE-CARD one-byte extras block keeps Initialize's own rolls. Without
-            // it, a rig whose "host" and "puppet" happened to roll alike would pass. The height
-            // is the discriminator -- it is uniform over 0..475, so an agreement inside 1.5px by
-            // chance is a ~0.6% event, while two phases can agree far more often.
-            FlyingSpider unanchored =
-                (FlyingSpider)desc.CreatePuppet(bin, game, state, extra, 0, 1);
-            unanchored.Initialize();
-            check("...and a pre-card 1-byte extras block leaves the puppet on its OWN roll",
-                !Near(unanchored.NetStartHeight, host.NetStartHeight, 1.5f));
+            // it, a rig whose "host" and "puppet" happened to roll alike would pass. The height is
+            // the discriminator -- it is uniform over 0..475 -- while two phases can agree far
+            // more often.
+            //
+            // ASSERTED OVER N INDEPENDENT PUPPETS, and that is the deflake (card c41a89a2). One
+            // puppet agreeing with the host inside 1.5px by chance is a ~0.6% event, which is a
+            // spurious FAILURE roughly once in 160 verification runs -- measured once in-suite.
+            // The guarded regression (CreatePuppet applying the anchor from a short extras block)
+            // is deterministic, so EVERY puppet would adopt the host's height; requiring only
+            // that ONE kept its own roll therefore loses no sensitivity while the coincidence
+            // collapses to 0.006^N. Seeding the roll instead was rejected: RandomHelper is
+            // process-global and this suite is leave-no-trace, and host and puppet draw from the
+            // same stream, so a seed does not by itself make them differ.
+            const int UnanchoredSamples = 4;
+            FlyingSpider[] unanchored = new FlyingSpider[UnanchoredSamples];
+            int ownRoll = 0;
+            int distinctHeights = 0;
+            for (int i = 0; i < UnanchoredSamples; i++)
+            {
+                unanchored[i] = (FlyingSpider)desc.CreatePuppet(bin, game, state, extra, 0, 1);
+                unanchored[i].Initialize();
+                if (!Near(unanchored[i].NetStartHeight, host.NetStartHeight, 1.5f))
+                {
+                    ownRoll++;
+                }
+                if (i > 0 && !Near(unanchored[i].NetStartHeight, unanchored[0].NetStartHeight, 1.5f))
+                {
+                    distinctHeights++;
+                }
+            }
+            check(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "...and a pre-card 1-byte extras block leaves the puppet on its OWN roll"
+                        + " ({0}/{1} kept theirs)", ownRoll, UnanchoredSamples),
+                ownRoll > 0);
+            // SENTINEL for the deflake above, not for the wire: the 0.006^N claim holds only
+            // while those N rolls are INDEPENDENT. Nothing correlates them today (Initialize's
+            // height roll is unconditional and not PosePinned-gated), so this cannot realistically
+            // fail now -- it has the same coincidence shape it guards, at 0.006^3 -- and it exists
+            // so that a future change which DID correlate them (a pin reaching that roll, a
+            // shared-seed refactor) fails HERE rather than silently reverting the leg above to its
+            // ~0.6% coincidence with every assertion still green. It reads a puppet per i > 0, so
+            // it says nothing at UnanchoredSamples < 2.
+            check("...and those rolls are INDEPENDENT (sentinel: the deflake's own premise)",
+                distinctHeights > 0);
 
             // The offset really is the swivel: two phases a quarter cycle apart must differ by
             // about the full amplitude, and the shape must be the sine Update draws.
@@ -150,10 +186,16 @@ namespace EvilAliensWeb.Compat.Net
                 atQuarter * atThreeQuarter < 0f
                     && System.Math.Abs(atQuarter - atThreeQuarter) > 10f);
 
-            // Both came out of the recycle pool via CreatePuppet -> NewFlyingSpider, so they go
-            // back -- section 4 does the same with its beams.
+            // All of them came out of the recycle pool via CreatePuppet -> NewFlyingSpider, so
+            // they are Remove()d on the way out -- section 4 does the same with its beams. Note
+            // what that does NOT do: nothing here ever entered `collection`, so no
+            // ComponentRemoved fires and none of them lands back in the bin's idleList. They are
+            // dropped rather than returned, and the next run re-`new`s what it needs.
             bin.Remove(puppet);
-            bin.Remove(unanchored);
+            for (int i = 0; i < unanchored.Length; i++)
+            {
+                bin.Remove(unanchored[i]);
+            }
         }
 
         // ---- 3. easing ---------------------------------------------------------------------

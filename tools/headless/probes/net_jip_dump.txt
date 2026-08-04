@@ -16,7 +16,7 @@
 #   * no `[net] listed (join-in-progress) host armed` -> ?net=jiphost stopped arming (the
 #     DebugFlags case, NetSession.Start's JipHost branch, or the transport failed to open).
 #     net_jip_sync would then report "the host never paired" with no explanation.
-#   * no `dump v3 ... end` -> NetJipDump threw before its sentinel, or the FORMAT VERSION moved
+#   * no `dump v4 ... end` -> NetJipDump threw before its sentinel, or the FORMAT VERSION moved
 #     without net_jip_sync's FORMAT_VERSION moving with it. Those two are one edit.
 #   * `scene none` or a missing `hud` -> the dump lost a whole section. Both are compared
 #     verbatim between the two peers, so losing one silently removes a dimension from the diff.
@@ -27,10 +27,16 @@
 #   * make NetJipDump.AppendExtras return before the scene line -> red on the `scene speed=`
 #     line, while the `dump v3 ... end` sentinel still passes -- which is the point of asserting
 #     the sections separately from the sentinel.
-#   * bump NetJipDump.FormatVersion without touching the probe -> red on `dump v3`.
+#   * bump NetJipDump.FormatVersion without touching the probe -> red on `dump v4`.
 #   * drop the `uns=` append from NetJipDump.AppendExtras -> red on the uns line alone (card
 #     94001db7). The differ subtracts that field, so losing it silently reverts its score
 #     compare to the raw one.
+#   * drop the `gone` line from NetJipDump.AppendExtras -> red on it alone (card d108c459). The
+#     differ excuses a host-only id with that line, so losing it turns the deferred-death
+#     release into a failure on every soak that catches one.
+#
+# NOT COVERED HERE: the per-entity `hpwire=` field, because a peerless dump has no entities at
+# all (`ids=0`, asserted below). Its pin is net_jip_sync, whose hp compare reads it.
 #
 # eahl: --flags "?level=Level2&invuln&aiplayer&noattract&seed=7&netjip&net=jiphost&room=jipprobe"
 
@@ -50,7 +56,7 @@ eval NetJipDump
 
 # 2. the SENTINEL, with the format version the differ speaks. Also the peerless state, asserted
 #    positively: no session, no peer, no replicated set.
-expect      \[netjip\] dump v3 role=none active=0 peer=0 ids=0 end
+expect      \[netjip\] dump v4 role=none active=0 peer=0 ids=0 end
 
 # 3. the scenery/music section is POPULATED, not the `none` a dump taken outside a level gives.
 expect      \[netjip\] scene speed=.*base=.*song=
@@ -66,6 +72,14 @@ expect      \[netjip\] hud .*lv=.*opt=
 #    and only nondeterministically; this is the deterministic pin for the field's SHAPE. It reads
 #    0 with no session, which is why it is assertable here at all.
 expect      \[netjip\] hud .*uns=
+
+# 4b. the REMOVAL LEDGER line (card d108c459). A host-only id is excused by this line -- the
+#     client saying it had the entity and released it to its own death animation -- so a build
+#     that stopped emitting it would turn every such id into an unexplained failure, and one
+#     that emitted it unconditionally full would excuse a joiner that never received anything.
+#     Only its SHAPE is pinnable here: a peerless dump is not a client, so `-` is the right and
+#     asserted answer. The populated case is net_jip_sync's, which is where a client exists.
+expect      \[netjip\] gone -
 
 # 5. nothing threw on the way through (a descriptor re-encode, a missing service).
 expect-not  \[netjip\] err

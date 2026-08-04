@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using EvilAliens;
 using Microsoft.Xna.Framework;
@@ -138,6 +138,18 @@ namespace EvilAliensWeb.Compat.Net
             // guard would throw away good data for every entity that was not in the newer packet.
             public ushort LastSnapSeq;
             public bool HasSnapSeq;
+            // THE LAST hp VALUE THIS PUPPET ACTUALLY TOOK OFF THE WIRE, or -1 if none ever has
+            // been (card d108c459). Diagnostic only -- nothing in the driver reads it.
+            //
+            // It exists because a puppet's LIVE hp and the host's hp are not the same quantity: a
+            // client hit-tests puppets with its own bullets, so between two snapshot turns its
+            // copy carries damage the host has not credited yet, exactly as a client's DISPLAYED
+            // score carries provisional credits the host has not settled (card 94001db7's `uns`).
+            // Comparing the live values is therefore a category error and only a tolerance wide
+            // enough to be useless would hide it; comparing THIS against the host's hp asks the
+            // question that actually has an answer -- did the client apply what the host sent --
+            // and the local damage drops out of the comparison entirely.
+            public int LastAppliedHp;
         }
 
         private static readonly Dictionary<ushort, PuppetInfo> byId = new Dictionary<ushort, PuppetInfo>();
@@ -180,12 +192,14 @@ namespace EvilAliensWeb.Compat.Net
         // an entity's extras has no other way to get it.
         internal readonly struct LiveEntry
         {
-            internal LiveEntry(ushort id, byte typeIdx, INetEntity comp, bool provisional)
+            internal LiveEntry(ushort id, byte typeIdx, INetEntity comp, bool provisional,
+                int lastAppliedHp)
             {
                 Id = id;
                 TypeIdx = typeIdx;
                 Comp = comp;
                 Provisional = provisional;
+                LastAppliedHp = lastAppliedHp;
             }
 
             internal readonly ushort Id;
@@ -198,6 +212,12 @@ namespace EvilAliensWeb.Compat.Net
             // that cannot be read off the entity itself (a provisional UFO is a perfectly
             // ordinary UFO), which is why the flag rides out here.
             internal readonly bool Provisional;
+
+            // The last hp this puppet took off the wire, -1 if none ever has -- PuppetInfo's
+            // field of the same name, and it rides out here for the same reason Provisional
+            // does: it cannot be read off the entity, whose live hp also carries the damage
+            // this client has dealt locally since. See PuppetInfo.LastAppliedHp.
+            internal readonly int LastAppliedHp;
         }
 
         // A SNAPSHOT of the live set, not a lazy view over `byId`: the caller walks it doing real
@@ -209,9 +229,30 @@ namespace EvilAliensWeb.Compat.Net
             var list = new List<LiveEntry>(byId.Count);
             foreach (KeyValuePair<ushort, PuppetInfo> kv in byId)
             {
-                list.Add(new LiveEntry(kv.Key, kv.Value.TypeIdx, kv.Value.Comp, kv.Value.SelfHealed));
+                list.Add(new LiveEntry(kv.Key, kv.Value.TypeIdx, kv.Value.Comp, kv.Value.SelfHealed,
+                    kv.Value.LastAppliedHp));
             }
             return list;
+        }
+
+        // THE IDS THIS CLIENT ONCE HELD AND LET GO, for a reader asking why an id the host still
+        // holds is not here (card d108c459). It is the removal LEDGER -- every path that drops a
+        // puppet passes through MarkRemoved -- so membership is this peer's own statement that it
+        // had the entity and released it, which is a different fact from "the entity never
+        // arrived" and the only one that can excuse the absence.
+        //
+        // The distinction it is for: ReleaseDyingPuppet hands a puppet its own death animation and
+        // drops it from every map, while the host keeps the entity in NetIdRegistry for the whole
+        // 2.5-5 s of that animation. So the two ends legitimately disagree about the id set for
+        // seconds at a time, by design and in one direction only. An id in neither this ledger nor
+        // a host-side death is the real defect: a joiner that never got an entity at all.
+        //
+        // A COPY, and capped by MarkRemoved at LedgerCap like every other ledger here -- so an id
+        // released long enough ago can age out and read as unexplained. That is the honest
+        // direction to fail in and it is not silently swallowed: net_jip_sync reports the count.
+        internal static List<ushort> RemovedIds()
+        {
+            return new List<ushort>(recentlyRemoved.Keys);
         }
 
         // The netId this peer knows a puppet by, for reporting a puppet's relationship to
@@ -417,6 +458,10 @@ namespace EvilAliensWeb.Compat.Net
                 // Cached rather than asked per tick: NetPathAnchored is a per-type constant.
                 PathAnchored = entity.NetPathAnchored,
                 ScaleLocal = entity.NetScaleLocal,
+                // -1 = "nothing off the wire yet", which the ApplySnapshotState below normally
+                // replaces immediately. It has to be spelt out: the field's whole job is to be
+                // distinguishable from an applied 0, and the default for an int is 0.
+                LastAppliedHp = -1,
             };
             ApplySnapshotState(info, state, null, null, 0, 0, isSpawn: true);
             if (stale != null)
@@ -832,6 +877,16 @@ namespace EvilAliensWeb.Compat.Net
             if (state.Hp > 0 && comp.NetKillable is INetKillable killable)
             {
                 killable.NetApplyHp(state.Hp);
+                // THE VALUE RECEIVED, not the entity read back after the clamp -- and the
+                // difference is the whole reason this field is trustworthy. NetApplyHp ONLY EVER
+                // LOWERS (it refuses to let an older snapshot resurrect hits this client has
+                // already landed), so a read-back reports the REFUSED figure whenever the client
+                // is ahead: measured 132 gaps across 6 seeds, every single one client-lower,
+                // none higher, none equal -- the clamp's signature, not a replication fault.
+                // Recording what crossed the wire keeps this comparable with the host's
+                // LastSentHp, and the clamp itself is asserted separately as an invariant
+                // (net_jip_sync: a puppet's live hp may never EXCEED this).
+                info.LastAppliedHp = state.Hp;
             }
             // ORDER MATTERS: state extras run LAST. The base writes above have per-type side
             // effects (NetSpeedVector's setter rewrites Direction, which zeroes Lazer's beam

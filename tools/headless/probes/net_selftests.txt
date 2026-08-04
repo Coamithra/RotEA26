@@ -129,7 +129,14 @@ expect \[kicktest\] PASS \(29/29 checks\)
 # tearing the stale one down BEFORE the replacement is built and landed fails exactly 2 -- a spawn
 # extras byte off a stranger's wire that no descriptor can build would otherwise delete a working
 # puppet and MarkRemove its id.
-expect \[netsnap\] PASS \(40 passed, 0 failed\)
+# Card d108c459 added section 7 -- 40 -> 45 -- a snapshot's hp reaching the puppet, END TO END
+# through NetPuppets.ApplySnapshotState. Nothing covered that: NetEntityTest calls NetApplyHp
+# directly through the INetKillable seam and NetWireTest round-trips an Hp byte through a frame,
+# but neither drives a real snapshot entry into a real puppet and reads the entity back. It uses a
+# StarMine (a UFO puppet starts at 1 hit point, where NetApplyHp's floor leaves nothing to lower
+# it to) and takes its values RELATIVE to whatever the puppet built with, since NetApplyHp only
+# ever lowers and an absolute number would pass vacuously the day the type's hit points change.
+expect \[netsnap\] PASS \(45 passed, 0 failed\)
 # per-slot HUD wire format + OwnsSlot + the real PowerupData exp curve (card 1a3ad45a), plus the
 # per-layer option counts v16 appended to that entry (card c5228350) and their decode-boundary
 # clamp -- asserted off a RAW packet, since the encoder clamps too and a value put through it can

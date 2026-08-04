@@ -35,6 +35,12 @@ namespace EvilAliensWeb.Compat.Net
         internal float? LossPct;
         internal float? JitterMs;
 
+        // Overridable for the same reason as the impairment triple: it has a consumer a scenario
+        // can point at with no Game involved, and NetStaleTest's sag measurement is exactly the
+        // "run the same frames with the fix off" shape ?netstaleguard=0 exists for -- from a
+        // suite, without a reboot. null => forward to the production flag.
+        internal bool? StaleGuard;
+
         internal PinnedNetHost()
             : this(0L, null)
         {
@@ -73,6 +79,8 @@ namespace EvilAliensWeb.Compat.Net
         public float NetLossPct => LossPct ?? inner.NetLossPct;
 
         public float NetJitterMs => JitterMs ?? inner.NetJitterMs;
+
+        public bool SnapshotStaleGuard => StaleGuard ?? inner.SnapshotStaleGuard;
 
         // Step 2b's four services forward UNCONDITIONALLY -- pinning the clock must not also
         // hand the layer a different world. A scenario wanting its own services overrides them

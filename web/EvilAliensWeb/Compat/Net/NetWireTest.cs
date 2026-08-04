@@ -532,8 +532,6 @@ namespace EvilAliensWeb.Compat.Net
             // ref offset -- the one message whose decode is stateful across entries, so two
             // entries with DIFFERENT extra lengths is the case that finds a stride bug.
             byte[] snap = new byte[512];
-            snap[0] = NetProtocol.MsgWorldSnapshot;
-            snap[1] = 2;
             int wOff = NetProtocol.SnapshotHeaderBytes;
             //
             // The two entries also carry DIFFERENT per-sample flags (card e79bb994), which is
@@ -546,12 +544,30 @@ namespace EvilAliensWeb.Compat.Net
             second.Hp = 9;
             NetProtocol.WriteSnapshotEntry(snap, ref wOff, 202, 2,
                 NetProtocol.NetSnapshotFlags.Teleported, second, null, 0);
+            // The header is stamped LAST, as the sender does it -- the entry loop is what knows
+            // how many entries fit. The seq (card f5cf7a5c) is picked ABOVE the u8 count's range
+            // and with distinct high and low bytes, so a decoder reading it from the wrong offset
+            // or as one byte cannot pass.
+            const ushort SnapSeq = 0x2A07;
+            NetProtocol.WriteSnapshotHeader(snap, 2, SnapSeq);
             byte[] packed = new byte[wOff];
             Array.Copy(snap, packed, wOff);
             byte[] gotSnap = Round(packed, reliable: false);
             int rOff = NetProtocol.SnapshotHeaderBytes;
             byte f1 = 0xFF;
             byte f2 = 0xFF;
+            check("MsgWorldSnapshot's header round-trips its count AND its packet seq",
+                gotSnap != null
+                && NetProtocol.TryReadSnapshotHeader(gotSnap, out byte hdrCount, out ushort hdrSeq)
+                && hdrCount == 2 && hdrSeq == SnapSeq);
+            // The negatives beside it: the header decoder is what every entry walk is gated on,
+            // so a truncated or mistyped packet must be refused rather than read as count 0.
+            check("a snapshot packet shorter than its header is refused",
+                !NetProtocol.TryReadSnapshotHeader(new byte[] { NetProtocol.MsgWorldSnapshot, 1, 0 },
+                    out _, out _));
+            check("a packet whose type is not MsgWorldSnapshot is refused",
+                !NetProtocol.TryReadSnapshotHeader(new byte[] { NetProtocol.MsgShipState, 1, 0, 0 },
+                    out _, out _));
             bool snapOk = gotSnap != null && gotSnap[1] == 2
                 && NetProtocol.TryReadSnapshotEntry(gotSnap, ref rOff, out ushort id1, out byte t1,
                     out f1, out NetBaseState st1, out int e1Off, out int e1Len)
@@ -571,8 +587,7 @@ namespace EvilAliensWeb.Compat.Net
             // rest. A decoder that validated the byte as a whole would drop the entry -- i.e.
             // stop correcting that entity -- the moment a later build appended a flag.
             byte[] fut = new byte[NetProtocol.SnapshotHeaderBytes + NetProtocol.SnapshotEntryBaseBytes];
-            fut[0] = NetProtocol.MsgWorldSnapshot;
-            fut[1] = 1;
+            NetProtocol.WriteSnapshotHeader(fut, 1, 0);
             int futOff = NetProtocol.SnapshotHeaderBytes;
             const byte FutureBits = 0x81; // Teleported + an undefined high bit
             NetProtocol.WriteSnapshotEntry(fut, ref futOff, 303, 3, FutureBits, second, null, 0);
@@ -588,8 +603,7 @@ namespace EvilAliensWeb.Compat.Net
             // A snapshot entry one byte short of the base block must be REFUSED, not read past
             // its end -- the flags byte grew that block, so this is the boundary that moved.
             byte[] runt = new byte[NetProtocol.SnapshotHeaderBytes + NetProtocol.SnapshotEntryBaseBytes];
-            runt[0] = NetProtocol.MsgWorldSnapshot;
-            runt[1] = 1;
+            NetProtocol.WriteSnapshotHeader(runt, 1, 0);
             runt[NetProtocol.SnapshotHeaderBytes] = (byte)(NetProtocol.SnapshotEntryBaseBytes - 1);
             byte[] gotRunt = Round(runt, reliable: false);
             int runtOff = NetProtocol.SnapshotHeaderBytes;

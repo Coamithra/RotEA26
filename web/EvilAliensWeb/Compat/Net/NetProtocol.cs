@@ -858,18 +858,60 @@ namespace EvilAliensWeb.Compat.Net
 
         // ---- world snapshot (host -> clients, stream lane) --------------------------------
 
-        // MsgWorldSnapshot: [0x20][count:1] then `count` length-prefixed entries:
+        // MsgWorldSnapshot: [0x20][count:1][seq:2] then `count` length-prefixed entries:
         //   [len:1][netId:2][typeIdx:1][flags:1][base:24][per-type state extra:(len-29)]
         // The len prefix makes entries for not-yet-spawned ids skippable without knowing the
         // type's extra size (stream lane may outrun the reliable spawn).
+        //
+        // `seq` (card f5cf7a5c, protocol v19) is the host's monotone per-PACKET counter, and it is
+        // what makes this lane's own contract survivable. The stream lane is unordered with
+        // maxRetransmits:0, so a reordered or late packet used to hand NetPuppets a position OLDER
+        // than the one already on screen and the puppet sagged backwards (~12px at ?netlag=120,
+        // panel jitter 40, against a Level-3 wall scrolling at 0.31 px/ms) and was then blended
+        // back over the correction window -- a visible sag, with pupPops staying at a contented 0
+        // throughout because nothing about it looks like a pop. The receiver keeps the last seq it
+        // APPLIED per netId and refuses anything not newer (NetPuppets.OnSnapshotEntry).
+        //
+        // Per PACKET rather than per entry: the round robin gives an entity a turn every
+        // `live/16` packets, so the packet's own counter already orders that entity's samples, and
+        // 2 bytes once beats 2 bytes x16. It sits AFTER `count` so that byte keeps index 1, which
+        // is the whole of the header's non-mechanical layout.
+        //
+        // Why a seq and not a send-time ms (the MsgShipState choice): the receiver only ever asks
+        // "is this newer than what I applied", never "how long ago was this" -- it does no
+        // arrival-time arithmetic on this lane at all, since the entity's own dead reckoning owns
+        // the time axis. u16 costs half of a u32 ms stamp and matches the MsgEvent convention.
         //
         // `flags` is per-SAMPLE, not per-entity state -- see NetSnapshotFlags. It is deliberately
         // NOT part of the shared base-state block: EvSpawn writes that same block, and a spawn is
         // by definition an entity's FIRST observation, so every flag defined here would be
         // permanently zero there. What this byte answers is "what should the receiver make of THIS
         // sample", which only a snapshot entry can ask.
-        public const int SnapshotHeaderBytes = 2;
+        public const int SnapshotHeaderBytes = 4;
         public const int SnapshotEntryBaseBytes = 5 + BaseStateBytes; // len+netId+typeIdx+flags+base
+
+        // The header is written LAST by the sender (the entry loop needs to know how many entries
+        // actually fit before `count` can be filled in), so this stamps into a buffer the entries
+        // are already in rather than returning a fresh one.
+        public static void WriteSnapshotHeader(byte[] b, byte count, ushort seq)
+        {
+            b[0] = MsgWorldSnapshot;
+            b[1] = count;
+            WriteU16(b, 2, seq);
+        }
+
+        public static bool TryReadSnapshotHeader(byte[] b, out byte count, out ushort seq)
+        {
+            count = 0;
+            seq = 0;
+            if (b == null || b.Length < SnapshotHeaderBytes || b[0] != MsgWorldSnapshot)
+            {
+                return false;
+            }
+            count = b[1];
+            seq = ReadU16(b, 2);
+            return true;
+        }
 
         public static void WriteSnapshotEntry(byte[] b, ref int off, ushort netId, byte typeIdx, byte flags, in NetBaseState state, byte[] extra, int extraLen)
         {
@@ -934,14 +976,32 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         // ---- shared base-state block (24 bytes) --------------------------------------------
-        // [posX:f32][posY:f32][velX:f32][velY:f32][rot:u16][curframe:u16 x64][scale:u16 x256][hp:u16]
+        // [posX:f32][posY:f32][velX:f32][velY:f32][rot:u16][curframe:u16 x64][scale:u16 x4096][hp:u16]
         // Velocity is the host's OBSERVED position delta in design px per ms (many enemies move
         // Position directly rather than via Speed/Direction, so SpeedVector would lie).
 
         public const int BaseStateBytes = 24;
 
         private const float FrameScale = 64f;
-        private const float ScaleScale = 256f;
+
+        // SCALE: a u16 quantum, raised 256 -> 4096 and ROUNDED rather than truncated (card
+        // f5cf7a5c, protocol v19). The card asked to WIDEN the field; the sweep in NetStaleTest
+        // section 1 measured every replicable type and this dominates that on every axis:
+        //
+        //   * ZERO BYTES. A f32 would add 2 per entity per snapshot turn (+32B on a 16-entry
+        //     packet, ~7%) on the one lane whose LOSS is the other half of this card's problem.
+        //   * 32x the precision anyway. Max absolute error goes 1/256 (0.0039) -> 1/8192
+        //     (0.000122), because the quantum is 16x finer AND rounding halves the residual.
+        //   * ROUNDING ALSO REMOVES A BIAS, which is the part precision alone would not fix.
+        //     Truncation is one-directional: every puppet in the world was systematically
+        //     SMALLER than the host's copy, never larger, which is exactly why the Level-3 wall's
+        //     error accumulated down 122 rows instead of averaging out (cards 4392bd30/80749dc4).
+        //
+        // THE CEILING IS 65535/4096 = 15.999 and the measured maximum across the replicable set is
+        // 3.0 (Asteroid huge), so there is 5x headroom -- but a clamp is silent, so NetStaleTest's
+        // per-type sweep asserts every type stays inside it rather than trusting this comment.
+        // A type that ever needs a bigger scale is what has to change first.
+        private const float ScaleScale = 4096f;
         private const float TwoPi = 6.2831855f;
 
         public static void WriteBaseState(byte[] b, ref int off, in NetBaseState s)
@@ -957,7 +1017,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             WriteU16(b, off + 16, (ushort)(rot / TwoPi * 65535f));
             WriteU16(b, off + 18, (ushort)Math.Clamp(s.CurFrame * FrameScale, 0f, 65535f));
-            WriteU16(b, off + 20, (ushort)Math.Clamp(s.Scale * ScaleScale, 0f, 65535f));
+            WriteU16(b, off + 20, (ushort)Math.Clamp(MathF.Round(s.Scale * ScaleScale), 0f, 65535f));
             WriteU16(b, off + 22, (ushort)Math.Clamp(s.Hp, 0, 65535));
             off += BaseStateBytes;
         }

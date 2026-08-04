@@ -693,6 +693,17 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetWallTest.Run();
 		}
 
+		// JS bridge for the world snapshot's staleness guard + the scale precision raise
+		// (eaNetStale, card f5cf7a5c): the per-type scale census, the packet seq end to end
+		// through a real client session, and the backward drag a reordered or late entry used to
+		// produce -- measured against ?netstaleguard=0 as the negative control. Nothing here is
+		// visible in a frame: the sag is well under SnapThresholdPx, so pupPops never moved.
+		[JSInvokable("debugNetStaleTest")]
+		public static string NetStale()
+		{
+			return EvilAliensWeb.Compat.Net.NetStaleTest.Run();
+		}
+
 		// Park a session-ending notice at the menus (card 72143c11), with no peer and no
 		// session -- the only offline way to reach MenuScene.NetUpdate's notice path, since
 		// every production writer of MenuNotice is inside NetSession.Stop(). MenuScene polls

@@ -108,7 +108,7 @@ namespace EvilAliensWeb.Compat.Net
                 //    bare "is there one?" scan would pass vacuously on a pre-existing bullet
                 //    (and the cleanup below would then evict a bullet the game still owns).
                 HashSet<GameComponent> before = new HashSet<GameComponent>(CollectType<EvilBullet>(game));
-                bool applied = NetPuppets.OnSnapshotEntry(IdRebuild, 0, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0,
+                bool applied = NetPuppets.OnSnapshotEntryNextSeq(IdRebuild, 0, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0,
                     out bool popped, out SnapUnknownKind kind);
                 foreach (GameComponent item in CollectType<EvilBullet>(game))
                 {
@@ -127,7 +127,7 @@ namespace EvilAliensWeb.Compat.Net
 
                 // 2. NONE -- the same id again, now that it IS puppeted. The entry applies
                 //    normally and must not be counted as unknown at all.
-                applied = NetPuppets.OnSnapshotEntry(IdRebuild, 0, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0, out popped, out kind);
+                applied = NetPuppets.OnSnapshotEntryNextSeq(IdRebuild, 0, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0, out popped, out kind);
                 Check("a known id reports None (was " + kind + ")", kind == SnapUnknownKind.None);
                 Check("a known id reports as applied", applied);
 
@@ -141,7 +141,7 @@ namespace EvilAliensWeb.Compat.Net
                 bin.Remove((GameComponent)(object)puppet);
                 bin.Update();
                 int liveAfterRemoval = NetPuppets.LiveCount;
-                applied = NetPuppets.OnSnapshotEntry(IdRebuild, 0, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0, out popped, out kind);
+                applied = NetPuppets.OnSnapshotEntryNextSeq(IdRebuild, 0, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0, out popped, out kind);
                 Check("a just-removed id reports LeftDead (was " + kind + ")", kind == SnapUnknownKind.LeftDead);
                 Check("a just-removed id is NOT resurrected",
                     NetPuppets.LiveCount == liveAfterRemoval && liveAfterRemoval == 0);
@@ -153,7 +153,7 @@ namespace EvilAliensWeb.Compat.Net
                 // 4. REFUSED -- a typeIdx with no descriptor. Unlike the two above this is a
                 //    fault: nothing can ever be built for it.
                 byte badType = (byte)NetTypeRegistry.Count;
-                applied = NetPuppets.OnSnapshotEntry(IdRefused, badType, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0, out popped, out kind);
+                applied = NetPuppets.OnSnapshotEntryNextSeq(IdRefused, badType, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0, out popped, out kind);
                 Check("an unbuildable typeIdx reports Refused (was " + kind + ")", kind == SnapUnknownKind.Refused);
                 Check("Refused builds nothing", NetPuppets.LiveCount == 0);
 
@@ -164,7 +164,7 @@ namespace EvilAliensWeb.Compat.Net
                 //    host streams that id. (The other two Refused causes mark the id removed
                 //    first, so they tick more slowly -- not covered here, hence the narrow
                 //    assertion name.) A climbing snapBad is the one shape that means trouble.
-                NetPuppets.OnSnapshotEntry(IdRefused, badType, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0, out popped, out kind);
+                NetPuppets.OnSnapshotEntryNextSeq(IdRefused, badType, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0, out popped, out kind);
                 Check("an unbuildable typeIdx re-counts on the very next turn (was " + kind + ")",
                     kind == SnapUnknownKind.Refused);
 
@@ -220,7 +220,7 @@ namespace EvilAliensWeb.Compat.Net
                     bin.Update();
                     Check("the stale self-healed Powerup left the world",
                         !CollectType<Powerup>(game).Contains((GameComponent)(object)healed));
-                    NetPuppets.OnSnapshotEntry(IdPowerup, TypePowerup, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0, out popped, out kind);
+                    NetPuppets.OnSnapshotEntryNextSeq(IdPowerup, TypePowerup, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0, out popped, out kind);
                     Check("the rebuilt puppet survives the stale component's deferred removal (was "
                         + kind + ")", kind == SnapUnknownKind.None);
 
@@ -255,7 +255,7 @@ namespace EvilAliensWeb.Compat.Net
                     Check("...and leaves the self-healed puppet in the world",
                         CollectType<Powerup>(game).Contains((GameComponent)(object)doomed));
                     bin.Update();
-                    NetPuppets.OnSnapshotEntry(IdUnbuildable, TypePowerup, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0, out popped, out kind);
+                    NetPuppets.OnSnapshotEntryNextSeq(IdUnbuildable, TypePowerup, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0, out popped, out kind);
                     Check("...and the id is still corrected, not left for dead (was " + kind + ")",
                         kind == SnapUnknownKind.None);
                     ignore.Add(doomed);
@@ -351,7 +351,7 @@ namespace EvilAliensWeb.Compat.Net
             in NetBaseState state, byte[] noExtras, Action<string, bool> check,
             HashSet<GameComponent> ignore) where T : GameComponent
         {
-            NetPuppets.OnSnapshotEntry(netId, typeIdx, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0,
+            NetPuppets.OnSnapshotEntryNextSeq(netId, typeIdx, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0,
                 out bool _, out SnapUnknownKind kind);
             GameComponent built = SoleOfType<T>(game, ignore);
             // The positive control, as in scenario 1: every assertion below is about what the

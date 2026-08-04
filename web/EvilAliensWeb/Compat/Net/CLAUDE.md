@@ -687,13 +687,16 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   Serializing WHO edits `NetProtocol.cs` in a parallel batch is an orchestration concern; it must
   not shape the design.
 
-- **MALFORMED-WIRE-INPUT HARDENING IS CAPPED -- do not file or accept cards growing it (user
-  ruling, 2026-08-04).** The robustness bar is: matched builds work, mismatched builds are
-  refused by the build-hash handshake, and everything else may simply break. What EXISTS stays
-  (the decode-boundary validators, the length gates, their tests -- several double as vacuity
-  controls on positive legs, e.g. NetMotionTest's spawn-anchor control), but no new work
-  hardening or testing exotic bad-bytes-from-a-peer paths: those scenarios either cannot occur
-  between matched builds or fail loudly enough to be found in an ordinary playtest.
+- **THE CLIENT TRUSTS THE HOST -- no client-side defense against host bugs or version drift
+  (user ruling, 2026-08-04).** Assume matched builds and a correct host: the build-hash
+  handshake refuses mismatches, the host's own code and suites are responsible for the host not
+  sending garbage, and the client does not re-verify or gracefully degrade what it receives --
+  anything outside those assumptions may simply break. Consequently malformed-wire-input
+  hardening is CAPPED: do not file or accept cards growing it, and do not add fallback paths
+  (a defensive random/default when a block looks short, etc.) to new receive code. What EXISTS
+  stays (the decode-boundary validators, the length gates, their tests -- several double as
+  vacuity controls on positive legs, e.g. NetMotionTest's spawn-anchor control), but this class
+  of code and test does not grow.
 
 - **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v15):** the 3
   layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim, alive flag,

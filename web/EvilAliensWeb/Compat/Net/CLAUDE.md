@@ -2736,7 +2736,7 @@ velocities the layer already had are wrong for it -- and the fix is neither of t
   both fallbacks. Any per-peer factor (`DifficultyModifier`, the oracle's scroll) is applied
   HOST-SIDE so the wire carries real px/ms -- the Lazer sent-rate rule.
 - **NO WIRE BYTES AND NO PROTOCOL BUMP: it is a better number in `NetBaseState.Vel`, which already
-  ships.** The batch's bump authorisation went unused. **The CLIENT is untouched too** -- the
+  ships.** **The CLIENT is untouched too** -- the
   scripted velocity is ASSIGNED, not eased, exactly as the Lazer rates are: a phase velocity is a
   genuine step function, and easing across it would delay a collidable sweep's start further.
 - **THIS IS WHAT `NetPathAnchored` COULD NOT DO, so read the two together.** Anchoring makes the

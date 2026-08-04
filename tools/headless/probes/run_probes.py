@@ -446,6 +446,11 @@ def main():
         print("WARNING: STALE BINARY -- running anyway (--allow-stale).\n" + head + stale + fix,
               file=sys.stderr)
 
+    if args.keep_output:
+        # The FAIL branch names each log it writes; the PASS branch cannot (50 paths per suite
+        # run is not a report), so say once where a soak's output is going.
+        print("--keep-output: logging every run to %s" % rel(FAILURE_DIR))
+
     failed = []
     for path in paths:
         name = os.path.basename(path)

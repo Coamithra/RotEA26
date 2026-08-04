@@ -11,8 +11,9 @@
 // <saves>/fs/EvilAliens/<Level>.dat with FileMode.Create and FileShare.None; with the directory
 // deleted under it, the open throws and screenshot_alpha.txt fails AFTER printing a perfectly
 // correct `[shot] Level2 300x225 alphaMin=255` — which is exactly the once-seen failure the card
-// records. Reproduced 5/5 by churning the shared directory while a run saved thumbnails, and 0
-// failures over the same experiment once the run had a directory of its own.
+// records. Measured as a matched A/B, same subject binary, a churner performing the same delete
+// a concurrent boot performs at ~780 wipes per trial: churn aimed at the SHARED dir failed 10 of
+// 10 runs, churn aimed at a PER-PROCESS dir 0 of 10.
 //
 // The fix is that each process claims %TEMP%/eahl-saves/<pid>-<ticks> and removes it on the way
 // out. `--saves <dir>` is untouched: an explicit directory is a deliberate persistent profile,
@@ -31,10 +32,20 @@ namespace EvilAliensWeb.Headless
     internal static class TempSaveDir
     {
         // A run that dies without unwinding (a crash, a kill, a --script timeout) leaks its
-        // directory. Deliberately swept by AGE rather than by liveness: asking whether a pid is
-        // still alive races and would eventually delete a running sibling's saves, which is the
-        // very bug this file exists to fix. Six hours is ~72x the runner's own 300 s probe
-        // timeout, so nothing that is still running can be near it.
+        // directory. Six hours is ~72x the runner's own 300 s probe timeout, so no PROBE run can
+        // be near it -- but age alone is not a safe rule, because `--repl` is advertised as a
+        // session an agent boots once and drives all day. Only writes directly inside the claimed
+        // directory refresh its mtime, and the game writes to <claimed>/fs/EvilAliens/, so an
+        // idle-but-live repl ages exactly like a leak and a sibling's Claim() would delete its
+        // saves -- the very failure this file exists to remove.
+        //
+        // So a directory is collected only when it is BOTH older than this AND owned by a pid
+        // that is gone. Note the asymmetry that makes the liveness test safe here: pids are
+        // recycled, so it can wrongly conclude "alive" and SKIP a dead run's directory (which
+        // merely leaks, and the name carries the claim time so a later sweep with a different
+        // pid table collects it), but it can never conclude "dead" about a process that is
+        // running. Liveness as the SOLE criterion would be the racy design -- as an extra veto
+        // on top of age it is strictly conservative.
         private const double StaleHours = 6.0;
 
         private static string _claimed;
@@ -79,7 +90,7 @@ namespace EvilAliensWeb.Headless
                     return;
                 DateTime cutoff = DateTime.UtcNow.AddHours(-StaleHours);
                 foreach (string dir in Directory.GetDirectories(Base))
-                    if (Directory.GetLastWriteTimeUtc(dir) < cutoff)
+                    if (Directory.GetLastWriteTimeUtc(dir) < cutoff && !OwnerAlive(dir))
                         try { Directory.Delete(dir, true); } catch (Exception) { }
                 foreach (string file in Directory.GetFiles(Base))
                     if (File.GetLastWriteTimeUtc(file) < cutoff)
@@ -89,6 +100,33 @@ namespace EvilAliensWeb.Headless
             {
                 // An unreadable temp dir is the caller's problem one line later, when the store
                 // fails to create its own directory and says so.
+            }
+        }
+
+        // Is the pid in "<pid>-<ticks>" still running? Answers TRUE whenever it cannot tell --
+        // an unparseable name, a pid it may not query, any surprise -- because every ambiguous
+        // answer must be the one that keeps the directory. See StaleHours.
+        private static bool OwnerAlive(string dir)
+        {
+            string name = Path.GetFileName(dir);
+            int dash = name.IndexOf('-');
+            if (dash <= 0 || !int.TryParse(name.Substring(0, dash), NumberStyles.Integer,
+                                           CultureInfo.InvariantCulture, out int pid))
+                return true;
+            try
+            {
+                // Throws ArgumentException when no such process exists -- the only answer that
+                // licenses a delete.
+                using (System.Diagnostics.Process.GetProcessById(pid))
+                    return true;
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+            catch (Exception)
+            {
+                return true;
             }
         }
     }

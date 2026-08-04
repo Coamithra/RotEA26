@@ -384,8 +384,20 @@ namespace EvilAliensWeb.Headless
                 // " in <path>:line <n>" is present only for a frame whose PDB shipped, i.e. ours.
                 (frame.Contains(":line ") ? located : rest).Add(frame);
             }
+            // The two groups are each in stack order, but printing them back to back would read
+            // as one stack and mis-attribute the caller of the last located frame. The separator
+            // says where the reordering happened -- and it can only ever appear AFTER a located
+            // frame, so the one line run_probes prints after the `err` is still a real frame.
             int shown = 0;
-            foreach (string frame in located.Concat(rest))
+            foreach (string frame in located)
+            {
+                yield return frame;
+                if (++shown == 8)
+                    yield break;
+            }
+            if (located.Count > 0 && rest.Count > 0)
+                yield return "-- outer frames --";
+            foreach (string frame in rest)
             {
                 yield return frame;
                 if (++shown == 8)

@@ -31,7 +31,9 @@ COMPILED IN — `wwwroot/Content` and the probe files themselves are read live o
 regenerating an asset never reads as stale.
 
 **A failing probe's FULL output is kept — read the log, not just the tail** (card de82597f). The
-runner prints a 12-line window around the `err` and writes everything the run produced to
+runner prints the `err` line with three lines of context and exactly ONE line after it (the
+12-line tail is only the fallback for output with no `err` at all), and writes everything the run
+produced to
 `tools/headless/probes/_failures/<probe>-<timestamp>.log` (gitignored, one file per failure, the
 command line at the top), naming the path under the tail. That exists because the summary throws
 away exactly what a rare flake needs: this card was filed with no evidence beyond "`[netmotion] 32

@@ -18,13 +18,16 @@
 // meaningless in browser-wasm, and putting it in Compat/ would ship a type that can only throw.
 //
 // SOCKET REUSE, stated explicitly because the soak kills and respawns the CLIENT process at
-// every join. The HOST binds the listener once and keeps it for the process lifetime -- it is
-// never rebound, so no TIME_WAIT window is ever hit -- and serves ONE peer at a time: when that
-// peer's socket closes, the peer-bye is raised and the listener goes straight back to accepting,
-// so join N+1 connects to the same port with no teardown. The CLIENT only ever dials out on an
-// ephemeral port, which is the side that may cycle freely. A second client arriving while one is
-// connected is refused and CLOSED rather than queued: the protocol is 2-peer, and silently
-// holding a third socket open would make a rig bug look like a network stall.
+// every join. The HOST binds the listener ONCE and keeps it for the process lifetime, and
+// `Close()` deliberately does NOT stop it -- that call is `eaNet.close`, which a listed host
+// reaches on every match teardown (`NetSession.Stop`), so stopping the listener there would
+// rebind it on the next re-arm and expose the port to a lingering TIME_WAIT. It serves ONE peer
+// at a time: when that peer's socket closes, the peer-bye is raised and the listener is still
+// accepting, so join N+1 connects to the same port with no teardown at all. The CLIENT only ever
+// dials out on an ephemeral port, which is the side that may cycle freely. A second client
+// arriving while one is connected is refused and CLOSED rather than queued: the protocol is
+// 2-peer, and silently holding a third socket open would make a rig bug look like a network
+// stall. `Shutdown()` is the process-exit door, and nothing in a run calls it.
 // ---------------------------------------------------------------------------
 using System;
 using System.Collections.Generic;
@@ -141,12 +144,16 @@ namespace EvilAliensWeb.Headless
             }
             else
             {
+                // Announced BEFORE the loop: this blocks Game1.Initialize for up to
+                // ConnectTimeoutMs, and a mistyped ?room= or a host that never came up otherwise
+                // looks like a silent 15-second hang.
+                Log("dialling 127.0.0.1:" + _port + " (room '" + _room + "')...");
                 var sw = Stopwatch.StartNew();
                 while (sw.ElapsedMilliseconds < ConnectTimeoutMs)
                 {
+                    var s = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                     try
                     {
-                        var s = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                         s.NoDelay = true;
                         s.Connect(IPAddress.Loopback, _port);
                         _peer = s;
@@ -154,6 +161,10 @@ namespace EvilAliensWeb.Headless
                     }
                     catch (SocketException)
                     {
+                        // DISPOSED on the way round: ~300 attempts against a dead port is 300
+                        // leaked handles, and dialling a dead port is exactly what
+                        // net_jip_sync's --no-pair vacuity control does on every level.
+                        s.Dispose();
                         System.Threading.Thread.Sleep(50);
                     }
                 }
@@ -197,7 +208,17 @@ namespace EvilAliensWeb.Headless
             }
         }
 
+        // eaNet.close -- the SESSION is over, not the process. A listed host reaches this on every
+        // match teardown and then re-arms, so the listener stays up (see the header); only the
+        // peer socket goes.
         internal static void Close()
+        {
+            DropPeer();
+        }
+
+        // Process exit. Unused by the game -- kept so the listener has a defined door out and the
+        // asymmetry with Close() is a decision rather than an omission.
+        internal static void Shutdown()
         {
             DropPeer();
             if (_listener != null)

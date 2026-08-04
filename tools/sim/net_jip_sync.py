@@ -33,9 +33,11 @@ are dumped having advanced the same number of virtual milliseconds.
 
 import argparse
 import os
+import queue
 import re
 import subprocess
 import sys
+import threading
 import time
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -81,7 +83,18 @@ class Peer(object):
         self.stdin = self.proc.stdin
         if self.stdout is None or self.stdin is None:
             raise RuntimeError("%s: the process was spawned without pipes" % name)
+        # A READER THREAD, so the timeout below is REAL. `readline()` blocks, so checking a
+        # deadline after it returns bounds nothing: a peer that wedges without printing (a
+        # blocked socket send, a hung eahl) would hang the driver forever -- and running
+        # unattended is this tool's whole job.
+        self.lines = queue.Queue()
+        threading.Thread(target=self._pump, daemon=True).start()
         self._read_until(lambda ln: ln.startswith("ok ready") or ln.startswith("err "))
+
+    def _pump(self):
+        for line in self.stdout:
+            self.lines.put(line)
+        self.lines.put(None)            # EOF sentinel
 
     def _read_until(self, done, timeout=180.0):
         """Collect stdout until `done(line)`. Returns the lines consumed.
@@ -92,8 +105,12 @@ class Peer(object):
         out = []
         deadline = time.time() + timeout
         while True:
-            line = self.stdout.readline()
-            if line == "":
+            try:
+                line = self.lines.get(timeout=max(0.1, deadline - time.time()))
+            except queue.Empty:
+                raise RuntimeError("%s: timed out waiting for a reply (log tail: %s)"
+                                   % (self.name, " | ".join(self.log[-6:])))
+            if line is None:
                 raise RuntimeError("%s: the process exited (log tail: %s)"
                                    % (self.name, " | ".join(self.log[-6:])))
             line = line.rstrip("\r\n")
@@ -103,9 +120,6 @@ class Peer(object):
             out.append(line)
             if done(line):
                 return out
-            if time.time() > deadline:
-                raise RuntimeError("%s: timed out waiting for a reply (log tail: %s)"
-                                   % (self.name, " | ".join(self.log[-6:])))
 
     def _send(self, cmd):
         self.stdin.write(cmd + "\n")
@@ -192,7 +206,7 @@ def fnum(kv, key):
         return None
 
 
-def diff_entity(hid, h, c, tol):
+def diff_entity(h, c, tol):
     """Per-id key comparison. Returns a list of human-readable mismatch strings.
 
     A key is SKIPPED when the entity's own `local=` seam says the game simulates it locally
@@ -260,8 +274,11 @@ def diff_entity(hid, h, c, tol):
     except (KeyError, ValueError):
         if h.get("hp") != c.get("hp"):
             bad.append("hp %s vs %s" % (h.get("hp"), c.get("hp")))
+    # Both are EVENTS rather than samples, so both are compared exactly.
     if h.get("dying") != c.get("dying"):
         bad.append("dying %s vs %s" % (h.get("dying"), c.get("dying")))
+    if h.get("dead") != c.get("dead"):
+        bad.append("dead %s vs %s" % (h.get("dead"), c.get("dead")))
 
     # CARD de4d5d65's PROVISIONAL SHAPE, and one of the two assertions this whole tool exists
     # for: a puppet the snapshot self-heal built on DEFAULT spawn extras and no later EvSpawn
@@ -298,7 +315,7 @@ def diff_worlds(host, client, tol):
         problems.append("id %s (%s) is on the JOINER and not on the host"
                         % (i, cents[i].get("type")))
     for i in sorted(set(hents) & set(cents), key=int):
-        for msg in diff_entity(i, hents[i], cents[i], tol):
+        for msg in diff_entity(hents[i], cents[i], tol):
             problems.append("id %s (%s): %s" % (i, hents[i].get("type"), msg))
 
     if host["scene"] != client["scene"]:
@@ -355,11 +372,15 @@ def diff_hud(hline, cline, tol):
         for key in ("lv", "opt"):
             if h.get(key) != c.get(key):
                 bad.append("%s %s %s vs %s" % (slot, key, h.get(key), c.get(key)))
-        # CONTINUOUS: score is reconciled at 1 Hz against a provisional ledger and combo rides
-        # a ~10 Hz HUD packet, so both legitimately trail by a fraction of a second. Compared
-        # with a tolerance rather than ignored -- the failure the ledger design exists to stop
-        # is a one-way DRIFT, which a tolerance still catches while sub-second staleness does
-        # not trip it. The policy itself is eaNetScore.test's subject, not this tool's.
+        # CONTINUOUS: score is reconciled at 1 Hz against a provisional ledger, so it
+        # legitimately trails by a fraction of a second. Compared with a tolerance rather than
+        # ignored -- the failure the ledger design exists to stop is a one-way DRIFT, which a
+        # tolerance still catches while sub-second staleness does not trip it. The policy itself
+        # is eaNetScore.test's subject, not this tool's.
+        #
+        # `combo` and `pu=<type>@<progress>` are DUMP-ONLY, for reading by hand: both ride the
+        # ~10 Hz MsgHudState and are re-derived per peer, so any threshold tight enough to catch
+        # a real disagreement would flag ordinary staleness. eaNetCombo.test owns that policy.
         try:
             gap = abs(float(h.get("pts", 0)) - float(c.get("pts", 0)))
         except ValueError:
@@ -385,7 +406,7 @@ def max_pos_gap(host, client):
 # ---------------------------------------------------------------------------- the run
 
 
-def run_join(host, room, port, seed, args, index):
+def run_join(host, room, port, args, index):
     """Attach ONE fresh joiner process, settle it, dump both ends, diff. Returns problems."""
     join_flags = "?menu&noattract&netallowdebug&net=jipjoin&room=%s" % room
     client = Peer("join%d" % index, join_flags, port, args.verbose)
@@ -405,7 +426,10 @@ def run_join(host, room, port, seed, args, index):
                 if attached:
                     # Once the world is up, keep stepping for the catch-up burst to be applied
                     # and a few snapshot rounds to correct it, then stop.
-                    for _ in range(args.settle_after // args.chunk):
+                    # Rounds UP -- the settle length is a MEASURED number (see the flag's
+                    # help), and truncating would quietly settle for less than the figure
+                    # net CLAUDE.md quotes whenever --chunk does not divide it.
+                    for _ in range(-(-args.settle_after // args.chunk)):
                         host.step(args.chunk)
                         client.step(args.chunk)
                     break
@@ -478,7 +502,7 @@ def run_level(level, args):
         client_port = PORT_NOWHERE if args.no_pair else port
         while elapsed < cap_frames:
             index += 1
-            problems = run_join(host, room, client_port, args.seed, args, index)
+            problems = run_join(host, room, client_port, args, index)
             if problems is LEVEL_OVER:
                 index -= 1          # nothing was tested, so it was not a join
                 print("    %s ended after %d join(s) -- the host finished the level"

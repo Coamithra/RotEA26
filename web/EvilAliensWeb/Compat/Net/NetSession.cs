@@ -472,9 +472,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            INetTransport t = DebugFlags.NetRtc
-                ? (INetTransport)new WebRtcTransport(attachOnly: false)
-                : new BroadcastChannelTransport();
+            INetTransport t = NewDevTransport();
             switch (DebugFlags.NetRole)
             {
             case NetRole.JipJoin:
@@ -503,6 +501,16 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             StartWith(g, DebugFlags.NetRole == NetRole.Host, t, DebugFlags.NetRoom, asMenuSession: false, asListedSession: false);
+        }
+
+        // The transport a `?net=` boot builds. ONE definition, because the JipHost role builds one
+        // twice -- at the initial arm and at every re-arm -- and a second copy of the expression
+        // would silently drop `?rtc` on every match after the first.
+        private static INetTransport NewDevTransport()
+        {
+            return DebugFlags.NetRtc
+                ? (INetTransport)new WebRtcTransport(attachOnly: false)
+                : new BroadcastChannelTransport();
         }
 
         // ---- ?net=jiphost: attach a real listed session when a peer shows up -----------------
@@ -534,7 +542,7 @@ namespace EvilAliensWeb.Compat.Net
             if (pendingListedTransport == null && DebugFlags.NetRole == NetRole.JipHost
                 && pendingListedGame != null)
             {
-                INetTransport re = new BroadcastChannelTransport();
+                INetTransport re = NewDevTransport();
                 pendingListedTransport = re;
                 pendingListedArmed = false;
                 re.OnData += OnPreSessionData;

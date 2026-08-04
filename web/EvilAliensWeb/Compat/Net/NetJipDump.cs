@@ -221,9 +221,14 @@ namespace EvilAliensWeb.Compat.Net
             }
 
             sb.Append("[netjip] hud lives=").Append(score.Lives);
-            var levels = new int[NetProtocol.HudLevelCount];
             for (int slot = 0; slot < Oracle.MaxPlayers; slot++)
             {
+                // A FRESH array per slot, not one reused down the loop: NetReadHudState returns
+                // EARLY for a slot past ScoreVisualiser's own list without writing `levels`, so a
+                // shared buffer would print the previous slot's ladder for it -- and `lv` is
+                // compared EXACTLY by net_jip_sync, so that both invents mismatches and masks
+                // real ones.
+                var levels = new int[NetProtocol.HudLevelCount];
                 sb.Append(" | s").Append(slot)
                     .Append(" seat=").Append(oracle.IsSeated(slot) ? oracle.Controller(slot).ToString() : "-")
                     .Append(" pts=").Append((int)score.PointScore(slot));

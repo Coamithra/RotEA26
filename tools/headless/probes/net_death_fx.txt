@@ -77,7 +77,8 @@
 #     "the puppet was RELEASED" failing IS the original bug (an intact boss for 5s, then a silent
 #     vanish); "reports itself DYING" is the NetIsDying half, which is what a join-in-progress
 #     catch-up reads (section 2h); the EvilBullet negative is what stops the null-killable branch
-#     un-freezing live enemies into the client's world on any stray beat.
+#     un-freezing live enemies into the client's world on any stray beat; and the two
+#     snapshot-clobber legs are the one place the WIRE can undo a death this peer already ran.
 #   * a section-2g/2h failure is the SpiderBoss's HOST half: 2g means its death entry stopped
 #     announcing (back to five silent seconds), 2h means NetIdRegistry.ReplayLive went back to a
 #     killable-only discriminant and a peer joining mid-fall is told nothing.
@@ -113,6 +114,8 @@
 #   * the null-killable branch skips NetSuppressAward                     -> 1  (section 9's score
 #     leg -- so those "nothing was credited" zeroes are discriminating, not vacuous)
 #   * SpiderBoss.NetBeginDeferredDeath loses its idempotence guard        -> 1  (section 9)
+#   * SpiderBoss.NetState stops refusing a wire state while dying          -> 2  (section 9's
+#     snapshot-clobber legs; the second reports +32, i.e. a whole second debris burst)
 #   * a killable deferred death deleted mid-animation (pre-PR#267)        -> 9  (sections 4, 6
 #     and all three of section 8's bosses)
 # Dropping NetSuppressAward on the KILLABLE branch is caught too, but LOUDLY rather than cleanly:
@@ -122,6 +125,13 @@
 # available for it: the teardown sweeps Explosion, BloodExplosion and BrainAura, restores the
 # score panels and restarts the music BrainBoss.KilledBy stopped, so a leak would make the SECOND
 # run report phantom failures (the eaBinTest rule). It costs ~2s of headless run time.
+#
+# GOTCHA the browser leg caught and eahl could not: SpiderBoss's 5s debris fall is
+# ResetTimer(5f), i.e. 5000ms / Settings.DifficultyFactorized(0.5f) -- so it is longer on an Easy
+# save. eahl boots a CLEAN temp save (default difficulty) and Chrome reads the player's own, so
+# the first cut's fixed tick budget passed here (300 ticks) and failed there (376). The suite
+# ticks until the component removes ITSELF now, up to a generous ceiling, and reports the count;
+# do not turn any of those back into a fixed budget.
 #
 # eahl: --flags "?menu&noattract"
 #
@@ -163,8 +173,15 @@ expect JunkBoss: the animation ENDED on its own and the boss left the world
 expect SpiderBoss: the puppet was RELEASED, not silently despawned
 expect SpiderBoss: the fall ENDED on its own and the boss left the world
 
-expect 7\. teardown
-expect \[netdeathfx\] 144 passed, 0 failed
+# The snapshot-clobber regression: this peer kills the boss off its own beam, the host keeps
+# snapshotting the id for the whole 5s fall, and the beat then arrives. Every one of those turns
+# used to clamp the local `dead` back to `standing` -- un-posing the falling boss and defeating
+# the idempotence guard, so the beat restarted the entry with a second debris burst.
+expect SpiderBoss: a snapshot turn does NOT un-do the local death
+expect SpiderBoss: \.\.\.so the host's beat after it fires NO second burst
+
+expect 10\. teardown
+expect \[netdeathfx\] 148 passed, 0 failed
 
 # LEAVE-NO-TRACE: two more runs in the SAME process, which is what makes the teardown's own
 # claims mean something. A leaked Explosion, BloodExplosion or BrainAura, an unrestored score

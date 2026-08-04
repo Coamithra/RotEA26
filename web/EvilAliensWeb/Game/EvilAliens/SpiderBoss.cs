@@ -747,8 +747,11 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		{
 			OnAlmostKilled(this);
 		}
-		// A no-op on a client: NetPuppets.BeginDeferredDeath claims the award slot first, so the
-		// figures stay the host's (the b0ab09ec rule).
+		// Reached through the EvDying beat this is a no-op -- NetPuppets.BeginDeferredDeath
+		// claims the award slot first, so the figures stay the host's (the b0ab09ec rule).
+		// Reached through a client's OWN CollidesWith it is not: that peer takes the ordinary
+		// provisional credit, which the host's later EvDeath replaces. Both are the b0ab09ec
+		// design; only the beat path is suppressed.
 		AwardScoreToAll(combo: false);
 		sound.PlayCue("spiderbossdeath");
 		sound.PlayCue("head asplode");
@@ -1018,8 +1021,20 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		}
 		set
 		{
-			// Never adopt `dead` from the wire (a dead boss is removed, never snapshotted); clamp
-			// any stray value to a live state so the state-keyed CollisionType/Draw stay in range.
+			// Once THIS copy is dying, the wire has nothing left to say about it (card ad9c8f8b).
+			// The host keeps snapshotting the id for the whole 5s fall, and every one of those
+			// turns used to clamp our `dead` back to `standing` below -- which un-poses the
+			// falling boss AND defeats the idempotence guard in NetBeginDeferredDeathSelf, so the
+			// host's EvDying beat landing after a death this peer had already run locally
+			// restarted the whole entry: a second debris burst, both cues again, and a fresh 5s
+			// timer.
+			if (state == SpiderBossState.dead)
+			{
+				return;
+			}
+			// Never adopt `dead` from the wire either (the death arrives as the EvDying beat, not
+			// as a sampled state); clamp any stray value to a live state so the state-keyed
+			// CollisionType/Draw stay in range.
 			SpiderBossState s = (SpiderBossState)value;
 			if (s == SpiderBossState.dead)
 			{

@@ -555,7 +555,8 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   (BattleSkull, the surviving MarsBoss) releases its frozen puppet so its own 2.5–5 s animation
   plays locally. Since ad9c8f8b it also WATCHES the four bosses' multi-phase deaths run to
   completion on the released puppet — and covers the SpiderBoss, which is not a `KillableAlien`
-  and so used to stand intact for five seconds and then vanish on the joiner. MENU-only and leave-no-trace, but it plants real entities off-screen and really
+  and so used to stand intact for five seconds and then vanish on the joiner. MENU-only and
+  leave-no-trace, but it plants real entities off-screen and really
   kills them, so it skips itself over a live session or level. Nothing it does is drawn, but it
   is not silent — the real death paths play their real cues),
   `eaNetCosmetic()` (the decorative-swarm replication self-test — card 9a3175d0; run it inside

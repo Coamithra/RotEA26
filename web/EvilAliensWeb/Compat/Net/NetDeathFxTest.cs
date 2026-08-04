@@ -102,6 +102,7 @@ namespace EvilAliensWeb.Compat.Net
         private const ushort IdJunkBoss = 61012;
         private const ushort IdSpiderBoss = 61013;
         private const ushort IdBullet2 = 61014;
+        private const ushort IdSpiderBoss2 = 61015;
 
         public static string Run()
         {
@@ -164,7 +165,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             finally
             {
-                sb.Append(" 7. teardown\n");
+                sb.Append(" 10. teardown\n");
                 Teardown(sb, Check, bin, game, score, scoreBefore, planted, sound, songBefore);
                 NetHost.Current = hostBefore;
             }
@@ -830,15 +831,15 @@ namespace EvilAliensWeb.Compat.Net
         {
             sb.Append(" 8. CLIENT -- the multi-phase BOSS deaths run to completion on the"
                 + " released puppet (card ad9c8f8b)\n");
-            // maxTicks are the animation's own duration plus ~15% of margin, at 60 Hz.
+            // maxTicks is a generous CEILING, not the animation's length -- see TickUntilGone.
             BossLeg<BrainBoss>(sb, Check, bin, game, score, planted, "BrainBoss", IdBrainBoss,
-                TypeIdxOf(new BrainBoss(game)), midTicks: 300, maxTicks: 1400, award: 900f,
+                TypeIdxOf(new BrainBoss(game)), midTicks: 300, maxTicks: 2000, award: 900f,
                 opensWithFx: true);
             BossLeg<FakeBoss>(sb, Check, bin, game, score, planted, "FakeBoss", IdFakeBoss,
-                TypeIdxOf(new FakeBoss(game)), midTicks: 60, maxTicks: 280, award: 500f,
+                TypeIdxOf(new FakeBoss(game)), midTicks: 60, maxTicks: 900, award: 500f,
                 opensWithFx: true);
             BossLeg<JunkBoss>(sb, Check, bin, game, score, planted, "JunkBoss", IdJunkBoss,
-                TypeIdxOf(new JunkBoss(game)), midTicks: 60, maxTicks: 300, award: 700f,
+                TypeIdxOf(new JunkBoss(game)), midTicks: 60, maxTicks: 900, award: 700f,
                 opensWithFx: false);
         }
 
@@ -898,9 +899,9 @@ namespace EvilAliensWeb.Compat.Net
             Check(name + ": ...and the boss is still in the world at that point -- no premature"
                 + " removal", InWorld(game, (GameComponent)(object)boss));
 
-            Tick((GameComponent)(object)boss, maxTicks - midTicks);
-            bin.TopOfTickFlush(); // its own Die() only QUEUES the removal
-            Check(name + ": the animation ENDED on its own and the boss left the world",
+            int took = TickUntilGone((GameComponent)(object)boss, bin, game, maxTicks);
+            Check(name + ": the animation ENDED on its own and the boss left the world (after "
+                + took + " of at most " + maxTicks + " ticks)",
                 !InWorld(game, (GameComponent)(object)boss));
             Check(name + ": ...having spawned strictly more FX on the way out (+"
                 + (DeathFxCount(game) - midway) + ")", DeathFxCount(game) > midway);
@@ -972,12 +973,46 @@ namespace EvilAliensWeb.Compat.Net
             Tick((GameComponent)(object)boss, 180);
             Check("SpiderBoss: still in the world 3s in -- the debris have 5s to fall",
                 InWorld(game, (GameComponent)(object)boss));
-            Tick((GameComponent)(object)boss, 160);
-            bin.TopOfTickFlush();
-            Check("SpiderBoss: the fall ENDED on its own and the boss left the world",
-                !InWorld(game, (GameComponent)(object)boss));
+            int fell = TickUntilGone((GameComponent)(object)boss, bin, game, 1200);
+            Check("SpiderBoss: the fall ENDED on its own and the boss left the world (after "
+                + (180 + fell) + " ticks)", !InWorld(game, (GameComponent)(object)boss));
             Check("SpiderBoss: nothing was credited -- the host's EvDeath is the authority",
                 SameScores(score, before));
+
+            // THE SNAPSHOT-CLOBBER LEG. A client hit-tests puppets with its own beams, so it can
+            // run this boss's death entry locally BEFORE the host's beat arrives -- and the host
+            // keeps snapshotting the id for the whole 5 s fall. Every one of those turns used to
+            // clamp the local `dead` back to `standing`, which un-posed the falling boss AND
+            // defeated the idempotence guard, so the beat landing after it restarted the entry:
+            // a second debris burst, both cues again, and a fresh 5 s timer.
+            SpiderBoss local = (SpiderBoss)BuildPuppet<SpiderBoss>(game, IdSpiderBoss2, spiderType, planted);
+            Check("SpiderBoss: PRECONDITION a second puppet was built for the local-kill case",
+                local != null);
+            if (local != null)
+            {
+                int beams = 0;
+                while (beams < 40 && !((INetEntity)local).NetIsDying)
+                {
+                    local.CollidesWith(new Lazer(game));
+                    beams++;
+                }
+                Check("SpiderBoss: PRECONDITION this peer killed the puppet itself, off its own"
+                    + " beam (" + beams + " beams)", ((INetEntity)local).NetIsDying);
+                int afterLocal = DeathFxCount(game);
+                // What the host really streams while its own copy is dying. It has to carry the
+                // descriptor's REAL 3-byte state extra -- the bare Snapshot() helper sends a
+                // zero-length block, which SpiderBossDescriptor.ApplyStateExtra drops, so a leg
+                // written on it would never touch NetState at all and would pass either way.
+                // Byte 0 is the host's own state, which for a dying boss is `dead` (6) -- the
+                // value the setter clamps.
+                SnapshotWithExtra(IdSpiderBoss2, spiderType, hp: 0, new byte[] { 6, 1, 0 });
+                Check("SpiderBoss: a snapshot turn does NOT un-do the local death",
+                    ((INetEntity)local).NetIsDying);
+                NetPuppets.OnDeathBegan(IdSpiderBoss2);
+                Check("SpiderBoss: ...so the host's beat after it fires NO second burst (+"
+                    + (DeathFxCount(game) - afterLocal) + ")",
+                    DeathFxCount(game) == afterLocal);
+            }
 
             // NEGATIVE: the release is not unconditional. A non-killable type with no deferred
             // death of its own answers `false` and must be left frozen and registered -- without
@@ -1000,7 +1035,7 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
-        // ---- teardown ------------------------------------------------------------------------
+        // ---- 10. teardown ------------------------------------------------------------------------
 
         private static void Teardown(StringBuilder sb, Action<string, bool> Check, ComponentBin bin,
             Game game, ScoreVisualiser score, float[] scoreBefore, List<GameComponent> planted,
@@ -1094,6 +1129,18 @@ namespace EvilAliensWeb.Compat.Net
             SnapshotKind(netId, typeIdx, hp, out _);
         }
 
+        // As Snapshot, but carrying a real per-type state-extra block. Everything else in this
+        // suite only cares about the base block's hp, so the bare helper sends none.
+        private static void SnapshotWithExtra(ushort netId, byte typeIdx, int hp, byte[] extra)
+        {
+            NetBaseState state = default(NetBaseState);
+            state.Pos = Nowhere;
+            state.Scale = 1f;
+            state.Hp = hp;
+            NetPuppets.OnSnapshotEntry(netId, typeIdx, NetProtocol.NetSnapshotFlags.None, state,
+                extra, 0, extra.Length, out _, out _);
+        }
+
         private static void SnapshotKind(ushort netId, byte typeIdx, int hp, out SnapUnknownKind kind)
         {
             NetBaseState state = default(NetBaseState);
@@ -1183,6 +1230,31 @@ namespace EvilAliensWeb.Compat.Net
                 total += step;
                 comp.Update(new GameTime(total, step));
             }
+        }
+
+        // Tick until the component removes ITSELF, up to a ceiling, and report how long it took.
+        //
+        // A FIXED tick count is not a safe budget here, and the SpiderBoss is why: its fall is
+        // `ResetTimer(5f)`, i.e. 5000 ms divided by Settings.DifficultyFactorized(0.5f) -- so on
+        // an Easy save the fall really does last longer than five seconds. eahl boots a clean
+        // temp save (default difficulty) and a browser reads the player's own, so a fixed budget
+        // passed headlessly and failed in Chrome -- measured 300 ticks under eahl against 376
+        // in a browser reading a real save. This is the repo's "pin a probe's
+        // precondition, never wait it out" rule in its other form: what is asserted is that the
+        // animation TERMINATES on its own, so the ceiling is generous and the measured count is
+        // reported for a reader to notice drift.
+        private static int TickUntilGone(GameComponent comp, ComponentBin bin, Game game, int cap)
+        {
+            for (int i = 0; i < cap; i++)
+            {
+                Tick(comp, 1);
+                bin.TopOfTickFlush(); // its own Die() only QUEUES the removal
+                if (!InWorld(game, comp))
+                {
+                    return i + 1;
+                }
+            }
+            return cap;
         }
 
         private static bool SameScoresExcept(ScoreVisualiser score, float[] before, int skipSlot)

@@ -1259,7 +1259,7 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     - **`OnRemoteDeath` makes the same decision** when neither the beat nor the snapshot got
       there first -- the last-resort fallback, and the only one before card 303bfb5b.
     - **A DEFERRED DEATH THAT DOES NOT RUN THROUGH `KillableAlien` AT ALL: the SpiderBoss, and
-      the `INetIsDying`/`NetBeginDeferredDeath` seam it needed (card ad9c8f8b).** The bullet
+      the `NetIsDying`/`NetBeginDeferredDeath` seam it needed (card ad9c8f8b).** The bullet
       above says the snapshot fallback's remaining job is "a deferred-death path that reaches
       its dying state WITHOUT going through KillableAlien, i.e. nothing today". That was wrong:
       **`SpiderBoss` derives from `AlienDrawableGameComponent`, not `KillableAlien`** -- only a

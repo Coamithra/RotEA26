@@ -712,6 +712,12 @@ public class UFO : KillableAlien
 
 	private float netChargeSize = 1f;
 
+	// This emitter instance's own eased copy of the replicated aim (card eb057163). The wire value
+	// only changes on this entity's snapshot turn, so the glow SWEEPS toward it instead of stepping;
+	// it lives here rather than in NetChargeGlow because the child is pooled and the emitter is
+	// what persists across a charge. Host-side it is never read (Drive is client-only).
+	private EvilAliensWeb.Compat.Net.NetChargeGlow.AimEase netChargeAim;
+
 	// Host encode: read live off the real generator (non-null only during the lazor windup -- the
 	// state clears it the moment the beam is fired).
 	internal bool NetCharging => lazerGenerator != null;
@@ -734,7 +740,9 @@ public class UFO : KillableAlien
 
 	internal override void NetDriveExtras(Microsoft.Xna.Framework.GameTime gameTime)
 	{
-		EvilAliensWeb.Compat.Net.NetChargeGlow.Drive(ref lazerGenerator, netCharging, netChargeOffset, netChargeWindup, netChargeSize, 1f, collection, base.Game, base.Position);
+		EvilAliensWeb.Compat.Net.NetChargeGlow.Drive(ref lazerGenerator, ref netChargeAim, netCharging,
+			netChargeOffset, netChargeWindup, netChargeSize, 1f, collection, base.Game,
+			base.Position, (float)gameTime.ElapsedGameTime.TotalMilliseconds);
 	}
 
 	internal void NetClearBonus()

@@ -793,6 +793,18 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetStaleTest.Run();
 		}
 
+		// JS bridge for the enemy charge-glow's AIM on a join peer (eaNetChargeAim, card
+		// eb057163): a scripted host charges a MarsBoss puppet over a real client session while
+		// the client ticks between snapshot turns, and the drawn aim is sampled every tick. It
+		// reports a VERDICT -- freeze vs staleness vs sweeping -- because the two faults that
+		// produce the reported symptom need opposite fixes. No frame can show any of it: a
+		// stepping aim and a sweeping aim are the same still picture.
+		[JSInvokable("debugNetChargeAimTest")]
+		public static string NetChargeAim()
+		{
+			return EvilAliensWeb.Compat.Net.NetChargeAimTest.Run();
+		}
+
 		// Park a session-ending notice at the menus (card 72143c11), with no peer and no
 		// session -- the only offline way to reach MenuScene.NetUpdate's notice path, since
 		// every production writer of MenuNotice is inside NetSession.Stop(). MenuScene polls

@@ -871,6 +871,17 @@
             catch (e) { console.warn('[debug] eaNetStale failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: the enemy charge-glow's AIM on a join peer (card eb057163). A scripted host
+        // charges a MarsBoss puppet over a real client session while the client ticks between
+        // snapshot turns, and the drawn aim is sampled every tick. It reports a VERDICT --
+        // freeze vs staleness vs sweeping -- because the two faults behind "the motherships do
+        // not change where they are aiming" need opposite fixes. MENU-only, leave-no-trace.
+        // No frame can show any of it: a stepping aim and a sweeping aim are the same picture.
+        window.eaNetChargeAim = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetChargeAimTest')); }
+            catch (e) { console.warn('[debug] eaNetChargeAim failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: the pinned many-puppet drive bench (card 25ad0659 step 2c-ii). Puts n real
         // puppets in the world through the real self-heal path and times NetPuppets.Drive,
         // reporting ABSOLUTE us/call, ns/puppet and the share of the 16.7ms frame budget.

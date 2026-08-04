@@ -2716,7 +2716,7 @@ internal static class Program
             "3. the injected clock reaches NetImpairment",
             "4. impairment knobs come from the host",
         };
-        return RunBrowserSuite(asm, "EvilAliensWeb.Compat.Net.NetHostTest", sections, minAssertions: 32);
+        return RunBrowserSuite(asm, "EvilAliensWeb.Compat.Net.NetHostTest", sections, minAssertions: 36);
     }
 
     // Card 724f2abc -- the sub-tick mouse click. InputHandler polls Mouse.GetState() once per

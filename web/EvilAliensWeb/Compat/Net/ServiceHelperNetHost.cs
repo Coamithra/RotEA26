@@ -101,6 +101,11 @@ namespace EvilAliensWeb.Compat.Net
             get { return DebugFlags.NetSnapshotStaleGuard; }
         }
 
+        public bool ChargeAimEase
+        {
+            get { return DebugFlags.NetChargeAimEase; }
+        }
+
         // ---- step 2b -----------------------------------------------------------------------
 
         public Oracle Oracle

@@ -41,6 +41,11 @@ namespace EvilAliensWeb.Compat.Net
         // suite, without a reboot. null => forward to the production flag.
         internal bool? StaleGuard;
 
+        // Overridable for the same reason as StaleGuard: NetChargeAimTest's mechanism section is
+        // exactly the "run the same frames with the fix off" shape ?netaimease=0 exists for, and a
+        // suite must be able to take that measurement without rebooting. null => the production flag.
+        internal bool? AimEase;
+
         internal PinnedNetHost()
             : this(0L, null)
         {
@@ -81,6 +86,8 @@ namespace EvilAliensWeb.Compat.Net
         public float NetJitterMs => JitterMs ?? inner.NetJitterMs;
 
         public bool SnapshotStaleGuard => StaleGuard ?? inner.SnapshotStaleGuard;
+
+        public bool ChargeAimEase => AimEase ?? inner.ChargeAimEase;
 
         // Step 2b's four services forward UNCONDITIONALLY -- pinning the clock must not also
         // hand the layer a different world. A scenario wanting its own services overrides them

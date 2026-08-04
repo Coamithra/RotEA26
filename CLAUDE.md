@@ -192,6 +192,7 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   into a level; a `Levels` value, e.g. `Level1`/`ClassicAliens`/`WebcamAliens`) · `?invuln` (aka
   `?god`) · `?unlockall` · `?skipsplash` / `?autostart`.
 - **Level fast-boots** (replace a level's event list with one fight/section): `?spiderboss` ·
+  `?marsboss` (Level 2's TWIN motherships -- otherwise ~8 sim-minutes into a Level 2 soak) ·
   `?spiders` · `?wallsonly` · `?brainboss` (bypasses the Hard+ gate). Pair with `?invuln`.
   e.g. `…:5280/?level=Level3&brainboss&invuln`.
   **`?wallsonly` serves TWO levels** (card b174b00f): on `Level3` it loops the wall sections; on
@@ -256,12 +257,21 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   reordered or late `MsgWorldSnapshot` entry drags a puppet BACKWARDS again. The packet now
   carries a monotone seq and an entry older than the one already applied for that netId is
   refused; this restores the pre-card behaviour. **The other deliberate bug reproduction** (the
-  `?nethitstop=1` idiom), and IN `DebugFlags.Active` for the same reason. It is the only boolean
-  in `DebugFlags` that DEFAULTS TRUE, so `Active` tests its negation. The `[net]` line's new
+  `?nethitstop=1` idiom), and IN `DebugFlags.Active` for the same reason. Like `?netaimease`
+  below it DEFAULTS TRUE, so `Active` tests its negation. The `[net]` line's new
   `snapStale=` counter reads the same either way -- the flag changes the drag, never the
   measurement. Console `eaNetStale()` / `eval NetStale` is the suite (it drives the flag through
   the injected host, so no reboot); protocol v19 also raised `NetBaseState.Scale` 1/256 -> 1/4096
   with rounding. Details: net CLAUDE.md.
+- **`?netaimease=0`** (card eb057163): stop a puppet's enemy charge glow SWEEPING toward each
+  newly replicated aim, so it teleports to it once per snapshot turn again -- the pre-card
+  staircase (measured: 15 moving ticks of 144, 7.62px each, over one 2500ms MarsBoss windup at a
+  150ms turn). **Another deliberate bug reproduction** (the `?nethitstop=1` / `?netstaleguard=0` /
+  `?teampartner=pad` idiom) and IN `DebugFlags.Active` for the same reason; like `?netstaleguard`
+  it turns a shipped FIX off, so it DEFAULTS TRUE and `Active` tests its negation. The glow is draw-only, so nothing desyncs either way -- the two
+  peers simply disagree about where an enemy is aiming, which is what the card was reported for.
+  Console `eaNetChargeAim()` / `eval NetChargeAim` is the suite (it drives the flag through the
+  injected host, so no reboot); no protocol change, still v19. Details: net CLAUDE.md.
 - **Local co-op + online co-op together** (card 4d904410): `?netlocal=<1-3>` queues that many
   synthetic COUCH joins on this peer once the session is live — a real one is a gamepad Start
   press the rig can't produce. Pair with `?net=host`/`?net=join`; the `[net]` line's new

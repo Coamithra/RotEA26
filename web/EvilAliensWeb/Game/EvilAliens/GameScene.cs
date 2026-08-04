@@ -2074,13 +2074,16 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 			// EXIST. `NetApplyReset` zeroes `_timer` when the EvReset arrives and both peers then
 			// run the same 3 s + 1500 ms `Background.XFade` on GAME time, so the client's purge
 			// trails the host's by RTT, not by seconds -- Level 2 and Level 3 both put the two
-			// purges on the SAME millisecond, and the host does not re-enter Normal (and so cannot
-			// spawn) for another ~2.7 s. The client also holds ZERO puppets by the time it gets
-			// here: the host purges this set first and announces an EvDeath per removal.
+			// purges on the SAME millisecond, and the host's SCRIPT cannot spawn until it re-enters
+			// Normal another ~2.7 s later. (UpdateStartup's SpawnAllPlayers does land at +1300 ms,
+			// but those are ships, which NetApplyReset takes.) The client also holds ZERO puppets
+			// by the time it gets here: the host purges this set first and announces an EvDeath
+			// per removal.
 			//
 			// And it is not a no-op even when it removes no puppet -- it clears this peer's OWN
-			// local-only AlienDrawableGameComponents (bullets, explosions, floating text), which
-			// no EvDeath covers, so skipping it would leave them on screen across the revert.
+			// local-only AlienDrawableGameComponents (this peer's Bullets, its Explosions and
+			// BloodExplosions), which no EvDeath covers, so skipping it would leave them on screen
+			// across the revert.
 			Collection.Purge<AlienDrawableGameComponent>();
 			Collection.Purge<AnimatedMessage>();
 			Collection.Purge<TutorialMessage>();

@@ -3412,7 +3412,7 @@ widen a tolerance to force green** -- that is suite CALIBRATION work with its ow
 assertions this tool exists for (`prov=`, `owner=`) are exact and clean. It is a standalone tool,
 not a `run_probes.py` probe, so red is a finding rather than broken CI.
 
-- **THE SUITE NEVER RESETS, SO NO RESIDUAL OF ITS IS RESET-CAUSED (card d6372279).** The host
+- **THE SUITE NEVER RESETS, SO NONE OF ITS RESIDUALS IS RESET-CAUSED (card d6372279).** The host
   boots `?invuln` and `LoseLife` is host-authoritative, so `AllShipsDead` never fires and neither
   peer ever enters `GameState.Resetting`: measured `resets=0` on **every** `[net]` line of a
   `--level Level3 --cap 200 --cadence 40 --verbose` run (22 of 22). **This is the fact the

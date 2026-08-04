@@ -1137,8 +1137,8 @@ namespace EvilAliensWeb.Compat.Net
             state.Pos = Nowhere;
             state.Scale = 1f;
             state.Hp = hp;
-            NetPuppets.OnSnapshotEntry(netId, typeIdx, NetProtocol.NetSnapshotFlags.None, state,
-                extra, 0, extra.Length, out _, out _);
+            NetPuppets.OnSnapshotEntryNextSeq(netId, typeIdx, NetProtocol.NetSnapshotFlags.None,
+                state, extra, 0, extra.Length, out _, out _);
         }
 
         private static void SnapshotKind(ushort netId, byte typeIdx, int hp, out SnapUnknownKind kind)

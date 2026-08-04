@@ -404,23 +404,30 @@ namespace EvilAliensWeb.Compat.Net
             return SpawnRejectKind.None;
         }
 
-        // THE SUITE OVERLOAD: each call gets the NEXT seq, so a sequence of entries is delivered
-        // in order and the guard never fires (card f5cf7a5c). It exists so the suites that are
-        // NOT about ordering -- NetSnapshotTest, NetWallTest, NetDeathFxTest, NetPuppetBench --
-        // keep saying what they mean, rather than every one of them carrying a counter to satisfy
-        // a parameter it has no opinion about. A fixed seq would be worse than churn: those
-        // suites deliver several entries to one netId, so a constant would silently drop all but
-        // the first and their assertions would be about the guard instead of their own subject.
+        // THE SUITE ENTRY POINT: each call gets the NEXT seq, so a sequence of entries is
+        // delivered in order and the guard never fires (card f5cf7a5c). It exists so the suites
+        // that are NOT about ordering -- NetSnapshotTest, NetWallTest, NetDeathFxTest,
+        // NetPuppetBench -- keep saying what they mean, rather than every one of them carrying a
+        // counter to satisfy a parameter it has no opinion about. A fixed seq would be worse than
+        // churn: those suites deliver several entries to one netId, so a constant would silently
+        // drop all but the first and their assertions would be about the guard instead of their
+        // own subject.
         //
-        // NOT for production, and there is exactly one production caller
-        // (NetSession.HandleWorldSnapshot), which passes the real packet seq. Ordering IS
-        // NetStaleTest's subject and it drives the full signature.
-        private static ushort testSeq;
+        // **NAMED, not an overload of OnSnapshotEntry, and that is the whole safety story.** As an
+        // overload it differed from the production signature only by three trailing arguments, so
+        // a future production call site that forgot the seq would COMPILE, silently bind to a
+        // fabricated monotone counter and defeat the guard -- with a comment as the only
+        // enforcement. The StartForTest naming idiom, for the same reason.
+        //
+        // There is exactly one production caller (NetSession.HandleWorldSnapshot) and it passes
+        // the real packet seq. Ordering IS NetStaleTest's subject, so that suite drives the full
+        // signature instead of this.
+        private static ushort suiteSeq;
 
-        public static bool OnSnapshotEntry(ushort netId, byte typeIdx, byte entryFlags, in NetBaseState state, byte[] buf, int extraOff, int extraLen, out bool popped, out SnapUnknownKind kind)
+        public static bool OnSnapshotEntryNextSeq(ushort netId, byte typeIdx, byte entryFlags, in NetBaseState state, byte[] buf, int extraOff, int extraLen, out bool popped, out SnapUnknownKind kind)
         {
             return OnSnapshotEntry(netId, typeIdx, entryFlags, state, buf, extraOff, extraLen,
-                ++testSeq, out popped, out kind, out _);
+                ++suiteSeq, out popped, out kind, out _);
         }
 
         // THE STALENESS GUARD (card f5cf7a5c). `packetSeq` is the MsgWorldSnapshot header's

@@ -2724,7 +2724,7 @@ sent per block or per frame.
   the replicated grid variation is the right answer at any precision, and section 1 of
   `NetWallTest` now measures its >1% claim against a transcription of the old encoder rather than
   the live one.
-- **Verify with `eaNetWalls()` / `eval NetWalls`** (`Compat/Net/NetWallTest.cs`, 24 assertions;
+- **Verify with `eaNetWalls()` / `eval NetWalls`** (`Compat/Net/NetWallTest.cs`, 28 assertions;
   `tools/headless/probes/net_walls.txt`). MENU-only and leave-no-trace. **A screenshot cannot see
   any of this**: on EACH screen a mis-scaled wall looks like a perfectly ordinary wall, which is why
   the bug was reported from a two-window capture and reproducible from neither half of it. Section 1

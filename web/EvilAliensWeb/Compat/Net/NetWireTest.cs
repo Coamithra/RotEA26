@@ -587,8 +587,7 @@ namespace EvilAliensWeb.Compat.Net
             // rest. A decoder that validated the byte as a whole would drop the entry -- i.e.
             // stop correcting that entity -- the moment a later build appended a flag.
             byte[] fut = new byte[NetProtocol.SnapshotHeaderBytes + NetProtocol.SnapshotEntryBaseBytes];
-            fut[0] = NetProtocol.MsgWorldSnapshot;
-            fut[1] = 1;
+            NetProtocol.WriteSnapshotHeader(fut, 1, 0);
             int futOff = NetProtocol.SnapshotHeaderBytes;
             const byte FutureBits = 0x81; // Teleported + an undefined high bit
             NetProtocol.WriteSnapshotEntry(fut, ref futOff, 303, 3, FutureBits, second, null, 0);
@@ -604,8 +603,7 @@ namespace EvilAliensWeb.Compat.Net
             // A snapshot entry one byte short of the base block must be REFUSED, not read past
             // its end -- the flags byte grew that block, so this is the boundary that moved.
             byte[] runt = new byte[NetProtocol.SnapshotHeaderBytes + NetProtocol.SnapshotEntryBaseBytes];
-            runt[0] = NetProtocol.MsgWorldSnapshot;
-            runt[1] = 1;
+            NetProtocol.WriteSnapshotHeader(runt, 1, 0);
             runt[NetProtocol.SnapshotHeaderBytes] = (byte)(NetProtocol.SnapshotEntryBaseBytes - 1);
             byte[] gotRunt = Round(runt, reliable: false);
             int runtOff = NetProtocol.SnapshotHeaderBytes;

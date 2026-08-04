@@ -272,7 +272,7 @@ namespace EvilAliensWeb.Compat.Net
             // host really sends -- this is the write the fix refuses.
             bool popped;
             SnapUnknownKind kind;
-            NetPuppets.OnSnapshotEntry(IdWall, TypeWall, NetProtocol.NetSnapshotFlags.None,
+            NetPuppets.OnSnapshotEntryNextSeq(IdWall, TypeWall, NetProtocol.NetSnapshotFlags.None,
                 state, extras, 0, 0, out popped, out kind);
             // Drive well past the scale lerp's ~100ms time constant: the pre-card code converged
             // on TargetScale rather than assigning it, so a short drive would pass either way.
@@ -335,7 +335,7 @@ namespace EvilAliensWeb.Compat.Net
             else
             {
                 bulletState.Scale = 0.25f;
-                NetPuppets.OnSnapshotEntry(IdBullet, TypeEvilBullet,
+                NetPuppets.OnSnapshotEntryNextSeq(IdBullet, TypeEvilBullet,
                     NetProtocol.NetSnapshotFlags.None, bulletState, none, 0, 0, out popped, out kind);
                 for (int i = 0; i < 60; i++)
                 {
@@ -403,12 +403,12 @@ namespace EvilAliensWeb.Compat.Net
             bool popped;
             SnapUnknownKind kind;
             state.Pos = puppet.Position + new Vector2(0f, 40f);
-            NetPuppets.OnSnapshotEntry(IdWallB, TypeWall, NetProtocol.NetSnapshotFlags.None,
+            NetPuppets.OnSnapshotEntryNextSeq(IdWallB, TypeWall, NetProtocol.NetSnapshotFlags.None,
                 state, extras, 0, 0, out popped, out kind);
             check("a wall's ordinary drift is BLENDED, not snapped", !popped);
 
             state.Pos = puppet.Position + new Vector2(0f, 400f);
-            NetPuppets.OnSnapshotEntry(IdWallB, TypeWall, NetProtocol.NetSnapshotFlags.None,
+            NetPuppets.OnSnapshotEntryNextSeq(IdWallB, TypeWall, NetProtocol.NetSnapshotFlags.None,
                 state, extras, 0, 0, out popped, out kind);
             check("...while a 400px error DOES snap (the control)", popped);
 
@@ -424,7 +424,7 @@ namespace EvilAliensWeb.Compat.Net
             // is, so the correction contributes nothing and this leg is about velocity alone.
             state.Pos = puppet.Position;
             state.Vel = declared * 2f;
-            NetPuppets.OnSnapshotEntry(IdWallB, TypeWall, NetProtocol.NetSnapshotFlags.None,
+            NetPuppets.OnSnapshotEntryNextSeq(IdWallB, TypeWall, NetProtocol.NetSnapshotFlags.None,
                 state, extras, 0, 0, out popped, out kind);
 
             float atChange = puppet.Position.Y;

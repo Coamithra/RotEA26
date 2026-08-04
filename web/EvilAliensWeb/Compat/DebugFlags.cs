@@ -1687,7 +1687,26 @@ namespace EvilAliensWeb.Compat
 					NetHitstop = IsOn(val);
 					break;
 				case "netstaleguard":
-					NetSnapshotStaleGuard = IsOn(val);
+					// NOT the bare `IsOn(val)` every other boolean here uses, and the asymmetry is
+					// the point: for those a typo silently leaves a DIAGNOSTIC off, which costs
+					// nothing, whereas an unrecognised value here would silently turn a shipped FIX
+					// off and restore the backward drag. So only an explicit off spelling disables
+					// it, and anything else is reported and ignored -- the value-carrying flags'
+					// rule, applied to the one boolean that needs it.
+					if (IsExplicitlyOff(val))
+					{
+						NetSnapshotStaleGuard = false;
+					}
+					else if (!IsOn(val))
+					{
+						// Names the setting actually IN FORCE, not the shipped default -- a
+						// repeated flag (?netstaleguard=0&netstaleguard=nope) keeps the earlier
+						// valid value, and a diagnostic that can state the wrong condition is
+						// worse than one that states none.
+						Console.WriteLine("[debug] unknown ?" + key + "= value '" + val
+							+ "' (expected 0/off to disable) -- ignored, the snapshot staleness"
+							+ " guard stays " + (NetSnapshotStaleGuard ? "ON" : "OFF"));
+					}
 					break;
 				case "slowmotrail":
 					SlowmoTrail = IsOn(val);
@@ -3841,6 +3860,10 @@ namespace EvilAliensWeb.Compat
 						+ (NetScript ? " netscript" : "")
 						+ (NetLocal > 0 ? " netlocal=" + NetLocal : "")
 						+ (NetDropGrant ? " netdropgrant" : "")
+						// Prints only when the guard is OFF, i.e. only on the deliberate bug repro. It is
+						// the one flag in this dump whose ABSENCE is the normal state, so a run that
+						// reordered a snapshot on purpose has to be tellable from one that did not.
+						+ (!NetSnapshotStaleGuard ? " netstaleguard=0" : "")
 						+ (Harness != null
 							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "") + " bg=" + HarnessBg
 							: ""));

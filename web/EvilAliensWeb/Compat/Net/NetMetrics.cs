@@ -108,6 +108,16 @@ namespace EvilAliensWeb.Compat.Net
                                         // RecentRemovalWindowMs with snapDead in between. Any
                                         // sustained nonzero reading deserves a look either way.
 
+        // Snapshot entries REFUSED as stale by the per-netId seq guard (card f5cf7a5c) -- an
+        // entry that decoded fine and named a puppet we hold, but was older than the sample
+        // already applied to it. NOT counted in snapUnk: nothing about the id was unknown.
+        //
+        // It is not a fault counter and not a 0 bar. It tracks the LINK's reorder rate, so an
+        // unimpaired BroadcastChannel or in-process run reads 0 while a real lossy WebRTC
+        // pairing reads whatever that connection is doing -- which is the point, since before
+        // the guard every one of those entries silently dragged a puppet backwards instead.
+        public long SnapStale;
+
         // claims (generous at-least-once)
         public long ClaimsTx;           // client: local deaths claimed
         public long ClaimsRx;           // host: claims received
@@ -152,16 +162,6 @@ namespace EvilAliensWeb.Compat.Net
         public long ImpDropped;         // stream packets the impairment wrapper dropped
         public int ImpHeld;             // packets currently parked in its delay queues
         public float ImpLagMs;          // settings in force at report time
-        // Snapshot entries REFUSED as stale by the per-netId seq guard (card f5cf7a5c) -- an
-        // entry that decoded fine and named a puppet we hold, but was older than the sample
-        // already applied to it. NOT counted in snapUnk: nothing about the id was unknown.
-        //
-        // It is not a fault counter and not a 0 bar. It tracks the LINK's reorder rate, so an
-        // unimpaired BroadcastChannel or in-process run reads 0 while a real lossy WebRTC
-        // pairing reads whatever that connection is doing -- which is the point, since before
-        // the guard every one of those entries silently dragged a puppet backwards instead.
-        public long SnapStale;
-
         public float ImpLossPct;
         public float ImpJitterMs;
 

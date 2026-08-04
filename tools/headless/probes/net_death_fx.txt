@@ -1,4 +1,4 @@
-# Death FX on the JOIN peer -- cards 4e406eba, 303bfb5b, 13aa596c.
+# Death FX on the JOIN peer -- cards 4e406eba, 303bfb5b, 13aa596c, f62116b5, ad9c8f8b.
 #
 # WHAT WENT WRONG. Three reports, one file, two unrelated causes:
 #   * "space mines dont explode on P2's screen" -- StarMine.Asplode() is a real death with no
@@ -30,6 +30,17 @@
 #     one-tick-early residual on ordinary kills), and the late EvDeath. A peer JOINING IN
 #     PROGRESS mid-animation is on the fast path too -- NetIdRegistry.ReplayLive re-announces
 #     any live entity that is already dying, beside its catch-up spawn (section 2f).
+#   * Card ad9c8f8b is the COVERAGE half and the newest: sections 8 and 9. The mechanism above is
+#     type-agnostic by construction, so the multi-phase boss deaths were "covered" and nobody had
+#     ever WATCHED one -- the net CLAUDE.md's known-limits bullet said exactly that. Section 8
+#     releases BrainBoss / FakeBoss / JunkBoss and TICKS the released component's real Update
+#     forward on a fixed 60 Hz dt, which is the only way to observe a 3-to-20-second choreography;
+#     section 9 is the hole that found: SpiderBoss is NOT a KillableAlien (its death lives in
+#     CollidesWith, reachable only by a Lazer), so nothing announced it, its null NetKillable made
+#     the hp==0 fallback structurally unreachable, and the EvDeath at the far end of its 5s debris
+#     fall carried KillerNone -- the join peer saw an intact boss for five seconds and then a
+#     silent vanish. Fixed with the INetEntity.NetIsDying / NetBeginDeferredDeath seam and NO
+#     protocol change (EvDying already existed and carries only a netId; protocol stays v18).
 #
 # WHY A PROBE AND NOT A SCREENSHOT. Both symptoms are the ABSENCE of a one-to-five-second effect
 # at a moment no capture can be timed to (root CLAUDE.md: never verify motion with timed live
@@ -54,8 +65,24 @@
 #     self-heal will rebuild a fresh intact collidable enemy on top of the one that is dying.
 #   * a section-5 failure means a deferred death is being deleted mid-animation again whenever the
 #     puppet's round-robin snapshot turn does not come round before the host's EvDeath.
+#   * a section-8 failure is the CHOREOGRAPHY rather than the release. Note which: "the death
+#     opened with its own FX" is the KilledBy burst, "KEEPS GOING" is the released puppet's own
+#     Update (a release that left the puppet inert would fire the opening burst and then stand
+#     there forever), "still in the world at that point" is a premature removal, and "the
+#     animation ENDED on its own" is a corpse that never leaves -- one per client, per boss, for
+#     the rest of the level. JunkBoss deliberately asserts the OPPOSITE at the open: its KilledBy
+#     spawns nothing at all, so its whole death is Update-driven and it is the type the release
+#     matters most for.
+#   * a section-9 failure is the SpiderBoss seam. "the debris death opened with its own FX" or
+#     "the puppet was RELEASED" failing IS the original bug (an intact boss for 5s, then a silent
+#     vanish); "reports itself DYING" is the NetIsDying half, which is what a join-in-progress
+#     catch-up reads (section 2h); the EvilBullet negative is what stops the null-killable branch
+#     un-freezing live enemies into the client's world on any stray beat.
+#   * a section-2g/2h failure is the SpiderBoss's HOST half: 2g means its death entry stopped
+#     announcing (back to five silent seconds), 2h means NetIdRegistry.ReplayLive went back to a
+#     killable-only discriminant and a peer joining mid-fall is told nothing.
 #
-# THE POSITIVE IS THE `73 passed` TALLY, and section 5's paid-award leg is the positive control
+# THE POSITIVE IS THE `144 passed` TALLY, and section 5's paid-award leg is the positive control
 # for every "no slot was credited" assertion above it -- an award path that had stopped working
 # entirely would satisfy all of those zeroes. Raise the count when checks are added.
 # `expect-not FAIL` is here too but is the weaker half: it passes on a run where the eval never
@@ -79,6 +106,22 @@
 #   * NetPuppets.OnDeathBegan made a no-op                               -> 5  (section 6 only,
 #     i.e. sections 4 and 5 stay green -- which is what proves the fallbacks are still real)
 #   * the two-consecutive-turns latch dropped (fire on the first zero)   -> 2  (section 4)
+#   * the null-killable branch never calls NetBeginDeferredDeath          -> 4  (section 9)
+#   * SpiderBoss stops announcing at its death entry                      -> 2  (section 2g)
+#   * ReplayLive back to the killable-only discriminant                   -> 1  (section 2h ONLY,
+#     i.e. the live beat stays green -- which is what proves the catch-up leg is its own path)
+#   * the null-killable branch skips NetSuppressAward                     -> 1  (section 9's score
+#     leg -- so those "nothing was credited" zeroes are discriminating, not vacuous)
+#   * SpiderBoss.NetBeginDeferredDeath loses its idempotence guard        -> 1  (section 9)
+#   * a killable deferred death deleted mid-animation (pre-PR#267)        -> 9  (sections 4, 6
+#     and all three of section 8's bosses)
+# Dropping NetSuppressAward on the KILLABLE branch is caught too, but LOUDLY rather than cleanly:
+# the suite aborts in section 4 with an ArgumentOutOfRangeException out of the award path.
+#
+# LEAVE-NO-TRACE is asserted by RUNNING IT THREE TIMES BELOW, which is the strongest evidence
+# available for it: the teardown sweeps Explosion, BloodExplosion and BrainAura, restores the
+# score panels and restarts the music BrainBoss.KilledBy stopped, so a leak would make the SECOND
+# run report phantom failures (the eaBinTest rule). It costs ~2s of headless run time.
 #
 # eahl: --flags "?menu&noattract"
 #
@@ -100,8 +143,35 @@ expect 3\. CLIENT -- EvDeath\(KillerSelf\) runs the mine's real self-destruct
 expect 4\. CLIENT -- hp==0 in TWO snapshot turns releases the puppet \(the fallback\)
 expect 5\. CLIENT -- an ATTRIBUTED EvDeath on a deferred-death type releases too
 expect 6\. CLIENT -- an EvDying beat releases the puppet on the EVENT tick
+expect 8\. CLIENT -- the multi-phase BOSS deaths run to completion on the released puppet
+expect 9\. CLIENT -- SpiderBoss, whose death does NOT run through KillableAlien
+
+# Section 2's SpiderBoss legs: the host announces a death that never touches KillableAlien, and
+# the join-in-progress catch-up re-announces it. Both were structurally impossible pre-card.
+expect a SpiderBoss death broadcast exactly one EvDying \(1\)
+expect a catch-up replay re-announces the dying SpiderBoss \(2 dying entities
+
+# The choreography itself, per boss -- the assertions no frame and no timed screenshot can make.
+# Named individually so a single boss regressing is legible in the probe output rather than only
+# in the tally.
+expect BrainBoss: the choreography KEEPS GOING after the opening burst
+expect BrainBoss: the animation ENDED on its own and the boss left the world
+expect FakeBoss: the choreography KEEPS GOING after the opening burst
+expect FakeBoss: the animation ENDED on its own and the boss left the world
+expect JunkBoss: the choreography KEEPS GOING after the opening burst
+expect JunkBoss: the animation ENDED on its own and the boss left the world
+expect SpiderBoss: the puppet was RELEASED, not silently despawned
+expect SpiderBoss: the fall ENDED on its own and the boss left the world
+
 expect 7\. teardown
-expect \[netdeathfx\] 73 passed, 0 failed
+expect \[netdeathfx\] 144 passed, 0 failed
+
+# LEAVE-NO-TRACE: two more runs in the SAME process, which is what makes the teardown's own
+# claims mean something. A leaked Explosion, BloodExplosion or BrainAura, an unrestored score
+# panel or the music BrainBoss stopped would all surface as failures HERE and not above.
+eval NetDeathFx
+eval NetDeathFx
+
 expect-not FAIL
 expect-not SKIP
 quit

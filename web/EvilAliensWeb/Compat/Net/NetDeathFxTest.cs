@@ -96,6 +96,12 @@ namespace EvilAliensWeb.Compat.Net
         private const ushort IdSkull5 = 61008;
         // Never built, never registered: the "a beat for an id we do not hold" negative.
         private const ushort IdUnknown = 61009;
+        // Section 8/9's multi-phase boss legs (card ad9c8f8b).
+        private const ushort IdBrainBoss = 61010;
+        private const ushort IdFakeBoss = 61011;
+        private const ushort IdJunkBoss = 61012;
+        private const ushort IdSpiderBoss = 61013;
+        private const ushort IdBullet2 = 61014;
 
         public static string Run()
         {
@@ -131,6 +137,13 @@ namespace EvilAliensWeb.Compat.Net
                 scoreBefore[i] = score.PointScore(i);
             }
 
+            // BrainBoss.KilledBy ends in sound.StopMusic(), so running its real death from the
+            // menu stops the menu track. Captured here and restarted in the teardown -- the
+            // suite's leave-no-trace contract (it restarts the track from the top, which is the
+            // one residue; nothing else in the suite touches music).
+            SoundManager sound = ServiceHelper.Get<ISoundManagerService>().SoundManager;
+            int songBefore = sound.NetCurrentSong;
+
             INetHost hostBefore = NetHost.Current;
             NetHost.Current = new PinnedNetHost();
             try
@@ -142,6 +155,8 @@ namespace EvilAliensWeb.Compat.Net
                 Section4DeferredFromSnapshot(sb, Check, bin, game, score, planted);
                 Section5DeferredFromEvDeath(sb, Check, bin, game, score, planted);
                 Section6DeferredFromEvDying(sb, Check, bin, game, score, planted);
+                Section8BossChoreography(sb, Check, bin, game, score, planted);
+                Section9SpiderBoss(sb, Check, bin, game, score, planted);
             }
             catch (Exception ex)
             {
@@ -150,7 +165,7 @@ namespace EvilAliensWeb.Compat.Net
             finally
             {
                 sb.Append(" 7. teardown\n");
-                Teardown(sb, Check, bin, game, score, scoreBefore, planted);
+                Teardown(sb, Check, bin, game, score, scoreBefore, planted, sound, songBefore);
                 NetHost.Current = hostBefore;
             }
 
@@ -370,6 +385,96 @@ namespace EvilAliensWeb.Compat.Net
                 Check("NEGATIVE ...and only that one -- a healthy entity is not announced ("
                     + dyings.Count + ")",
                     dyings.Count == 1 && healthyMine != null);
+
+                // 2g. THE SPIDERBOSS, which announces nothing through KillableAlien (card
+                // ad9c8f8b). It is not one -- its death lives in CollidesWith, reachable only by
+                // a Lazer -- so it is killed here through that REAL path rather than NetKill.
+                // Pre-card this leg read zero EvDying and zero EvDeath: the host said nothing at
+                // all for the whole 5 s fall, and then sent a KillerNone EvDeath.
+                //
+                // FIRST, because ReplayLive below re-announces EVERY dying entity and the three
+                // killable bosses after it would make that count unreadable.
+                deaths.Clear();
+                dyings.Clear();
+                SpiderBoss spider = SpiderBoss.NewSpiderBoss(bin, game);
+                spider.Setup(false);
+                spider.Position = Nowhere;
+                bin.Add((GameComponent)(object)spider);
+                planted.Add((GameComponent)(object)spider);
+                spider.Position = Nowhere;
+                bool gotSpiderId = NetIdRegistry.TryGetByComp((GameComponent)(object)spider,
+                    out NetIdRegistry.Entry spiderEntry);
+                ushort spiderId = gotSpiderId ? spiderEntry.Id : (ushort)0;
+                Check("PRECONDITION the planted SpiderBoss got a netId", gotSpiderId);
+                // Its hit points are difficulty-scaled, so feed beams until it turns rather than
+                // assuming a count. Each Lazer must be a DISTINCT instance (it dedupes on
+                // identity) and none is ever added to the world.
+                int beams = 0;
+                while (beams < 40 && !((INetEntity)spider).NetIsDying)
+                {
+                    spider.CollidesWith(new Lazer(game));
+                    beams++;
+                }
+                Check("PRECONDITION the SpiderBoss died to its real Lazer path (" + beams
+                    + " beams)", ((INetEntity)spider).NetIsDying);
+                wire.Pump();
+                Check("a SpiderBoss death broadcast exactly one EvDying (" + dyings.Count + ")",
+                    dyings.Count == 1);
+                Check("...addressed to that entity's netId",
+                    dyings.Count == 1
+                    && NetProtocol.TryDecodeDyingEvent(dyings[0], out ushort spiderDyingId)
+                    && spiderDyingId == spiderId && spiderId != 0);
+                Check("...and NO EvDeath yet -- the debris have 5s to fall (" + deaths.Count + ")",
+                    deaths.Count == 0);
+                Check("...and the host's own copy is still in the world, dying",
+                    InWorld(game, (GameComponent)(object)spider) && !spider.IsDead);
+
+                // 2h. The join-in-progress catch-up reads the same NetIsDying seam, so a peer
+                // arriving mid-fall is re-told about a boss no hp field could describe.
+                dyings.Clear();
+                NetIdRegistry.ReplayLive();
+                wire.Pump();
+                // TWO, not one: 2d's BattleSkull is still dying as well, which 2f already
+                // established. What is asserted is that the SpiderBoss is now AMONG them -- the
+                // pre-card discriminant is a killable at zero hit points, so this boss was the
+                // one live dying entity a catch-up could never mention.
+                bool replayHasSpider = false;
+                foreach (byte[] frame in dyings)
+                {
+                    replayHasSpider |= NetProtocol.TryDecodeDyingEvent(frame, out ushort rid)
+                        && rid == spiderId;
+                }
+                Check("a catch-up replay re-announces the dying SpiderBoss (" + dyings.Count
+                    + " dying entities, skull + spider)",
+                    replayHasSpider && dyings.Count == 2);
+
+                // 2i. The three KillableAlien bosses. They reach NoteDeathBegan like the
+                // BattleSkull in 2d, so this is coverage rather than a new mechanism -- but the
+                // net CLAUDE.md said in as many words that nobody had watched them, and a
+                // KilledBy that stopped deferring would be silent everywhere else.
+                // BrainBoss LAST: its KilledBy purges seven types out of the live bin and stops
+                // the music, so anything this section still needs must already be done with.
+                HostDeferredLeg(Check, bin, game, planted, deaths, dyings, wire, "FakeBoss",
+                    () =>
+                    {
+                        FakeBoss b = FakeBoss.NewFakeBoss(bin, game);
+                        b.Setup();
+                        return (AlienDrawableGameComponent)(object)b;
+                    });
+                HostDeferredLeg(Check, bin, game, planted, deaths, dyings, wire, "JunkBoss",
+                    () =>
+                    {
+                        JunkBoss b = JunkBoss.NewJunkBoss(bin, game);
+                        b.Setup(isbase: false);
+                        return (AlienDrawableGameComponent)(object)b;
+                    });
+                HostDeferredLeg(Check, bin, game, planted, deaths, dyings, wire, "BrainBoss",
+                    () =>
+                    {
+                        BrainBoss b = BrainBoss.NewBrainBoss(bin, game);
+                        b.Setup(challenge: false);
+                        return (AlienDrawableGameComponent)(object)b;
+                    });
             }
             finally
             {
@@ -378,6 +483,41 @@ namespace EvilAliensWeb.Compat.Net
                 bin.TopOfTickFlush();
                 Check("the host session was stopped and left nothing Active", !NetSession.Active);
             }
+        }
+
+        // One host leg for a KillableAlien boss whose KilledBy defers: plant it, kill it through
+        // the real NetKill, and read the frames the peer actually received. Same shape as 2d's
+        // BattleSkull, and the second assertion is again the one that carries it -- the beat is
+        // on the wire while NO EvDeath is, because the host will not remove the component until
+        // its own animation finishes seconds later.
+        private static void HostDeferredLeg(Action<string, bool> Check, ComponentBin bin,
+            Game game, List<GameComponent> planted, List<byte[]> deaths, List<byte[]> dyings,
+            NetWire wire, string name, Func<AlienDrawableGameComponent> make)
+        {
+            deaths.Clear();
+            dyings.Clear();
+            AlienDrawableGameComponent boss = make(); // configure-then-Add
+            boss.Position = Nowhere;
+            bin.Add((GameComponent)(object)boss);
+            planted.Add((GameComponent)(object)boss);
+            boss.Position = Nowhere; // Initialize ran inside Add and moves every one of these
+            bool gotId = NetIdRegistry.TryGetByComp((GameComponent)(object)boss,
+                out NetIdRegistry.Entry entry);
+            ushort id = gotId ? entry.Id : (ushort)0;
+            Check("PRECONDITION the planted " + name + " got a netId", gotId);
+            ((INetKillable)boss).NetKill(null, isComboGenerator: false);
+            wire.Pump();
+            Check(name + ": a deferred death broadcast exactly one EvDying (" + dyings.Count + ")",
+                dyings.Count == 1);
+            Check(name + ": ...addressed to that entity's netId",
+                dyings.Count == 1
+                && NetProtocol.TryDecodeDyingEvent(dyings[0], out ushort dyingId)
+                && dyingId == id && id != 0);
+            Check(name + ": ...and NO EvDeath yet -- its asplode has seconds to run ("
+                + deaths.Count + ")", deaths.Count == 0);
+            Check(name + ": ...and the host's own copy is still in the world, dying",
+                InWorld(game, (GameComponent)(object)boss) && !boss.IsDead
+                && ((INetEntity)boss).NetIsDying);
         }
 
         // ---- 3. the client replays an unattributed death, and pays nobody --------------------
@@ -656,10 +796,215 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
+        // ---- 8. the multi-phase BOSS deaths actually RUN on the released puppet ---------------
+        //
+        // Card ad9c8f8b. Sections 4-6 prove the release MECHANISM on a BattleSkull, and stop at
+        // the opening frame: still in the world, un-frozen, out of the registry. What none of
+        // them checks is that the animation the release exists to permit then RUNS -- so this
+        // section releases each of the three KillableAlien bosses and TICKS the released
+        // component's real Update forward on a fixed 60 Hz dt (the isolation-sim pattern), which
+        // is the only way to observe a 3-to-20-second choreography without a frame.
+        //
+        // The three were "covered by construction" (the mechanism is type-agnostic) and the net
+        // CLAUDE.md's known-limits bullet said outright that nobody had watched them. They are:
+        //   BrainBoss  -- KilledBy -> BossState.asplode, a 20 s bombardment then a 300 ms fade
+        //   FakeBoss   -- KilledBy -> FakeBossState.asplode, 4 s then a 75-burst finale
+        //   JunkBoss   -- KilledBy -> JunkBossState.asplode, exactly 25 explosions (~3.1 s)
+        //                 -- the "elongated death explosion" raised on card c146422f
+        //
+        // THREE THINGS ARE ASSERTED PER BOSS AND EACH IS A DIFFERENT WAY THE RELEASE COULD BE
+        // USELESS: the tally keeps CLIMBING at an intermediate checkpoint (a released puppet
+        // whose Update did nothing would fire the opening burst and then stand there), the boss
+        // is STILL IN THE WORLD at that checkpoint (no premature removal), and it eventually
+        // Die()s ON ITS OWN (an animation that never terminates leaves a corpse in every
+        // client's world for the rest of the level).
+        //
+        // AWARDS EXACTLY ONCE is the fourth, and the score panels DO discriminate it: each of
+        // these bosses ends its asplode in AwardScoreToAll, which a released puppet really does
+        // reach, so a lost NetSuppressAward would re-derive the figure from this peer's own
+        // combo on top of the host's. The host's late EvDeath paying its array is the positive
+        // control beside it -- without a leg where a score DOES move, "nothing moved" would pass
+        // just as well on a build where payment had stopped working altogether.
+        private static void Section8BossChoreography(StringBuilder sb, Action<string, bool> Check,
+            ComponentBin bin, Game game, ScoreVisualiser score, List<GameComponent> planted)
+        {
+            sb.Append(" 8. CLIENT -- the multi-phase BOSS deaths run to completion on the"
+                + " released puppet (card ad9c8f8b)\n");
+            // maxTicks are the animation's own duration plus ~15% of margin, at 60 Hz.
+            BossLeg<BrainBoss>(sb, Check, bin, game, score, planted, "BrainBoss", IdBrainBoss,
+                TypeIdxOf(new BrainBoss(game)), midTicks: 300, maxTicks: 1400, award: 900f,
+                opensWithFx: true);
+            BossLeg<FakeBoss>(sb, Check, bin, game, score, planted, "FakeBoss", IdFakeBoss,
+                TypeIdxOf(new FakeBoss(game)), midTicks: 60, maxTicks: 280, award: 500f,
+                opensWithFx: true);
+            BossLeg<JunkBoss>(sb, Check, bin, game, score, planted, "JunkBoss", IdJunkBoss,
+                TypeIdxOf(new JunkBoss(game)), midTicks: 60, maxTicks: 300, award: 700f,
+                opensWithFx: false);
+        }
+
+        private static void BossLeg<T>(StringBuilder sb, Action<string, bool> Check,
+            ComponentBin bin, Game game, ScoreVisualiser score, List<GameComponent> planted,
+            string name, ushort netId, byte typeIdx, int midTicks, int maxTicks, float award,
+            bool opensWithFx)
+            where T : AlienDrawableGameComponent
+        {
+            sb.Append("    -- " + name + "\n");
+            int boom = DeathFxCount(game);
+            float[] before = Scores(score);
+            T boss = (T)(object)BuildPuppet<T>(game, netId, typeIdx, planted);
+            Check(name + ": PRECONDITION a puppet was built", boss != null);
+            if (boss == null)
+            {
+                return;
+            }
+            Check(name + ": PRECONDITION the puppet starts FROZEN", !boss.Enabled);
+            int liveBefore = NetPuppets.LiveCount;
+
+            NetPuppets.OnDeathBegan(netId);
+
+            int opened = DeathFxCount(game) - boom;
+            // JunkBoss's KilledBy spawns NOTHING -- it only sets the state and starts a 125 ms
+            // timer, so its entire death is Update-driven. That makes it the type the release
+            // matters MOST for (a puppet left frozen would show no death at all, not a truncated
+            // one), so the expectation is asserted in both directions rather than relaxed.
+            Check(name + (opensWithFx ? ": the death opened with its own FX (+"
+                    : ": NEGATIVE its KilledBy spawns NO FX -- the whole death is Update-driven (+")
+                + opened + ")", opensWithFx ? opened > 0 : opened == 0);
+            Check(name + ": the puppet was RELEASED, not deleted mid-animation",
+                InWorld(game, (GameComponent)(object)boss) && boss.Enabled
+                && !boss.Collides && NetPuppets.LiveCount == liveBefore - 1);
+
+            // The host's EvDeath arrives while the animation is still running -- it finished on
+            // the host seconds before it finishes here. The puppet has left the registry, so this
+            // settles as an award-only reconciliation and must fire no second burst.
+            int beforeLate = DeathFxCount(game);
+            float[] lateBefore = Scores(score);
+            float[] awards = new float[NetProtocol.MaxSlots];
+            awards[PeerSlot] = award;
+            NetPuppets.OnRemoteDeath(netId, PeerSlot, Nowhere, awards);
+            Check(name + ": the host's late EvDeath pays its award once (+"
+                + Round(score.PointScore(PeerSlot) - lateBefore[PeerSlot]) + ")",
+                Math.Abs(score.PointScore(PeerSlot) - lateBefore[PeerSlot] - award) < 0.01f);
+            Check(name + ": ...and fires NO second burst on a puppet already dying",
+                DeathFxCount(game) == beforeLate);
+
+            // THE MULTI-PHASE PART. Tick the released component's own Update forward; nothing
+            // else in the world is ticked, so every effect counted below is this boss's.
+            int atRelease = DeathFxCount(game);
+            Tick((GameComponent)(object)boss, midTicks);
+            int midway = DeathFxCount(game);
+            Check(name + ": the choreography KEEPS GOING after the opening burst (+"
+                + (midway - atRelease) + " over " + midTicks + " ticks)", midway > atRelease);
+            Check(name + ": ...and the boss is still in the world at that point -- no premature"
+                + " removal", InWorld(game, (GameComponent)(object)boss));
+
+            Tick((GameComponent)(object)boss, maxTicks - midTicks);
+            bin.TopOfTickFlush(); // its own Die() only QUEUES the removal
+            Check(name + ": the animation ENDED on its own and the boss left the world",
+                !InWorld(game, (GameComponent)(object)boss));
+            Check(name + ": ...having spawned strictly more FX on the way out (+"
+                + (DeathFxCount(game) - midway) + ")", DeathFxCount(game) > midway);
+            // The finale calls AwardScoreToAll. Suppressed, so the ONLY movement across this
+            // whole leg is the host's figure above -- which is what "awards exactly once" means.
+            Check(name + ": nothing beyond the host's award ever moved a score panel",
+                Math.Abs(score.PointScore(PeerSlot) - before[PeerSlot] - award) < 0.01f
+                && SameScoresExcept(score, before, PeerSlot));
+        }
+
+        // ---- 9. SpiderBoss -- the one that is NOT a KillableAlien ----------------------------
+        //
+        // Card ad9c8f8b, and the hole the card's coverage work actually found. This boss derives
+        // from AlienDrawableGameComponent, and its death lives in CollidesWith (only a Lazer
+        // hurts it), so HitBy / KilledBy / NoteDeathBegan never run: pre-card it announced no
+        // EvDying, its NetKillable was null so the hp==0 snapshot fallback was structurally
+        // unreachable, and the EvDeath at the far end of its 5 s debris fall carried KillerNone
+        // (nothing had called NoteKill) -- i.e. the join peer saw an intact boss stand there for
+        // five seconds and then vanish, with no debris, no explosions and no cues.
+        //
+        // The fix is the INetEntity.NetIsDying / NetBeginDeferredDeath seam: the boss announces
+        // at its own death entry and runs its own choreography on the client. No protocol
+        // change -- EvDying already existed and carries only a netId.
+        //
+        // Its FX are BloodExplosion, not Explosion, which is why this suite counts both.
+        private static void Section9SpiderBoss(StringBuilder sb, Action<string, bool> Check,
+            ComponentBin bin, Game game, ScoreVisualiser score, List<GameComponent> planted)
+        {
+            sb.Append(" 9. CLIENT -- SpiderBoss, whose death does NOT run through KillableAlien"
+                + " (card ad9c8f8b)\n");
+            byte spiderType = TypeIdxOf(new SpiderBoss(game));
+            int boom = DeathFxCount(game);
+            float[] before = Scores(score);
+            SpiderBoss boss = (SpiderBoss)BuildPuppet<SpiderBoss>(game, IdSpiderBoss, spiderType, planted);
+            Check("SpiderBoss: PRECONDITION a puppet was built", boss != null);
+            if (boss == null)
+            {
+                return;
+            }
+            Check("SpiderBoss: PRECONDITION the puppet starts FROZEN", !boss.Enabled);
+            // The discriminant the pre-card code used, which is exactly what fails here: this is
+            // the reason the beat and both fallbacks all skipped it.
+            Check("SpiderBoss: PRECONDITION it is NOT a KillableAlien, so hp==0 can never mean"
+                + " 'dying' for it", ((INetEntity)boss).NetKillable == null);
+            Check("SpiderBoss: PRECONDITION it does not report itself dying while alive",
+                !((INetEntity)boss).NetIsDying);
+            int liveBefore = NetPuppets.LiveCount;
+
+            NetPuppets.OnDeathBegan(IdSpiderBoss);
+
+            int opened = DeathFxCount(game) - boom;
+            Check("SpiderBoss: the debris death opened with its own FX (+" + opened
+                + "; BeginDeathThroes bleeds 32 times)", opened >= 32);
+            Check("SpiderBoss: the puppet was RELEASED, not silently despawned",
+                InWorld(game, (GameComponent)(object)boss) && boss.Enabled
+                && !boss.Collides && NetPuppets.LiveCount == liveBefore - 1);
+            Check("SpiderBoss: ...and now reports itself DYING, which is what a join-in-progress"
+                + " replay reads", ((INetEntity)boss).NetIsDying);
+
+            // IDEMPOTENT, which the seam requires: this peer hit-tests puppets with its own
+            // beams, so it may already have run the same death locally. A second beat must not
+            // spawn a second debris burst or restart the 5 s fall.
+            int afterOpen = DeathFxCount(game);
+            ((INetEntity)boss).NetBeginDeferredDeath();
+            Check("SpiderBoss: NEGATIVE a repeated death-began is a no-op, not a second burst (+"
+                + (DeathFxCount(game) - afterOpen) + ")", DeathFxCount(game) == afterOpen);
+
+            // The 5 s debris fall, then Die(). 340 ticks is 5.67 s at 60 Hz.
+            Tick((GameComponent)(object)boss, 180);
+            Check("SpiderBoss: still in the world 3s in -- the debris have 5s to fall",
+                InWorld(game, (GameComponent)(object)boss));
+            Tick((GameComponent)(object)boss, 160);
+            bin.TopOfTickFlush();
+            Check("SpiderBoss: the fall ENDED on its own and the boss left the world",
+                !InWorld(game, (GameComponent)(object)boss));
+            Check("SpiderBoss: nothing was credited -- the host's EvDeath is the authority",
+                SameScores(score, before));
+
+            // NEGATIVE: the release is not unconditional. A non-killable type with no deferred
+            // death of its own answers `false` and must be left frozen and registered -- without
+            // this, the null-killable branch would un-freeze live enemies into the client's
+            // world on any stray beat.
+            byte bulletType = TypeIdxOf(new EvilBullet(game));
+            EvilBullet bullet = (EvilBullet)BuildPuppet<EvilBullet>(game, IdBullet2, bulletType, planted);
+            Check("SpiderBoss: PRECONDITION a second EvilBullet puppet was built", bullet != null);
+            if (bullet != null)
+            {
+                liveBefore = NetPuppets.LiveCount;
+                boom = DeathFxCount(game);
+                Check("NEGATIVE PRECONDITION an EvilBullet declares no deferred death of its own",
+                    !((INetEntity)bullet).NetBeginDeferredDeath());
+                NetPuppets.OnDeathBegan(IdBullet2);
+                Check("NEGATIVE a beat for a non-killable with no deferred death releases"
+                    + " NOTHING (+" + (DeathFxCount(game) - boom) + " FX)",
+                    !bullet.Enabled && NetPuppets.LiveCount == liveBefore
+                    && DeathFxCount(game) == boom);
+            }
+        }
+
         // ---- teardown ------------------------------------------------------------------------
 
         private static void Teardown(StringBuilder sb, Action<string, bool> Check, ComponentBin bin,
-            Game game, ScoreVisualiser score, float[] scoreBefore, List<GameComponent> planted)
+            Game game, ScoreVisualiser score, float[] scoreBefore, List<GameComponent> planted,
+            SoundManager sound, int songBefore)
         {
             // Released puppets are live components with their own Update, so they are swept the
             // same way as everything else; they are all at Nowhere and were never drawn.
@@ -672,7 +1017,19 @@ namespace EvilAliensWeb.Compat.Net
             }
             NetPuppets.Disable();
             bin.TopOfTickFlush();
+            // Three collateral types, none of which is ever in `planted`: the death paths spawn
+            // Explosion AND BloodExplosion (a plain AlienDrawableGameComponent, NOT an Explosion
+            // subclass -- sweeping only the latter left the boss legs' hundreds of blood bursts
+            // in the world), and BrainBoss.Initialize adds its own BrainAura child.
             foreach (GameComponent comp in CollectType<Explosion>(game))
+            {
+                bin.Remove(comp);
+            }
+            foreach (GameComponent comp in CollectType<BloodExplosion>(game))
+            {
+                bin.Remove(comp);
+            }
+            foreach (GameComponent comp in CollectType<BrainAura>(game))
             {
                 bin.Remove(comp);
             }
@@ -694,6 +1051,17 @@ namespace EvilAliensWeb.Compat.Net
                 scoresBack &= Math.Abs(score.PointScore(i) - scoreBefore[i]) < 0.01f;
             }
             Check("the score panels are back where they started", scoresBack);
+            Check("no death FX component was left in the world",
+                CountType<Explosion>(game) == 0 && CountType<BloodExplosion>(game) == 0
+                && CountType<BrainAura>(game) == 0);
+            // Restart whatever was playing if a boss leg stopped it. `songBefore` < 0 means
+            // nothing was playing, in which case a stopped state is already correct.
+            if (songBefore >= 0 && sound.NetCurrentSong != songBefore)
+            {
+                sound.PlayMusic((Songs)songBefore);
+            }
+            Check("the music is back where it started (was " + songBefore + ", now "
+                + sound.NetCurrentSong + ")", sound.NetCurrentSong == songBefore);
         }
 
         // ---- helpers -------------------------------------------------------------------------
@@ -792,6 +1160,41 @@ namespace EvilAliensWeb.Compat.Net
                 s[i] = score.PointScore(i);
             }
             return s;
+        }
+
+        // Both death-FX families. `BloodExplosion` is an AlienDrawableGameComponent, NOT an
+        // Explosion subclass, and the SpiderBoss's entire debris death is made of it -- so a
+        // CountType<Explosion> alone reads zero for the one leg that matters most.
+        private static int DeathFxCount(Game game)
+        {
+            return CountType<Explosion>(game) + CountType<BloodExplosion>(game);
+        }
+
+        // Drive ONE component's real Update at a fixed 60 Hz, the isolation-sim pattern: the
+        // thing under test is a 3-to-20-second choreography, which no frame and no timed
+        // screenshot can see. Nothing else in the world is ticked, so every effect that appears
+        // during a Tick belongs to this component.
+        private static void Tick(GameComponent comp, int ticks)
+        {
+            TimeSpan step = TimeSpan.FromTicks(166667); // 16.6667 ms
+            TimeSpan total = TimeSpan.Zero;
+            for (int i = 0; i < ticks; i++)
+            {
+                total += step;
+                comp.Update(new GameTime(total, step));
+            }
+        }
+
+        private static bool SameScoresExcept(ScoreVisualiser score, float[] before, int skipSlot)
+        {
+            for (int i = 0; i < NetProtocol.MaxSlots; i++)
+            {
+                if (i != skipSlot && Math.Abs(score.PointScore(i) - before[i]) >= 0.01f)
+                {
+                    return false;
+                }
+            }
+            return true;
         }
 
         private static bool SameScores(ScoreVisualiser score, float[] before)

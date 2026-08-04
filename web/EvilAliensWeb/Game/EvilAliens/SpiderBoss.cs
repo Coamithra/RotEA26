@@ -687,57 +687,13 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		hp--;
 		if (hp <= 0 && !base.IsDead)
 		{
-			switch (state)
-			{
-			case SpiderBossState.flyleft:
-				impulse = new Vector2(-0.84f, 0f);
-				break;
-			case SpiderBossState.flyright:
-				impulse = new Vector2(0.84f, 0f);
-				break;
-			case SpiderBossState.flyup:
-				impulse = new Vector2(0f, -0.84f);
-				break;
-			case SpiderBossState.land:
-				impulse = new Vector2(0f, 0.84f);
-				break;
-			case SpiderBossState.standing:
-				impulse = Vector2.Zero;
-				break;
-			}
-			state = SpiderBossState.dead;
-			if (OnAlmostKilled != null)
-			{
-				OnAlmostKilled(this);
-			}
-			AwardScoreToAll(combo: false);
-			sound.PlayCue("spiderbossdeath");
-			sound.PlayCue("head asplode");
-			for (int i = 0; i < 6; i++)
-			{
-				debrisposition.Add(base.Position);
-				debrisspeed.Add(new Vector2(RandomHelper.RandomNextFloat(-0.3f, 0.3f), -0.3f + 0.5f * RandomHelper.RandomNextFloat(-0.3f, 0.3f)));
-				debrisrotation.Add(RandomHelper.RandomNextAngle());
-				debrisrotationspeed.Add(RandomHelper.RandomNextFloat(-0.03f, 0.03f));
-			}
-			base.Collides = false;
-			ResetTimer(5f);
-			for (int j = 0; j < 8; j++)
-			{
-				Bleed(2.5f);
-			}
-			for (int k = 0; k < 8; k++)
-			{
-				Bleed(3f);
-			}
-			for (int l = 0; l < 8; l++)
-			{
-				Bleed(5f);
-			}
-			for (int m = 0; m < 8; m++)
-			{
-				Bleed(6f);
-			}
+			BeginDeathThroes();
+			// Online co-op (card ad9c8f8b): this death is DEFERRED -- the debris fall for 5s
+			// before Die() -- but it never runs through KillableAlien.HitBy, so nothing else
+			// announces it. Without this the join peer sees an intact boss for five seconds and
+			// then a silent despawn, because the EvDeath at the far end of the animation carries
+			// KillerNone (nothing ever called NoteKill).
+			EvilAliensWeb.Compat.Net.NetSession.OnHostDeathBegan(this);
 		}
 		else
 		{
@@ -758,6 +714,87 @@ internal class SpiderBoss : AlienDrawableGameComponent
 				Bleed(2.5f);
 			}
 		}
+	}
+
+	// The whole death ENTRY: pick the debris impulse off the state the boss died in, spawn the
+	// six chunks, bleed, go uncollidable and start the 5s fall that `SpiderBossState.dead` runs
+	// out in Update. Lifted out of CollidesWith so a join peer can run the identical thing off
+	// the host's EvDying beat (card ad9c8f8b) rather than being handed a boss that vanishes.
+	private void BeginDeathThroes()
+	{
+		switch (state)
+		{
+		case SpiderBossState.flyleft:
+			impulse = new Vector2(-0.84f, 0f);
+			break;
+		case SpiderBossState.flyright:
+			impulse = new Vector2(0.84f, 0f);
+			break;
+		case SpiderBossState.flyup:
+			impulse = new Vector2(0f, -0.84f);
+			break;
+		case SpiderBossState.land:
+			impulse = new Vector2(0f, 0.84f);
+			break;
+		case SpiderBossState.standing:
+			impulse = Vector2.Zero;
+			break;
+		}
+		state = SpiderBossState.dead;
+		// Null on a puppet -- SpiderBossEvent is the only subscriber and the descriptor builds
+		// its copy through NewSpiderBoss/Setup, so the client never advances a level script here.
+		if (OnAlmostKilled != null)
+		{
+			OnAlmostKilled(this);
+		}
+		// A no-op on a client: NetPuppets.BeginDeferredDeath claims the award slot first, so the
+		// figures stay the host's (the b0ab09ec rule).
+		AwardScoreToAll(combo: false);
+		sound.PlayCue("spiderbossdeath");
+		sound.PlayCue("head asplode");
+		for (int i = 0; i < 6; i++)
+		{
+			debrisposition.Add(base.Position);
+			debrisspeed.Add(new Vector2(RandomHelper.RandomNextFloat(-0.3f, 0.3f), -0.3f + 0.5f * RandomHelper.RandomNextFloat(-0.3f, 0.3f)));
+			debrisrotation.Add(RandomHelper.RandomNextAngle());
+			debrisrotationspeed.Add(RandomHelper.RandomNextFloat(-0.03f, 0.03f));
+		}
+		base.Collides = false;
+		ResetTimer(5f);
+		for (int j = 0; j < 8; j++)
+		{
+			Bleed(2.5f);
+		}
+		for (int k = 0; k < 8; k++)
+		{
+			Bleed(3f);
+		}
+		for (int l = 0; l < 8; l++)
+		{
+			Bleed(5f);
+		}
+		for (int m = 0; m < 8; m++)
+		{
+			Bleed(6f);
+		}
+	}
+
+	// Online co-op (card ad9c8f8b). This boss is NOT a KillableAlien -- its death lives in
+	// CollidesWith, so the base's "killable at zero hit points" derivation answers `false`
+	// forever and both the live EvDying emitter and NetIdRegistry.ReplayLive's join-in-progress
+	// re-announce would skip it. The dying state IS the answer here.
+	private protected override bool NetIsDyingSelf => state == SpiderBossState.dead && !base.IsDead;
+
+	// The client half. Idempotent, as the seam requires: this peer hit-tests puppets with its
+	// own beams, so it may already have run BeginDeathThroes off its own CollidesWith -- running
+	// it twice would spawn a second debris burst and restart the 5s fall.
+	private protected override bool NetBeginDeferredDeathSelf()
+	{
+		if (state != SpiderBossState.dead)
+		{
+			BeginDeathThroes();
+		}
+		return true;
 	}
 
 	private static void FindSpawnSpot(out float angle, out float range)
@@ -970,7 +1007,9 @@ internal class SpiderBoss : AlienDrawableGameComponent
 	// the frozen Update. So a puppet needs three things beyond the base fields: the state (for the
 	// Draw flip/offset AND the state-keyed collision box), which of the four sprites is current, and
 	// the animation frame. It draws Color.White (no HP redden), so the base Hp is unused here. The
-	// `dead` debris burst never crosses the wire -- an attributed remote death removes the puppet.
+	// `dead` debris burst is re-run LOCALLY on the client off the EvDying beat (card ad9c8f8b),
+	// which is why this setter must never adopt `dead` from a snapshot: the wire only ever
+	// describes a live boss, and the death arrives as the beat.
 	internal byte NetState
 	{
 		get

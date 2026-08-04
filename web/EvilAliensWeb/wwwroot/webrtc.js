@@ -32,6 +32,16 @@ window.eaRtc = (() => {
     const pingSentAt = new Map(); // room code -> performance.now() of its last ping
     const BEAT_MS = 30000, BROWSE_REFRESH_MS = 4000;
 
+    // Room thumbnails (card e7404647). The SERVER decides when a shot is taken --
+    // it pulls, we answer, and a client that is never pulled sends nothing ever.
+    // JPEG is the only place image bytes are compressed: C# hands us raw RGBA it
+    // captured off the scene render target (never the canvas -- see NetRoomShot),
+    // and on the way back we hand C# raw RGBA again, so no C# code has to know
+    // what a JPEG is.
+    const SHOT_QUALITY = 0.6;
+    const MAX_SHOT_CHARS = 48 * 1024;   // mirrors the server's MAX_SHOT_BYTES
+    let shotCanvas = null;              // reused for both encode and decode
+
     const invoke = (m, ...a) => {
         try { DotNet.invokeMethod('EvilAliensWeb', m, ...a); }
         catch (e) { console.warn('[rtc] ' + m + ' dispatch failed: ' + e.message); }
@@ -71,7 +81,24 @@ window.eaRtc = (() => {
     const sendList = () => {
         if (!listMeta) return;
         sendSignal({ t: 'list', level: listMeta.level, difficulty: listMeta.difficulty,
-            players: listMeta.players, proto: listMeta.proto, hash: String(window.eaBuildHash || 'dev') });
+            players: listMeta.players, proto: listMeta.proto, hash: String(window.eaBuildHash || 'dev'),
+            // Card e7404647: declare that we understand a {t:'shot'} pull. The
+            // server pulls ONLY declaring rooms, which is what lets a new server
+            // and an old client coexist -- an old client would answer the pull
+            // with nothing, take the server's `bad` reply through fail(), and
+            // lose its listing over a feature it does not have.
+            shots: 1 });
+    };
+
+    // Reused 2D scratch canvas, sized to whatever it is asked for. One canvas for
+    // encode and decode: they never run in the same turn, and a per-shot canvas
+    // would churn a GPU-backed surface every pull.
+    const shotCtx = (w, h) => {
+        if (!shotCanvas) shotCanvas = document.createElement('canvas');
+        if (shotCanvas.width !== w || shotCanvas.height !== h) {
+            shotCanvas.width = w; shotCanvas.height = h;
+        }
+        return shotCanvas.getContext('2d', { willReadFrequently: true });
     };
 
     const teardown = () => {
@@ -162,6 +189,12 @@ window.eaRtc = (() => {
             // A browser is pinging us (relayed by the server). Auto-pong in JS without
             // touching C#, so the measured RTT is the network, not our frame pacing.
             else if (m.t === 'ping') sendSignal({ t: 'pong', id: m.id, ref: m.ref });
+            // The server is pulling a thumbnail off us (card e7404647). Unlike the
+            // ping this CANNOT be answered in JS: the picture has to come from the
+            // game's scene target, so C# arms a capture and calls sendShot back on
+            // its next post-draw. Ignored unless we are actually listing -- a pull
+            // arriving at a room that has since gone private answers nothing.
+            else if (m.t === 'shot') { if (listing) invoke('rtcShotRequest'); }
             else if (m.t === 'sdp') {
                 await pc.setRemoteDescription(m.d);
                 if (!isHost) {
@@ -299,6 +332,43 @@ window.eaRtc = (() => {
             if (!connected && !pc && ws) { try { ws.onclose = null; ws.close(); } catch (e) { } ws = null; }
         },
 
+        // Host side, card e7404647: answer a pull. `b64` is raw RGBA straight out of
+        // C#'s capture (w*h*4 bytes), which we paint into a scratch canvas purely to
+        // get the browser's JPEG encoder. Alpha is already sealed to 255 by the
+        // capture -- it has to be, because toDataURL('image/jpeg') composites a
+        // translucent canvas over black and would hand the server a darkened frame.
+        sendShot(b64, w, h) {
+            if (!listing || !ws || ws.readyState !== WebSocket.OPEN) return;
+            try {
+                const bytes = bufFromB64(b64);
+                if (bytes.length !== w * h * 4) return;
+                const ctx = shotCtx(w, h);
+                ctx.putImageData(new ImageData(new Uint8ClampedArray(bytes), w, h), 0, 0);
+                const url = shotCanvas.toDataURL('image/jpeg', SHOT_QUALITY);
+                const data = url.slice(url.indexOf(',') + 1);
+                // Refused here as well as server-side: a frame the server would drop
+                // is not worth the socket traffic, and this is the only side that can
+                // say WHY in a way a developer will see.
+                if (data.length > MAX_SHOT_CHARS) {
+                    console.warn('[rtc] thumbnail too large (' + data.length + ' chars) -- not sent');
+                    return;
+                }
+                sendSignal({ t: 'shot', data });
+            } catch (e) {
+                console.warn('[rtc] thumbnail encode failed: ' + e.message);
+            }
+        },
+
+        // Joiner side, card e7404647: fetch one room's stored thumbnail. Only ever
+        // called for a code whose listing carried a non-zero seq, so an older server
+        // (which never sends that field, and would answer this with a fatal `bad`)
+        // is never asked.
+        shotGet(code) {
+            if (bws && bws.readyState === WebSocket.OPEN) {
+                try { bws.send(JSON.stringify({ t: 'shotget', code: String(code) })); } catch (e) { }
+            }
+        },
+
         // Joiner side: open the browse socket (a third role, no room), fetch the listed
         // build-compatible games, and ping each host in parallel. Rooms arrive via
         // rtcRooms; each entry's RTT fills in via rtcPing as its pong lands.
@@ -328,6 +398,32 @@ window.eaRtc = (() => {
                 } else if (m.t === 'pong') {
                     const t0 = pingSentAt.get(m.id);
                     if (t0 !== undefined) invoke('rtcPing', String(m.id), Math.round(performance.now() - t0));
+                } else if (m.t === 'shot') {
+                    // A fetched thumbnail (card e7404647). Decoded to raw RGBA here so
+                    // C# only ever sees pixels; seq 0 / empty data is the server saying
+                    // it has nothing, which C# needs so it can retire the request
+                    // rather than ask forever.
+                    const code = String(m.code || '');
+                    const seq = Number(m.seq) || 0;
+                    if (!code) return;
+                    if (!seq || !m.data) { invoke('rtcShot', code, 0, '', 0, 0); return; }
+                    const img = new Image();
+                    img.onload = () => {
+                        try {
+                            const w = img.naturalWidth, h = img.naturalHeight;
+                            const ctx = shotCtx(w, h);
+                            ctx.clearRect(0, 0, w, h);
+                            ctx.drawImage(img, 0, 0);
+                            const px = ctx.getImageData(0, 0, w, h).data;
+                            invoke('rtcShot', code, seq, b64FromBuf(px.buffer), w, h);
+                        } catch (e) {
+                            console.warn('[rtc] thumbnail decode failed: ' + e.message);
+                            invoke('rtcShot', code, 0, '', 0, 0);
+                        }
+                    };
+                    // A corrupt/hostile JPEG must retire the request too, not wedge it.
+                    img.onerror = () => invoke('rtcShot', code, 0, '', 0, 0);
+                    img.src = 'data:image/jpeg;base64,' + String(m.data);
                 } else if (m.t === 'error') {
                     invoke('rtcBrowseFailed', String(m.reason || 'server'));
                 }

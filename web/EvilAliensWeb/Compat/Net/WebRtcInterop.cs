@@ -27,6 +27,13 @@ namespace EvilAliensWeb.Compat.Net
         internal static event Action<string, int> OnPing;
         internal static event Action<string> OnBrowseFail;
 
+        // Room thumbnails (card e7404647). OnShotRequest = the server is pulling a picture of
+        // our listed game (NetRoomShot arms a capture); OnShot = a fetched thumbnail arrived,
+        // already decoded to raw RGBA by JS (code, seq, pixels, w, h) -- seq 0 with an empty
+        // buffer is "the server has nothing for that code", which retires the request.
+        internal static event Action OnShotRequest;
+        internal static event Action<string, int, byte[], int, int> OnShot;
+
         public static void Init(IJSRuntime js)
         {
             _js = js as IJSInProcessRuntime;
@@ -86,6 +93,21 @@ namespace EvilAliensWeb.Compat.Net
         internal static void EndBrowse()
         {
             _js?.InvokeVoid("eaRtc.endBrowse");
+        }
+
+        // ---- room thumbnails (card e7404647) --------------------------------------------
+
+        // Host side: answer a pull with a raw RGBA capture. JS does the JPEG encoding -- C#
+        // never handles compressed image bytes in either direction.
+        internal static void SendShot(byte[] rgba, int width, int height)
+        {
+            _js?.InvokeVoid("eaRtc.sendShot", Convert.ToBase64String(rgba), width, height);
+        }
+
+        // Joiner side: fetch one listed room's stored thumbnail.
+        internal static void ShotGet(string code)
+        {
+            _js?.InvokeVoid("eaRtc.shotGet", code);
         }
 
         internal static void PromptCode()
@@ -174,6 +196,38 @@ namespace EvilAliensWeb.Compat.Net
         public static void Ping(string code, int rttMs)
         {
             OnPing?.Invoke(code ?? "", rttMs);
+        }
+
+        // The server is asking our listed game for a fresh thumbnail (card e7404647).
+        [JSInvokable("rtcShotRequest")]
+        public static void ShotRequest()
+        {
+            OnShotRequest?.Invoke();
+        }
+
+        // A fetched thumbnail, decoded to raw RGBA by JS. Base64 rather than a byte[] parameter
+        // for the house reason (the eaRtc/eaNet boundary is base64 throughout); a malformed
+        // payload retires the request instead of throwing across the interop boundary.
+        [JSInvokable("rtcShot")]
+        public static void Shot(string code, int seq, string b64, int width, int height)
+        {
+            byte[] rgba;
+            if (string.IsNullOrEmpty(b64))
+            {
+                rgba = null;
+            }
+            else
+            {
+                try
+                {
+                    rgba = Convert.FromBase64String(b64);
+                }
+                catch (FormatException)
+                {
+                    rgba = null;
+                }
+            }
+            OnShot?.Invoke(code ?? "", seq, rgba, width, height);
         }
 
         [JSInvokable("rtcBrowseFailed")]

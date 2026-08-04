@@ -879,6 +879,8 @@ namespace EvilAliensWeb.Compat.Net
         // One snapshot packet carrying one entry, built through the real encoder. Hand-rolling
         // the frame is exactly what the design doc forbids: a scripted peer that drifts from the
         // encoder it stands in for tests the script, not the game.
+        private static ushort snapshotSeq;
+
         private static byte[] SnapshotFor(ushort id, in NetBaseState state)
         {
             byte[] scratch = new byte[NetProtocol.SnapshotHeaderBytes
@@ -886,8 +888,12 @@ namespace EvilAliensWeb.Compat.Net
             int off = NetProtocol.SnapshotHeaderBytes;
             NetProtocol.WriteSnapshotEntry(scratch, ref off, id, ChurnTypeIdx,
                 NetProtocol.NetSnapshotFlags.None, state, new byte[1], 0);
-            scratch[0] = NetProtocol.MsgWorldSnapshot;
-            scratch[1] = 1;
+            // A MONOTONE seq per packet (card f5cf7a5c), because this scenario really does send
+            // an entity several packets and the receiver now refuses one that is not newer than
+            // the last it applied. A fixed seq -- which is what a hand-stamped header used to
+            // leave -- makes every packet after the first stale, and the residual pupPops probe
+            // below then measures nothing while still reading green on its "must not pop" half.
+            NetProtocol.WriteSnapshotHeader(scratch, 1, ++snapshotSeq);
             byte[] packet = new byte[off];
             Array.Copy(scratch, packet, off);
             return packet;

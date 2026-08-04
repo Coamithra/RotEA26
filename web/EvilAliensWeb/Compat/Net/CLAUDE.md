@@ -69,6 +69,11 @@ inputs; the other peer's ship is an interpolated puppet.
   12-wide grid, 402px of divergence down it) stops being applied; the collision grid takes its tile
   size from the wall, closing the joiner-local hit-before-you-touch-it gap; and the scroll is
   anchored. No protocol change -- see the LEVEL-3 WALLS section.
+- **The snapshot lane stops dragging puppets backwards** (`f5cf7a5c`, v19): `MsgWorldSnapshot`
+  carries a monotone per-PACKET seq and an entry older than the one already applied to that netId
+  is refused -- the guard `NetFrameLocal` gave animation frames, which positions never had. Same
+  card raises `NetBaseState.Scale` 1/256 -> 1/4096 and makes it ROUND, in the same u16. See the
+  SNAPSHOT STALENESS section.
 - **Puppet smoothness** (`c92f3817` / `0dfc4495` / `d3add86f` / `8dabe812` / `0108d1fc`), and its
   wire-first successor: the host now MARKS a reposition instead of the observed-velocity estimator
   guessing at one (`e79bb994`, v13) -- see the teleport-marker bullet under "Puppet SMOOTHNESS".
@@ -739,6 +744,12 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   its respawn clock, so the other peer draws the indicator too, card 37f3a663. A v16 peer ignores
   the unknown event and simply does not draw it, i.e. the pre-card behaviour, so like v14 and v15
   the bump is the batch convention rather than a forced incompatibility.
+  **v19** puts a monotone `[seq:2]` on the MsgWorldSnapshot HEADER and raises
+  `NetBaseState.Scale`'s quantum from 1/256 to 1/4096 with a ROUNDING cast -- card f5cf7a5c, see
+  the SNAPSHOT STALENESS section. Like v13 and v16 both changes MOVE AN EXISTING LAYOUT rather
+  than appending something an old peer could ignore (the header grew 2 -> 4 bytes, so a v18 peer
+  reads every entry two bytes early; the scale is in the shared base block `EvSpawn` also writes,
+  so it would decode 16x too large). A forced bump, not a convention one.
   **v18** gives `LazerDescriptor` a `[ownerNetId:2]` SPAWN extra where it had none -- card
   9ccfe295, see the unattributed-claim bullet under "Claims". Like v14 the block is
   APPEND-ONLY and LENGTH-GUARDED, so an older peer degrades to exactly the pre-card behaviour
@@ -1258,7 +1269,38 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
       so it would have been a rare unreproducible ghost.
     - **`OnRemoteDeath` makes the same decision** when neither the beat nor the snapshot got
       there first -- the last-resort fallback, and the only one before card 303bfb5b.
-  - **Verify with `eaNetDeathFx()`** (`Compat/Net/NetDeathFxTest.cs`, 73 assertions;
+    - **A DEFERRED DEATH THAT DOES NOT RUN THROUGH `KillableAlien` AT ALL: the SpiderBoss, and
+      the `NetIsDying`/`NetBeginDeferredDeath` seam it needed (card ad9c8f8b).** The bullet
+      above says the snapshot fallback's remaining job is "a deferred-death path that reaches
+      its dying state WITHOUT going through KillableAlien, i.e. nothing today". That was wrong:
+      **`SpiderBoss` derives from `AlienDrawableGameComponent`, not `KillableAlien`** -- only a
+      `Lazer` hurts it and its whole death lives in `CollidesWith`. So `HitBy`/`KilledBy`/
+      `NoteDeathBegan` never ran (no `EvDying`), its `NetKillable` was null so
+      `ApplyHostKilledFromSnapshot` returned before the hp test (the fallback was structurally
+      unreachable, not merely slow), and the `EvDeath` at the end of its 5 s debris fall carried
+      `KillerNone` because nothing had called `NoteKill`. **The join peer saw an intact boss
+      stand there for five seconds and then silently vanish** -- no debris, no explosions, no
+      cues.
+      - **Two members on `INetEntity`, no protocol change, protocol stays v18.** `NetIsDying`
+        (the host's "announce this" discriminant, which `NetIdRegistry.ReplayLive` also reads
+        for the join-in-progress re-announce) and `NetBeginDeferredDeath()` (the client's "run
+        your own death"). **The BASE derives both from the killable discriminant** -- a
+        `KillableAlien` at zero hit points still in the world -- which is exactly the test
+        `ReplayLive` used to spell out, so every other type is unchanged by construction and a
+        future such type costs one override.
+      - Host side, `SpiderBoss.CollidesWith` calls `NetSession.OnHostDeathBegan(this)` at its
+        death entry; client side it re-runs `BeginDeathThroes` (the death entry lifted out of
+        `CollidesWith`), **idempotently** -- this peer hit-tests puppets with its own beams, so
+        it may already have run the same death, and a second burst would restart the 5 s fall.
+      - **`NetPuppets.BeginDeferredDeath` now accepts a NULL killable**, claims the award slot
+        and asks the entity; a `false` answer releases NOTHING, or a stray beat would un-freeze
+        live enemies into the client's world. **The hp==0 snapshot fallback still needs the
+        killable discriminant** and is untouched -- hp is 0 for every non-killable, so there is
+        nothing there to read. `EvDying` rides the reliable lane and `ReplayLive` covers the
+        join-in-progress case, so the fallback is not missed.
+      - **`SpiderBoss.NetState` still clamps a wire `dead` back to `standing`, and must**: the
+        wire only ever describes a live boss and the death arrives as the beat.
+  - **Verify with `eaNetDeathFx()`** (`Compat/Net/NetDeathFxTest.cs`, 144 assertions;
     `tools/headless/probes/net_death_fx.txt`). MENU-ONLY and leave-no-trace, the `eaNetSnap`
     shape -- section 2 runs a real HOST session over a `NetWire` and reads the frames the peer
     RECEIVED (including the `EvDying` trigger-latency legs: the beat is on the wire while no
@@ -1271,9 +1313,24 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     proves nothing and a backgrounded joiner tab ticks at ~1 Hz. Every positive has its negative
     beside it -- **the `Enabled` assertions are the load-bearing ones**, since a puppet left
     frozen is still in the world and would satisfy a survival-only check, which IS the bug.
-    Mutation-tested nine ways, failing DISJOINT legs across the two defects and the trigger --
+    Mutation-tested sixteen ways, failing DISJOINT legs across the two defects, the trigger and
+    the coverage --
     notably, making `NetPuppets.OnDeathBegan` a no-op fails section 6 and ONLY section 6, which
     is what proves the two fallbacks are still real rather than dead code behind the fast path.
+    **Sections 8 and 9 are card ad9c8f8b's, and they are what a release-only assertion cannot
+    do**: 8 releases BrainBoss / FakeBoss / JunkBoss (the last being card c146422f's elongated
+    25-explosion death) and TICKS the released component's real `Update` on a fixed 60 Hz dt --
+    the isolation-sim pattern, because a 3-to-20-second choreography is exactly what "never
+    verify motion with timed live screenshots" is about -- asserting the tally keeps CLIMBING at
+    an intermediate checkpoint, that the boss is still in the world there, and that it `Die()`s
+    on its own rather than leaving a corpse in every client's world; 9 is the SpiderBoss seam
+    above, with an `EvilBullet` as the negative that a non-killable with no deferred death of its
+    own is released by nothing. **`BloodExplosion` is not an `Explosion` subclass** and the
+    SpiderBoss's entire debris death is made of it, so the suite counts both. **Leave-no-trace
+    is asserted by RUNNING THE WHOLE SUITE THREE TIMES in one process** (the `eaBinTest` rule):
+    the teardown sweeps `Explosion`/`BloodExplosion`/`BrainAura`, restores the score panels and
+    restarts the music `BrainBoss.KilledBy` stops, and a leak would surface as phantom failures
+    in the second run.
     **Deliberately absent from `net_selftests.txt` despite being menu-runnable** -- unlike the
     suites there it has its own probe, which carries this card's write-up and mutation matrix, so
     listing it in both would run it twice for nothing. (It is NOT absent for `eaNetBgTest`'s
@@ -2322,9 +2379,10 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   state extras grow. **The multi-phase DEATHS are no longer part of that** (cards 303bfb5b /
   13aa596c): a remote death whose `KilledBy` defers its own removal now RELEASES the puppet to
   finish dying locally instead of deleting it mid-animation -- see the deferred-death bullet
-  under "Claims". That is type-agnostic, so the SpiderBoss debris death and the
-  BrainBoss/FakeBoss asplode come with it; neither has been WATCHED on a client, so treat them as
-  covered-by-construction rather than verified. The time-scaling half of
+  under "Claims". **All four bosses have now been WATCHED on a client and are pinned (card
+  ad9c8f8b)**: BrainBoss, FakeBoss and JunkBoss were covered by construction and are verified
+  end to end by `eaNetDeathFx` section 8; SpiderBoss was NOT covered and is the hole that
+  coverage found -- see the not-a-KillableAlien bullet under "Claims". The time-scaling half of
   the old first-wipe `pupPops` burst is FIXED (the puppet driver now dead-reckons on real time,
   above); if a residual first-wipe burst ever shows, it's the reset/id-churn transition (purge +
   checkpoint replay), reproducible in the headless two-peer net sim's reset scenario, not the
@@ -2705,12 +2763,15 @@ sent per block or per frame.
   were the three above.
 - **NO PROTOCOL CHANGE and no version bump.** Every change here is a host-side decision about what
   goes in existing base-state fields, or a client-side decision about what to do with them.
-- **STILL OPEN, filed as its own card:** `MsgWorldSnapshot` carries no sequence and no timestamp, so
-  a REORDERED stream packet still drags any puppet backwards (~12px at the reported rig's
-  `netjitter=40` and 0.31 px/ms) -- the same defect `NetFrameLocal` fixed for animation frames, with
-  no equivalent guard for position. Filed together with widening `NetBaseState.Scale`, since both
-  are changes to the same packet and share this suite's rig.
-- **Verify with `eaNetWalls()` / `eval NetWalls`** (`Compat/Net/NetWallTest.cs`, 24 assertions;
+- **CLOSED by card `f5cf7a5c` (protocol v19) -- the snapshot packet carries a seq now, and the
+  wire's scale is 32x finer.** Both halves of what this section left open; see the
+  SNAPSHOT STALENESS section below. Note its verdict on the second half: the card asked to WIDEN
+  `NetBaseState.Scale`, the census found nobody left who needed the bytes, and what shipped is a
+  precision RAISE inside the same u16. **`Wall.NetScaleLocal` STAYS** -- deriving the scale from
+  the replicated grid variation is the right answer at any precision, and section 1 of
+  `NetWallTest` now measures its >1% claim against a transcription of the old encoder rather than
+  the live one.
+- **Verify with `eaNetWalls()` / `eval NetWalls`** (`Compat/Net/NetWallTest.cs`, 28 assertions;
   `tools/headless/probes/net_walls.txt`). MENU-only and leave-no-trace. **A screenshot cannot see
   any of this**: on EACH screen a mis-scaled wall looks like a perfectly ordinary wall, which is why
   the bug was reported from a two-window capture and reproducible from neither half of it. Section 1
@@ -2721,6 +2782,96 @@ sent per block or per frame.
   probe's header -- with the scale fixed, `800/width` and the drawn block AGREE again, so the
   invariant leg cannot tell a derived tile size from the old hard-coded one and the guard leg forces
   a scale on by hand to reproduce the pre-card condition.
+
+## SNAPSHOT STALENESS + SCALE PRECISION (card f5cf7a5c, protocol v19)
+
+Two changes to the same packet, filed together because they share one rig. Both were left open by
+the LEVEL-3 WALLS section above.
+
+- **THE GUARD. `MsgWorldSnapshot` now carries a monotone per-PACKET `[seq:2]` and the receiver
+  refuses an entry that is not NEWER than the last one it applied FOR THAT netId.** The stream
+  lane is unordered with `maxRetransmits:0`, so a reordered or late entry used to hand
+  `NetPuppets` an OLDER position than the one on screen: the puppet sagged BACKWARDS and was then
+  blended forward again over the correction window. Exactly the defect `NetFrameLocal` fixed for
+  animation FRAMES; positions had no equivalent guard at all.
+  - **NOTHING COUNTED IT, which is why it was reported from a playtest and from no log.**
+    `pupPops` only moves on a correction past `SnapThresholdPx` (100px) and a reorder's error is
+    far below that, so every metric read clean throughout. The new counter is **`snapStale`** on
+    the `[net]` line: NOT a fault counter and NOT a 0 bar -- it tracks the LINK's reorder rate, so
+    an unimpaired BroadcastChannel or in-process run reads 0 while a real lossy WebRTC pairing
+    reads whatever that connection does. Deliberately NOT folded into `snapUnk`: nothing about
+    the id was unknown, and folding it in would re-break the split card 48ab9b2f made.
+  - **PER netId, not one global high-water mark.** The round robin gives an entity a turn every
+    `live/16` packets, so a packet can be older than the newest one seen and still carry the
+    freshest sample THAT entity has; a global guard would throw away good data for every entity
+    not in the newer packet. An UNKNOWN id is never judged stale (there is nothing to compare
+    against, and refusing it would strand a puppet the host has, permanently), and a REBUILT
+    puppet starts with no mark, so its first entry is always accepted.
+  - **THE WHOLE ENTRY GOES, `ApplyHostKilledFromSnapshot` included**, which is the question the
+    next reader asks. Safe because a newer entry has already been applied and is authoritative
+    over every field this one carries, and because death does not ride this lane -- `EvDying` and
+    `EvDeath` are RELIABLE events and the hp==0 path is only the fallback trigger, whose own
+    two-consecutive-turns rule re-offers a real death on every remaining turn.
+  - **Wrap-safe on the SIGNED difference.** The counter is a u16 and a busy host rolls it over
+    about every 65 minutes at 16.7 Hz; a naive `seq > last` would refuse every entry for the rest
+    of the session from that moment, silently, with the puppets simply dead-reckoning on.
+  - **A seq rather than a send-time ms** (the `MsgShipState` choice): the receiver only ever asks
+    is-this-newer, never how-long-ago -- the entity's own dead reckoning owns the time axis -- so
+    a u16 costs half a u32 stamp and matches the `MsgEvent` convention. Per PACKET rather than per
+    entry for the same economy: 2 bytes once against 2 bytes x16.
+  - **`?netstaleguard=0` restores the pre-card behaviour**, IN `DebugFlags.Active` for the
+    `?nethitstop=1` reason -- it is a deliberate bug reproduction and must never reach a public
+    lobby. It is the only boolean in `DebugFlags` that DEFAULTS TRUE, so `Active` tests its
+    negation. **The `snapStale` count is identical either way**: the entry is reported stale
+    whether or not it is then refused, so the flag changes the drag and never the measurement it
+    exists to let you take. That was not true of the first cut, and the mutation run -- not
+    review -- is what found it.
+
+- **THE SCALE. The card asked to WIDEN `NetBaseState.Scale`; it was MEASURED and superseded by a
+  precision RAISE inside the same u16 -- quantum 1/256 -> 1/4096, and the cast ROUNDS.** The card
+  chartered exactly that outcome (identify who is left; if the answer is nothing, say so).
+  - **The census, over all 29 replicable types** (`NetStaleTest` section 1 prints it): nobody left
+    DERIVES geometry from the replicated scale the way a `Wall` does -- `CollisionLevelMap` is the
+    only scale-derived grid in the set and `Wall.NetScaleLocal` already owns it. Every other type
+    is a single sprite whose hitbox is `texture * scale`, so the error is sub-pixel and does not
+    accumulate. At the old quantum: 0% on every scale-1.0 type, 0.17% Asteroid, 0.21% ClassicBoss,
+    0.39% ParatrooperAlien, and -- read out of the source, since the sweep reads CONSTRUCTED
+    scales -- 0.67% small Braineroid, up to 2.1% small Ball, 6.25% at the bottom of PlasmaBall's
+    entry telegraph, and Parachute's fade quantizing to literally 0 below 1/256.
+  - **Why not the f32 the card named.** It would add 2 bytes per entity per snapshot turn (+32B on
+    a 16-entry packet, ~7%) on the ONE lane whose loss is the other half of this card, to buy
+    precision nobody needs beyond this. The raise is free in bytes and still 32x better.
+  - **The ROUNDING is the half precision alone would not have fixed.** Truncation is
+    one-directional -- every puppet in the world was systematically SMALLER than the host's copy,
+    never larger -- which is exactly why the Level-3 wall's error accumulated down 122 rows
+    instead of averaging out. Max absolute error 1/256 -> 1/8192.
+  - **The ceiling is 65535/4096 = 15.999** against a measured maximum of 3.0 (Asteroid huge), and
+    `WriteBaseState` CLAMPS silently, so the sweep asserts every type stays inside it rather than
+    trusting a comment.
+  - **`Wall.NetScaleLocal` STAYS.** Deriving from the replicated grid variation is right at any
+    precision. `NetWallTest` section 1 keeps its >1% claim by measuring a verbatim transcription
+    of the PRE-CARD encoder (`PreCardWire`) -- at the new quantum the live figure is 0.090%, and
+    deleting the leg would delete the negative control the rest of that suite rests on.
+
+- **Verify with `eaNetStale()` / `eval NetStale`** (`Compat/Net/NetStaleTest.cs`, 24 assertions;
+  `tools/headless/probes/net_stale.txt`). MENU-only and leave-no-trace. It generalises
+  `NetWallTest`'s wire harness one level up: the seq lives in the packet HEADER, so section 2 runs
+  a REAL client `NetSession` over a `NetWire` with a scripted host writing real packets (the
+  `NetScenarioTest` scenario-5 shape), while sections 3-5 drive `OnSnapshotEntry` directly with
+  explicit seqs. **Section 3 measures the drag** across three runs of one frame sequence -- late
+  entry undelivered / delivered-and-refused / delivered-and-applied -- because the guarded run not
+  sagging passes on a build where the entry never arrived. Mutation-tested five ways.
+  **Deliberately absent from `net_selftests.txt`** (it has its own probe, the `eaNetDeathFx`
+  precedent).
+  - **GOTCHA for any suite that hand-builds a snapshot packet:** stamp a MONOTONE seq through
+    `NetProtocol.WriteSnapshotHeader`. Three suites wrote the header by hand and so left the seq
+    at a fixed 0, which now makes every packet after the first stale -- `NetScenarioTest`,
+    `NetFxTest` and `NetTeleportTest` were all fixed with this card, and two of them went GREEN on
+    their must-not-pop halves while silently delivering nothing.
+  - `NetPuppets.OnSnapshotEntry` keeps a 9-argument SUITE OVERLOAD that supplies the next seq
+    automatically, so the suites that are not about ordering (`NetSnapshotTest`, `NetWallTest`,
+    `NetDeathFxTest`, `NetPuppetBench`) keep saying what they mean. There is exactly one
+    production caller, `NetSession.HandleWorldSnapshot`, and it passes the real packet seq.
 
 ## Public game browser & join-in-progress
 
@@ -2974,3 +3125,46 @@ sent per block or per frame.
     degrades to exactly the pre-card behaviour (the level's opening backdrop) with no desync --
     unlike `EvCosmeticSwarm`, which had an old peer expecting per-entity spawns that stopped
     coming and so forced v10.
+
+## Room thumbnails -- the browse carousel shows the real game (card e7404647)
+
+A listed room carries a small JPEG of the host's game in progress, and
+`SubMenuOnlineGames` draws it instead of stock level art. **The thumbnail is a picture of the
+GAME FIELD only** -- the resolved scene render target, never a camera, a canvas or the page.
+
+- **THE SERVER OWNS THE SCHEDULE, and that is the whole design.** Clients never upload
+  unsolicited: the matchmaker PULLS (`{"t":"shot"}` on the room's existing signaling socket) on a
+  **global** budget of one pull per second across ALL rooms, round-robin by oldest-pulled. At <=15
+  listed rooms that is the ~15 s per-room refresh; beyond it the per-room interval stretches by
+  itself. **Degradation is staleness, never load** -- do not scale the budget with the room count.
+  The rotation is keyed on a COUNTER stamped when a pull is SENT, so a host that never answers
+  forfeits its own turn and can never starve anyone; `server/signal/main.py` says why it is not a
+  clock.
+- **CAPTURE IS C#, ENCODE IS JS, and the split is what makes it verifiable.**
+  `Compat/Net/NetRoomShot` books one `Game1.onPostDraw`, `ResolveBackBuffer`s the scene,
+  `DrawPresent`s it into a 200x150 RT (the `ScreenshotSaver.SaveScreenShot` recipe, alpha seal
+  included -- `toDataURL('image/jpeg')` composites a translucent canvas over BLACK, so an unsealed
+  frame reaches the server visibly darkened) and hands the RGBA to `eaRtc.sendShot`, which does the
+  JPEG. **`canvas.toDataURL` was the obvious route and is the wrong one**: no
+  `preserveDrawingBuffer`, the canvas carries the letterbox bars rather than the field, and none of
+  it runs under eahl. Coming back, JS decodes to RGBA too, so no C# code handles compressed bytes
+  in either direction.
+- **NEITHER HALF NEEDED A PROTOCOL VERSION -- this is signaling only, and the capability is
+  negotiated by DATA.** The host declares `shots:1` in its `list` frame and the server pulls only
+  declaring rooms; the client sends `shotget` only for a listing entry that carried a non-zero
+  `shot` seq, which an old server never emits. Both directions matter: an old host answering an
+  unknown pull would take the server's `bad` reply through `fail()` and LOSE ITS LISTING, and a new
+  client asking an old server would show "Browse failed". Either deploy order is safe.
+- **The carousel prefers the thumbnail and falls through to the card-0d166364 `EnsureArt` chain**
+  when there is none, when it is stale (>180 s, both ends agree) or when the room drops off the
+  list. `NetGameBrowser` holds the pixels keyed by CODE, not on `GameEntry` -- the entries are
+  rebuilt every ~4 s browse refresh and a thumbnail must outlive that.
+- **Verify with `eaGameBrowserShots()` / `eval GameBrowserShots`, not a screenshot** -- a row whose
+  thumbnail silently failed to install draws exactly what a row that never had one draws.
+  `?gamebrowser=thumbs` gives two of the four fake rooms a synthetic thumbnail (both branches in
+  one shot, no server); `eaRoomShot()` captures the live frame through the real pull path and
+  reports dimensions / alphaMin / a distinct-colour count that separates a real picture from a
+  blank one, and `eaRoomShot.inject('CODE')` puts a REAL captured frame in the carousel offline.
+  Pinned by `tools/headless/probes/room_thumbnail_capture.txt` + `room_thumbnail_carousel.txt`.
+  **Neither the real pull nor the JPEG round trip is reachable headlessly** (no WS, no DOM) -- that
+  leg is a local `uvicorn` + Chrome pass.

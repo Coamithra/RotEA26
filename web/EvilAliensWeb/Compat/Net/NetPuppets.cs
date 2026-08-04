@@ -131,6 +131,13 @@ namespace EvilAliensWeb.Compat.Net
             // deferred-death trigger needs TWO consecutive such turns -- see
             // ApplyHostKilledFromSnapshot for why one is not enough now that EvDying exists.
             public bool SawZeroHp;
+            // The snapshot PACKET seq of the newest sample actually applied to this puppet, and
+            // whether one ever has been (card f5cf7a5c). Per puppet rather than one global
+            // high-water mark: the round robin means a packet can be older than the newest one
+            // seen and still carry the freshest sample this particular entity has, so a global
+            // guard would throw away good data for every entity that was not in the newer packet.
+            public ushort LastSnapSeq;
+            public bool HasSnapSeq;
         }
 
         private static readonly Dictionary<ushort, PuppetInfo> byId = new Dictionary<ushort, PuppetInfo>();
@@ -397,10 +404,52 @@ namespace EvilAliensWeb.Compat.Net
             return SpawnRejectKind.None;
         }
 
-        public static bool OnSnapshotEntry(ushort netId, byte typeIdx, byte entryFlags, in NetBaseState state, byte[] buf, int extraOff, int extraLen, out bool popped, out SnapUnknownKind kind)
+        // THE SUITE ENTRY POINT: each call gets the NEXT seq, so a sequence of entries is
+        // delivered in order and the guard never fires (card f5cf7a5c). It exists so the suites
+        // that are NOT about ordering -- NetSnapshotTest, NetWallTest, NetDeathFxTest,
+        // NetPuppetBench -- keep saying what they mean, rather than every one of them carrying a
+        // counter to satisfy a parameter it has no opinion about. A fixed seq would be worse than
+        // churn: those suites deliver several entries to one netId, so a constant would silently
+        // drop all but the first and their assertions would be about the guard instead of their
+        // own subject.
+        //
+        // **NAMED, not an overload of OnSnapshotEntry, and that is the whole safety story.** As an
+        // overload it differed from the production signature only by three trailing arguments, so
+        // a future production call site that forgot the seq would COMPILE, silently bind to a
+        // fabricated monotone counter and defeat the guard -- with a comment as the only
+        // enforcement. The StartForTest naming idiom, for the same reason.
+        //
+        // There is exactly one production caller (NetSession.HandleWorldSnapshot) and it passes
+        // the real packet seq. Ordering IS NetStaleTest's subject, so that suite drives the full
+        // signature instead of this.
+        private static ushort suiteSeq;
+
+        public static bool OnSnapshotEntryNextSeq(ushort netId, byte typeIdx, byte entryFlags, in NetBaseState state, byte[] buf, int extraOff, int extraLen, out bool popped, out SnapUnknownKind kind)
+        {
+            return OnSnapshotEntry(netId, typeIdx, entryFlags, state, buf, extraOff, extraLen,
+                ++suiteSeq, out popped, out kind, out _);
+        }
+
+        // THE STALENESS GUARD (card f5cf7a5c). `packetSeq` is the MsgWorldSnapshot header's
+        // monotone per-packet counter; an entry not NEWER than the last one applied to this
+        // puppet is refused whole and reported through `stale`.
+        //
+        // Wrap-safe by construction: the comparison is on the signed difference, so the counter
+        // rolling over at 65535 (~65 minutes at 16.7 Hz) is an ordinary step and not a cliff.
+        //
+        // THE WHOLE ENTRY GOES, ApplyHostKilledFromSnapshot INCLUDED, and that is the question a
+        // reader asks here: dropping the hp read is safe because a newer entry has already been
+        // applied to this puppet and is authoritative over every field this one carries, and
+        // because death itself does not ride this lane -- EvDying and EvDeath are RELIABLE
+        // events, and the hp==0 path here is only the fallback trigger for a deferred death that
+        // never went through KillableAlien. Its own two-consecutive-turns rule then means a real
+        // death is re-offered on the entity's every remaining turn, so nothing is lost by
+        // refusing a sample that was superseded before it arrived.
+        public static bool OnSnapshotEntry(ushort netId, byte typeIdx, byte entryFlags, in NetBaseState state, byte[] buf, int extraOff, int extraLen, ushort packetSeq, out bool popped, out SnapUnknownKind kind, out bool stale)
         {
             popped = false;
             kind = SnapUnknownKind.None;
+            stale = false;
             if (!enabled)
             {
                 return false;
@@ -438,6 +487,28 @@ namespace EvilAliensWeb.Compat.Net
                         : SnapUnknownKind.Refused;
                 }
                 return false;
+            }
+            if (info.HasSnapSeq && (short)(packetSeq - info.LastSnapSeq) <= 0)
+            {
+                // ?netstaleguard=0 reproduces the pre-card behaviour verbatim (the deliberate
+                // bug repro, the ?nethitstop=1 idiom) -- it is what a negative control measuring
+                // the backward sag has to be able to switch off. It still REPORTS the entry as
+                // stale, so the count is the same either way and only the drag is restored.
+                stale = true;
+                if (NetHost.Current.SnapshotStaleGuard)
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                // Advanced ONLY on a newer sample, so the field is a high-water mark rather than
+                // "the last one seen". That keeps ?netstaleguard=0 a pure behaviour switch: the
+                // stale COUNT it reports is identical to the guarded run's, and letting a stale
+                // entry walk the mark backwards would make the flag change the measurement it
+                // exists to take.
+                info.LastSnapSeq = packetSeq;
+                info.HasSnapSeq = true;
             }
             INetTypeDescriptor desc = NetTypeRegistry.Get(info.TypeIdx);
             // Unknown bits are ignored, not refused -- see NetProtocol.NetSnapshotFlags for why a
@@ -511,6 +582,22 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return; // already gone; the removal seam owns it from here
             }
+            if (killable == null)
+            {
+                // NOT a KillableAlien -- its whole death lives outside HitBy/KilledBy, so there
+                // is no NetKill to run and the type has to open its own (card ad9c8f8b, the
+                // SpiderBoss). Award-free first, exactly as below: the seam's contract lets an
+                // implementation run its real death path verbatim, AwardScoreToAll included.
+                info.Comp.NetSuppressAward();
+                if (!info.Comp.NetBeginDeferredDeath())
+                {
+                    // No deferred death of its own -- nothing to finish, so releasing it would
+                    // just un-freeze a live enemy into the client's world.
+                    return;
+                }
+                ReleaseDyingPuppet(netId, info);
+                return;
+            }
             if (killable.NetHitPoints > 0)
             {
                 info.Comp.NetSuppressAward();
@@ -546,10 +633,11 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            if (info.Comp.NetKillable is INetKillable killable)
-            {
-                BeginDeferredDeath(netId, info, killable);
-            }
+            // A null killable is a legal case here, not a filter: a type whose deferred death
+            // lives outside KillableAlien answers the beat through NetBeginDeferredDeath
+            // instead (card ad9c8f8b). The snapshot fallback above still needs the
+            // discriminant, because hp is 0 for every non-killable.
+            BeginDeferredDeath(netId, info, info.Comp.NetKillable);
         }
 
         private static bool IsRecentlyRemoved(ushort netId)

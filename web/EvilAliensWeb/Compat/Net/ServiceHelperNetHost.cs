@@ -96,6 +96,11 @@ namespace EvilAliensWeb.Compat.Net
             get { return DebugFlags.NetJitterMs; }
         }
 
+        public bool SnapshotStaleGuard
+        {
+            get { return DebugFlags.NetSnapshotStaleGuard; }
+        }
+
         // ---- step 2b -----------------------------------------------------------------------
 
         public Oracle Oracle

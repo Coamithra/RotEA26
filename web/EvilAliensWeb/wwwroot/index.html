@@ -633,6 +633,27 @@
         // predicate the hello gate uses plus the v6 handshake codec. Prints PASS/FAIL.
         // Best run from the main menu: over a LIVE session it skips the teardown-persistence
         // leg rather than wiping a real match's state, and says so in the report.
+        // Debug: room thumbnails (card e7404647). eaRoomShot() captures THIS frame through the
+        // real server-pull path and prints what it got (dimensions, byte count, alphaMin and the
+        // distinct-colour count that separates a real picture from a blank one).
+        // eaRoomShot.inject('CODE') additionally installs it as that room's carousel thumbnail,
+        // which is how a real game frame reaches the game browser with no server in the loop.
+        // Both only ARM the capture -- the [roomshot] line lands on the next frame.
+        window.eaRoomShot = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugRoomShot')); }
+            catch (e) { console.warn('[debug] eaRoomShot failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaRoomShot.inject = (code) => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugRoomShotInject', String(code || ''))); }
+            catch (e) { console.warn('[debug] eaRoomShot.inject failed: ' + e.message); }
+        };
+
+        // Debug: which game-browser rows draw a live thumbnail vs stock level art (card e7404647).
+        window.eaGameBrowserShots = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugGameBrowserShots')); }
+            catch (e) { console.warn('[debug] eaGameBrowserShots failed: ' + e.message); }
+        };
+
         window.eaKickTest = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugKickTest')); }
             catch (e) { console.warn('[debug] eaKickTest failed (game not booted yet?): ' + e.message); }
@@ -817,6 +838,17 @@
         window.eaNetWalls = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetWallTest')); }
             catch (e) { console.warn('[debug] eaNetWalls failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: the world snapshot's staleness guard + the scale precision raise (card
+        // f5cf7a5c). The per-type scale census over the whole replicable set, the packet seq
+        // driven end to end through a real client session on an in-process wire, and the
+        // backward drag a reordered entry used to cause -- measured against ?netstaleguard=0.
+        // MENU-only, leave-no-trace. No frame can show any of it: the drag is far under
+        // SnapThresholdPx, so pupPops read a contented 0 the whole time.
+        window.eaNetStale = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetStaleTest')); }
+            catch (e) { console.warn('[debug] eaNetStale failed (game not booted yet?): ' + e.message); }
         };
 
         // Debug: the pinned many-puppet drive bench (card 25ad0659 step 2c-ii). Puts n real
@@ -1122,6 +1154,17 @@
                 try { DotNet.invokeMethod('EvilAliensWeb', 'debugRespawnState'); }
                 catch (e) { console.warn('[debug] eaRespawn.state failed (game not booted yet?): ' + e.message); }
             }
+        };
+
+        // Debug: the evil grinning face of death's volley state (card d8344c17).
+        //   eaSkullVolley() — print every live EvilSkull's shots-so-far, the cap it is counting
+        //                     up to, and the difficulty modifier that cap comes from. Nothing
+        //                     about a skull's appearance changes with its volley position, so
+        //                     this is the only way to see a volley starting part-way through.
+        //                     Pair with the ?skullvolley boot flag for a per-shot trace.
+        window.eaSkullVolley = () => {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugSkullVolley'); }
+            catch (e) { console.warn('[debug] eaSkullVolley failed (game not booted yet?): ' + e.message); }
         };
 
         // Debug: live-set the ship-connector lightning knobs (the ?level=TeamChallenge tuner). Drives

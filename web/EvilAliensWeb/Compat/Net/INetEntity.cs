@@ -126,6 +126,26 @@ namespace EvilAliensWeb.Compat.Net
         // (AlienDrawableGameComponent); a type with its own hit timer or death chunk overrides.
         void NetPlayFx(NetFxKind kind);
 
+        // ---- deferred deaths that do NOT go through KillableAlien (card ad9c8f8b) ---------
+        //
+        // "My death has begun and is taking a while." The host asks it to decide whether to
+        // announce an EvDying beat, and NetIdRegistry.ReplayLive asks it again to re-announce a
+        // death already in progress to a peer joining mid-animation. The base derives it from
+        // the killable discriminant -- a KillableAlien at zero hit points that is still in the
+        // world deferred its own removal -- which is exactly the test both sites used to spell
+        // out for themselves. A type whose death lives OUTSIDE HitBy/KilledBy overrides it.
+        bool NetIsDying { get; }
+
+        // The client half of the same: run this type's own multi-phase death locally, so the
+        // released puppet's Update has something to finish. Return false for "I have no deferred
+        // death of my own", which is the base answer and the answer for every KillableAlien
+        // (NetPuppets reaches those through INetKillable.NetKill instead). The caller has
+        // already claimed the award slot, so an implementation may run its real death path
+        // verbatim, AwardScoreToAll included. It must be IDEMPOTENT -- this peer may already
+        // have run the same death off its own collision -- and must not remove the component,
+        // or there is nothing left to release.
+        bool NetBeginDeferredDeath();
+
         // ---- the two discriminants an interface cannot carry as a type test --------------
         //
         // The layer does `is KillableAlien` and `is Powerup` in four and three places. A type

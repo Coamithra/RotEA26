@@ -220,6 +220,25 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   "a negative is clamped or refused" shape does not describe it. Mutation-tested: stubbing
   `RandomHelper.Reseed` to a no-op turns **4** legs FAIL -- note the divergence leg is NOT one of
   them (unseeded runs diverge anyway), which is what it is there to guard the opposite way.
+- **Newest case set: the AI's swept-path teleport guard** (card c1d783ad) --
+  `AlienDrawableGameComponent.IsAiSweptPathPlausible`, the predicate the DEFAULT
+  `TryGetAiSweptPath` consults before handing the AI a cone. **It is here because the ceiling is
+  SHARED with another layer**: it is `NetSession.MaxObservedSpeedPxPerMs`, where the same number is
+  only a diagnostic (a wrong value prints a line) while here it is a guard (a wrong value deletes a
+  real mover's directional repellent). So beyond the measured tables -- every genuine speed
+  `eaNetVelScan` recorded must pass, every measured reposition must be refused, both sides of the
+  boundary -- it asserts the SEPARATION PROPERTY (>= 2x the fastest real mover, <= half the slowest
+  reposition), which is what makes the cross-module reference safe: a net-side retune that walks
+  out of the measured gap fails HERE rather than quietly changing how the bot flies. One section
+  measures the MOTIVATION off the real `EvaluateSweptShape` rather than asserting it (at a
+  reposition's 42 px/ms the cone saturates `ConeMaxLenPx`, i.e. one frame really would close a
+  full-screen corridor). Its control is `?aisweptmax=0` restoring the pre-card behaviour, asserted
+  AFTER the refusals per the ordering lesson above, plus an ordinary override that must BITE -- or
+  "0 = off" would be indistinguishable from a flag that does nothing. Restores the override to
+  null and asserts the restore took. Mutation-tested twice: stubbing the predicate to `true` turns
+  **6** FAIL, and tightening the ceiling to a copied 3.0 turns **3** -- including the separation
+  leg, while MarsBoss's measured 2.404 still passes, which is exactly the silent mistune the
+  property exists to catch.
 - The probe deliberately does NOT reference `web/EvilAliensWeb` (that project targets
   browser-wasm and cannot be a `ProjectReference` of a desktop exe), so nothing in `web/` knows it
   exists and CI -- which only publishes `web/EvilAliensWeb` -- is untouched.

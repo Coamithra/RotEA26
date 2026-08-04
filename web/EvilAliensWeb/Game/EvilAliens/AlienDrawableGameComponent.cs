@@ -223,10 +223,78 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		anchor = Position;
 		velocity = _observedVelocity;
 		halfWidth = AiHalfExtent();
+		// THE TELEPORT GUARD (card c1d783ad). `_observedVelocity` is a RAW ONE-FRAME position
+		// delta, so anything repositioned in a single tick reports an enormous speed for that
+		// frame -- and the cone's length is speed * ConeLeadMs capped at ConeMaxLenPx, so a
+		// teleport would project a full-length, full-strength corridor across the screen for one
+		// frame and shove the ship somewhere arbitrary. A reposition has no swept path to
+		// describe, so the honest answer is the same one a stationary thing gives: false. The
+		// body itself is still described by the radial field, which is unaffected.
+		//
+		// LATENT, NOT LIVE, AND THAT IS THE POINT: the known teleporter is SpiderBoss, which
+		// OVERRIDES this seam with its announced path and so never reaches here. The default is
+		// what every FUTURE type inherits silently, which is why the refusal reports itself.
+		if (!IsAiSweptPathPlausible(velocity))
+		{
+			ReportImplausibleSweptPath(this, velocity);
+			return false;
+		}
 		// Behaviour-neutral -- the consumer discards a negligible speed anyway -- but it keeps the
 		// "false means no meaningful swept path" contract above true of the DEFAULT and not only of
 		// its callers, so an override can rely on it.
 		return (velocity).LengthSquared() > 0.000001f;
+	}
+
+	// The ceiling on a believable OBSERVED speed, design px/ms, and the guard's whole decision --
+	// pure and static so `logic_probe` can call it with no Game, no entity and no rig.
+	//
+	// THE NUMBER IS NOT INVENTED HERE. It is `NetSession.MaxObservedSpeedPxPerMs`, the project's
+	// existing "that was a teleport, not motion" threshold, derived by `eaNetVelScan` from the
+	// measured gap between the fastest genuine mover (~2.5 px/ms) and the slowest reposition
+	// (11.6 px/ms) -- the derivation lives at that constant and is not copied here, so there is
+	// ONE number rather than two that can drift apart.
+	//
+	// THE TWO USES DIFFER IN RISK DIRECTION, so read the constant's own comment before touching
+	// it: over there it is a DIAGNOSTIC (the worst a wrong value does is print a line), here it
+	// is a GUARD (a value set too low silently deletes a genuinely fast mover's cone). What keeps
+	// the shared number safe is `logic_probe`'s ProbeAiSweptPathGuard, which asserts the
+	// SEPARATION property -- at least 2x above the fastest measured real mover and at most half
+	// the slowest measured reposition. A net-side retune that leaves that band fails there rather
+	// than quietly changing how the AI flies.
+	internal static float AiSweptMaxSpeedPxPerMs =>
+		EvilAliensWeb.Compat.DebugFlags.AiSweptMaxSpeedPxPerMs
+			?? EvilAliensWeb.Compat.Net.NetSession.MaxObservedSpeedPxPerMs;
+
+	// 0 disables the guard entirely (`?aisweptmax=0`) -- the A/B seam the card's measurement pass
+	// runs against, and the negative control for the probe.
+	internal static bool IsAiSweptPathPlausible(Vector2 velocity)
+	{
+		float ceiling = AiSweptMaxSpeedPxPerMs;
+		if (ceiling <= 0f)
+		{
+			return true;
+		}
+		return (velocity).LengthSquared() <= ceiling * ceiling;
+	}
+
+	// ONCE PER TYPE, and it is the guard's only observable -- a refused cone changes no pixel and
+	// moves no counter, so without this a future reposition site would be silently steering the
+	// bot for one frame per teleport with nothing to grep. The `NetSession.ReportUnmarkedTeleport`
+	// shape: the point is to name the type, not to count the frames.
+	private static readonly HashSet<string> reportedImplausibleSweptPaths = new HashSet<string>();
+
+	private static void ReportImplausibleSweptPath(AlienDrawableGameComponent comp, Vector2 velocity)
+	{
+		string type = comp.GetType().Name;
+		if (!reportedImplausibleSweptPaths.Add(type))
+		{
+			return;
+		}
+		Console.WriteLine("[ai] implausible swept path refused: " + type + " at "
+			+ (velocity).Length().ToString("0.0") + " px/ms (ceiling "
+			+ AiSweptMaxSpeedPxPerMs.ToString("0.0")
+			+ ") -- a one-frame reposition? announce the real path by overriding"
+			+ " TryGetAiSweptPath, or raise ?aisweptmax=");
 	}
 
 	// Rough half-extent of this thing's hull, mirroring the collision-type switch the AI's radial
@@ -717,6 +785,18 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		// pool with the latch still set -- and the fresh instance's first observation would go out
 		// marked, for a reposition that happened in a previous life somewhere else entirely.
 		netTeleported = false;
+		// Per-LIFE for the same reason (card c1d783ad), and it was MISSING -- which made the
+		// hazard above LIVE rather than latent. The observed velocity is a finite difference
+		// against `_prevPosition`, so a recycled entity's first Update differenced its new spawn
+		// point against its PREVIOUS LIFE's last position and reported a phantom teleport for one
+		// frame. Measured on stock rigs: EvilBullet at 14.9 px/ms against a DECLARED 0.24, UFO at
+		// 15.0, EvilSkull at 21.4 -- i.e. every recycled bullet, UFO and skull was projecting a
+		// bogus full-length cone. (The net layer never saw it: it keeps its own per-entity
+		// position history in NetIdRegistry. Its scan hit the identical pool-recycle artefact and
+		// reported the same 14.9 -- see NetSession.MaxObservedSpeedPxPerMs.)
+		_prevPosition = Vector2.Zero;
+		_observedVelocity = Vector2.Zero;
+		_hasPrevPosition = false;
 		foreach (Timer timer in timers)
 		{
 			timer.Reset();

@@ -137,6 +137,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeAiSweptPathGuard(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         rc = ProbeFlagRejectionSweep(asm);
         if (rc != 0)
         {
@@ -674,6 +680,11 @@ internal static class Program
             new { Flag = "aiconescale",    Prop = "AiConeScale",           Good = "2.75",Want = (object)2.75f, Baked = ""     },
             new { Flag = "aiwedgestrength",Prop = "AiLaneWedgeStrength",   Good = "29",  Want = (object)29f,   Baked = "18"   },
             new { Flag = "aiwedgefall",    Prop = "AiLaneWedgeFallAlong",  Good = "7",   Want = (object)7f,    Baked = ""     },
+            // The swept-path teleport guard (card c1d783ad). Good is "12" rather than anything
+            // carrying a 5, so the Baked check below is not satisfied by the value being quoted
+            // back at us. 0 is a MEANINGFUL value here (guard off), so its guard refuses only a
+            // negative -- which is the shape this table's negative leg already expects.
+            new { Flag = "aisweptmax",     Prop = "AiSweptMaxSpeedPxPerMs",Good = "12",  Want = (object)12f,   Baked = "5"    },
         };
         // Baked "" = no default-absence check available for that row: aiscanrows/aicrosspenalty
         // bake 4, aifieldfall bakes 3 and aiff sits at 0, all single digits that occur inside the
@@ -693,7 +704,7 @@ internal static class Program
             return 2;
         }
 
-        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 30 knobs (card 48b7c6b1)");
+        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 31 knobs (card 48b7c6b1)");
 
         // One counter and its OWN first-problem detail per leg: a shared sink attaches the
         // diagnosis to whichever Check happens to print it, which in a mutation run put the only
@@ -1446,6 +1457,186 @@ internal static class Program
             wedgeStrength > MaxSteerStrength,
             "DefaultLaneWedgeStrength " + wedgeStrength + " against the threat field's peak "
             + MaxSteerStrength + " -- being in the lane is not a risk to weigh, it is a death");
+        return 0;
+    }
+
+    // ---- the swept-path teleport guard (card c1d783ad) --------------------------------------
+    //
+    // `AlienDrawableGameComponent.TryGetAiSweptPath`'s DEFAULT hands the AI a raw one-frame
+    // position delta, so anything repositioned in a single tick reports an enormous velocity for
+    // that frame and would project a full-length cone across the screen. The guard refuses such a
+    // path; `IsAiSweptPathPlausible` is the whole decision, and it is pure and static, so it is
+    // checkable here with no Game and no entity.
+    //
+    // THE SPEEDS BELOW ARE THE MEASURED ONES, out of `eaNetVelScan` (they are quoted at
+    // NetSession.MaxObservedSpeedPxPerMs, which is the constant under test). That is what makes
+    // this more than a restatement of one comparison: the ceiling is SHARED with the net layer,
+    // where it is only a diagnostic, so a net-side retune that walks it out of the measured gap
+    // must fail HERE rather than quietly changing how the bot flies.
+    private static int ProbeAiSweptPathGuard(Assembly asm)
+    {
+        Type adc = asm.GetType("EvilAliens.AlienDrawableGameComponent", true);
+        Type flags = asm.GetType("EvilAliensWeb.Compat.DebugFlags", true);
+        Type net = asm.GetType("EvilAliensWeb.Compat.Net.NetSession", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+
+        MethodInfo plausible = adc.GetMethod("IsAiSweptPathPlausible", anyStatic);
+        PropertyInfo ceilingP = adc.GetProperty("AiSweptMaxSpeedPxPerMs", anyStatic);
+        PropertyInfo overrideP = flags.GetProperty("AiSweptMaxSpeedPxPerMs", anyStatic);
+        FieldInfo netCeilingF = net.GetField("MaxObservedSpeedPxPerMs", anyStatic);
+        if (plausible == null || ceilingP == null || overrideP == null || netCeilingF == null
+            || !netCeilingF.IsLiteral)
+        {
+            Console.WriteLine("FAIL: could not reflect AlienDrawableGameComponent.IsAiSweptPathPlausible"
+                + " / AiSweptMaxSpeedPxPerMs / DebugFlags.AiSweptMaxSpeedPxPerMs"
+                + " / NetSession.MaxObservedSpeedPxPerMs -- renamed or moved?");
+            return 2;
+        }
+        Type vec2 = plausible.GetParameters()[0].ParameterType;
+        object V(float x, float y) => Activator.CreateInstance(vec2, x, y);
+        // Off-axis on purpose: the guard must measure the SPEED, not a component, so every case is
+        // fed at 3-4-5 so an `Abs(X) > ceiling` mistake fails rather than passing by luck.
+        bool Ok(float speed) => (bool)plausible.Invoke(null, new object[] { V(speed * 0.6f, speed * 0.8f) });
+        float Ceiling() => (float)ceilingP.GetValue(null);
+
+        Console.WriteLine("[logic_probe] AI swept-path teleport guard (card c1d783ad)");
+
+        float netCeiling = (float)netCeilingF.GetRawConstantValue();
+        Check("the ceiling IS NetSession.MaxObservedSpeedPxPerMs, not a second copy of it",
+            Ceiling() == netCeiling,
+            "resolved " + Ceiling().ToString("0.00") + " against the net layer's "
+            + netCeiling.ToString("0.00"));
+
+        // 1. EVERY GENUINE MOVER KEEPS ITS CONE. These are `eaNetVelScan`'s highest SUSTAINED
+        // readings for types that do not reposition, plus the fastest DECLARED speed in the set
+        // (EvilSkull's launched MaxSpeed). A guard that deletes one of these is the failure the
+        // card warned about -- it silently removes a real threat's directional repellent.
+        // CADENCE CAVEAT, and it matters for reading this table: these are `eaNetVelScan`'s
+        // SUSTAINED readings at the net layer's 60ms snapshot cadence, while the guard runs
+        // against a PER-FRAME (~16.7ms) delta. An accelerating mover therefore reads higher in
+        // the game than it does here -- measured, MarsBoss's entry ramp peaks at 7.8 px/ms for a
+        // single frame and IS refused, against the 2.404 sustained below. So this table's claim
+        // is "no real mover's sustained speed is refused", not "no real mover is ever refused".
+        // The accepted cost is stated at the card and in web/EvilAliensWeb/CLAUDE.md.
+        //
+        // NOTE ALSO that the separation leg below passes at exactly 5.00 >= 2 x 2.50, i.e. with
+        // ZERO margin on the left-hand side: raising any speed in this table breaks it. That is
+        // deliberate (it forces the conversation), not probe rot.
+        var genuine = new (string name, float speed)[]
+        {
+            ("JunkBoss", 0.075f), ("BrainBoss", 0.101f), ("EvilBullet", 0.240f),
+            ("an asteroid", 0.38f), ("SweepUFO", 0.385f), ("PlasmaBall", 0.600f),
+            ("Spider", 1.237f), ("MarsBoss entry curve", 2.404f),
+            ("EvilSkull declared MaxSpeed", 2.5f)
+        };
+        foreach (var g in genuine)
+        {
+            Check("genuine motion keeps its swept path: " + g.name, Ok(g.speed),
+                g.speed.ToString("0.000") + " px/ms under the " + Ceiling().ToString("0.0") + " ceiling");
+        }
+        Check("a standing-still mover is plausible too (the speed gate is the caller's job)",
+            Ok(0f), "0 px/ms -- the default still returns false for it, on the LengthSquared test");
+
+        // 2. EVERY MEASURED REPOSITION IS REFUSED. Each is a code fact rather than a reading to
+        // explain away -- see the derivation at NetSession.MaxObservedSpeedPxPerMs.
+        var repositions = new (string name, float speed)[]
+        {
+            ("EvilSkull respawning at a random point", 11.6f),
+            ("a wrapping Braineroid crossing the screen", 13.5f),
+            ("SpiderBoss's fly-by park (low reading)", 42f),
+            ("SpiderBoss's fly-by park (high reading)", 57f)
+        };
+        foreach (var r in repositions)
+        {
+            Check("a reposition is refused: " + r.name, !Ok(r.speed),
+                r.speed.ToString("0.0") + " px/ms over the " + Ceiling().ToString("0.0") + " ceiling");
+        }
+
+        // 3. THE BOUNDARY, both sides of it, so a `<` / `>` slip cannot hide.
+        Check("the ceiling itself is plausible (the test is an inclusive <=)", Ok(Ceiling()),
+            "exactly " + Ceiling().ToString("0.00") + " px/ms");
+        Check("a hair over the ceiling is refused", !Ok(Ceiling() * 1.001f),
+            (Ceiling() * 1.001f).ToString("0.000") + " px/ms");
+
+        // 4. THE SEPARATION PROPERTY -- the reason this ceiling can be shared with a layer that
+        // only uses it to print a line. It must clear the fastest real mover by 2x AND sit at or
+        // under half the slowest reposition. A net-side retune that leaves that band fails here.
+        float fastestReal = 0f;
+        foreach (var g in genuine)
+        {
+            fastestReal = Math.Max(fastestReal, g.speed);
+        }
+        float slowestReposition = float.MaxValue;
+        foreach (var r in repositions)
+        {
+            slowestReposition = Math.Min(slowestReposition, r.speed);
+        }
+        Check("SEPARATION: the ceiling is at least 2x the fastest measured real mover",
+            Ceiling() >= 2f * fastestReal,
+            Ceiling().ToString("0.00") + " against 2 x " + fastestReal.ToString("0.00")
+            + " = " + (2f * fastestReal).ToString("0.00"));
+        Check("SEPARATION: the ceiling is at most half the slowest measured reposition",
+            Ceiling() <= 0.5f * slowestReposition,
+            Ceiling().ToString("0.00") + " against half of " + slowestReposition.ToString("0.0")
+            + " = " + (0.5f * slowestReposition).ToString("0.00"));
+
+        // 5. THE CONSEQUENCE THE GUARD EXISTS FOR, measured off the real shape rather than
+        // asserted: at a reposition's speed the cone saturates its own length cap, i.e. one frame
+        // of it really would close a corridor the width of the world.
+        Type ship = asm.GetType("EvilAliens.PlayerShip", true);
+        MethodInfo eval = ship.GetMethod("EvaluateSweptShape", anyStatic);
+        float coneMaxLen = (float)ship.GetField("DefaultConeMaxLenPx", anyStatic).GetRawConstantValue();
+        float coneLeadMs = (float)ship.GetField("DefaultConeLeadMs", anyStatic).GetRawConstantValue();
+        Type shapeType = eval.ReturnType;
+        float ShapeField(object shape, string name) =>
+            (float)shapeType.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .GetValue(shape);
+        object teleportShape = eval.Invoke(null, new object[]
+        {
+            V(400f, 300f), V(0f, 0f), V(0f, 300f), V(42f, 0f), 30f, 20f, 4f, false
+        });
+        Check("WHY: at a 42 px/ms reposition the cone saturates its length cap",
+            ShapeField(teleportShape, "ConeLength") == coneMaxLen
+                && 42f * coneLeadMs > coneMaxLen,
+            "42 px/ms x " + coneLeadMs.ToString("0") + "ms would be "
+            + (42f * coneLeadMs).ToString("0") + "px, capped at " + coneMaxLen.ToString("0")
+            + "px -- a full-screen corridor from one frame's position delta");
+        // Half the cap down that corridor the mesa is still at 75% of peak (the along-axis
+        // plateau, `1 - t^2`), i.e. the one frame does not merely reach the ship -- it shoves it.
+        Check("WHY: and 400px down that corridor it still out-votes the 0.8 seek several times over",
+            ShapeField(teleportShape, "ConeStrength") > 4f * 0.7f,
+            "cone strength " + ShapeField(teleportShape, "ConeStrength").ToString("0.00")
+            + " of a 4.00 peak, at the ship's position");
+
+        // 6. THE NEGATIVE CONTROL: `?aisweptmax=0` is the A/B seam the card's measurement pass
+        // runs against, so it must genuinely restore the pre-card behaviour -- every reposition
+        // plausible again. Asserted AFTER the refusals above, per the ordering lesson: a
+        // "does not refuse" check is worth nothing unless something earlier really did refuse.
+        overrideP.SetValue(null, 0f);
+        try
+        {
+            bool allPass = true;
+            foreach (var r in repositions)
+            {
+                allPass &= Ok(r.speed);
+            }
+            Check("control: ?aisweptmax=0 turns the guard OFF -- the pre-card behaviour",
+                allPass && Ceiling() == 0f,
+                "every measured reposition is plausible again, which is what makes the A/B an A/B");
+            // And an ordinary override must still bite, or "0 = off" would be indistinguishable
+            // from "the flag does nothing at all".
+            overrideP.SetValue(null, 1f);
+            Check("control: an override REACHES the guard (a 1.0 ceiling refuses Spider's 1.237)",
+                Ceiling() == 1f && !Ok(1.237f),
+                "so the seam is live rather than merely parsed");
+        }
+        finally
+        {
+            // Restore, so a later Probe* does not inherit a guard this one turned off.
+            overrideP.SetValue(null, null);
+        }
+        Check("the override is restored to null on the way out",
+            Ceiling() == netCeiling, "back to the measured " + netCeiling.ToString("0.00"));
         return 0;
     }
 

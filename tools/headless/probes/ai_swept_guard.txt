@@ -1,0 +1,68 @@
+# PROBE: no ordinary mover reports a teleport-shaped swept path to the AI
+#
+# PINS:   card c1d783ad, and specifically the POOL-RECYCLE half of it, which is the part that was
+#         live rather than latent. AlienDrawableGameComponent.ObservedVelocity is a finite
+#         difference against `_prevPosition`, and Initialize did not reset that history per life
+#         -- so a recycled entity's first Update differenced its new spawn point against its
+#         PREVIOUS LIFE's last position and handed the AI a phantom teleport. Measured on this
+#         rig before the fix: EvilBullet at 14.9 px/ms against a DECLARED 0.24, plus UFO 15.0 and
+#         EvilSkull 21.4. Each one projected a full-length, full-strength cone (a 14.9 px/ms
+#         mover saturates ConeMaxLenPx) for that frame, shoving the bot somewhere arbitrary.
+#
+# WHY THIS RIG: OwnLevel churns exactly the three types that tripped -- its SkullSpawner and
+# StarMineSpawner recycle constantly and the skulls fire bullets -- so it is the densest recycle
+# load in the game. It also reaches the AI's cone term heavily, which the positive leg asserts.
+#
+# WHY A PROBE AND NOT A SCREENSHOT: a phantom cone lasts ONE FRAME and moves the ship by a
+# steering vote, not by anything drawn. There is no pixel to look at, and no aggregate moves
+# reliably either -- 52 bogus corridors a run perturb `deaths` in whichever direction the dice
+# fall. The refusal LINE is the only observable the defect has, which is why it exists.
+#
+# NOTE THE ASYMMETRY WITH ITS SIBLING, ai_swept_guard_trip.txt: this probe asserts the line is
+# ABSENT, so on its own it would pass on a build where the detector had been deleted, or on a run
+# that never reached a level. The sibling supplies the positive control (the same detector, made
+# to fire on purpose), and the `threats=...(cone)` leg below supplies the "we got there" half.
+# Neither is optional -- read them as one probe in two files.
+#
+# TYPES THAT LEGITIMATELY TRIP THE GUARD ARE ON OTHER LEVELS, deliberately kept off this rig:
+# a `wrapping` Braineroid (Level1, ~52 refusals a run at 47.9 px/ms) really does teleport across
+# the screen, and MarsBoss's entry PowerCurve reads 7.8 px/ms for a single frame at the top of
+# its ramp -- a finite-difference artefact of an acceleration sampled at 16.7ms rather than a
+# speed it ever travels, accepted at one frame per arrival. See the card's close-out.
+#
+# FAILURE MEANS:
+#   * an `[ai] implausible swept path refused: <T>` line  -> either the Initialize reset was lost
+#     (the line names EvilBullet / UFO / EvilSkull -- the recycle phantom is back), or a NEW type
+#     repositions in one tick. Read the type name: it tells you which. A genuine repositioner
+#     should ANNOUNCE its path by overriding TryGetAiSweptPath, the SpiderBoss way, not have the
+#     ceiling raised for it.
+#   * the `(cone)` leg missing                            -> the run never reached the directional
+#     repellent at all, so the absence above proves nothing. Not a guard regression; look at the
+#     level boot or the AI bench first.
+#
+# MUTATION-TESTED: reverting the three-line per-life reset in Initialize turns the first leg red
+# with `EvilBullet at 14.9 px/ms` (and the run still passes every other leg, which is exactly how
+# invisible the defect was). Deleting the guard's call site turns it green again -- which is what
+# the sibling probe is for.
+#
+# eahl: --flags "?level=OwnLevel&aiplayer&aibench&difficulty=Very_Hard&invuln&seed=1&noattract"
+
+step 150 nodraw
+mark
+
+# 120 sim-seconds of real bot, real spawners, real recycling.
+eval AiBenchRun 60
+eval AiBenchRun 60
+
+eval AiBench
+
+# THE LEG. Nothing on this rig has a swept path the guard can refuse.
+expect-not \[ai\] implausible swept path refused
+
+# ...and the run genuinely got to the AI's cone term, so the silence above is a measurement
+# rather than a run that never started.
+expect \[aibench\].*OwnLevel
+expect \[aibench\].*ticks=[1-9][0-9][0-9][0-9]
+expect \[aibench\].*\(cone\)=[1-9][0-9]*@
+
+quit

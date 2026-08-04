@@ -1,0 +1,39 @@
+# PROBE: without the flag, the SHIPPED wall-nav is what runs (the negative control)
+#
+# PINS:   card d79b7ea7, the other half of ai_wallnav_2008.txt -- read the two as one probe.
+#         `?aiwallnav2008=1` reinstates the 2008 approach steer the port replaced (audited at
+#         +3.93 +- 1.54 ownlevel deaths, N=60), so it is a deliberate regression repro in the
+#         ?nethitstop=1 idiom and must reach NOTHING that did not ask for it. This is the leg that would catch
+#         the 2008 path being left switched on by a default, a stray `||`, or an inverted
+#         dispatch condition -- none of which changes a build error, a screenshot, or any counter
+#         a casual run reads.
+#
+# FAILURE MEANS: read WHICH line went red.
+#         [aiwallnav] steering: missing entirely -> the run never reached a wall, so the
+#                                expect-not below would have passed on evidence it never had
+#                                (README rule 1). Same causes as the paired probe.
+#         "steering: 2008" seen  -> THE REGRESSION: an ordinary boot is flying the 2008 wall-nav.
+#         aiwallnav2008 on the flags line -> the flag is being set by something other than the
+#                                URL, which is how a deliberate regression reaches a real player.
+#
+# NOTES:  Identical boot to the paired probe except for the flag itself, so the two differ in one
+#         variable. The flags-active line here reports the OTHER ?wallsonly/?aiplayer flags, so
+#         the first expect below still proves the dump was printed at all -- an absent dump would
+#         otherwise make the aiwallnav2008 expect-not vacuous too.
+#         Mutation-tested by defaulting DebugFlags.AiWallNav2008 to true, which turns the last
+#         two lines red while the paired probe stays green.
+#
+# eahl: --flags "?level=Level3&wallsonly&aiplayer&aibench&noattract&invuln&seed=1&difficulty=Very_Hard"
+
+# Asserted BEFORE the first `mark`: the dump is printed at BOOT, so marking above it discards the
+# subject. The positive half proves the dump was printed AT ALL -- without it the expect-not below
+# would pass just as happily on a run that printed no flags line whatsoever.
+expect      \[debug\] flags active:.*wallsonly
+expect-not  \[debug\] flags active:.*aiwallnav2008
+
+mark
+step 900 nodraw
+
+expect      \[aiwallnav\] steering: port
+expect-not  \[aiwallnav\] steering: 2008
+quit

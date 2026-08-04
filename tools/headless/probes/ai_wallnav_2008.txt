@@ -1,0 +1,47 @@
+# PROBE: ?aiwallnav2008=1 really swaps the wall-steering ALGORITHM (not just the flag)
+#
+# PINS:   card d79b7ea7. The port's wall-nav constants (WallReactionMs, WallScanRows,
+#         WallCrossPenalty, GapSwitchMargin, ColumnScore) could only be audited against the 2008
+#         original by reimplementing that algorithm behind this flag -- so every figure the audit
+#         recorded rests on the dispatch in DoAIMove's `baddy is Wall` branch actually reaching
+#         SteerThroughWall2008. That failure is SILENT: a sweep arm whose flag parsed but whose
+#         dispatch did not fire measures the shipped code twice and prints a plausible table with
+#         a small difference in it. `[aiwallnav] steering:` names the algorithm that ran, which is
+#         the only observable that separates the two.
+#
+#         Read this probe together with its negative control, ai_wallnav_2008_absent.txt -- one
+#         proves the flag reaches the 2008 path, the other proves the port path is what runs
+#         without it. Either alone passes on a build where the branch always takes one side.
+#
+# FAILURE MEANS: read WHICH line went red.
+#         [aiwallnav] steering: missing entirely -> the run never reached a wall at all, so it
+#                                proved nothing either way (precondition, README rule 5). The
+#                                ?wallsonly fast-boot or the Level 3 wall sections moved.
+#         "steering: port" seen  -> THE REGRESSION: the flag parsed (it is on the flags-active
+#                                line) but DoAIMove still called SteerThroughWall. Any audit
+#                                number taken since is measuring the shipped wall-nav.
+#         aiwallnav2008 missing from the flags line -> the flag stopped parsing, or dropped out
+#                                of DebugFlags.Active (the whole dump is gated on Active).
+#
+# NOTES:  ?invuln pins the precondition: without it the bot can die before the first wall section
+#         and the run ends with nothing to assert. The flag is a DELIBERATE regression repro in
+#         the ?nethitstop=1 idiom, so it must stay in `Active` -- the flags-active assertion below
+#         is what defends that, and it is not incidental.
+#         Mutation-tested by inverting the dispatch condition in DoAIMove (`if (!og2008)`), which
+#         turns the second expect red while the flags line stays green -- exactly the silent
+#         failure this probe exists for.
+#
+# eahl: --flags "?level=Level3&wallsonly&aiplayer&aibench&noattract&invuln&seed=1&aiwallnav2008=1&difficulty=Very_Hard"
+
+# The flag parsed AND survived into Active (the dump is gated on it). Asserted BEFORE the first
+# `mark` on purpose: this line is printed at BOOT, so a `mark` above it discards the very subject
+# -- which is how the first revision of this probe failed on a run that contained both lines.
+expect      \[debug\] flags active:.*aiwallnav2008
+
+mark
+step 900 nodraw
+
+# ...and the 2008 algorithm is what actually steered through the wall.
+expect      \[aiwallnav\] steering: 2008
+expect-not  \[aiwallnav\] steering: port
+quit

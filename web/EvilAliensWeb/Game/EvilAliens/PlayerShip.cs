@@ -168,9 +168,13 @@ public class PlayerShip : AlienDrawableGameComponent
 	private static float SteerNoiseFloor => EvilAliensWeb.Compat.DebugFlags.AiSteerNoiseFloor ?? DefaultSteerNoiseFloor;
 
 	// How far ahead the wall logic looks, as MILLISECONDS of closing travel rather than a fixed
-	// pixel count. The 2008 code probed `41.67 * MaxSpeed` = ~13.75px against wall tiles that are
-	// 800/gridWidth = 67..267px wide -- roughly one ship-width of warning, which is why the bot
-	// clipped so much. Closing speed is ship speed plus the wall's own scroll.
+	// pixel count. The 2008 code probed `1.2 * dtMs * MaxSpeed` = ~6.6px at 60Hz against wall
+	// tiles that are 800/gridWidth = 67..267px wide -- a FIFTH of a ship-width of warning, which
+	// is why the bot clipped so much. Closing speed is ship speed plus the wall's own scroll.
+	//
+	// The ~13.75px figure this comment used to quote (card d79b7ea7) is a different probe: it is
+	// `41.67 * MaxSpeed`, the 2008 hard clamp's, which the port KEPT as `WallClampMs`. Attributing
+	// it here credited the replacement with replacing something that was never replaced.
 	public const float DefaultWallReactionMs = 420f;
 
 	// A gap must beat the COMMITTED one by this many tiles of cost before the AI switches. The
@@ -863,6 +867,29 @@ public class PlayerShip : AlienDrawableGameComponent
 	private Vector2 aiSteer = Vector2.Zero;
 
 	private int aiGapColumn = -1;
+
+	// Process-wide one-shot for the `[aiwallnav] steering:` line. Static rather than per-ship so
+	// four co-op ships announce once between them; it is a diagnostic, not state, and nothing
+	// reads it back.
+	private static bool aiWallNavAnnounced;
+
+	// Names the wall-steering algorithm that ACTUALLY RAN, once per process (card d79b7ea7).
+	//
+	// It is called from INSIDE `SteerThroughWall` and `SteerThroughWall2008` rather than from the
+	// dispatch that chooses between them, and that placement is the whole point -- an earlier
+	// revision read `DebugFlags.AiWallNav2008` at the call site, so it reported the FLAG and not
+	// the branch. Inverting the dispatch left it printing "2008" while the port code ran, and the
+	// probe pair that exists to catch exactly that passed the mutation. An audit arm whose
+	// dispatch is broken measures the shipped build twice and prints a plausible table with a
+	// small difference in it; this line is the only thing that can say otherwise.
+	private static void AnnounceWallNav(string which)
+	{
+		if (!aiWallNavAnnounced)
+		{
+			aiWallNavAnnounced = true;
+			Console.WriteLine("[aiwallnav] steering: " + which);
+		}
+	}
 
 	public int Owner => player;
 
@@ -1974,7 +2001,14 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				hasWall = true;
 				collisionLevelMap = (CollisionLevelMap)((Wall)baddy).GetCollisionType();
-				SteerThroughWall(ref direction, (Wall)baddy, collisionLevelMap);
+				if (EvilAliensWeb.Compat.DebugFlags.AiWallNav2008)
+				{
+					SteerThroughWall2008(ref direction, collisionLevelMap, gameTime);
+				}
+				else
+				{
+					SteerThroughWall(ref direction, (Wall)baddy, collisionLevelMap);
+				}
 			}
 			else if (baddy is Lazer)
 			{
@@ -2939,15 +2973,25 @@ public class PlayerShip : AlienDrawableGameComponent
 	// occupied tile is AsplodeWall() -- instant death -- so this is the one place the AI cannot
 	// afford to be approximate.
 	//
-	// What the 2008 code did, and why it jittered (all three measured with ?aibench):
-	//   * it probed a fixed `41.67 * MaxSpeed` = ~13.75px ahead, against tiles 67..267px wide --
-	//     about one ship-width of warning at full closing speed;
-	//   * on a hit it SLAMMED the steer (`direction.X = -max(|direction.Y|, 1)`), a full reversal
-	//     rather than a push, so the next tick's clear probe threw it straight back;
+	// What the 2008 APPROACH steer did, and what this replaced. Reachable for real since card
+	// d79b7ea7 -- `?aiwallnav2008=1`, transcribed below as SteerThroughWall2008:
+	//   * it probed a fixed `1.2 * dtMs * MaxSpeed` = ~6.6px ahead at 60Hz, against tiles
+	//     67..267px wide -- a fifth of a ship-width of warning at full closing speed;
 	//   * it re-picked left-vs-right every single tick, and a wall scrolling on by one row can
 	//     swap which side is cheaper, reversing the ship mid-approach.
-	// Together those spun the commanded heading at ~1050 deg/s. This version looks ahead by
-	// TIME, pushes proportionally, and commits to a gap.
+	// This version looks ahead by TIME, pushes proportionally, and commits to a gap.
+	//
+	// TWO CLAIMS THAT USED TO LIVE HERE WERE WRONG, both corrected by card d79b7ea7's audit:
+	//   * the SLAM (`direction.X = -max(|direction.Y|, 1)`) was listed as a third thing this
+	//     replaced. It is not: the slam is `ClampIntoWallSpace`, which the port KEPT verbatim --
+	//     see its own comment. `?aiwallnav2008=1` does not switch it either, because there is
+	//     nothing to switch it to.
+	//   * "together those spun the commanded heading at ~1050 deg/s" is not this term's figure.
+	//     That churn is the missing steering LOW-PASS (card 05a2b818 reproduces it cleanly at
+	//     `?aismooth=0`, and validates the low-pass on it); with the low-pass in place BOTH wall
+	//     algorithms are smooth, and the 2008 one is if anything smoother while dying more.
+	//     So do not defend these constants on churn -- they earn their keep on SURVIVAL, and the
+	//     audit's paired numbers are in web/EvilAliensWeb/CLAUDE.md.
 
 	// Steer toward the committed gap in this wall, and away from tiles that are close in the
 	// direction of travel. Called once per Wall in the steering loop; only ever adds to
@@ -2955,6 +2999,7 @@ public class PlayerShip : AlienDrawableGameComponent
 	// other. The hard "do not fly into that" clamp is ClampIntoWallSpace, applied last.
 	private void SteerThroughWall(ref Vector2 direction, Wall wall, CollisionLevelMap map)
 	{
+		AnnounceWallNav("port");
 		CollisionBox box = (CollisionBox)GetCollisionType();
 		int x = 0;
 		int y = 0;
@@ -3129,7 +3174,19 @@ public class PlayerShip : AlienDrawableGameComponent
 	}
 
 	// The last-resort "do not fly into that" clamp, applied after every other steering term.
-	// Unlike the 2008 override this fires only when a tile is within roughly ONE TICK of travel,
+	//
+	// **THIS IS THE 2008 BLOCK, not a port-era replacement** (card d79b7ea7, struck from the audit
+	// on source inspection rather than measured). `DoAIMove`'s `if (flag)` tail in
+	// `src_decompiled/EvilAliens/PlayerShip.cs` lines 1114-1158 has the same two side probes at
+	// `41.666668 * MaxSpeed`, the same ungated upward probe at 3x that, and the same
+	// `direction.X = -max(|direction.Y|, 1)` slam. The port differs in three ways, none
+	// behavioural: `WallClampMs` is 42 rather than 41.666668 (13.86px against 13.75px at
+	// MaxSpeed 0.33, 0.8%), the two corner probes per side are OR-ed into one bool instead of
+	// applying the identical assignment twice, and the 3x lives in a named
+	// `WallClampUpFactor`. So there was no port value here to audit, and `?aiwallnav2008=1`
+	// deliberately does not switch this half.
+	//
+	// Unlike the 2008 gap-approach steer this fires only when a tile is within roughly ONE TICK of travel,
 	// where the reversal is genuinely correct and cannot alternate -- at that range the probe
 	// stays hit until the ship is actually clear. Everything further out is handled by the
 	// proportional steer in SteerThroughWall.
@@ -3172,6 +3229,165 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			direction.Y = MathHelper.Max(Math.Abs(direction.X), 1f);
 		}
+	}
+
+	// ---- the 2008 wall navigation, kept reachable as the audit's null hypothesis ----------------
+	//
+	// `?aiwallnav2008=1` (card d79b7ea7) swaps `SteerThroughWall` for this. It exists because the
+	// port's wall-nav constants could not be audited against the original AT ALL by flag: the
+	// 2008 code is a different ALGORITHM, so no setting of `?aireact`/`?aiscanrows`/
+	// `?aicrosspenalty`/`?aigapmargin` reconstitutes it, and card 05a2b818's bar for a port value
+	// ("beat the original in a paired A/B, ties revert") needs an original to run against.
+	//
+	// TRANSCRIBED VERBATIM from `src_decompiled/EvilAliens/PlayerShip.cs` -- the block at lines
+	// 849-914 of `DoAIMove` and `findNextTileOnMap` at 1167-1228 -- so a reviewer can diff it by
+	// eye. Nothing here is improved, tidied or corrected: a reference arm that has drifted
+	// measures nothing. Only the decompiler's slot names (`num6`, `num7`) are given readable
+	// names, the empty `else if (target_x != x) { }` tail is dropped as unreachable dead code,
+	// and the two `Vector2`/`CollisionBox` casts follow this file's normal style.
+	//
+	// NOT included, deliberately: the `if (flag)` hard clamp that follows it in the original.
+	// `ClampIntoWallSpace` IS that block -- same probes (`41.666668 * MaxSpeed`, 3x upward), same
+	// slam -- so the port never replaced it and there is nothing to switch. See its own comment.
+	private void SteerThroughWall2008(ref Vector2 direction, CollisionLevelMap map, GameTime gameTime)
+	{
+		AnnounceWallNav("2008");
+		// `num6`: the approach probe, ~6.6px at 60Hz and MaxSpeed 0.33. (NOT the ~13.75px figure
+		// this file quotes elsewhere -- that is the CLAMP's `41.67 * MaxSpeed` probe, which the
+		// port kept.) Against tiles 67..267px wide it is a fifth of a tile of warning.
+		float probe = 1.2f * (float)gameTime.ElapsedGameTime.TotalMilliseconds * base.MaxSpeed;
+		// Per-seat push strength, so four co-op ships did not steer identically.
+		float push = 0f;
+		if (player == 0)
+		{
+			push = 8f;
+		}
+		if (player == 1)
+		{
+			push = 4f;
+		}
+		if (player == 2)
+		{
+			push = 6f;
+		}
+		if (player == 3)
+		{
+			push = 10f;
+		}
+		CollisionBox box = (CollisionBox)GetCollisionType();
+		int x = 0;
+		int y = 0;
+		map.GetMapCoords(ref x, ref y, base.Position);
+		int target_x = 0;
+		int target_y = 0;
+		FindNextTileOnMap2008(x, y, ref target_x, ref target_y, map);
+		// The original re-runs GetMapCoords inside each branch, clobbering x and y after they have
+		// been used for the branch decision. Kept as-is.
+		if (target_y < y)
+		{
+			map.GetMapCoords(ref x, ref y, new Vector2(box.Left - probe, base.Position.Y));
+			if (map.TileIsOccupied(x, y - 1))
+			{
+				direction += new Vector2(push, 0f);
+			}
+			map.GetMapCoords(ref x, ref y, new Vector2(box.Right + probe, base.Position.Y));
+			if (map.TileIsOccupied(x, y - 1))
+			{
+				direction += new Vector2(0f - push, 0f);
+			}
+		}
+		else if (target_x > x)
+		{
+			map.GetMapCoords(ref x, ref y, new Vector2(box.Left - probe, base.Position.Y));
+			if (map.TileIsOccupied(x, y - 1))
+			{
+				direction += new Vector2(push, 0f);
+			}
+			if (map.TileIsOccupied(target_x, y - 1))
+			{
+				direction += new Vector2(0f, push);
+			}
+		}
+		else if (target_x < x)
+		{
+			map.GetMapCoords(ref x, ref y, new Vector2(box.Right + probe, base.Position.Y));
+			if (map.TileIsOccupied(x, y - 1))
+			{
+				direction += new Vector2(0f - push, 0f);
+			}
+			if (map.TileIsOccupied(target_x, y - 1))
+			{
+				direction += new Vector2(0f, push);
+			}
+		}
+	}
+
+	// `findNextTileOnMap`, verbatim from src_decompiled/EvilAliens/PlayerShip.cs lines 1167-1228.
+	// Straight up if the tile above is clear; otherwise walk left and right along the ship's own
+	// row and the one above it, take whichever side reaches a clear column first, and break a tie
+	// by seat index. No look-ahead depth, no cost for the columns crossed, and NO memory -- it is
+	// re-decided every tick, which is the flip-flop `GapSwitchMargin` was added to stop.
+	private void FindNextTileOnMap2008(int x, int y, ref int target_x, ref int target_y, CollisionLevelMap map)
+	{
+		if (!map.TileIsOccupied(x, y - 1))
+		{
+			target_x = x;
+			target_y = y - 1;
+			return;
+		}
+		int scan = x - 1;
+		int leftCost = 0;
+		while (map.TileIsOccupied(scan, y) || map.TileIsOccupied(scan, y - 1))
+		{
+			leftCost++;
+			scan--;
+			if (scan < 0)
+			{
+				leftCost = 1000;
+				break;
+			}
+		}
+		scan = x + 1;
+		int rightCost = 0;
+		while (map.TileIsOccupied(scan, y) || map.TileIsOccupied(scan, y - 1))
+		{
+			rightCost++;
+			scan++;
+			if (scan >= map.Width)
+			{
+				rightCost = 1000;
+				break;
+			}
+		}
+		if (leftCost < rightCost)
+		{
+			target_x = x - 1;
+			target_y = y;
+			return;
+		}
+		if (leftCost > rightCost)
+		{
+			target_x = x + 1;
+			target_y = y;
+			return;
+		}
+		if (player == 0)
+		{
+			target_x = x - 1;
+		}
+		if (player == 1)
+		{
+			target_x = x + 1;
+		}
+		if (player == 2)
+		{
+			target_x = x - 1;
+		}
+		if (player == 3)
+		{
+			target_x = x + 1;
+		}
+		target_y = y;
 	}
 
 	private void getDistanceToLine(AlienDrawableGameComponent alien, out float d, out Vector2 shortestpoint)

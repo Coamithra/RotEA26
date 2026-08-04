@@ -393,7 +393,13 @@ internal static class Program
 
             float offsetY = -(rows + 2) * tile;
             var pos = new Vector2(400f, StartY);
-            var map = new EvilAliens.CollisionLevelMap(new Vector2(0f, offsetY), grid);
+            // `tile` is 800/width, which is exactly what Wall.Setup computes for the real thing
+            // (`LogicalWidth * scale` with `scale = 800 / (LogicalWidth * width)`). The tileSize
+            // parameter became required on CollisionLevelMap's constructor at some point after
+            // this bench was written and nothing rebuilt it, so it did not COMPILE at all when
+            // card d79b7ea7 came to use it -- the failure mode a bench that is only reached
+            // between tuning cards has.
+            var map = new EvilAliens.CollisionLevelMap(new Vector2(0f, offsetY), grid, tile);
             int prevCol = -1, prevLatSign = 0;
 
             while (offsetY < 600f)

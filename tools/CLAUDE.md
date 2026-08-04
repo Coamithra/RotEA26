@@ -918,6 +918,21 @@ level-select screenshot cropped from the meme splash). Don't hand-edit.
   **this box runs up to eight worktree agents, so do not raise it casually.** It needs a built
   `eahl` (`dotnet build tools/headless -c Debug`) and, like `aiwallnav`, benches whatever was last
   built — rebuild after editing `PlayerShip.cs` or you will measure the old constants.
+- **`tools/sim/net_jip_sync.py`** (card 054947f3): the automated join-in-progress suite, and the
+  only tool here that drives **two eahl PROCESSES**. A real listed host plays a level, a fresh
+  menu-session joiner attaches to it every `--cadence` seconds, and the two worlds are DIFFED
+  entity by entity once the attach settles. Needs a built `eahl`; `--selftest` is its own vacuity
+  control (a run that tested nothing must come out RED).
+  ```sh
+  python tools/sim/net_jip_sync.py                  # the three story levels
+  python tools/sim/net_jip_sync.py --level Level2 --cap 120 --verbose
+  ```
+  **It is RED on `main` on purpose** -- it found a real defect on its first soak and the assertion
+  was not softened. Read net CLAUDE.md's "THE AUTOMATED JOIN-IN-PROGRESS SUITE" before quoting a
+  number from it: the tolerances, the measured `--settle-after`, the interleave skew that dominates
+  the position figure, and the three mutations that deliberately do NOT discriminate are all there.
+  It cannot live in `run_probes.py` (that runs ONE `eahl --script`); `probes/net_jip_dump.txt`
+  covers the half that fits.
 - **`tools/xnb/unpack.py`**: unpacked the original content; emits decoded RGBA verbatim (straight
   alpha — the basis for the project-wide straight-alpha rule).
 - **`tools/audit_add_order.py`**: lint for the ComponentBin instant-add contract (card 02d9ad67)

@@ -475,7 +475,90 @@ namespace EvilAliensWeb.Compat.Net
             INetTransport t = DebugFlags.NetRtc
                 ? (INetTransport)new WebRtcTransport(attachOnly: false)
                 : new BroadcastChannelTransport();
+            switch (DebugFlags.NetRole)
+            {
+            case NetRole.JipJoin:
+                // The joiner half of the two-process JIP rig (card 054947f3): a REAL menu
+                // session, exactly as NetLobby builds one -- so it sits at the menu with no
+                // world, mirrors the host's EvLaunch through MenuScene.NetLaunchMirror, warms
+                // and Initializes the level itself, and its own scene-up edge sends EvReady.
+                // That whole first half of an attach is unreachable from ?net=join, which boots
+                // straight into a level and so already holds a scene when it pairs.
+                StartMenuSession(g, host: false, t, DebugFlags.NetRoom);
+                return;
+            case NetRole.JipHost:
+                // The host half. It must NOT start a session here: a listed game is plain
+                // single-player until a stranger actually arrives, and starting early would
+                // make every NetSession.Active branch (the hit-stop refusal, the turbo lock,
+                // the client sim-split guards) fire for the whole run before the join. So the
+                // transport is opened and HELD, and the first inbound frame arms the real
+                // StartListedSession -- see TickPendingListedAttach.
+                pendingListedTransport = t;
+                pendingListedGame = g;
+                pendingListedRoom = DebugFlags.NetRoom;
+                t.OnData += OnPreSessionData;
+                t.Open(DebugFlags.NetRoom);
+                Console.WriteLine("[net] listed (join-in-progress) host armed on room "
+                    + DebugFlags.NetRoom + " -- single-player until a peer arrives");
+                return;
+            }
             StartWith(g, DebugFlags.NetRole == NetRole.Host, t, DebugFlags.NetRoom, asMenuSession: false, asListedSession: false);
+        }
+
+        // ---- ?net=jiphost: attach a real listed session when a peer shows up -----------------
+
+        private static INetTransport pendingListedTransport;
+        private static Game pendingListedGame;
+        private static string pendingListedRoom;
+        private static bool pendingListedArmed;
+
+        // Queued, never inline: this fires from the transport's own delivery callback, and
+        // starting a session enables NetIdRegistry over the live world. World mutation belongs
+        // on the game tick, the same rule OnPeerBye follows.
+        private static void OnPreSessionData(byte[] data, bool reliable, string from)
+        {
+            pendingListedArmed = true;
+        }
+
+        // Polled from Update() while nothing is Active. THE FRAME THAT ARMED US IS DROPPED, and
+        // that is fine rather than sloppy: the only thing a peer sends before pairing is its
+        // hello, which repeats at 1 Hz until the pairing settles (see HandleHello's callers), so
+        // the next one lands in a session that exists. Buffering it instead would mean
+        // re-injecting into a private rx queue from outside StartWith.
+        private static void TickPendingListedAttach()
+        {
+            // RE-ARM after a match ends. A listed host's session ending is not the end of the
+            // GAME -- it drops back to single-player and NetListing re-lists it under the same
+            // room code, which is exactly how a real host takes a second stranger. Stop() closed
+            // the transport, so a fresh one is opened; without this the whole soak gets one join.
+            if (pendingListedTransport == null && DebugFlags.NetRole == NetRole.JipHost
+                && pendingListedGame != null)
+            {
+                INetTransport re = new BroadcastChannelTransport();
+                pendingListedTransport = re;
+                pendingListedArmed = false;
+                re.OnData += OnPreSessionData;
+                re.Open(pendingListedRoom);
+                Console.WriteLine("[net] listed host re-armed on room " + pendingListedRoom
+                    + " -- back to single-player, waiting for the next peer");
+            }
+            if (!pendingListedArmed || pendingListedTransport == null)
+            {
+                return;
+            }
+            pendingListedArmed = false;
+            INetTransport t = pendingListedTransport;
+            Game g = pendingListedGame;
+            string room = pendingListedRoom;
+            // The transport reference is cleared (the session owns it now) but the GAME and the
+            // ROOM are kept: they are what the re-arm above needs when this match ends.
+            pendingListedTransport = null;
+            t.OnData -= OnPreSessionData;
+            // The REAL entry point NetListing uses, so the attach under test is production's:
+            // PeerConnected sends EvLaunch into our running level and EvReady triggers the
+            // ReplayLive + NetReplayCatchUp burst. StartWith re-Opens the transport, which is a
+            // no-op on one already open.
+            StartListedSession(g, t, room);
         }
 
         // Menu-lobby path (card 11.4) -- called by NetLobby once the DataChannels are up.
@@ -765,6 +848,9 @@ namespace EvilAliensWeb.Compat.Net
         {
             if (!Active)
             {
+                // ?net=jiphost holds an open transport with no session; this is the tick that
+                // turns a peer's arrival into the real StartListedSession.
+                TickPendingListedAttach();
                 return;
             }
             long now = NowMs;

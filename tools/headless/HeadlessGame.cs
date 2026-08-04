@@ -40,6 +40,10 @@ namespace EvilAliensWeb.Headless
         // SoundEffectInstance / dynamic audio, and skipping it leaks voices over a long run.
         internal void UpdateFrame(GameTime gameTime)
         {
+            // Deliver whatever the peer process sent BEFORE Update, so it is in NetSession's rx
+            // queue by the time NetSession.Update drains it -- the browser's JS callback lands
+            // ahead of the tick for the same reason. Inert (one bool test) with no ?net= role.
+            LocalSocketNet.Pump();
             FrameworkDispatcher.Update();
             Update(gameTime);
             FrameNumber++;

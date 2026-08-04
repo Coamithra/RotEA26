@@ -1526,6 +1526,20 @@ internal class MenuScene : Scene
 		// ring's dart timestamps above. Placed BEFORE the ?gamebrowser block so that branch's own
 		// netMode = true still wins on a boot that asks for the carousel.
 		ResetNetFlowState();
+		if (DebugFlags.NetRole == EvilAliensWeb.Compat.NetRole.JipJoin)
+		{
+			// ?net=jipjoin (card 054947f3): this boot IS a join-in-progress joiner, so the menu
+			// has to be in the net flow for NetUpdate to reach TakePendingLaunch at all -- that
+			// whole method returns early on `!netMode`, and without this the host's EvLaunch
+			// would sit in the latch forever while the joiner watched the main menu. Same shape
+			// as the ?gamebrowser block below, and placed beside it for the same reason: after
+			// ResetNetFlowState, which clears the flag on every entry to the menus.
+			//
+			// mainMenu is deliberately NOT removed here (EnterNetLobby's rule) -- there is no
+			// status panel to sit over it, the launch mirror arrives within a second or two, and
+			// leaving the menu drawn is what makes a screenshot of a waiting joiner recognisable.
+			netMode = true;
+		}
 		if (DebugFlags.GameBrowser)
 		{
 			// ?gamebrowser: boot straight into the online-game carousel with injected fake

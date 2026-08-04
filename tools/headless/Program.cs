@@ -54,6 +54,14 @@ namespace EvilAliensWeb.Headless
         // Hand the game the DEVELOPER'S DESKTOP mouse, as every run did before card 83054936.
         // Off by default -- see HeadlessHost.Boot and DebugInput.SuppressPhysicalMouse.
         internal bool RealMouse;
+        // --nettime game: run the net layer's clock on GAME time (one --fps step per frame)
+        // instead of the wall clock. OFF by default so every existing probe is unchanged.
+        // Card 054947f3: --nodraw runs ~17x real time, so the wire's cadences (60 ms snapshots,
+        // 30 Hz ship state, 1 Hz score sync) fire ~17x too rarely PER UNIT OF WORLD MOTION and a
+        // two-process world diff measures that artifact rather than the code.
+        internal bool NetTimeGame;
+        // --net-port: override the port LocalSocketNet derives from ?room=. 0 = derive.
+        internal int NetPort;
     }
 
     internal static class Program
@@ -517,6 +525,15 @@ namespace EvilAliensWeb.Headless
                     case "--audio": opt.Audio = true; break;
                     case "--fake-no-audio-device": opt.FakeNoAudioDevice = true; break;
                     case "--real-mouse": opt.RealMouse = true; break;
+                    case "--net-port": opt.NetPort = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture); break;
+                    case "--nettime":
+                    {
+                        string mode = Next(args, ref i);
+                        if (mode == "game") opt.NetTimeGame = true;
+                        else if (mode == "wall") opt.NetTimeGame = false;
+                        else throw new ArgumentException("--nettime wants game or wall, got '" + mode + "'");
+                        break;
+                    }
                     case "--help":
                     case "-h":
                         return false;
@@ -611,6 +628,14 @@ OPTIONS
                     headless run otherwise samples your real pointer AND your real buttons,
                     focus or no focus -- which silently flaked the probe suite (card
                     83054936). This restores that, and is the negative control for it.
+  --nettime <game|wall>
+                    which clock the net layer runs on. wall (default) is production's
+                    Environment.TickCount64. game advances it by one --fps step per frame, so
+                    the wire's cadences stay in step with world motion however fast the run
+                    goes -- required for a two-process co-op run, since --nodraw is ~17x real
+                    time and would otherwise starve the wire (card 054947f3)
+  --net-port <n>    port for the ?net= localhost loopback (default: derived from ?room=, so
+                    two processes sharing a room agree with no extra configuration)
   --software        rasterize on the CPU via Mesa llvmpipe, for machines with no GPU
   --mesa <dll>      path to Mesa's opengl32.dll (implies --software)
   --jscalls         dump which browser (ea*) calls the game made

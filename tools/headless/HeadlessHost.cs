@@ -37,6 +37,12 @@ namespace EvilAliensWeb.Headless
         private readonly TimeSpan _step;
         private TimeSpan _total = TimeSpan.Zero;
 
+        // --nettime game only. The clock is integer ms and the step is 16.666..., so the
+        // FRACTION is carried rather than truncated -- truncating loses 40ms per second, which
+        // over a 600s soak is 24s of drift between the two peers' cadences.
+        private Compat.Net.PinnedNetHost _netClock;
+        private double _netClockCarry;
+
         internal HeadlessHost(Options opt)
         {
             _opt = opt;
@@ -87,6 +93,22 @@ namespace EvilAliensWeb.Headless
             Compat.Net.WebRtcInterop.Init(_js);
             DebugFlags.Parse(_opt.Flags);
             LoadProfiler.Init(_js);
+
+            // The ?net= loopback's medium (card 054947f3). Which end dials is decided by the
+            // boot role, not by who opened first, and it must be set before Game1.Initialize
+            // reaches NetSession.Start -- which is the first eaNet.open.
+            LocalSocketNet.SetPortOverride(_opt.NetPort);
+            LocalSocketNet.ConfigureFromRole(DebugFlags.NetRole);
+            if (_opt.NetTimeGame)
+            {
+                // A PinnedNetHost DECORATOR, so only the clock changes: the build hash, the peer
+                // token and the debug flags all still come from production, which is what keeps
+                // a "deterministic" rig from quietly being a different rig (see its header).
+                _netClock = new Compat.Net.PinnedNetHost();
+                Compat.Net.NetHost.Current = _netClock;
+                Log("nettime  GAME time (" + _step.TotalMilliseconds.ToString("0.##")
+                    + "ms/frame) -- the wire's cadences track world motion, not the wall clock");
+            }
 
             // BEFORE the boot tick, which already polls input. There is no window to point at
             // here, but KNI's SDL2 backend does not know that: it answers Mouse.GetState() from
@@ -176,6 +198,13 @@ namespace EvilAliensWeb.Headless
                 // a bug: a script that does the whole run in one `step 3600` would then check
                 // exactly once, before any sound had ever played, and never apply it.)
                 HeadlessAudio.Pump();
+                if (_netClock != null)
+                {
+                    _netClockCarry += _step.TotalMilliseconds;
+                    long whole = (long)_netClockCarry;
+                    _netClockCarry -= whole;
+                    _netClock.Advance(whole);
+                }
                 _total += _step;
                 var gt = new GameTime(_total, _step);
                 // FrameProfiler's per-phase brackets live inside Game1 and so already run here,

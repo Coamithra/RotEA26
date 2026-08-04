@@ -3384,3 +3384,135 @@ GAME FIELD only** -- the resolved scene render target, never a camera, a canvas 
   Pinned by `tools/headless/probes/room_thumbnail_capture.txt` + `room_thumbnail_carousel.txt`.
   **Neither the real pull nor the JPEG round trip is reachable headlessly** (no WS, no DOM) -- that
   leg is a local `uvicorn` + Chrome pass.
+
+## THE AUTOMATED JOIN-IN-PROGRESS SUITE (card 054947f3) -- and what it found
+
+`python tools/sim/net_jip_sync.py` drives **two eahl PROCESSES** -- a real listed HOST playing a
+level and a real menu-session JOINER that attaches to it mid-level -- and DIFFS the two worlds
+once the attach has settled. It replaces the manual two-window Chrome pass as the REGRESSION
+gate; the manual pass stays the final real-network check, since nothing here reproduces WebRTC or
+signaling.
+
+```sh
+dotnet build tools/headless -c Debug
+python tools/sim/net_jip_sync.py                     # the three story levels, 600s each
+python tools/sim/net_jip_sync.py --level Level2 --cap 120 --verbose
+python tools/sim/net_jip_sync.py --selftest          # the tool's own vacuity control
+```
+
+**IT IS RED ON `main` AS OF THIS CARD'S MERGE, ON PURPOSE.** Its first soak found a real defect
+(below) and the assertion for it was NOT softened -- a verification tool that goes quiet on the
+first thing it catches has taught everyone to ignore it on day one. It is a standalone tool, not
+a `run_probes.py` probe, so red is a finding rather than broken CI.
+
+- **WHY TWO PROCESSES, and why that is not over-engineering.** The claim is "the joiner ends up
+  with the host's world", which is a DIFF and needs both worlds to exist -- and one process holds
+  one `Game.Components` (see the "TWO PEERS WITH INDEPENDENT WORLDS IN ONE PROCESS IS
+  UNREACHABLE" bullet). Everything else automated here scripts a peer onto a wire and covers one
+  leg; this is the only rig where the joiner runs `MenuScene.NetLaunchMirror`, warms and
+  `Initialize`s the level itself, and sends its own `EvReady` -- i.e. the first half of an attach.
+- **THE TRANSPORT IS THE EXISTING ONE.** `BroadcastChannelTransport` already IS the project's
+  instant-local transport; what it lacked headlessly was a backend, since eahl stubbed
+  `eaNet.open/send/close` as no-ops. `tools/headless/LocalSocketNet.cs` backs those three calls
+  with a localhost TCP socket -- **eahl-only, nothing under `INetTransport` changed, nothing
+  shipped changed**, and every existing two-tab `?net=` recipe becomes two-process-runnable for
+  free. The port is derived from `?room=` so both sides agree with no configuration
+  (`--net-port` overrides); a bind clash is REPORTED and survived, so a room-name collision
+  between two agents reads as "the host never paired" with the cause named above it.
+- **`?net=jiphost` / `?net=jipjoin` are the two boot roles.** The host holds an open transport
+  with NO session (a listed game is plain single-player until a stranger arrives -- starting one
+  early would fire every `NetSession.Active` branch for the whole run) and the first inbound
+  frame arms the REAL `StartListedSession`; the frame itself is dropped, which is free because
+  the hello repeats at 1 Hz. The joiner is a real `StartMenuSession` client, and
+  `MenuScene.Initialize` puts it in `netMode` or `NetUpdate` would never reach
+  `TakePendingLaunch`. **The joiner also needs `?netallowdebug`** -- `?net=` sets
+  `DebugFlags.Active` and a menu session refuses its own pairing while that is set; `DebugFlags`
+  says so out loud rather than waiving it. **The host RE-ARMS after each match**, which is what
+  makes a soak of repeated joins possible at all -- a listed host dropping back to single-player
+  and re-listing is production behaviour, not a rig affordance.
+- **`eahl --nettime game` is REQUIRED for a two-process run.** `--nodraw` runs ~17x real time, so
+  on the wall clock the wire's cadences (60 ms snapshots, 30 Hz ship, 1 Hz score sync) fire ~17x
+  too rarely PER UNIT OF WORLD MOTION and the diff measures that artifact. Off by default so
+  every existing probe is unchanged.
+- **THE ORACLE IS GENERIC, and `NetJipDump` is the observable.** One dump per peer, keyed by
+  netId: the base state (position, rotation, scale, frame, hp, dying) plus each entity's spawn
+  and state extras RE-ENCODED through its own descriptor, plus the scenery/music line and the
+  per-slot HUD. A key is SKIPPED when the entity's own declared seam says the game simulates it
+  locally (`NetFrameLocal` / `NetSpinPerMs` / `NetScaleLocal` / `NetPathOffset`) -- so a skip is
+  the GAME's statement, never a type name in the tool.
+  - **AN EXTRAS RE-ENCODE IS NOT A CONSTANT, and the differ leans on knowing it.**
+    `FlyingSpiderDescriptor`'s spawn anchor carries the swivel PHASE and `UfoDescriptor`'s spawn
+    flags carry `hasbonus`, both of which drift in play -- so two correctly-built ends
+    legitimately re-encode different spawn bytes and a byte compare cries wolf on every wasp.
+    The extras are therefore compared for LENGTH (a structural mismatch is still real) and the
+    dimension they were meant to cover is reported DIRECTLY as **`prov=`**, off the puppet
+    layer's own `SelfHealed` flag.
+  - Continuous replicated values get tolerances and the tool PRINTS `maxpos=` on every join so a
+    tightening regression is visible even while passing. Measured across 39 joins: 0.0-17.9 px
+    at the default `--chunk 3`, which is the interleave's own skew (one peer has always stepped
+    last) -- at `--chunk 30` a 0.16 px/ms UFO reads 79 px apart with nothing wrong.
+  - **`--settle-after` is MEASURED, not picked: 300 frames.** That is past the joiner's own 1.3 s
+    `GameScene.UpdateStartup` plus the 3 s `RecentRemovalWindowMs` the self-heal waits out, and
+    it is where the id sets first agree (Level2 seed 7: 4/4 joins match at 300, 0/4 at 120).
+    Going much higher stops testing the ATTACH -- at 600 the population has turned over and
+    deleting BOTH `ReplayLive` calls changes nothing.
+  - **The HUD is compared per FIELD, and a seat is a MIRROR rather than a match** -- slots are
+    identity-mapped, so "host slot 0 = Keyboard, joiner slot 0 = Remote" is the pairing being
+    correct. Levels and option counts are discrete and owner-authoritative, so they must agree
+    EXACTLY (this is card c5228350's join-in-progress catch-up); score rides a 1 Hz reconcile
+    against a provisional ledger and gets a tolerance, since the failure that design exists to
+    stop is a one-way DRIFT, which a tolerance still catches.
+  - **A host whose level has ENDED reports `scene none`, and the loop stops there** rather than
+    grinding out the remaining cadence against an empty world. The settle frames are charged to
+    `--cap` too: a join steps the host through the joiner's whole level warm, so charging only
+    the cadence made the cap under-count by ~3x and a 600 s run played the level out and then
+    reported a dozen vacuous joins.
+
+**THE DEFECT IT FOUND, and it is open: SOME ENTITIES IN A JOINER'S WORLD ARE PROVISIONAL.**
+Reproducible at roughly **12 of 39 joins** across the three story levels
+(`--cadence 20 --cap 600 --seed 7`), i.e. every level, not a Level-2 quirk.
+
+- A `prov=1` puppet was built by the SNAPSHOT SELF-HEAL on default spawn extras and no reliable
+  `EvSpawn` ever rebuilt it -- card de4d5d65's shape, at a real attach. Observed: a `UFO` on the
+  wrong saucer sheet (host `spawn=0800`, joiner `0000`), both `MarsBoss` twins (whose spawn extra
+  is the left/right position byte, so both can come up as the left one), `StarMine`, `EvilSkull`,
+  `Powerup`.
+- **It cascades into card 9ccfe295's precondition.** In the same join both `Lazer` puppets read
+  `spawn=0000` against the host's `6f00`/`7000` -- i.e. **owner = no emitter**, because
+  `FindPuppet` could not resolve a MarsBoss that did not exist yet. That is exactly the ownerless
+  beam that made a big laser UFO shoot itself dead on the joiner.
+- Joiner metrics at a failing join: `dupLive=0 dupBad=0 snapNew=2 snapDead=120`. `dupLive=0` says
+  the rebuild never got the chance -- the `EvSpawn` for those ids never arrived after the
+  self-heal; the large `snapDead` says a batch of ids was removed LOCALLY shortly before.
+- **Leading hypothesis, NOT pinned:** `GameScene.UpdateStartup` runs
+  `Collection.Purge<AlienDrawableGameComponent>(standing: false)` during the joiner's own 1300 ms
+  Startup -- AFTER `NetActiveScene` is set, so `EvReady` has fired and the host has already
+  replayed. The catch-up burst would be built and then wiped, leaving a blind window until the
+  snapshots self-heal the ids provisionally. It does not fully explain the data (one join split
+  the MarsBoss twins, one `prov=1` and one `prov=0`). **Note the precedent**: card 74403f83
+  exempted the puppet layer from the STANDING filter, and this purge is `standing: false`.
+- **`ReplayLive` on `EvReady` is doing less than it appears**, which is the same finding one
+  level up: deleting it -- or BOTH `ReplayLive` calls -- changes nothing measurable on Level 2 at
+  the shipped settle, because the self-heal reconstructs the world anyway (as provisionals).
+
+**MUTATION MATRIX, including the three that did NOT discriminate** -- each of those is a finding
+about the code, not a weak assertion, and re-deriving them is a waste of an afternoon:
+
+| mutation | result |
+|---|---|
+| delete `NetScene.Current?.NetReplayCatchUp()` from the `EvReady` handler | **RED**, naming the scenery line (host `speed=-0.012` vs joiner `speed=-0.6`). Needs a LATE join -- `--cadence 200 --cap 500`; at 20 s Level 2's scenery has not moved off its initial state and there is nothing to replay |
+| the tool's own `--selftest` (a joiner on a dead port; a `--cap` at the cadence) | **RED** on both arms -- the vacuity control, committed rather than performed once |
+| delete `NetIdRegistry.ReplayLive()` from the `EvReady` handler | **no change.** See the bullet above -- the self-heal covers for it |
+| force `CreatePuppet`'s extras length to 0 (every puppet built on defaults) | **no change.** The differ dropped extras-CONTENT comparison for the drift reason above, and `prov=` reads the self-heal flag rather than the bytes -- so an artificially defaulted puppet built from a real `EvSpawn` is invisible. Closing it means caching the bytes that CROSSED THE WIRE on both ends |
+| revert `Wall.NetScaleLocal` to false (`--level Level3 --host-extra "&wallsonly"`) | **no change**, and the reason is that another card already fixed it: protocol v19 raised the wire scale to 1/4096 with rounding, so the error `NetScaleLocal` defends against is now **0.090%**, far under any sane scale tolerance. `eaNetWalls` remains the pin |
+| drop `ReplayLive`'s `EvDying` re-announce | **not reached.** It needs a join timed into a 2.5-5 s deferred-death window, which the orchestrator does not control. `eaNetDeathFx` pins that beat directly |
+
+**WHAT IT DELIBERATELY DOES NOT COVER**, each because something else already pins it: the
+background APPLY path (`netbg_catchup.txt`), the slot-grant NEGOTIATION (`eaSlotTest`), the
+wall's collision-tile derivation (`eaNetWalls`), the ship-puppet lane (`eaNetFire` /
+`eaNetMotion` / `eaNetResetSpawn`), and the option-count catch-up's own arithmetic
+(`eaNetPickup` leg 6). It also never sees WebRTC, the signaling server or the room-code flow.
+
+`tools/headless/probes/net_jip_dump.txt` is the half that fits `run_probes.py` -- that the dump
+reports at all, and that `?net=jiphost` arms a listed host -- so a dump that silently stopped
+reporting cannot make the tool green.

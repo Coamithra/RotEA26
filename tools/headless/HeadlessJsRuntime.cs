@@ -119,6 +119,22 @@ namespace EvilAliensWeb.Headless
                 case "eaWebcam.overlayPixels":
                     return "";
 
+                // --- the eaNet loopback, over a localhost socket (card 054947f3) -----------
+                // These three were no-ops, which made a headless `?net=` boot open a channel
+                // with nobody on it. LocalSocketNet turns them into a real medium between two
+                // eahl PROCESSES; it is inert unless the boot carries a ?net= role, so every
+                // other run is unchanged. See LocalSocketNet's header for why this rather than
+                // a fourth INetTransport.
+                case "eaNet.open":
+                    LocalSocketNet.Open(Str(args, 0));
+                    return null;
+                case "eaNet.send":
+                    LocalSocketNet.Send(Str(args, 0), args.Length > 1 && args[1] is bool b && b);
+                    return null;
+                case "eaNet.close":
+                    LocalSocketNet.Close();
+                    return null;
+
                 // --- load profiler --------------------------------------------------------
                 case "eaLoadProfile.load":
                     return _loadProfile ?? "";
@@ -165,9 +181,6 @@ namespace EvilAliensWeb.Headless
                 case "eaWcTune.hide":
                 case "eaWebcam.begin":
                 case "eaWebcam.stop":
-                case "eaNet.open":
-                case "eaNet.send":
-                case "eaNet.close":
                 case "eaRtc.host":
                 case "eaRtc.join":
                 case "eaRtc.send":

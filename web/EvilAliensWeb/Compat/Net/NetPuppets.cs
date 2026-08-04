@@ -174,6 +174,46 @@ namespace EvilAliensWeb.Compat.Net
 
         public static int LiveCount => byId.Count;
 
+        // One live puppet, for a reader that needs the whole set rather than one id (card
+        // 054947f3's world dump -- the client-side counterpart of NetIdRegistry.Live). The
+        // typeIdx rides along because it is what selects the descriptor, and a caller re-encoding
+        // an entity's extras has no other way to get it.
+        internal readonly struct LiveEntry
+        {
+            internal LiveEntry(ushort id, byte typeIdx, INetEntity comp, bool provisional)
+            {
+                Id = id;
+                TypeIdx = typeIdx;
+                Comp = comp;
+                Provisional = provisional;
+            }
+
+            internal readonly ushort Id;
+            internal readonly byte TypeIdx;
+            internal readonly INetEntity Comp;
+
+            // Card de4d5d65's shape: built by the snapshot self-heal on DEFAULT spawn extras and
+            // not yet rebuilt by the reliable EvSpawn -- so it may be the wrong powerup type, the
+            // wrong saucer sheet, an untinted bonus carrier. It is the one thing about a puppet
+            // that cannot be read off the entity itself (a provisional UFO is a perfectly
+            // ordinary UFO), which is why the flag rides out here.
+            internal readonly bool Provisional;
+        }
+
+        // A SNAPSHOT of the live set, not a lazy view over `byId`: the caller walks it doing real
+        // work per entity (a descriptor re-encode), and a dictionary that grew a puppet mid-walk
+        // -- the rx drain can add one -- would throw an InvalidOperationException out of a
+        // diagnostic. Same rule DetectCollisions follows for the same reason.
+        internal static List<LiveEntry> LiveEntries()
+        {
+            var list = new List<LiveEntry>(byId.Count);
+            foreach (KeyValuePair<ushort, PuppetInfo> kv in byId)
+            {
+                list.Add(new LiveEntry(kv.Key, kv.Value.TypeIdx, kv.Value.Comp, kv.Value.SelfHealed));
+            }
+            return list;
+        }
+
         // True while the puppet layer itself is constructing/adding a puppet -- the ONLY
         // path allowed to add replicable types to a client world (see ComponentBin.Add).
         public static bool Constructing => constructing;

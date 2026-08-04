@@ -1266,6 +1266,15 @@
             try { return DotNet.invokeMethod('EvilAliensWeb', 'debugNetBgTest'); }
             catch (e) { return 'not booted'; }
         };
+        // eaNetJipDump() is eaNetBg() widened to the WHOLE replicated world: every live entity
+        // by netId with its base state and its descriptor's re-encoded extras, plus the scenery
+        // line and the per-slot HUD. Same usage — it is a DIFF between two peers, not a reading
+        // — and read-only, so it is safe in a real game. Automated by
+        // `python tools/sim/net_jip_sync.py`, which drives two eahl processes and diffs for you.
+        window.eaNetJipDump = () => {
+            try { return DotNet.invokeMethod('EvilAliensWeb', 'debugNetJipDump'); }
+            catch (e) { return 'not booted'; }
+        };
 
         // Debug: live-set the Mars jumping-spider alignment knobs (the ?harness=spiderjump /
         // ?level=Level2&spiders tuner). Drives Compat/DebugInput.SetSpider so the slider panel below

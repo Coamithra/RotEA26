@@ -62,7 +62,7 @@ render target, never a camera, a canvas or a page (`Compat/Net/NetRoomShot.cs`;
 | `{"t":"list",…,"shots":1}` | host only: declares this client understands a pull. Rooms that do not declare it are never pulled. |
 | *(server → host)* `{"t":"shot"}` | the pull |
 | `{"t":"shot","data":"<b64 jpeg>"}` | host only: stored as this room's thumbnail. Over `MAX_SHOT_BYTES` (48 KB) it is dropped whole, silently — an `error` reply would kill the host's listing. |
-| `{"t":"shotget","code":"ABCDE"}` | browser only (after browse): `{"t":"shot","code":..,"seq":..,"data":..}`, or `seq:0` with empty data when there is nothing fresh. Rate-limited per socket. |
+| `{"t":"shotget","code":"ABCDE"}` | browser only (after browse): `{"t":"shot","code":..,"seq":..,"data":..}`, or `seq:0` with empty data when there is nothing fresh. Rate-limited per socket — over the cap it is **answered empty, never dropped**, since the client retires a request only when an answer lands. |
 
 Browse entries gain `shot` (the sequence number, 0 = none) and `shotAge`. The
 bytes are **not** inlined there — a client fetches only the codes whose `seq`

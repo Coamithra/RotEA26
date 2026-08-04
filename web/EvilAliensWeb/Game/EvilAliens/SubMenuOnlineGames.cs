@@ -90,6 +90,7 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 			? games[selectedEntry].Code
 			: null;
 		games = new List<NetGameBrowser.GameEntry>(live);
+		PruneThumbnailTextures();
 		RemoveAllEntries();
 		// Card 0d166364: report any entry whose level resolved to no bundled art. That branch is
 		// only reachable off the wire, so nothing but a live stranger's build -- or
@@ -241,6 +242,36 @@ internal class SubMenuOnlineGames : SubMenuCarousel
 		{
 			// A thumbnail is a nicety; a texture we cannot create just means stock art.
 			return null;
+		}
+	}
+
+	// Drop the uploads for rooms that have left the listing. `DisposeThumbnail` alone only ever
+	// runs for a code still ON screen, so without this a browse session watching rooms open and
+	// close accumulates a 200x150 texture per code ever seen -- ~120 KB of VRAM each, for
+	// pictures of games that no longer exist. Called from the code-set-changed branch, which is
+	// exactly when a room can have gone.
+	private void PruneThumbnailTextures()
+	{
+		if (thumbTextures.Count == 0)
+		{
+			return;
+		}
+		HashSet<string> live = new HashSet<string>();
+		foreach (NetGameBrowser.GameEntry g in games)
+		{
+			live.Add(g.Code);
+		}
+		List<string> gone = new List<string>();
+		foreach (string code in thumbTextures.Keys)
+		{
+			if (!live.Contains(code))
+			{
+				gone.Add(code);
+			}
+		}
+		foreach (string code in gone)
+		{
+			DisposeThumbnail(code);
 		}
 	}
 

@@ -79,16 +79,20 @@ namespace EvilAliensWeb.Compat.Net
             public int Revision;
         }
 
-        public static IReadOnlyList<GameEntry> GamesForTest => games;
-
         private static readonly List<GameEntry> games = new List<GameEntry>();
         private static readonly Dictionary<string, int> pingByCode = new Dictionary<string, int>();
         private static readonly Dictionary<string, Thumbnail> thumbs = new Dictionary<string, Thumbnail>();
-        // Codes whose fetch is out on the wire. Cleared by the answer (including the empty
-        // "nothing stored" answer), so a room with no picture is asked once per seq change
-        // rather than once per frame.
-        private static readonly HashSet<string> shotInFlight = new HashSet<string>();
+        // Codes whose fetch is out on the wire, against the tick they were sent. Cleared by the
+        // answer (including the empty "nothing stored" one), so a room with no picture is asked
+        // once per seq change rather than once per frame -- and RETIRED after
+        // ShotRequestTimeoutMs, because an answer is not guaranteed to come at all: the stream
+        // can drop it, and the browse socket can die and be replaced. Without the timeout one
+        // lost frame pins that room on stock art for the rest of the visit.
+        private static readonly Dictionary<string, long> shotInFlight = new Dictionary<string, long>();
+        private const long ShotRequestTimeoutMs = 5000;
         private static int thumbRevision;
+
+        private static long NowMs => Environment.TickCount64;
 
         private static bool subscribed;
         private static readonly Queue<string> roomsQueue = new Queue<string>();
@@ -371,20 +375,31 @@ namespace EvilAliensWeb.Compat.Net
         // server-advertised sequence.
         private static void RequestMissingShots()
         {
+            long now = NowMs;
             foreach (GameEntry g in games)
             {
-                if (g.ShotSeq <= 0 || g.ShotAgeSec > StaleAfterSec)
+                bool servable = g.ShotSeq > 0 && g.ShotAgeSec <= StaleAfterSec;
+                if (!servable)
                 {
+                    // The SERVER has stopped offering a picture for this room -- it aged out, or
+                    // the host unlisted. Drop ours: the fetch gate alone would leave the last one
+                    // on screen forever (a host whose tab stops drawing answers no more pulls),
+                    // which is the opposite of the staleness bound both ends are supposed to
+                    // agree on.
+                    thumbs.Remove(g.Code);
+                    shotInFlight.Remove(g.Code);
                     continue;
                 }
                 if (thumbs.TryGetValue(g.Code, out Thumbnail have) && have.Seq == g.ShotSeq)
                 {
                     continue;
                 }
-                if (shotInFlight.Add(g.Code))
+                if (shotInFlight.TryGetValue(g.Code, out long sentAt) && now - sentAt < ShotRequestTimeoutMs)
                 {
-                    WebRtcInterop.ShotGet(g.Code);
+                    continue;
                 }
+                shotInFlight[g.Code] = now;
+                WebRtcInterop.ShotGet(g.Code);
             }
         }
 
@@ -497,7 +512,7 @@ namespace EvilAliensWeb.Compat.Net
                 thumbs.Remove(k);
             }
             stale.Clear();
-            foreach (string k in shotInFlight)
+            foreach (string k in shotInFlight.Keys)
             {
                 if (!live.Contains(k))
                 {

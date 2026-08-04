@@ -115,7 +115,8 @@ class Room:
         self.shots = False
         self.shot = ""            # base64 JPEG as the host sent it, "" = none
         self.shot_at = 0.0        # monotonic stamp of the stored shot
-        self.shot_seq = 0         # bumped per stored shot; 0 = never got one
+        self.shot_seq = 0         # bumped per stored shot; 0 = never got one.
+                                  # Monotone -- see drop_shot.
         # Where this room sits in the rotation: the value of `pull_counter` when
         # it was last PULLED, not when it last answered -- which is what keeps a
         # wedged host from starving anyone. It spends its own turn and the
@@ -133,13 +134,20 @@ class Room:
         return time.monotonic() - self.shot_at
 
     def shot_fresh(self) -> bool:
-        return self.shot_seq > 0 and self.shot_age() <= SHOT_MAX_AGE_SECONDS
+        return self.shot != "" and self.shot_age() <= SHOT_MAX_AGE_SECONDS
 
     def drop_shot(self) -> None:
-        """Forget the stored thumbnail (unlisted, or aged out)."""
+        """Forget the stored thumbnail (unlisted, or aged out by the sweeper).
+
+        `shot_seq` is deliberately NOT reset: it is what a client caches its
+        decoded copy under, so a room that unlists and re-lists inside one
+        browse refresh (~4 s -- one flick of the pause menu's room toggle)
+        would otherwise hand out a fresh picture under the seq the client
+        already holds, and be skipped. Monotone per room, like NetIdRegistry's
+        own counter across a Disable/Enable.
+        """
         self.shot = ""
         self.shot_at = 0.0
-        self.shot_seq = 0
 
     def expired(self) -> bool:
         return time.monotonic() - self.last_beat > ROOM_TTL_SECONDS
@@ -239,7 +247,7 @@ async def pull_once() -> Room | None:
     """Ask ONE host for a fresh thumbnail; return the room picked, if any.
 
     Round-robin by construction: always the candidate whose last pull is
-    oldest. Because `last_shot_pull` is stamped HERE rather than when an answer
+    oldest. Because `last_pull_seq` is stamped HERE rather than when an answer
     lands, a host that never answers simply forfeits its own turn -- it can
     never hold the rotation up for anyone else. Split out of the loop below so
     test_signal.py can drive a tick directly instead of sleeping for one.
@@ -271,6 +279,14 @@ async def _sweeper() -> None:
         expired = [room for room in rooms.values() if room.expired()]
         for room in expired:
             await _expire_room(room)
+        # Release the memory of a thumbnail that has aged past being servable
+        # (card e7404647). `shot_fresh` already stops it being advertised and
+        # served, so this changes no behaviour -- it stops a host that listed,
+        # answered one pull and went quiet from holding up to 48 KB for the
+        # rest of the room's 10-minute TTL.
+        for room in rooms.values():
+            if room.shot and not room.shot_fresh():
+                room.drop_shot()
 
 
 @contextlib.asynccontextmanager
@@ -465,12 +481,17 @@ async def ws_endpoint(ws: WebSocket):
                 # that server never emits the field, so this is never sent.
                 if browser_id is None:
                     await bad()  # must browse before fetching
-                elif not rate_allowed(shotget_times, SHOTGET_RATE_WINDOW, SHOTGET_RATE_MAX):
-                    pass  # silently drop; the carousel keeps the art it has
                 else:
                     code = str(msg.get("code", "")).strip().upper()
                     target = rooms.get(code)
-                    if target is not None and target.shot_fresh():
+                    # A rate-limited fetch is ANSWERED EMPTY, not dropped. The
+                    # client retires a request when the answer lands, so a
+                    # silent drop would wedge that code on stock art for the
+                    # rest of the browse session -- the cap is meant to bound
+                    # bandwidth, not to blacklist a room.
+                    if not rate_allowed(shotget_times, SHOTGET_RATE_WINDOW, SHOTGET_RATE_MAX):
+                        await _send_json(ws, {"t": "shot", "code": code, "seq": 0, "data": ""})
+                    elif target is not None and target.shot_fresh():
                         await _send_json(ws, {"t": "shot", "code": code,
                                               "seq": target.shot_seq, "data": target.shot})
                     else:

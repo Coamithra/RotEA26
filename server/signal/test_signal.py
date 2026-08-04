@@ -133,7 +133,14 @@ def unit_tests() -> None:
     s.shot_at = time.monotonic()
     record("a fresh shot advertises its seq", s.listing_entry()["shot"] == 1)
     s.drop_shot()
-    record("drop_shot clears the stored bytes", s.shot == "" and s.shot_seq == 0)
+    record("drop_shot clears the stored bytes", s.shot == "" and not s.shot_fresh())
+    # ...but KEEPS the sequence number. A client caches its decoded copy under
+    # (code, seq), so restarting at 1 after an unlist/re-list inside one browse
+    # refresh would hand it a new picture under a seq it already holds.
+    s.shot = "y"
+    s.shot_at = time.monotonic()
+    s.shot_seq += 1
+    record("a re-listed room's next shot gets a HIGHER seq", s.listing_entry()["shot"] == 2)
 
 
 async def run_tests(url: str) -> None:
@@ -425,6 +432,7 @@ async def run_tests(url: str) -> None:
         record("a non-answering host does not starve the rotation", False, repr(e))
 
     # 20. answer a pull -> the shot is advertised and servable
+    host = None
     try:
         host, code = await listed_host(url, shots=True)
         await main.pull_once()
@@ -442,10 +450,11 @@ async def run_tests(url: str) -> None:
         await bws.close()
     except Exception as e:
         record("an answered pull is advertised and served to a browser", False, repr(e))
-        return
+        host = None  # 21/22 need this host; 23 does not, so it still runs
 
     # 21. an oversized frame is dropped WHOLE -- the previous good shot survives
     try:
+        assert host is not None, "no host from case 20"
         await send(host, {"t": "shot", "data": "X" * (main.MAX_SHOT_BYTES + 1)})
         bws, rooms = await browse(url, proto="4", hash="h1")
         await send(bws, {"t": "shotget", "code": code})
@@ -458,6 +467,7 @@ async def run_tests(url: str) -> None:
 
     # 22. unlist drops the stored thumbnail
     try:
+        assert host is not None, "no host from case 20"
         await send(host, {"t": "unlist"})
         bws, _ = await browse(url, proto="4", hash="h1")
         await send(bws, {"t": "shotget", "code": code})
@@ -488,6 +498,25 @@ async def run_tests(url: str) -> None:
     except Exception as e:
         record("shot needs a host, shotget needs a browse, unknown code -> empty",
                False, repr(e))
+
+    # 24. a RATE-LIMITED shotget is answered empty, never dropped. A silent drop
+    #     would wedge that code on stock art for the rest of the browse session,
+    #     because the client only retires a request when an answer lands.
+    try:
+        saved = main.SHOTGET_RATE_MAX
+        main.SHOTGET_RATE_MAX = 1
+        bws, _ = await browse(url, proto="4", hash="h1")
+        await send(bws, {"t": "shotget", "code": "ZZZZZ"})
+        await recv_json(bws)                       # spends the one allowance
+        await send(bws, {"t": "shotget", "code": "ZZZZZ"})
+        limited = await recv_json(bws)             # over the cap -- must still answer
+        main.SHOTGET_RATE_MAX = saved
+        record("a rate-limited shotget still gets an answer",
+               limited.get("t") == "shot" and limited.get("seq") == 0, repr(limited))
+        await bws.close()
+    except Exception as e:
+        main.SHOTGET_RATE_MAX = saved
+        record("a rate-limited shotget still gets an answer", False, repr(e))
 
 
 async def main_async() -> int:

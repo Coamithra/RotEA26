@@ -513,6 +513,13 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   which shipped and merely looks rougher — so nothing throws and no counter moves. Menu-runnable
   and leave-no-trace; whether it is actually SMOOTHER is
   `python tools/sim/net_puppet_drive_sim.py --smoothness`'s question, not this one's),
+  `eaNetScriptedMotion()` (scripted motion -- card 76ec8bdb: the scripted-position bosses
+  announce the velocity they are moving at, so the host stops sending a zero across a marked park
+  and a whole-turn-stale difference at every phase boundary. Its ground-truth section drives the
+  REAL `SpiderBoss.Update` through a full choreography cycle and finite-differences the
+  displacement it actually produces, so the override cannot agree with a hand-copied expectation
+  table instead of with the game. Menu-runnable and leave-no-trace; whether it is actually
+  SMOOTHER is `python tools/sim/net_puppet_drive_sim.py --smoothness`'s question, not this one's),
   `eaNetWalls()` (the Level-3 wall's replication — cards 4392bd30 / 80749dc4: the base state's
   u16-at-1/256 scale is 4.9% out on a wall's tiny derived scale, which drew the joiner's grid 402px
   short of the host's and put its collision rows below its towers. Asserts that a real puppet keeps
@@ -1953,7 +1960,9 @@ the rest are tier-independent.
     reach zero rather than chase a decaying residual) catches the leftover equilibrium case.
   - **Each attractor's deadzone is sized by the ship's STOPPING DISTANCE**, which is
     `0.5 * ShipMaxSpeed^2 / ShipDeceleration` = **11.3px**. Below that the ship coasts out the far
-    side still under the pull and pingpongs; `DefaultSeekArriveDeadzonePx` is 30. The powerup's
+    side still under the pull and pingpongs; `DefaultSeekArriveDeadzonePx` is **15** since card
+    05a2b818, i.e. a margin of only 3.7px over that bound -- the 2008 value of 10 measured BETTER
+    and was rejected precisely because it falls UNDER it. The powerup's
     pull needs none (contact collects it, so the target stops existing) and the boss standoff's is
     its standoff radius. `logic_probe`'s **`ProbeAiFieldComposition`** derives the bound from the
     real motion constants and pins it, along with "no floor sits above the weakest force".
@@ -2047,7 +2056,11 @@ the rest are tier-independent.
       boss, tier and weapon in the game **except BrainBoss up close** -- its hull is 233->257px of
       body term against a 351px gun range, which undamped bands 13.5px falling to 10.0px at its
       pulse peak. Do not delete the damping as dead code.
-    - **MEASURED (eahl, Very_Hard, paired seeds 1-16 x2, N=32 per side).** `?level=Level3&brainboss`:
+    - **MEASURED (eahl, Very_Hard, paired seeds 1-16 x2, N=32 per side) -- PHANTOM-ERA, so read
+      the ratios and not the absolutes** (card 05a2b818). The re-baseline confirms the mechanism
+      survives both PR #298 and the field-range revert: `bossfar` still sits at 25-27% on the
+      `?brainboss` rig against the pre-card 99.9%, and `idle%` at 12-13% against 49.4%.
+      `?level=Level3&brainboss`:
       `bossfar` **99.9% -> 27.1%**, `idle%` (a shootable target on screen and no shot fired)
       **49.4% -> 12.4%**, powerups collected **45% -> 51%**. On the FULL Level 3 deaths are
       IDENTICAL seed-by-seed (10/8/8/9 both sides) while `bossfar` still falls
@@ -2077,6 +2090,10 @@ the rest are tier-independent.
   the largest single win the bot has had: **SpaceDodge 2/16 -> 16/16 victories, 33.75 -> 3.25
   deaths** (eahl, Very_Hard, 600s cap, seeds 1-8 x2, same-side pairs agreeing on every seed), with
   the death heatmap over those runs going 540 -> 51.
+  **NUMBERS SUPERSEDED (card 05a2b818): every figure in this bullet is phantom-era AND N=16.**
+  The shape's VERDICT survived re-audit at N=60 -- the cone and the wedge both earn their keep,
+  and `?aicone=0` / `?aiwedge=0` still cost 3.95 deaths on SpaceDodge -- but do not quote the
+  magnitudes. Current reference numbers are in the re-baseline table below.
   - **WHY A SHAPE AND NOT MORE STRENGTH.** A circle can only say "I am here"; it cannot say "I am
     about to be THERE". The bot's measured mean edge distance from an asteroid is 252px while the
     radial field falls under the 0.8 seek at 199px -- it spends its life outside the only warning
@@ -2141,6 +2158,52 @@ the rest are tier-independent.
     sweeps to the right screen edge, so the swept band is not symmetric about the body. That is
     choreography-as-data, which is what the field principle asks for -- the knowledge lives in the
     shape's INPUTS, not in a special case inside `DoAIMove`.
+  - **THE DEFAULT REFUSES A TELEPORT-SHAPED PATH, and finding out why fixed a live bug** (card
+    c1d783ad). `ObservedVelocity` is a raw ONE-FRAME position delta, so anything repositioned in a
+    single tick reports an enormous speed for that frame -- and cone length is `speed * ConeLeadMs`
+    capped at `ConeMaxLenPx`, so one such frame closes a full-screen corridor at full strength and
+    shoves the bot somewhere arbitrary. The default now returns false above a ceiling and says so
+    once per type on an `[ai] implausible swept path refused: <T> at <n> px/ms` line -- which is
+    the term's ONLY observable, since a refused cone changes no pixel and moves no counter.
+    - **The ceiling IS `NetSession.MaxObservedSpeedPxPerMs` (5.0), referenced, not copied** -- the
+      project's existing "that was a teleport, not motion" number, measured by `eaNetVelScan` from
+      the gap between the fastest genuine mover (~2.5 px/ms) and the slowest reposition (11.6).
+      The two uses differ in RISK DIRECTION -- over there a wrong value prints a spurious line,
+      here it deletes a real mover's cone -- so `logic_probe`'s `ProbeAiSweptPathGuard` asserts the
+      SEPARATION property (>= 2x the fastest real mover, <= half the slowest reposition). A
+      net-side retune that leaves that band fails there instead of quietly changing how the bot
+      flies. `?aisweptmax=<px/ms>` overrides it; **`0` turns the guard off**, which is the A/B seam.
+    - **THE HAZARD WAS LIVE, NOT LATENT, AND THE ROOT CAUSE WAS POOL RECYCLING.** `Initialize`
+      reset `netTeleported` per life but NOT `_prevPosition`/`_hasPrevPosition`, so a recycled
+      entity's first `Update` differenced its new spawn point against its PREVIOUS LIFE's last
+      position. Measured before the fix: `EvilBullet` at **14.9 px/ms against a declared 0.24**,
+      `UFO` 15.0, `EvilSkull` 21.4 -- i.e. every recycled bullet, UFO and skull was projecting a
+      bogus full-length cone, and `EvadeMovingThreat` (which reads `ObservedVelocity` directly)
+      was being fed the same phantom. The net layer never saw it: it keeps its own per-entity
+      history in `NetIdRegistry`, and its scan hit the identical artefact and reported the same
+      14.9. The three-line per-life reset is the fix; the guard is the safety net.
+    - **`EvadeMovingThreat` CONSULTS THE SAME PREDICATE, and it needs it more than the cone does.**
+      A reposition sails through its `ThreatMinSpeed` gate, collapses the time-to-closest-approach
+      to almost nothing and so lands inside `ThreatPanicMs` -- a `ThreatPanicStrength` shove of
+      **16**, four times `maxSteerStrength`, aimed along a course the thing never took. The screen
+      wrappers reach it for real, so the reset alone would not have covered it. Measured on Level 1
+      (the only rig where anything trips the guard), guarded vs `?aisweptmax=0`: 5.62 vs 3.75
+      deaths on one pass and 6.00 vs 5.62 on another -- i.e. inside that rig's own lottery, which
+      is the honest reading rather than a win.
+    - **THREE TYPES STILL TRIP IT, all correctly.** The SCREEN WRAPPERS are the reason the card
+      exists: a `wrapping` Braineroid and a wrapping `Ball` really do teleport across the screen
+      (each already calls `NetNoteTeleport` at the same site), measured at ~52 refusals a run on
+      Level 1 at 47.9 px/ms -- 52 bogus full-screen corridors that no longer exist. The third is
+      `MarsBoss`, which reads 7.8 px/ms for a SINGLE frame at the top of its entry ramp:
+      `eaNetVelScan` measured that same curve at 2.404 sustained over its 60 ms cadence, so 7.8 is
+      a finite-difference artefact of an acceleration sampled at 16.7 ms rather than a speed it
+      travels. Accepted at one frame of one cone per arrival; the body is still covered by the
+      radial field. **This is the general caveat: the ceiling was measured at 60 ms and is applied
+      per frame**, so an accelerating mover reads higher here than in the scan.
+    - Pinned by `logic_probe`'s `ProbeAiSweptPathGuard` (the measured genuine/reposition tables,
+      the boundary, the separation property) and the probe PAIR
+      `tools/headless/probes/ai_swept_guard.txt` (the line is absent on a recycle-heavy rig) +
+      `ai_swept_guard_trip.txt` (the same detector made to fire). Read the two as one probe.
   - **BOTH SUPERSESSION CANDIDATES WERE MEASURED AND BOTH SURVIVED -- nothing was deleted.** The
     card's ruling was to delete them outright; the match-the-number bar refuted it, which is what
     that bar is for. The cone is an ADDITION.
@@ -2153,7 +2216,12 @@ the rest are tier-independent.
     - `?ailaneescape=0` is therefore a PERMANENT A/B seam rather than the temporary one it was
       built as -- the escapes it disables now live on beside the wedge.
   - **SHIPPED WITH TWO STATED REGRESSIONS**, both on levels whose victory verdict is unchanged and
-    both smaller than what the shape buys:
+    both smaller than what the shape buys. **BOTH ARE NOW GONE and neither was fixed by a shape
+    change** (card 05a2b818): the CrazyGame one was recovered by PR #298's phantom fix and then
+    improved past its own pre-card figure by the field-range revert (3.93 deaths at N=60 against
+    the 4.75 this bullet calls the baseline), and the `SpiderBoss(standing)` figure was measured
+    on a rig this file now runs for 300s rather than 180s, so the two counts are not comparable at
+    all. Kept for the mechanism, not the numbers:
     - **CrazyGame deaths 4.75 -> 8.50** (victories 8/8 either way; it is a `Lives = -1` level).
     - **`SpiderBoss(standing)` deaths 12 -> 22**, while TOTAL spider deaths IMPROVE 6.50 -> 5.00.
       It is NOT the wedge -- `?aiwedge=0` makes it worse still (28). A standing boss sweeps nothing
@@ -2236,10 +2304,21 @@ the rest are tier-independent.
     was measured. `?ai*` overrides still win over the row.
   - The spread is deliberately **subtle**: a Mechanical Friend that visibly cannot play defeats
     the point of having one. Expect the gradient to show in the readout and NOT to the eye.
-  - **Only `ThreatFieldBasePx` and `AimSpreadRad` scale, and that is a MEASURED result.** Each
-    candidate was isolated by holding the tier fixed (so the level's own difficulty scaling could
-    not confound it) and moving one `?ai*` override: aim `15deg -> 57.3deg` moved Level1 progress
+  - **Only `ThreatFieldBasePx` and `AimSpreadRad` scale.** WHICH two knobs scale is a measured
+    result; the field column's VALUES are not (see the rescale note below). Each candidate was
+    isolated by holding the tier fixed (so the level's own difficulty scaling could not confound
+    it) and moving one `?ai*` override: aim `15deg -> 57.3deg` moved Level1 progress
     `50/64 -> 45/64`; field `190 -> 30px` moved spider-boss deaths `11 -> 14`.
+    **That field pair is PARK-ERA and its 190 is no longer the anchor -- do not quote the
+    numbers.** It survives only as evidence of the knob's DIRECTION at the extreme, and card
+    05a2b818 showed the response is not monotone between 150 and 190 anyway.
+  - **THE FIELD COLUMN IS RESCALED, NOT RE-MEASURED** (card 05a2b818). That card moved the anchor
+    190 -> 150, which would have collapsed the ladder outright (the old Easy row was itself 150),
+    so every field row is multiplied by 150/190: **118 / 129 / 139 / 150 / 150**. That preserves
+    each tier's spacing below the new anchor and nothing more -- the lower rows are the old
+    proportions and carry no evidence of their own. A fresh sweep is not the fix, either: the
+    argument two bullets down, that tier-vs-tier cannot be measured end-to-end because the
+    ENEMIES scale with the same tier, is exactly why only the anchor row is evidence-backed.
   - **`?aireact` and `?aithreatlead` stay OUT of the table -- but NOT because they are inert.**
     That verdict (n=1 each, on the one rig where each knob happens to be inert) was retired by
     card b174b00f, and the tuning campaign it called for (card 21bb6849) confirms both have large
@@ -2323,8 +2402,116 @@ the rest are tier-independent.
   story level on Very Hard (L1 game over at event 19/64, L2 at 45/104, L3 at 19/60) -- it dies to
   sustained bullet fire, and the sum-of-repulsions model is the wrong shape for bullet hell;
   "pick the safest reachable spot" is the next move. Level 1 on Medium is a VICTORY with 1 death.
-  **Single runs of a stochastic fight vary a lot -- differences
-  under ~30% are noise, which misled this card more than once.**
+- **HOW TO MEASURE ANYTHING HERE, and it is stricter than this file used to say** (card 05a2b818).
+  The old rule was "single runs vary a lot -- differences under ~30% are noise". That was right in
+  spirit and far too weak in practice. Per-seed deaths on these rigs range 0-17, so a 16-run mean
+  carries a standard error of ~2 deaths: during this audit a "46% improvement" at N=16 evaporated
+  at N=60, and the arm that looked WORST at N=16 turned out to be among the best. The rules:
+  - **N=60 per arm-rig is the floor** (seeds 1-30 x 2 captures). Nothing below N~60 is safe on
+    these rigs, whatever the percentage looks like. The old CrazyGame-specific caution (N=6 and
+    N=10 both misled card 21bb6849) was not a quirk of that rig -- it is the general case.
+  - **PAIR BY SEED and quote +-1 SEM of the PAIRED DIFFERENCE.** Every arm runs the same seeds,
+    and seeds are the dominant variance source, so pairing removes it and is far more powerful
+    than comparing two independent means. **An interval spanning 0 is not evidence.**
+  - **Same-side captures must AGREE before sides are compared.** A seed whose own two captures
+    disagree is an UNSTABLE world; a cross-arm difference resting on one is not a result. (This
+    is the `?seed=` near-determinism caveat, enforced rather than remembered.)
+  - **Read TIME-TO-VICTORY beside deaths -- deaths are a COUNT, not a RATE.** A build that takes
+    twice as long to finish the same world dies about twice as often in it while dodging exactly
+    as well. This is not hypothetical: the whole of card c1d783ad's handed-off SpaceDodge seed-4
+    "regression" was this and nothing else (that world: victory at 456s/17 deaths against
+    165s/4 on the same seed), and at N=30 the two builds are indistinguishable (4.83 vs 4.87
+    deaths). **There was no regression.**
+  - **The instrument is `python tools/sim/ai_sweep.py`**, which does all four by construction --
+    `--rig` x `--arm` x `--seeds`, paired stats, unstable-seed flagging, time-to-victory. Use it
+    rather than hand-rolling a loop; see tools/CLAUDE.md.
+  - **Every AI figure in this file predating merge f6b6504 (PR #298) was measured with
+    recycle-phantom cones in the world, and most predate N=60 as well.** Treat all of them as
+    hypotheses. The re-baselined reference set is in the next bullet.
+
+#### THE RE-BASELINE, and what the port-era audit actually found (card 05a2b818)
+
+The user ruled the July-24-era tuning generation contaminated (every value chosen then was
+validated against a bot whose deliberate motion the 0.95 park was vetoing), and PR #298 then
+invalidated the rest by removing the recycle phantoms. So every port-changed constant was
+re-audited with the 2008 original as the **null hypothesis**: a port value survives only by
+BEATING the original in a paired A/B, and ties revert.
+
+**THE REFERENCE SET.** eahl, Very_Hard, `?aiplayer`, `?invuln` OFF, seeds 1-30 x2 (N=60), on the
+SHIPPED configuration at merge `01009f9`. Quote these, not anything older:
+
+| rig | flags | cap | deaths | victories | win@ |
+|---|---|---|---|---|---|
+| SpaceDodge | `?level=SpaceDodge` | 600s | 4.03 | 60/60 | 188s |
+| CrazyGame | `?level=CrazyGame` | 300s | 3.93 | 50/60 | 106s |
+| spider | `?level=Level2&spiderboss` | 300s | 8.87 | 3/60 | 83s |
+| Level 1 | `?level=Level1` | 600s | 7.02 | 12/60 | 441s |
+| BrainBoss | `?level=Level3&brainboss` | 300s | 5.00 | 2/60 | 299s |
+
+**Level 1 is the weak rig** -- 3 of 8 seeds were unstable at N=16 and it needs the full 600s to
+reach a verdict at all (at 300s it reads 0 victories on every arm, so the victory column carries
+no signal). Require a large effect there.
+
+**FOUR PORT VALUES WERE VALIDATED against their 2008 counterparts** -- paired diffs vs shipped,
+N=60, positive = worse:
+
+| suspect | 2008 arm | verdict |
+|---|---|---|
+| **steering low-pass** (90ms / 15ms urgent; 2008 had none) | `?aismooth=0&aismoothurgent=0` | **KEPT.** BrainBoss **+10.57 +- 0.30** -- 15.00 deaths on all 30 seeds, SEM 0.00, 900 PlasmaBall kills, coast 74%: a deterministic level-halting wedge. It helps the bullet rigs (-2.62 SpaceDodge, -3.67 CrazyGame) at `turn` 1488-2636 deg/s, i.e. **card f4d1721f's ~1050 deg/s jitter reproduces cleanly** post-park and post-phantom. |
+| **field curve FAMILY** `(1-t)^p` | `?aifieldcurve=classic` | **KEPT.** +11.37 +- 1.79 SpaceDodge, +10.20 +- 0.81 CrazyGame (0/60 victories). Re-confirms card e88e21ca / PR #289 under clean conditions. |
+| **falloff exponent p=3** | `?aifieldfall=2` | **KEPT.** +2.37 +- 0.94 CrazyGame, n.s. on the other four. |
+| **spider lane/sweep escapes** (port-added) | `?ailaneescape=0` | **KEPT.** +1.83 +- 0.64 and victories 5/60 -> 0/60. The wedge too (+1.72 spider, +3.95 SpaceDodge). e425781b's phantom-era supersession A/B holds up. |
+
+**TWO PORT VALUES WERE REFUTED AND CHANGED.**
+
+- **`ThreatFieldRange` base 190 -> 150**, size scale 1.8 KEPT. The formula's two parameters
+  separate cleanly and pull in opposite directions, so neither era's version is best:
+
+  Paired diffs (N=60) **against the PRE-CARD arm, `190 + 1.8*he`** -- not against the shipped
+  build, which is the `px150` row itself. Positive = that arm is worse than the pre-card one:
+
+  | arm | spacedodge | crazygame | spider | level1 | brainboss |
+  |---|---|---|---|---|---|
+  | `og150` = 2008 exactly (`150 + 0`) | -0.65 +-1.12 | **-3.57 +-1.10** | **+1.28 +-0.59** (vic 4->1) | +0.02 +-0.66 | **-1.60 +-0.38** (vic 6->14) |
+  | `px150` = what SHIPPED (`150 + 1.8*he`) | -0.68 +-1.32 | **-2.67 +-0.94** | -0.25 +-0.73 (vic 4->6) | +0.68 +-0.62 | +0.67 +-0.42 |
+
+  **The spider victory counts move between sweeps and that is the point, not a typo**: the
+  pre-card arm reads 4/60 here, 6/60 in the combined confirmation run, and the shipped build 6/60
+  here against 3/60 there. Victories on that rig are a 3-6-of-60 event, so their run-to-run spread
+  swamps any difference between these arms -- which is why the deaths column with its SEM is what
+  the verdict rests on, and why no single victory count in this table should be quoted alone.
+
+  The BASE is refuted (150 wins CrazyGame on both arms). The SIZE SCALE is validated (dropping it
+  costs the spider rig +1.28 deaths and 3 of 4 victories -- big-UFO kills 117 -> 187 -- because a
+  flat field is nothing next to a 90px-half UFO) and is simultaneously what makes BrainBoss
+  expensive (a ~250px hull draws a ~600px field). **What ships is neither era's formula and it
+  survives on measurement, not doctrine: zero significant losses on any rig.**
+- **`DefaultSeekArriveDeadzonePx` 30 -> 15.** Monotone on CrazyGame, flat on the other four --
+  paired against 30: **10px -3.60 +-0.86, 15px -2.87 +-0.85, 20px -1.97 +-0.96** (victories 36 ->
+  50 / 48 / 44 of 60). **10 -- the 2008 value -- measured BEST and was rejected anyway**, on the
+  bound rather than the number: it sits below the ship's 11.3px stopping distance, so the ship
+  cannot come to rest inside it and it stops being a deadzone at all. 15 is the smallest value
+  keeping `ProbeAiFieldComposition`'s invariant intact and takes ~80% of the win.
+
+**COMBINED, vs the old baked values** (`?aifieldpx=190&aiseekdeadzone=30`, N=60): CrazyGame
+**-3.70 +- 1.01** deaths (7.63 -> 3.93), victories 36 -> 50 of 60, win@172s -> 106s; SpaceDodge
+4.70 -> 4.03 and 58 -> 60 victories; Level 1 flat. **Shipped with two stated non-significant
+regressions**, in the e425781b tradition of stating rather than hiding them: spider deaths
+8.37 -> 8.87 (**+0.50** +- 0.66, victories 6 -> 3 of 60) and BrainBoss 4.30 -> 5.00 (**+0.70**
++- 0.40, victories 6 -> 2), both driven by the size scale the audit kept. (Positive = the NEW
+build is worse, as everywhere in this section.)
+
+**The difficulty ladder's field column was RESCALED, not re-measured** -- see
+`AiSkillByDifficulty`. Moving the anchor to 150 would otherwise have collapsed it (the old Easy
+row WAS 150), so every row is multiplied by 150/190. The lower rows are the old proportions and
+carry no evidence of their own; the doc's own argument that tier-vs-tier cannot be measured
+end-to-end is why.
+
+**Not suspects, struck on source inspection rather than measurement** (2008 == port, so there was
+nothing to audit -- verified in `src_decompiled/EvilAliens/PlayerShip.cs` `DoAIMove`/`DoAIFire`):
+the per-seat `dodgeAngle` (+-pi/16, +-pi/6), the four screen-edge repulsions (`steerRange` 150,
+strengths 0..4, `PowerCurve` exp 2, the 560px Floor bottom), the powerup's direct pull, the aim
+spread `Math.PI/12`, `SeekWeight` 0.8 and both 0.2 floors.
 
 #### The challenge-level completion matrix (card 9391f95a)
 

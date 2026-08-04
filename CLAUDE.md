@@ -304,7 +304,15 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   ?aiasteroidscale= ?aiasteroidrange= ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge=
   ?ailaneescape= ?aiconelead= ?aiconemaxlen= ?aiconewidth= ?aiconetaper= ?aiconefallalong=
   ?aiconefallacross= ?aiconescale= ?aiconespread= ?aiconewidthmin= ?aiwedgestrength=
-  ?aiwedgefall=`. Pair with `?aiplayer`.
+  ?aiwedgefall= ?aisweptmax=`. Pair with `?aiplayer`.
+  **`?aisweptmax=<px/ms>` is a GUARD, not a tuning knob** (card c1d783ad): above it the DEFAULT
+  swept-path seam refuses the path, because a raw one-frame position delta reports an enormous
+  velocity for anything repositioned in a single tick and the cone would sweep the screen for that
+  frame. `0` turns it off (the A/B seam). The value is `NetSession.MaxObservedSpeedPxPerMs`,
+  referenced rather than copied. **The same card found the hazard was LIVE**: `Initialize` did not
+  reset the observed-velocity history per life, so every POOL-RECYCLED entity reported a phantom
+  teleport on its first tick (`EvilBullet` at 14.9 px/ms against a declared 0.24). Details: web
+  CLAUDE.md.
   **The bench also reports `killers=<Type>:<n>` (with `SpiderBoss(standing)` split out),
   `pickups=<n>/<spawned>(<pct>%)` and `boss=<px> bossfar=<pct>`** (cards 31ceb6ff / ada9e839) --
   which is what turned "the AI runs into the stationary spider boss" and "the AI ignores
@@ -330,6 +338,14 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   **Do NOT tune the radial asteroid field -- FOUR axes were swept across three cards (magnitude,
   range, falloff, curve family) and none reaches the gate**; the `?aiasteroid*` seams exist to A/B
   against, not to ship a value.
+  **THE WHOLE PORT-ERA TUNING GENERATION WAS RE-AUDITED against the 2008 original (card
+  05a2b818), and the measurement bar moved with it.** Four port values were validated (the
+  steering low-pass, the field curve family, its exponent, the spider lane escapes); two were
+  refuted and changed (`ThreatFieldRange` base 190 -> 150 with the size scale kept; the seek
+  deadzone 30 -> 15). **Every AI number predating merge f6b6504 is a hypothesis** -- phantom-era,
+  and mostly N=16. **N=60 paired by seed is now the floor** (`python tools/sim/ai_sweep.py` is the
+  instrument, and reports time-to-victory because deaths are a count, not a rate). The re-baseline
+  reference table for all five rigs is in web CLAUDE.md.
   Details + all the tables: web CLAUDE.md.
   **Per-tier AI skill** (card c10e3e7f): the threat-field and aim-spread knobs resolve through
   `PlayerShip.AiSkillByDifficulty[]`, keyed off `Settings.EffectiveDifficulty` (the LOCK-aware

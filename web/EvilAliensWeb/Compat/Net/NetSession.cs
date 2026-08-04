@@ -168,6 +168,14 @@ namespace EvilAliensWeb.Compat.Net
         // a first cut at 3.0 clipped MarsBoss's own arrival, and the scan's own sampler was
         // differencing across POOL RECYCLES, which reported an EvilBullet whose declared speed is
         // 0.24 px/ms at a sustained 14.9.
+        //
+        // BLAST RADIUS BEYOND THE NET LAYER (card c1d783ad): the AI's swept-path seam
+        // (AlienDrawableGameComponent.AiSweptMaxSpeedPxPerMs) consumes this same constant, and
+        // there it IS a guard -- a value set too low deletes a genuinely fast mover's directional
+        // repellent instead of merely printing a line. `logic_probe`'s ProbeAiSweptPathGuard
+        // asserts the measured SEPARATION above (>= 2x the fastest real mover, <= half the
+        // slowest reposition), so a retune that leaves that band fails there rather than quietly
+        // changing how the bot flies.
         internal const float MaxObservedSpeedPxPerMs = 5.0f;
         private const long ScoreSyncIntervalMs = 1000;
         private const long HelloIntervalMs = 1000;
@@ -1981,8 +1989,9 @@ namespace EvilAliensWeb.Compat.Net
             entryFlags = teleported ? NetProtocol.NetSnapshotFlags.Teleported : NetProtocol.NetSnapshotFlags.None;
 
             bool anchored = c.NetPathAnchored;
+            bool scripted = c.TryGetNetScriptedVelocity(out Vector2 announced);
             Vector2 vel = ResolveBaseVelocity(c.NetSpeedVector, anchored, teleported, pos,
-                e.HasLastPos, e.LastPos, e.LastPosMs, now);
+                e.HasLastPos, e.LastPos, e.LastPosMs, now, scripted, announced);
             if (teleported)
             {
                 metrics.Teleports++;
@@ -1993,7 +2002,17 @@ namespace EvilAliensWeb.Compat.Net
                 // for them, not an observed one, so the safety net below would be measuring the
                 // wrong quantity. Neither anchored type repositions (a wasp and a rock fly a
                 // straight line and die off-screen), so there is no reposition site to miss.
-                NoteIfUnmarkedTeleport(c, vel);
+                //
+                // SCRIPTED TYPES ARE **NOT** SKIPPED, and the asymmetry is deliberate (card
+                // 76ec8bdb). Their wire velocity is announced rather than observed too, so it is
+                // equally unfit to measure -- but the SpiderBoss is this detector's principal
+                // subject, holding three of the game's four reposition sites, and it is the type
+                // most likely to grow a fourth. So the raw difference is recomputed here purely
+                // to be judged, and never reaches the wire. It is only reached on an UNMARKED
+                // turn, where that difference describes genuine motion.
+                NoteIfUnmarkedTeleport(c, scripted
+                    ? (pos - e.LastPos) / (now - e.LastPosMs)
+                    : vel);
             }
             e.LastPos = pos;
             e.LastPosMs = now;
@@ -2031,22 +2050,50 @@ namespace EvilAliensWeb.Compat.Net
         //     the longer the turn. Here the declared vector is not a fallback at all -- it is the
         //     baseline, exactly.
         //
-        // FOR THE FIRST TWO THE DECLARED SPEED IS THE BEST THE HOST HAS, NOT A GOOD ANSWER -- do
-        // not read that fallback as informative. Half the replicable set (the SpiderBoss included)
-        // moves by writing `Position` directly and never assigns `Speed`/`Direction`, so its
+        // A FOURTH branch, SCRIPTED, now outranks the two fallbacks above (card 76ec8bdb): a type
+        // that moves by writing `Position` can ANNOUNCE the velocity it is moving at, and that
+        // answer is used on EVERY turn, not only the ones the fallbacks would have caught. It
+        // beats the finite difference for the same reason the anchored branch does and one more:
+        // a difference reported at turn T describes [T-1, T] while the client dead-reckons over
+        // [T, T+1], so it is a whole turn stale at every phase boundary of a scripted set-piece
+        // -- and a boss stepping from a standing 0 to a 0.78 px/ms sweep leaves a COLLIDABLE
+        // puppet ~375 px behind at a 480 ms turn before popping. An announced velocity is
+        // forward-looking, which is the direction dead reckoning needs.
+        //
+        // WITHOUT A SCRIPTED ANSWER THE DECLARED SPEED IS THE BEST THE HOST HAS, NOT A GOOD
+        // ANSWER -- do not read that fallback as informative. Half the replicable set moves by
+        // writing `Position` directly and never assigns `Speed`/`Direction`, so its
         // NetSpeedVector is ZERO: a marked park sends zero velocity and the puppet stands still
-        // until its next turn, up to ~1.2 s in a big world. That is the correct trade against
-        // flinging it across the screen collidably. Fixing it properly means giving those types
-        // a real motion model -- the anchored branch is what that looks like, and they cannot
-        // take it as they stand, precisely because their declared vector is the thing that lies.
+        // until its next turn, up to ~1.2 s in a big world. That was the correct trade against
+        // flinging it across the screen collidably, and it is still what every type that has not
+        // taken the scripted seam gets. `SpiderBoss` is the one that has.
+        //
+        // ANCHORED STILL OUTRANKS SCRIPTED, and no type may hold both: the two answer the same
+        // question from opposite evidence (a declared vector that is honest, versus a script that
+        // makes the declared vector irrelevant), so a type claiming both is a contradiction the
+        // ordering resolves rather than a blend. eaNetScriptedMotion asserts none does.
         //
         // The CALLER still stamps LastPos/LastPosMs whatever this returns: they are the entity's
-        // observation history and must stay live in case a type ever stops being anchored
-        // mid-life.
+        // observation history and must stay live in case a type ever stops being anchored or
+        // scripted mid-life -- and for the SCRIPTED case the caller reads them back, to keep the
+        // unmarked-teleport safety net on the one type most likely to grow a reposition site.
         internal static Vector2 ResolveBaseVelocity(Vector2 declared, bool anchored, bool teleported,
-            Vector2 pos, bool hasLastPos, Vector2 lastPos, long lastPosMs, long now)
+            Vector2 pos, bool hasLastPos, Vector2 lastPos, long lastPosMs, long now,
+            // NOT defaulted, though only one type answers true today. A default would let a new
+            // caller -- or a suite written to the old signature -- opt out of the scripted branch
+            // by saying nothing, which is exactly how card c1a38ef9's anchored mutation survived
+            // an entire probe suite.
+            bool scripted, Vector2 announced)
         {
-            if (anchored || teleported || !hasLastPos || now <= lastPosMs)
+            if (anchored)
+            {
+                return declared;
+            }
+            if (scripted)
+            {
+                return announced;
+            }
+            if (teleported || !hasLastPos || now <= lastPosMs)
             {
                 return declared;
             }

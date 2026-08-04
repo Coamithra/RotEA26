@@ -754,6 +754,17 @@
             catch (e) { console.warn('[debug] eaNetTeleport failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: scripted motion (card 76ec8bdb) — the scripted-position bosses announce the
+        // velocity they are moving at, so a marked park no longer sends zero and a phase change
+        // is no longer a whole snapshot turn stale. Its ground-truth section drives the REAL
+        // SpiderBoss.Update and finite-differences the displacement it actually produces.
+        // Prints PASS/FAIL. Run from the MAIN MENU: it starts a real session and drives a real
+        // boss, so it skips itself over a live session or level.
+        window.eaNetScriptedMotion = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetScriptedMotion')); }
+            catch (e) { console.warn('[debug] eaNetScriptedMotion failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: scenario 6 of the same harness -- reset / pause / checkpoint ORDERING against
         // a REAL GameScene. DESTRUCTIVE: it applies a real EvReset and leaves the scene in its
         // reset branch, so run it in a throwaway ?level=Level2&invuln boot, never in a game you

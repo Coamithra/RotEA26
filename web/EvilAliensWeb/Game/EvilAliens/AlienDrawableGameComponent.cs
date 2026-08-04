@@ -223,10 +223,78 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		anchor = Position;
 		velocity = _observedVelocity;
 		halfWidth = AiHalfExtent();
+		// THE TELEPORT GUARD (card c1d783ad). `_observedVelocity` is a RAW ONE-FRAME position
+		// delta, so anything repositioned in a single tick reports an enormous speed for that
+		// frame -- and the cone's length is speed * ConeLeadMs capped at ConeMaxLenPx, so a
+		// teleport would project a full-length, full-strength corridor across the screen for one
+		// frame and shove the ship somewhere arbitrary. A reposition has no swept path to
+		// describe, so the honest answer is the same one a stationary thing gives: false. The
+		// body itself is still described by the radial field, which is unaffected.
+		//
+		// LATENT, NOT LIVE, AND THAT IS THE POINT: the known teleporter is SpiderBoss, which
+		// OVERRIDES this seam with its announced path and so never reaches here. The default is
+		// what every FUTURE type inherits silently, which is why the refusal reports itself.
+		if (!IsAiSweptPathPlausible(velocity))
+		{
+			ReportImplausibleSweptPath(this, velocity);
+			return false;
+		}
 		// Behaviour-neutral -- the consumer discards a negligible speed anyway -- but it keeps the
 		// "false means no meaningful swept path" contract above true of the DEFAULT and not only of
 		// its callers, so an override can rely on it.
 		return (velocity).LengthSquared() > 0.000001f;
+	}
+
+	// The ceiling on a believable OBSERVED speed, design px/ms, and the guard's whole decision --
+	// pure and static so `logic_probe` can call it with no Game, no entity and no rig.
+	//
+	// THE NUMBER IS NOT INVENTED HERE. It is `NetSession.MaxObservedSpeedPxPerMs`, the project's
+	// existing "that was a teleport, not motion" threshold, derived by `eaNetVelScan` from the
+	// measured gap between the fastest genuine mover (~2.5 px/ms) and the slowest reposition
+	// (11.6 px/ms) -- the derivation lives at that constant and is not copied here, so there is
+	// ONE number rather than two that can drift apart.
+	//
+	// THE TWO USES DIFFER IN RISK DIRECTION, so read the constant's own comment before touching
+	// it: over there it is a DIAGNOSTIC (the worst a wrong value does is print a line), here it
+	// is a GUARD (a value set too low silently deletes a genuinely fast mover's cone). What keeps
+	// the shared number safe is `logic_probe`'s ProbeAiSweptPathGuard, which asserts the
+	// SEPARATION property -- at least 2x above the fastest measured real mover and at most half
+	// the slowest measured reposition. A net-side retune that leaves that band fails there rather
+	// than quietly changing how the AI flies.
+	internal static float AiSweptMaxSpeedPxPerMs =>
+		EvilAliensWeb.Compat.DebugFlags.AiSweptMaxSpeedPxPerMs
+			?? EvilAliensWeb.Compat.Net.NetSession.MaxObservedSpeedPxPerMs;
+
+	// 0 disables the guard entirely (`?aisweptmax=0`) -- the A/B seam the card's measurement pass
+	// runs against, and the negative control for the probe.
+	internal static bool IsAiSweptPathPlausible(Vector2 velocity)
+	{
+		float ceiling = AiSweptMaxSpeedPxPerMs;
+		if (ceiling <= 0f)
+		{
+			return true;
+		}
+		return (velocity).LengthSquared() <= ceiling * ceiling;
+	}
+
+	// ONCE PER TYPE, and it is the guard's only observable -- a refused cone changes no pixel and
+	// moves no counter, so without this a future reposition site would be silently steering the
+	// bot for one frame per teleport with nothing to grep. The `NetSession.ReportUnmarkedTeleport`
+	// shape: the point is to name the type, not to count the frames.
+	private static readonly HashSet<string> reportedImplausibleSweptPaths = new HashSet<string>();
+
+	private static void ReportImplausibleSweptPath(AlienDrawableGameComponent comp, Vector2 velocity)
+	{
+		string type = comp.GetType().Name;
+		if (!reportedImplausibleSweptPaths.Add(type))
+		{
+			return;
+		}
+		Console.WriteLine("[ai] implausible swept path refused: " + type + " at "
+			+ (velocity).Length().ToString("0.0") + " px/ms (ceiling "
+			+ AiSweptMaxSpeedPxPerMs.ToString("0.0")
+			+ ") -- a one-frame reposition? announce the real path by overriding"
+			+ " TryGetAiSweptPath, or raise ?aisweptmax=");
 	}
 
 	// Rough half-extent of this thing's hull, mirroring the collision-type switch the AI's radial
@@ -717,6 +785,18 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		// pool with the latch still set -- and the fresh instance's first observation would go out
 		// marked, for a reposition that happened in a previous life somewhere else entirely.
 		netTeleported = false;
+		// Per-LIFE for the same reason (card c1d783ad), and it was MISSING -- which made the
+		// hazard above LIVE rather than latent. The observed velocity is a finite difference
+		// against `_prevPosition`, so a recycled entity's first Update differenced its new spawn
+		// point against its PREVIOUS LIFE's last position and reported a phantom teleport for one
+		// frame. Measured on stock rigs: EvilBullet at 14.9 px/ms against a DECLARED 0.24, UFO at
+		// 15.0, EvilSkull at 21.4 -- i.e. every recycled bullet, UFO and skull was projecting a
+		// bogus full-length cone. (The net layer never saw it: it keeps its own per-entity
+		// position history in NetIdRegistry. Its scan hit the identical pool-recycle artefact and
+		// reported the same 14.9 -- see NetSession.MaxObservedSpeedPxPerMs.)
+		_prevPosition = Vector2.Zero;
+		_observedVelocity = Vector2.Zero;
+		_hasPrevPosition = false;
 		foreach (Timer timer in timers)
 		{
 			timer.Reset();
@@ -989,6 +1069,45 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	// offset contributes nothing and only its CHANGE moves the puppet.
 	internal virtual Vector2 NetPathOffset => Vector2.Zero;
 
+	// ---- scripted motion (card 76ec8bdb) ------------------------------------------------
+	// Does this type know the velocity it is moving at RIGHT NOW, because its motion is a
+	// script it wrote rather than a Speed/Direction it declared? A true answer makes the HOST
+	// send this vector instead of the finite difference NetSession.CaptureBaseState measures.
+	//
+	// THIS IS THE THIRD SOURCE OF TRUTH, and it exists because the other two both fail for a
+	// scripted set-piece:
+	//   * NetSpeedVector LIES -- a type that writes Position directly never assigns
+	//     Speed/Direction, so its declared vector reads ZERO. That is why NetPathAnchored is
+	//     forbidden here (see its header): anchoring would dead-reckon a stale nothing;
+	//   * the FINITE DIFFERENCE is a whole snapshot turn LATE at every phase boundary. A
+	//     difference reported at turn T describes the interval [T-1, T] and the client applies
+	//     it over [T, T+1], so each phase change is dead-reckoned on the PREVIOUS phase's
+	//     velocity for up to a full turn -- `NetSession.SnapshotTurnMs` is live*60/16, i.e.
+	//     60 ms at 16 live entities, 480 ms at 128 and ~1.2 s at 320. The SpiderBoss steps from
+	//     a standing 0 to a 0.78 px/ms screen-crossing sweep, so at a 480 ms turn the puppet of
+	//     a COLLIDABLE boss trails the host by ~375 px and then pops past SnapThresholdPx. The marked-teleport case (card e79bb994) is the extreme of the
+	//     same defect and not a separate one: there the fallback is zero rather than merely
+	//     stale, so the puppet stands still instead of lagging.
+	// What this returns is therefore FORWARD-looking where a difference is backward-looking,
+	// which is the direction dead reckoning actually needs.
+	//
+	// THE CONTRACT IS "WHAT Update WILL DO ON THE NEXT TICK", and it is not the same contract
+	// as TryGetAiSweptPath's. That seam deliberately announces the velocity a frozen boss is
+	// ABOUT to move at, because a warning hold is exactly when the AI must already be leaving
+	// the lane. Here a paused entity is genuinely not moving and must report ZERO, or the
+	// puppet slides out of the park a second before the host does. Do not wire one to the other.
+	//
+	// ONLY OVERRIDE IT WHERE THE ANSWER IS EXACT, transcribed from the type's own Update. A
+	// wrong value here is dead-reckoned onto a collidable puppet on the other player's screen,
+	// which is the failure mode this whole family keeps re-learning. Any per-peer factor
+	// (Settings.DifficultyModifier, the oracle's scroll) must be applied HERE, host-side, so the
+	// wire carries real px/ms -- the Lazer sent-rate rule (card c1a38ef9).
+	internal virtual bool TryGetNetScriptedVelocity(out Vector2 velocity)
+	{
+		velocity = Vector2.Zero;
+		return false;
+	}
+
 	// ---- INetEntity (card 25ad0659 step 2c-ii) ------------------------------------------
 	// The net cores read this type through EvilAliensWeb.Compat.Net.INetEntity rather than by
 	// name. Every member above is already the implementation; these are the forwards for the
@@ -1062,6 +1181,11 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	bool EvilAliensWeb.Compat.Net.INetEntity.NetPathAnchored => NetPathAnchored;
 
 	Vector2 EvilAliensWeb.Compat.Net.INetEntity.NetPathOffset => NetPathOffset;
+
+	bool EvilAliensWeb.Compat.Net.INetEntity.TryGetNetScriptedVelocity(out Vector2 velocity)
+	{
+		return TryGetNetScriptedVelocity(out velocity);
+	}
 
 	void EvilAliensWeb.Compat.Net.INetEntity.NetSetFrame(float frame)
 	{

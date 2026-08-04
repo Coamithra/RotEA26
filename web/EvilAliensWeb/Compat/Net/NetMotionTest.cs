@@ -365,9 +365,9 @@ namespace EvilAliensWeb.Compat.Net
             Vector2 now = new Vector2(388f, 320f); // -12 px of X drift, +20 px of swivel
 
             Vector2 anchored = NetSession.ResolveBaseVelocity(
-                declared, anchored: true, teleported: false, now, true, last, 0L, 100L);
+                declared, anchored: true, teleported: false, now, true, last, 0L, 100L, scripted: false, announced: default);
             Vector2 observed = NetSession.ResolveBaseVelocity(
-                declared, anchored: false, teleported: false, now, true, last, 0L, 100L);
+                declared, anchored: false, teleported: false, now, true, last, 0L, 100L, scripted: false, announced: default);
 
             check("an ANCHORED entity's velocity is its declared vector, never differenced",
                 anchored == declared);
@@ -381,10 +381,10 @@ namespace EvilAliensWeb.Compat.Net
             // an anchored entity's first snapshot correct rather than a special case.
             check("with no history both paths fall back to the declared vector",
                 NetSession.ResolveBaseVelocity(
-                        declared, anchored: true, teleported: false, now, false, last, 0L, 100L)
+                        declared, anchored: true, teleported: false, now, false, last, 0L, 100L, scripted: false, announced: default)
                     == declared
                     && NetSession.ResolveBaseVelocity(
-                        declared, anchored: false, teleported: false, now, false, last, 0L, 100L)
+                        declared, anchored: false, teleported: false, now, false, last, 0L, 100L, scripted: false, announced: default)
                     == declared);
 
             // The teleport marker (card e79bb994) is the OTHER reason to refuse a difference, and
@@ -393,13 +393,13 @@ namespace EvilAliensWeb.Compat.Net
             Vector2 far = new Vector2(1200f, 300f);
             check("a MARKED teleport is not differenced either",
                 NetSession.ResolveBaseVelocity(
-                    declared, anchored: false, teleported: true, far, true, last, 0L, 100L)
+                    declared, anchored: false, teleported: true, far, true, last, 0L, 100L, scripted: false, announced: default)
                     == declared);
             // ...with its own control: the identical jump UNMARKED really is differenced, so
             // neither leg can be passing because the function refuses everything.
             check("...while the same jump UNMARKED is (the control for both branches)",
                 NetSession.ResolveBaseVelocity(
-                    declared, anchored: false, teleported: false, far, true, last, 0L, 100L)
+                    declared, anchored: false, teleported: false, far, true, last, 0L, 100L, scripted: false, announced: default)
                     != declared);
         }
 

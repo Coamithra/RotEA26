@@ -201,6 +201,16 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   `held |= MouseLatch.Consume(i)` lines -- turns 3, namely the two section-2 positives plus the
   leaves-nothing-latched check (that build never drains the latch at all), with every section-1
   leg still passing.
+- **Scripted-velocity ranking case set: `ProbeScriptedVelocity`** (card 76ec8bdb) --
+  `NetSession.ResolveBaseVelocity`, which now has FOUR branches, every one chosen by a flag or a
+  history bit rather than by the numbers. It pins the RANKING only (scripted beats both fallbacks
+  and the finite difference; anchored still beats scripted), because whether the SpiderBoss's
+  announced number is CORRECT is ground-truth work that needs a `Game` and lives in
+  `tools/headless/probes/net_scripted_motion.txt`. Every positive has the SAME call with
+  `scripted: false` beside it, which must give the pre-card answer -- without those a build
+  returning the announced vector unconditionally passes the lot. The declared vector is ZERO in
+  most rows on purpose: that is the real situation for a type that never assigns
+  `Speed`/`Direction`, and it is why the two fallbacks were not good enough in the first place.
 - **Latest case set: `?seed=<n>`** (card d937c721) -- the flag that seeds `RandomHelper`, the
   gameplay RNG. **It is here because the claim is about a SEQUENCE, not a picture**: an eahl A/B
   can only show that two frames happened to match, and the card's own measurements are why that is
@@ -220,6 +230,25 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   "a negative is clamped or refused" shape does not describe it. Mutation-tested: stubbing
   `RandomHelper.Reseed` to a no-op turns **4** legs FAIL -- note the divergence leg is NOT one of
   them (unseeded runs diverge anyway), which is what it is there to guard the opposite way.
+- **Newest case set: the AI's swept-path teleport guard** (card c1d783ad) --
+  `AlienDrawableGameComponent.IsAiSweptPathPlausible`, the predicate the DEFAULT
+  `TryGetAiSweptPath` consults before handing the AI a cone. **It is here because the ceiling is
+  SHARED with another layer**: it is `NetSession.MaxObservedSpeedPxPerMs`, where the same number is
+  only a diagnostic (a wrong value prints a line) while here it is a guard (a wrong value deletes a
+  real mover's directional repellent). So beyond the measured tables -- every genuine speed
+  `eaNetVelScan` recorded must pass, every measured reposition must be refused, both sides of the
+  boundary -- it asserts the SEPARATION PROPERTY (>= 2x the fastest real mover, <= half the slowest
+  reposition), which is what makes the cross-module reference safe: a net-side retune that walks
+  out of the measured gap fails HERE rather than quietly changing how the bot flies. One section
+  measures the MOTIVATION off the real `EvaluateSweptShape` rather than asserting it (at a
+  reposition's 42 px/ms the cone saturates `ConeMaxLenPx`, i.e. one frame really would close a
+  full-screen corridor). Its control is `?aisweptmax=0` restoring the pre-card behaviour, asserted
+  AFTER the refusals per the ordering lesson above, plus an ordinary override that must BITE -- or
+  "0 = off" would be indistinguishable from a flag that does nothing. Restores the override to
+  null and asserts the restore took. Mutation-tested twice: stubbing the predicate to `true` turns
+  **6** FAIL, and tightening the ceiling to a copied 3.0 turns **3** -- including the separation
+  leg, while MarsBoss's measured 2.404 still passes, which is exactly the silent mistune the
+  property exists to catch.
 - The probe deliberately does NOT reference `web/EvilAliensWeb` (that project targets
   browser-wasm and cannot be a `ProjectReference` of a desktop exe), so nothing in `web/` knows it
   exists and CI -- which only publishes `web/EvilAliensWeb` -- is untouched.
@@ -864,6 +893,31 @@ level-select screenshot cropped from the meme splash). Don't hand-edit.
   which pinned `contacts` at a flat 226 across four look-ahead depths, an artifact that read
   exactly like a result; **(4)** scroll speed is PINNED per table, never pooled -- run duration is
   `distance / scroll`, so averaging a sweep silently weights it onto the slowest rung.
+- **`tools/sim/ai_sweep.py`** (card 05a2b818): the paired-seed AI bench sweep driver — `--rig` x
+  `--arm` x `--seeds` through `eahl`, scored off `AiBench`'s machine-readable row. Use it instead
+  of hand-rolling a loop, because it applies the four measurement rules that a hand-rolled loop
+  silently breaks (web CLAUDE.md, the AI section's measurement bullet) — three enforced, the
+  fourth only FLAGGED:
+  **N=60 per arm-rig** (`--seeds 1-30 --captures 2`), **pairing by seed** with `+-1 SEM of the
+  paired difference` (seeds are the dominant variance source, so an unpaired comparison of two
+  16-run means cannot see a real 3-death effect — during that card a "46% improvement" at N=16
+  evaporated at N=60 and the arm that looked worst turned out best), **unstable-seed flagging**
+  — the one that is NOT enforced: a seed whose own two captures disagree is listed under
+  `UNSTABLE`, but it stays in the arm means and in the paired diff, so a conclusion resting on one
+  still comes out of the tool looking clean. Read that list before quoting a diff. And
+  **time-to-victory beside deaths** (deaths are a COUNT, not a rate: a build that takes twice as
+  long to finish a world dies twice as often in it while dodging just as well — that alone
+  explained card c1d783ad's handed-off "SpaceDodge regression", which did not exist).
+  ```sh
+  python tools/sim/ai_sweep.py --list-rigs
+  python tools/sim/ai_sweep.py --rig crazygame --rig spider \
+      --arm "shipped=" --arm "og150=aifieldpx=150&aifieldsize=0" --seeds 1-30 --captures 2
+  ```
+  Rigs are presets (level + the cap that card used) or `name:flags:seconds`; an arm is
+  `label=<bare ?ai* query>`, so `shipped=` is the baked configuration. `--workers` defaults to 4 —
+  **this box runs up to eight worktree agents, so do not raise it casually.** It needs a built
+  `eahl` (`dotnet build tools/headless -c Debug`) and, like `aiwallnav`, benches whatever was last
+  built — rebuild after editing `PlayerShip.cs` or you will measure the old constants.
 - **`tools/xnb/unpack.py`**: unpacked the original content; emits decoded RGBA verbatim (straight
   alpha — the basis for the project-wide straight-alpha rule).
 - **`tools/audit_add_order.py`**: lint for the ComponentBin instant-add contract (card 02d9ad67)

@@ -25,7 +25,8 @@ Server-initiated / error frames:
 | `{"t":"gone"}` | the other member disconnected; room deleted |
 
 One socket can host/join at most one room (a second attempt gets `bad`).
-`GET /health` returns `{"ok": true, "rooms": <count>, "listed": <count>, "browsers": <count>}`.
+`GET /health` returns `{"ok": true, "rooms": <count>, "listed": <count>,
+"browsers": <count>, "shots": <count>, "shotBytes": <total>}`.
 
 ## Public game browser (card 2001fbd8)
 
@@ -42,6 +43,36 @@ it never constructs a game session.
 | `{"t":"browse","proto":..,"hash":..}` | `{"t":"rooms","rooms":[{code,level,difficulty,players,ageSec},…]}` — only **listable** (listed + not full) rooms whose `proto` **and** `hash` match |
 | `{"t":"ping","code":..,"id":..}` | browser only (after browse): forwarded to that room's host as `{"t":"ping","id":..,"ref":<opaque>}` |
 | `{"t":"pong","id":..,"ref":..}` | host only: routed back to the originating browser as `{"t":"pong","id":..}` |
+
+## Room thumbnails (card e7404647)
+
+A listed room can carry a small JPEG of the host's game in progress, which the
+browse carousel draws instead of stock level art. **The server owns the
+schedule**: clients never upload unsolicited, they only answer a pull, and the
+budget is global — one pull per second across all rooms, round-robin by
+`last_pull_seq` (oldest first). More rooms therefore means staler thumbnails,
+never more load. Shots live in memory on the `Room` and die with it.
+
+**The thumbnail is a picture of the game field only** — the resolved scene
+render target, never a camera, a canvas or a page (`Compat/Net/NetRoomShot.cs`;
+`WebcamAliens` is not a listable level in the first place).
+
+| Client sends | Server replies / behavior |
+|---|---|
+| `{"t":"list",…,"shots":1}` | host only: declares this client understands a pull. Rooms that do not declare it are never pulled. |
+| *(server → host)* `{"t":"shot"}` | the pull |
+| `{"t":"shot","data":"<b64 jpeg>"}` | host only: stored as this room's thumbnail. Over `MAX_SHOT_BYTES` (48 KB) it is dropped whole, silently — an `error` reply would kill the host's listing. |
+| `{"t":"shotget","code":"ABCDE"}` | browser only (after browse): `{"t":"shot","code":..,"seq":..,"data":..}`, or `seq:0` with empty data when there is nothing fresh. Rate-limited per socket — over the cap it is **answered empty, never dropped**, since the client retires a request only when an answer lands. |
+
+Browse entries gain `shot` (the sequence number, 0 = none) and `shotAge`. The
+bytes are **not** inlined there — a client fetches only the codes whose `seq`
+changed, so an unchanged thumbnail costs nothing per refresh. A shot older than
+`SHOT_MAX_AGE_SECONDS` (180) stops being advertised and stops being served.
+
+Both `shots:1` and the `shot` listing field are the compatibility negotiation:
+an old client never declares, so a new server never pulls it; an old server
+never advertises a seq, so a new client never sends it `shotget`. Either deploy
+order is safe.
 
 Room TTL now counts from the **last beat** (or creation, if never beaten), so a
 listed game stays alive across a long level while unlisted 11.4 lobby rooms keep

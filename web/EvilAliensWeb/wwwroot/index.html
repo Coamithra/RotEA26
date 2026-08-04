@@ -633,6 +633,27 @@
         // predicate the hello gate uses plus the v6 handshake codec. Prints PASS/FAIL.
         // Best run from the main menu: over a LIVE session it skips the teardown-persistence
         // leg rather than wiping a real match's state, and says so in the report.
+        // Debug: room thumbnails (card e7404647). eaRoomShot() captures THIS frame through the
+        // real server-pull path and prints what it got (dimensions, byte count, alphaMin and the
+        // distinct-colour count that separates a real picture from a blank one).
+        // eaRoomShot.inject('CODE') additionally installs it as that room's carousel thumbnail,
+        // which is how a real game frame reaches the game browser with no server in the loop.
+        // Both only ARM the capture -- the [roomshot] line lands on the next frame.
+        window.eaRoomShot = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugRoomShot')); }
+            catch (e) { console.warn('[debug] eaRoomShot failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaRoomShot.inject = (code) => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugRoomShotInject', String(code || ''))); }
+            catch (e) { console.warn('[debug] eaRoomShot.inject failed: ' + e.message); }
+        };
+
+        // Debug: which game-browser rows draw a live thumbnail vs stock level art (card e7404647).
+        window.eaGameBrowserShots = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugGameBrowserShots')); }
+            catch (e) { console.warn('[debug] eaGameBrowserShots failed: ' + e.message); }
+        };
+
         window.eaKickTest = () => {
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugKickTest')); }
             catch (e) { console.warn('[debug] eaKickTest failed (game not booted yet?): ' + e.message); }

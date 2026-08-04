@@ -1,0 +1,36 @@
+# PROBE: the game browser prefers a live room thumbnail and falls back to stock art
+#
+# PINS:   card e7404647's carousel half. Two of ?gamebrowser=thumbs' four fake rooms carry a
+#         thumbnail and two do not, so ONE run covers both branches of SubMenuOnlineGames.ArtFor:
+#         draw the host's live picture when there is one, fall through to the card-0d166364
+#         EnsureArt chain when there is not.
+#
+#         Asserted through eaGameBrowserShots rather than a screenshot on purpose: a row whose
+#         thumbnail failed to install draws exactly what a row that never had one draws, so the
+#         picture cannot tell a working feature from a dead one. The per-code form also catches a
+#         thumbnail landing on the WRONG row, which a bare count would not.
+#
+#         The 200x150@1 is load-bearing too -- it is the store's dimensions and the SERVER's
+#         sequence number, so a thumbnail installed at the wrong size (which the carousel would
+#         happily stretch) or with a lost seq (which would make the client re-fetch it forever)
+#         both show up here.
+#
+# FAILURE MEANS: read the quoted [gamebrowser] line. `B29MT:stock` -> the install path is broken
+#         or the rig no longer runs. `QX7KP:200x150@1` -> the FALLBACK is broken and every row is
+#         getting a picture. entries=4 wrong -> the fake set changed and this probe's expectations
+#         need to change with it (see NetGameBrowser.InjectFakeGames).
+#
+# eahl: --flags "?gamebrowser=thumbs"
+
+step 200 nodraw
+mark
+eval GameBrowserShots
+expect      \[gamebrowser\] entries=4 thumbs=2 inflight=0
+# The two rigged rows carry a real picture at the capture size...
+expect      B29MT:200x150@1
+expect      KP8FN:200x150@1
+# ...and the other two must still fall back. Named individually rather than as "thumbs=2"
+# alone, so a pair of thumbnails installed on the wrong rows cannot pass.
+expect      QX7KP:stock
+expect      Z4HRW:stock
+quit

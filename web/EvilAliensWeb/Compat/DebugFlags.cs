@@ -1568,6 +1568,15 @@ namespace EvilAliensWeb.Compat
 		// noise you have to mentally discount. Bare ?gamebrowser is therefore the clean rig again.
 		public static bool GameBrowserFallback { get; private set; }
 
+		// ?gamebrowser=thumbs (card e7404647): the same boot, but two of the four fake entries
+		// also carry a synthetic ROOM THUMBNAIL, so a single screenshot shows both halves of the
+		// carousel's new rule -- prefer the live picture of the host's game, fall back to stock
+		// level art when there is none. It is the only offline way to see the thumbnail path at
+		// all: a real one needs a listed stranger, a signaling server and its pull schedule.
+		// A third value rather than a second flag because it is the same rig with one row of
+		// data changed, exactly as `fallback` is.
+		public static bool GameBrowserThumbs { get; private set; }
+
 		// ?netjip: the two-window join-in-progress test. Pair with ?level=<Name> (+ ?invuln):
 		// the host boots straight into a level, solo, and LISTS it despite the debug boot
 		// (NetListing's eligibility normally refuses a DebugFlags.Active / cheating host, so
@@ -3230,7 +3239,8 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "gamebrowser":
 					// Bare ?gamebrowser is the appearance rig (real-looking entries only).
-					// ?gamebrowser=fallback adds the two unmapped entries. An unrecognised value
+					// ?gamebrowser=fallback adds the two unmapped entries; =thumbs gives two
+					// entries a room thumbnail (card e7404647). An unrecognised value
 					// is REPORTED and treated as bare, for the ?teampartner reason: a typo would
 					// otherwise silently run the appearance rig while the run is labelled as the
 					// fallback one, and the missing entries look exactly like the bug.
@@ -3238,29 +3248,40 @@ namespace EvilAliensWeb.Compat
 					{
 						GameBrowser = true;
 						GameBrowserFallback = true;
+						GameBrowserThumbs = false;
+					}
+					else if (val != null && val.Trim().ToLowerInvariant() == "thumbs")
+					{
+						GameBrowser = true;
+						GameBrowserFallback = false;
+						GameBrowserThumbs = true;
 					}
 					else if (IsOn(val))
 					{
 						GameBrowser = true;
 						GameBrowserFallback = false;
+						GameBrowserThumbs = false;
 					}
 					else if (IsExplicitlyOff(val))
 					{
 						GameBrowser = false;
 						GameBrowserFallback = false;
+						GameBrowserThumbs = false;
 					}
 					else
 					{
-						// GameBrowserFallback is deliberately NOT written here: a repeated flag
-						// (?gamebrowser=fallback&gamebrowser=falback) keeps the earlier VALID
-						// value, per the ?flyspiderflatten convention, and the message names what
-						// is actually in force rather than what the typo would have set.
+						// GameBrowserFallback/Thumbs are deliberately NOT written here: a
+						// repeated flag (?gamebrowser=fallback&gamebrowser=falback) keeps the
+						// earlier VALID value, per the ?flyspiderflatten convention, and the
+						// message names what is actually in force rather than what the typo
+						// would have set.
 						GameBrowser = true;
 						Console.WriteLine("[debug] unknown ?gamebrowser= value '" + val
-							+ "' (expected fallback) -- ignored, listing "
+							+ "' (expected fallback or thumbs) -- ignored, listing "
 							+ (GameBrowserFallback
 								? "the unmapped entries too"
-								: "the real-looking entries only"));
+								: "the real-looking entries only")
+							+ (GameBrowserThumbs ? " with thumbnails" : ""));
 					}
 					if (GameBrowser)
 					{

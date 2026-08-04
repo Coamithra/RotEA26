@@ -3125,3 +3125,46 @@ the LEVEL-3 WALLS section above.
     degrades to exactly the pre-card behaviour (the level's opening backdrop) with no desync --
     unlike `EvCosmeticSwarm`, which had an old peer expecting per-entity spawns that stopped
     coming and so forced v10.
+
+## Room thumbnails -- the browse carousel shows the real game (card e7404647)
+
+A listed room carries a small JPEG of the host's game in progress, and
+`SubMenuOnlineGames` draws it instead of stock level art. **The thumbnail is a picture of the
+GAME FIELD only** -- the resolved scene render target, never a camera, a canvas or the page.
+
+- **THE SERVER OWNS THE SCHEDULE, and that is the whole design.** Clients never upload
+  unsolicited: the matchmaker PULLS (`{"t":"shot"}` on the room's existing signaling socket) on a
+  **global** budget of one pull per second across ALL rooms, round-robin by oldest-pulled. At <=15
+  listed rooms that is the ~15 s per-room refresh; beyond it the per-room interval stretches by
+  itself. **Degradation is staleness, never load** -- do not scale the budget with the room count.
+  The rotation is keyed on a COUNTER stamped when a pull is SENT, so a host that never answers
+  forfeits its own turn and can never starve anyone; `server/signal/main.py` says why it is not a
+  clock.
+- **CAPTURE IS C#, ENCODE IS JS, and the split is what makes it verifiable.**
+  `Compat/Net/NetRoomShot` books one `Game1.onPostDraw`, `ResolveBackBuffer`s the scene,
+  `DrawPresent`s it into a 200x150 RT (the `ScreenshotSaver.SaveScreenShot` recipe, alpha seal
+  included -- `toDataURL('image/jpeg')` composites a translucent canvas over BLACK, so an unsealed
+  frame reaches the server visibly darkened) and hands the RGBA to `eaRtc.sendShot`, which does the
+  JPEG. **`canvas.toDataURL` was the obvious route and is the wrong one**: no
+  `preserveDrawingBuffer`, the canvas carries the letterbox bars rather than the field, and none of
+  it runs under eahl. Coming back, JS decodes to RGBA too, so no C# code handles compressed bytes
+  in either direction.
+- **NEITHER HALF NEEDED A PROTOCOL VERSION -- this is signaling only, and the capability is
+  negotiated by DATA.** The host declares `shots:1` in its `list` frame and the server pulls only
+  declaring rooms; the client sends `shotget` only for a listing entry that carried a non-zero
+  `shot` seq, which an old server never emits. Both directions matter: an old host answering an
+  unknown pull would take the server's `bad` reply through `fail()` and LOSE ITS LISTING, and a new
+  client asking an old server would show "Browse failed". Either deploy order is safe.
+- **The carousel prefers the thumbnail and falls through to the card-0d166364 `EnsureArt` chain**
+  when there is none, when it is stale (>180 s, both ends agree) or when the room drops off the
+  list. `NetGameBrowser` holds the pixels keyed by CODE, not on `GameEntry` -- the entries are
+  rebuilt every ~4 s browse refresh and a thumbnail must outlive that.
+- **Verify with `eaGameBrowserShots()` / `eval GameBrowserShots`, not a screenshot** -- a row whose
+  thumbnail silently failed to install draws exactly what a row that never had one draws.
+  `?gamebrowser=thumbs` gives two of the four fake rooms a synthetic thumbnail (both branches in
+  one shot, no server); `eaRoomShot()` captures the live frame through the real pull path and
+  reports dimensions / alphaMin / a distinct-colour count that separates a real picture from a
+  blank one, and `eaRoomShot.inject('CODE')` puts a REAL captured frame in the carousel offline.
+  Pinned by `tools/headless/probes/room_thumbnail_capture.txt` + `room_thumbnail_carousel.txt`.
+  **Neither the real pull nor the JPEG round trip is reachable headlessly** (no WS, no DOM) -- that
+  leg is a local `uvicorn` + Chrome pass.

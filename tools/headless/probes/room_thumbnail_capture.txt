@@ -1,0 +1,42 @@
+# PROBE: a room thumbnail captures the live game field, opaque and non-blank
+#
+# PINS:   card e7404647. The matchmaking server pulls a picture of a publicly listed game
+#         every ~15 s; NetRoomShot.Capture is what produces one, by resolving the scene
+#         render target into a 200x150 RGBA buffer during Game1.onPostDraw.
+#
+#         Three things have to hold and NONE of them is visible in a screenshot of the game:
+#           - 200x150 / 120000 bytes: the size the carousel and the JS encoder both assume.
+#             A wrong size is silently dropped by eaRtc.sendShot's length check, i.e. rooms
+#             just quietly stop having thumbnails.
+#           - alphaMin=255: the SealAlpha pass (card d67755d2's defect, in a new place). The
+#             pixels are painted into a canvas and JPEG-encoded, and toDataURL composites a
+#             translucent canvas over BLACK -- so an unsealed frame reaches the server
+#             darkened in the shape of whatever background layers were drawing. RGB is
+#             always right, which is exactly why nothing else catches this.
+#           - colors=<big>: the capture is a PICTURE. A capture that resolved the wrong
+#             target, or ran outside the Draw, comes back as one flat colour -- and a flat
+#             dark frame and a real starfield are the same screenshot.
+#
+# FAILURE MEANS: read the quoted [roomshot] probe line. Wrong dimensions -> the constants or
+#         RenderScale changed under the DrawPresent. alphaMin < 255 -> the SealAlpha call is
+#         gone or ran before another blended draw. colors=1 -> the capture is blank; check it
+#         is still hooked to Game1.onPostDraw rather than called straight from the console.
+#
+# eahl: --flags "?level=Level2&invuln&noattract&seed=7"
+
+step 200 nodraw
+step 5
+mark
+eval RoomShot
+step 5
+# The positive control first: without this line every assertion below would pass on a run
+# where the capture never happened at all.
+expect      \[roomshot\] probe 200x150 bytes=120000
+expect      alphaMin=255
+# Two digits or more. A blank capture reports colors=1, a real frame hundreds (measured 315
+# on this boot, 1422 at the menu) -- so this discriminates without pinning a scene's exact
+# palette, which would make the probe a flake.
+expect      colors=[0-9][0-9]+
+expect-not  \[roomshot\] capture failed
+expect-not  \[roomshot\] probe FAILED
+quit

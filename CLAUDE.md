@@ -307,11 +307,13 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   ?aiwedgefall= ?aisweptmax= ?aitopedgepx= ?aitopedgestrength= ?ailazerpx= ?ailazerstrength=
   ?ailazerdodge=`. Pair with `?aiplayer`.
   **`?aiwallnav2008=1` is NOT one of those knobs -- it swaps the wall-steering ALGORITHM** (card
-  d79b7ea7): `findNextTileOnMap`'s per-tick left-vs-right re-decision plus the slam-the-steer push,
+  d79b7ea7): `findNextTileOnMap`'s per-tick left-vs-right re-decision and its ~6.6px probe,
   transcribed verbatim from `src_decompiled/`, in place of the port's committed-gap column search.
+  It swaps the APPROACH STEER only -- the slam-the-steer clamp (`ClampIntoWallSpace`) is 2008 code
+  the port KEPT, so there is nothing there to switch.
   It exists because no setting of `?aireact`/`?aiscanrows`/`?aicrosspenalty`/`?aigapmargin`
   reconstitutes the original, so the wall-nav constants had no null hypothesis to be audited
-  against. **The third deliberate bug reproduction** (the `?nethitstop=1` / `?netstaleguard=0` /
+  against. **Another deliberate bug reproduction** (the `?nethitstop=1` / `?netstaleguard=0` /
   `?netaimease=0` idiom) and IN `DebugFlags.Active` for that reason. Which algorithm actually ran
   is printed once per process as `[aiwallnav] steering: port|2008` -- the flags dump reports only
   the PARSE, and an arm that measured the shipped code twice prints a plausible table. Pinned by

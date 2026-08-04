@@ -47,7 +47,7 @@ namespace EvilAliensWeb.Compat
 	//   ?aiwallnav2008=1  steer through walls with the 2008 ORIGINAL's algorithm (card d79b7ea7):
 	//                  findNextTileOnMap's per-tick left-vs-right re-decision and the slam-the-
 	//                  steer push, instead of the port's committed-gap column search. The AUDIT's
-	//                  null hypothesis, and the third deliberate bug reproduction -- IN `Active`.
+	//                  null hypothesis, and another deliberate bug reproduction -- IN `Active`.
 	//   ?netstaleguard=0  turn the world-snapshot staleness guard OFF, so a reordered or late
 	//                  snapshot entry drags a puppet backwards again (card f5cf7a5c). The other
 	//                  deliberate bug reproduction, and in `Active` for the same reason. ON by
@@ -1366,16 +1366,18 @@ namespace EvilAliensWeb.Compat
 		public static float? AiWallCrossPenalty { get; private set; }
 
 		// `?aiwallnav2008=1` -- steer through walls with the 2008 ORIGINAL's algorithm instead of
-		// the port's (card d79b7ea7). Not a knob: `findNextTileOnMap` + the slam-the-steer block
-		// are a different algorithm from `SteerThroughWall`'s committed-gap column search, so no
+		// the port's (card d79b7ea7). Not a knob: `findNextTileOnMap`'s per-tick left-vs-right
+		// re-decision is a different algorithm from `SteerThroughWall`'s committed-gap search, so no
 		// combination of `?aireact`/`?aiscanrows`/`?aicrosspenalty`/`?aigapmargin` reconstitutes
 		// it -- which is why the wall-nav suspects could not be audited against the original at
 		// all until this seam existed.
 		//
 		// IN `Active`, the `?nethitstop=1` / `?netstaleguard=0` / `?netaimease=0` idiom: it
-		// deliberately reinstates behaviour the port replaced (measured at ~1050 deg/s of
-		// commanded-heading churn) and must never reach a public lobby. It is the AUDIT's null
-		// hypothesis, kept reachable so the comparison can be re-run rather than trusted.
+		// deliberately reinstates an algorithm the port replaced -- audited at +3.93 +- 1.54
+		// ownlevel deaths against the shipped one (N=60) -- and must never reach a public lobby.
+		// It is the AUDIT's null hypothesis, kept reachable so the comparison can be re-run
+		// rather than trusted. It swaps the APPROACH STEER only; `ClampIntoWallSpace` is 2008
+		// code on both sides, and the port's steering low-pass runs on both.
 		public static bool AiWallNav2008 { get; private set; }
 
 		public static float? AiThreatLeadMs { get; private set; }

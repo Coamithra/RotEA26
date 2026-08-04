@@ -31,7 +31,7 @@
 #         turns the second expect red while the flags line stays green -- exactly the silent
 #         failure this probe exists for.
 #
-# eahl: --flags "?level=Level3&wallsonly&aiplayer&aibench&noattract&invuln&aiwallnav2008=1&difficulty=Very_Hard"
+# eahl: --flags "?level=Level3&wallsonly&aiplayer&aibench&noattract&invuln&seed=1&aiwallnav2008=1&difficulty=Very_Hard"
 
 # The flag parsed AND survived into Active (the dump is gated on it). Asserted BEFORE the first
 # `mark` on purpose: this line is printed at BOOT, so a `mark` above it discards the very subject

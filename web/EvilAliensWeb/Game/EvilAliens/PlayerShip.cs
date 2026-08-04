@@ -2973,16 +2973,25 @@ public class PlayerShip : AlienDrawableGameComponent
 	// occupied tile is AsplodeWall() -- instant death -- so this is the one place the AI cannot
 	// afford to be approximate.
 	//
-	// What the 2008 code did, and why it jittered (all three measured with ?aibench). Reachable
-	// for real since card d79b7ea7 -- `?aiwallnav2008=1`, transcribed below as SteerThroughWall2008:
+	// What the 2008 APPROACH steer did, and what this replaced. Reachable for real since card
+	// d79b7ea7 -- `?aiwallnav2008=1`, transcribed below as SteerThroughWall2008:
 	//   * it probed a fixed `1.2 * dtMs * MaxSpeed` = ~6.6px ahead at 60Hz, against tiles
 	//     67..267px wide -- a fifth of a ship-width of warning at full closing speed;
-	//   * on a hit it SLAMMED the steer (`direction.X = -max(|direction.Y|, 1)`), a full reversal
-	//     rather than a push, so the next tick's clear probe threw it straight back;
 	//   * it re-picked left-vs-right every single tick, and a wall scrolling on by one row can
 	//     swap which side is cheaper, reversing the ship mid-approach.
-	// Together those spun the commanded heading at ~1050 deg/s. This version looks ahead by
-	// TIME, pushes proportionally, and commits to a gap.
+	// This version looks ahead by TIME, pushes proportionally, and commits to a gap.
+	//
+	// TWO CLAIMS THAT USED TO LIVE HERE WERE WRONG, both corrected by card d79b7ea7's audit:
+	//   * the SLAM (`direction.X = -max(|direction.Y|, 1)`) was listed as a third thing this
+	//     replaced. It is not: the slam is `ClampIntoWallSpace`, which the port KEPT verbatim --
+	//     see its own comment. `?aiwallnav2008=1` does not switch it either, because there is
+	//     nothing to switch it to.
+	//   * "together those spun the commanded heading at ~1050 deg/s" is not this term's figure.
+	//     That churn is the missing steering LOW-PASS (card 05a2b818 reproduces it cleanly at
+	//     `?aismooth=0`, and validates the low-pass on it); with the low-pass in place BOTH wall
+	//     algorithms are smooth, and the 2008 one is if anything smoother while dying more.
+	//     So do not defend these constants on churn -- they earn their keep on SURVIVAL, and the
+	//     audit's paired numbers are in web/EvilAliensWeb/CLAUDE.md.
 
 	// Steer toward the committed gap in this wall, and away from tiles that are close in the
 	// direction of travel. Called once per Wall in the steering loop; only ever adds to

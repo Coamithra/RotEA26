@@ -1919,7 +1919,7 @@ the rest are tier-independent.
 
     | suspect | 2008-ward arm | ownlevel diff | verdict |
     |---|---|---|---|
-    | **the whole algorithm** (`ColumnScore` + committed gap) | `?aiwallnav2008=1` | **+3.93 +- 1.54** | **VALIDATED.** Wall kills 266 -> 508, victories 38 -> 30 of 60. Beats its null hypothesis outright. |
+    | **the whole algorithm** (`ColumnScore` + committed gap) | `?aiwallnav2008=1` | **+3.93 +- 1.54** | **VALIDATED.** Wall kills 266 -> 508, victories 38 -> 30 of 60. Beats its null hypothesis on the approach steer (see the scope bullet below). |
     | **`WallScanRows` 4** | `?aiscanrows=1` (2008 saw rows y and y-1 only) | **+2.97 +- 1.21** | **VALIDATED.** |
     | **`WallReactionMs` 420** | `?aireact=80` | +0.13 +- 1.17 | **STANDS.** Flat here, but Level 3 Wall kills 188 -> 325; and Stage A had 800ms at +15.40 +- 1.53, 0 victories. A broad interior optimum. |
     | **`WallCrossPenalty` 4** | `?aicrosspenalty=0` (2008 had none) | +1.10 +- 0.83 | **STANDS, WEAK.** n.s. at 2 SEM; victories 38 -> 26 is suggestive only. |
@@ -1930,13 +1930,21 @@ the rest are tier-independent.
     and the cross penalty survive on the doctrine's tie-goes-to-nobody boundary rather than on a
     measured win. Their authority is real but small once the graded column search is in place --
     which is consistent with `og2008` (which removes ALL of it at once) being the only decisive row.
-  - **THE JITTER JUSTIFICATION DOES NOT REPRODUCE, and the port wins on survival instead.** This
-    file has long justified the wall-nav rewrite with card f4d1721f's ~1050 deg/s of commanded-
-    heading churn. Measured head to head at N=60, the 2008 arm churns **LESS** than shipped
-    (ownlevel `turn` 550 vs 769 deg/s, coast 22.7% vs 10.9%; Level 3 268 vs 333) -- while dying
-    substantially more. So it is the `revs/s=0 turn=0` trap in mirror image: the original is
-    smoother AND worse, and what the port bought is survival, not smoothness. **Do not defend
-    these constants on churn.**
+  - **THE ARM'S SCOPE, which bounds every number above: `?aiwallnav2008=1` swaps the APPROACH
+    STEER ONLY.** `ClampIntoWallSpace` is 2008 code either way (bullet above), and everything
+    downstream -- the adaptive low-pass, the repellent cancel floor, the noise floor -- is the
+    port's and keeps running. So these rows say "the 2008 gap search, inside the port's steering
+    stack, is worse", which is the question the constants live in; they do NOT price the 2008
+    steering stack as a whole.
+  - **DO NOT DEFEND THESE CONSTANTS ON CHURN -- the ~1050 deg/s belongs to a different knob.**
+    This file long justified the wall-nav rewrite with card f4d1721f's commanded-heading churn.
+    That figure is the missing LOW-PASS's, not this term's: card 05a2b818 reproduces it cleanly at
+    `?aismooth=0` and validates the low-pass on it, and the low-pass is in force on both arms
+    here. With it in place both wall algorithms are smooth and the 2008 one is *slightly smoother*
+    (ownlevel `turn` 550 vs 769 deg/s, coast 22.7% vs 10.9%) while dying substantially more --
+    the `revs/s=0 turn=0` trap in mirror image. **The wall-nav constants earn their keep on
+    SURVIVAL.** (This is not evidence against the low-pass, which was measured separately and
+    kept; it is evidence that churn cannot separate these two wall algorithms.)
   - **On `?level=Level3` the deaths column is SATURATED and cannot answer anything** (same card).
     All six arms read 8.3-8.5 deaths and 0/60 victories -- that is the life cap, i.e. GAME OVER at
     the same point every time, not six builds dodging equally well. Its `killers=Wall:` column is

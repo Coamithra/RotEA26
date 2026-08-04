@@ -294,8 +294,14 @@ def diff_entity(h, c, tol):
     # is card 9ccfe295's ownerless shape, the one that let a big laser UFO shoot itself dead on
     # the joiner. Compared EXACTLY: `owner=` is a netId, netIds are identity-mapped across the
     # pair, and the legitimately unowned beams (every SetupSingleShot shooter, GameScene's
-    # warm-up prime) report "-" on BOTH ends. The count of ids this ran on is the run-level
-    # positive control lives in eaNetIdReuse section 7 (see run_join).
+    # warm-up prime) report "-" on BOTH ends. This leg's positive control lives in
+    # `eaNetIdReuse` section 7, not here -- see run_join for why.
+    #
+    # THE ONE BENIGN DISAGREEMENT: an emitter's REMOVAL is not simultaneous on the two peers, and
+    # a beam drops its owner reference when its emitter leaves the world (Lazer.OnComponentRemoved,
+    # both ends). A dump landing inside that lag reads `owner N vs -` with nothing wrong. It is
+    # narrow -- one snapshot lane's worth -- so it is named rather than tolerated: a persistent
+    # disagreement is the defect, a single join's is worth re-running before believing.
     if h.get("owner") != c.get("owner"):
         bad.append("owner %s vs %s -- the two ends disagree about this entity's emitter "
                    "(card 9ccfe295's ownerless beam)" % (h.get("owner"), c.get("owner")))
@@ -490,8 +496,12 @@ def run_join(host, room, port, args, index, stats):
     # IS DETERMINISTIC: `eaNetIdReuse` section 7, pinned by
     # tools/headless/probes/net_id_reuse.txt, builds an owned beam on both a host world and a
     # client world and asserts the dump names the emitter (card 9a7ee4c0).
+    # EITHER end declaring an emitter is material -- the compare ran on that id whichever side
+    # named one, and counting only the host's would under-report exactly the asymmetry the leg
+    # exists to catch.
     owners = sum(1 for i in set(hd["ents"]) & set(cd["ents"])
-                 if hd["ents"][i].get("owner", "-") != "-")
+                 if hd["ents"][i].get("owner", "-") != "-"
+                 or cd["ents"][i].get("owner", "-") != "-")
     stats["owners"] += owners
 
     problems = diff_worlds(hd, cd, {

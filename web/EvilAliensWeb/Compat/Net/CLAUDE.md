@@ -1434,7 +1434,7 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     "the puppet ignores non-player contacts" silently drops shadows on Mars. With fix 1 removing
     the observed mis-simulation and fix 2 removing its destructive consequence, there is no
     remaining victim to justify the risk.
-  - **Verify with `eaNetIdReuse()`** (`Compat/Net/NetIdReuseTest.cs`, 35 assertions;
+  - **Verify with `eaNetIdReuse()`** (`Compat/Net/NetIdReuseTest.cs`, 48 assertions;
     `tools/headless/probes/net_id_reuse.txt`). MENU-ONLY and leave-no-trace, the `eaNetFx` shape.
     **The leg that carries the card is a PAIR** -- the ownerless configuration DAMAGES the
     emitter over the identical geometry and the owned one does not -- because "the UFO survived"
@@ -3455,7 +3455,12 @@ not a `run_probes.py` probe, so red is a finding rather than broken CI.
     dimension they were meant to cover is reported DIRECTLY as **`prov=`**, off the puppet
     layer's own `SelfHealed` flag -- and, one hop downstream, as **`owner=`**, the emitter's netId
     off the generic `INetEntity.NetOwner` seam (card 9a7ee4c0). Both are exact and compared
-    exactly; `owner=` reads `-` on BOTH ends for a legitimately unowned beam.
+    exactly; `owner=` reads `-` on BOTH ends for a legitimately unowned beam. **Its one benign
+    disagreement is an emitter's REMOVAL**, which is not simultaneous on the two peers: a beam
+    drops its owner reference when its emitter leaves the world (`Lazer.OnComponentRemoved`, both
+    ends), so a dump landing inside that lag reads `owner N vs -` with nothing wrong. One
+    snapshot lane wide -- a persistent disagreement is the defect, a single join's is worth
+    re-running before believing.
   - Continuous replicated values get tolerances and the tool PRINTS `maxpos=` on every join so a
     tightening regression is visible even while passing. Measured across 39 joins: 0.0-17.9 px
     at the default `--chunk 3`, which is the interleave's own skew (one peer has always stepped

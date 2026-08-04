@@ -679,10 +679,6 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
-        // ---- helpers -------------------------------------------------------------------------
-
-        // A real UFO through its own factory + Setup, planted off screen so nothing is drawn.
-        // `big` picks the laser-firing variant the card is about (11 hit points, mediumship).
         // ---- 7. the JIP dump reports the emitter, on BOTH ends (card 9a7ee4c0) --------------
         //
         // `net_jip_sync.py` compares `owner=` between the two peers' worlds, which is how an
@@ -814,6 +810,10 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
+        // ---- helpers -------------------------------------------------------------------------
+
+        // A real UFO through its own factory + Setup, planted off screen so nothing is drawn.
+        // `big` picks the laser-firing variant the card is about (11 hit points, mediumship).
         // The `owner=` token off the dump's `ent` line for one netId, or null when that entity is
         // not in the dump at all -- which is a different answer from "no emitter" and must not
         // read as one.

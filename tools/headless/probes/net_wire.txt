@@ -90,6 +90,6 @@ expect 5\. scaled-i16 motion rates
 # beside it. The DURATION is the field that carries the risk: it is what the far peer's copy of
 # the respawn clock actually runs for, and it is not a constant (it falls out of the dying
 # player's respawntimebonus as well as the difficulty).
-expect \[netwire\] 93 passed, 0 failed
+expect \[netwire\] 96 passed, 0 failed
 expect-not FAIL
 quit

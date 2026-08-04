@@ -110,7 +110,7 @@ namespace EvilAliensWeb.Compat.Net
         // degrades to exactly the pre-card behaviour (an ownerless beam) rather than
         // mis-parsing: the bump is the parallel batch's convention, not a forced
         // incompatibility.
-        public const byte ProtocolVersion = 18;
+        public const byte ProtocolVersion = 19;
         public const float InterpDelayMs = 100f;
 
         // ~30 Hz ship stream. INTERNAL because NetFireTest scripts its packet cadence against it.
@@ -211,7 +211,7 @@ namespace EvilAliensWeb.Compat.Net
         private const float PopSlackPx = 3f;
 
         private const int SnapshotMaxEntries = 16;   // <= ~500B/packet within extras budget
-        private const int SnapshotScratchBytes = 2 + SnapshotMaxEntries * 64;
+        private const int SnapshotScratchBytes = NetProtocol.SnapshotHeaderBytes + SnapshotMaxEntries * 64;
         private const int ExtraScratchBytes = 64;
         private const int DeathRecordCap = 512;
 
@@ -279,6 +279,12 @@ namespace EvilAliensWeb.Compat.Net
         // tx
         private static ushort txSeq;
         private static ushort txEventSeq;
+        // The world snapshot's own packet counter (card f5cf7a5c). Monotone for the whole SESSION,
+        // not per match: ResetPerMatchState deliberately leaves it alone, exactly as it leaves the
+        // tx/rx event sequences alone -- the puppet layer's id maps are cycled there, so no
+        // receiver carries a last-applied seq across a level anyway, and a counter that restarts
+        // is a counter something can mis-order.
+        private static ushort txSnapshotSeq;
         private static long lastStreamTx;
         private static long lastSnapshotTx;
         private static long lastScoreSyncTx;
@@ -666,6 +672,7 @@ namespace EvilAliensWeb.Compat.Net
             unmarkedTeleportReported.Clear();
             txSeq = 0;
             txEventSeq = 0;
+            txSnapshotSeq = 0;
             lastTxShotCount = 0;
             lastTxShip = null;   // also drops a stale ship reference from the previous session
             lastTxShipShots = 0;
@@ -1954,8 +1961,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            snapshotScratch[0] = NetProtocol.MsgWorldSnapshot;
-            snapshotScratch[1] = (byte)written;
+            NetProtocol.WriteSnapshotHeader(snapshotScratch, (byte)written, txSnapshotSeq++);
             byte[] packet = new byte[off];
             Array.Copy(snapshotScratch, packet, off);
             transport.SendStream(packet);
@@ -3241,7 +3247,7 @@ namespace EvilAliensWeb.Compat.Net
 
         private static void HandleWorldSnapshot(byte[] data)
         {
-            if (isHost || data.Length < NetProtocol.SnapshotHeaderBytes)
+            if (isHost || !NetProtocol.TryReadSnapshotHeader(data, out byte count, out ushort packetSeq))
             {
                 return;
             }
@@ -3254,7 +3260,6 @@ namespace EvilAliensWeb.Compat.Net
                 // our scene is up. (Counts as heartbeat above either way.)
                 return;
             }
-            int count = data[1];
             int off = NetProtocol.SnapshotHeaderBytes;
             for (int i = 0; i < count; i++)
             {
@@ -3263,15 +3268,38 @@ namespace EvilAliensWeb.Compat.Net
                     break;
                 }
                 metrics.SnapEntriesRx++;
-                if (NetPuppets.OnSnapshotEntry(netId, typeIdx, entryFlags, state, data, extraOff, extraLen, out bool popped, out SnapUnknownKind kind))
+                bool applied = NetPuppets.OnSnapshotEntry(netId, typeIdx, entryFlags, state, data,
+                    extraOff, extraLen, packetSeq, out bool popped, out SnapUnknownKind kind,
+                    out bool stale);
+                if (stale)
+                {
+                    // NOT a fault and not counted as an unknown id: the entry decoded fine and
+                    // named a puppet we hold, it was simply older than the sample already applied
+                    // to it. On an unimpaired link this stays at 0; it tracks the link's reorder
+                    // rate, so it is the observable for "how much backwards drag is this
+                    // connection producing" (card f5cf7a5c).
+                    //
+                    // COUNTED BEFORE `applied` IS BRANCHED ON, and that is deliberate: under
+                    // ?netstaleguard=0 the entry is stale AND applied, and the flag must change
+                    // only the drag, never the measurement it exists to let you take. Counting
+                    // this inside the not-applied arm made the negative control silently stop
+                    // reporting -- found by mutation-testing NetStaleTest, not by review.
+                    metrics.SnapStale++;
+                }
+                if (applied)
                 {
                     if (popped)
                     {
                         metrics.PuppetPops++;
                     }
                 }
-                else
+                else if (!stale)
                 {
+                    // `!stale` because a refused STALE entry is not an unknown id -- the id was
+                    // ours and the entry decoded perfectly. Folding it in here would put the
+                    // link's reorder rate into snapUnk, which is exactly the conflation card
+                    // 48ab9b2f split these counters to remove.
+                    //
                     // Keep the total AND why (card 48ab9b2f). Rebuilt/LeftDead are ordinary
                     // traffic -- their rates track the world's spawn and removal rates, so a
                     // busy level logs plenty of both on a perfectly healthy link. Refused is

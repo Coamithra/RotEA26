@@ -88,7 +88,7 @@ namespace EvilAliensWeb.Compat.Net
                 for (int i = 0; i < n; i++)
                 {
                     NetBaseState state = SpawnState(i);
-                    NetPuppets.OnSnapshotEntry((ushort)(IdBase + i), 0, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0,
+                    NetPuppets.OnSnapshotEntryNextSeq((ushort)(IdBase + i), 0, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0,
                         out _, out SnapUnknownKind kind);
                     // Collect AS WE GO, not after the loop: an ABORT below returns from inside
                     // the try, and the finally can only take back what `built` already holds.
@@ -128,7 +128,7 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     NetBaseState state = SpawnState(i);
                     state.Pos += new Vector2(3f, 2f);
-                    NetPuppets.OnSnapshotEntry((ushort)(IdBase + i), 0, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0,
+                    NetPuppets.OnSnapshotEntryNextSeq((ushort)(IdBase + i), 0, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0,
                         out _, out _);
                 }
 

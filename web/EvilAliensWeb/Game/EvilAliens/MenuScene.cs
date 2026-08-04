@@ -1532,7 +1532,8 @@ internal class MenuScene : Scene
 			// entries (no server, no WebRTC) so its appearance can be screenshotted.
 			// ?gamebrowser=fallback swaps in the variant that also lists two levels with no
 			// bundled art, for the EnsureArt fallback probe.
-			EvilAliensWeb.Compat.Net.NetGameBrowser.InjectFakeGames(DebugFlags.GameBrowserFallback);
+			EvilAliensWeb.Compat.Net.NetGameBrowser.InjectFakeGames(DebugFlags.GameBrowserFallback,
+				DebugFlags.GameBrowserThumbs);
 			netMode = true;
 			browsingGames = true;
 			onlineGamesMenu.Show();

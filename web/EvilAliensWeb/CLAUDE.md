@@ -551,10 +551,14 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `eaNetResetSpawn()` (the reset/`TryAdd` ship-puppet spawn scenario — card 25ad0659; the ONE
   **destructive** suite here: it pairs a real session onto the live level, so run it in a
   throwaway `?level=Level2&invuln` boot),
-  `eaNetDeathFx()` (join-peer death FX — cards 4e406eba / 303bfb5b / 13aa596c: a self-detonating
+  `eaNetDeathFx()` (join-peer death FX — cards 4e406eba / 303bfb5b / 13aa596c / f62116b5 /
+  ad9c8f8b: a self-detonating
   space mine goes out as `KillerSelf` instead of a silent despawn, and a deferred death
   (BattleSkull, the surviving MarsBoss) releases its frozen puppet so its own 2.5–5 s animation
-  plays locally. MENU-only and leave-no-trace, but it plants real entities off-screen and really
+  plays locally. Since ad9c8f8b it also WATCHES the four bosses' multi-phase deaths run to
+  completion on the released puppet — and covers the SpiderBoss, which is not a `KillableAlien`
+  and so used to stand intact for five seconds and then vanish on the joiner. MENU-only and
+  leave-no-trace, but it plants real entities off-screen and really
   kills them, so it skips itself over a live session or level. Nothing it does is drawn, but it
   is not silent — the real death paths play their real cues),
   `eaNetCosmetic()` (the decorative-swarm replication self-test — card 9a3175d0; run it inside
@@ -1458,6 +1462,59 @@ uses `Enabled=false`, not a pause layer -- so they still play here while a `shot
     `respawn_singleplayer.txt` and `logic_probe`'s `ProbeRespawnSummon`.
   - The netplay half -- both peers draw it, `EvRespawn`, protocol v17 -- is in
     [`Compat/Net/CLAUDE.md`](Compat/Net/CLAUDE.md).
+- **The evil grinning face of death (`EvilSkull.cs`) fires in VOLLEYS, and the volley length is
+  a ramp, not a bug (card d8344c17).** `shoottimer1` (5500 ms, 8000 ms once launched) rearms
+  `shoottimer2` (133 ms); each beat fires one `EvilBullet` and the volley ends at
+  `(int)(4 * Settings.DifficultyModifier)` beats. **The cap RAMPS with level time** -- the
+  modifier climbs `+0.17 * tier` per minute to a ceiling of `2 * tier` (or 2.4 on
+  Adaptive/Easy) and hard-resets to the tier floor on death, so the same enemy fires 4 early and
+  8-9 six minutes later:
+
+  | tier | volley at level start | volley at the ceiling (~6 min) |
+  |---|---|---|
+  | Easy, STORY levels only | 2 | **9** |
+  | Easy, challenge levels | 1 | 2 |
+  | Medium | 2 | 4 |
+  | Hard | 3 | 6 |
+  | Very_Hard | 4 | **8** |
+  | Inzane | 4 | **9** |
+
+  **The two Easy rows differ because `ApplyDifficultyPolicy` is called by `Level1/2/3` ALONE.**
+  On a story level it seeds the modifier at Medium's 0.6 and sets `AdaptiveDifficulty`, which
+  raises the ceiling to Inzane*2 = 2.4; the nine challenge levels instead inherit
+  `GameScene.Initialize`'s `AdaptiveDifficulty = false`, so Easy there runs the bare
+  `4 * 0.35 = 1` up to `2 * 0.35` -> 2. So the headline 9 is a story-level number.
+
+  **That ramp is 2008 behaviour and was DECLINED for change by the user on this card** -- it is
+  the intended balance, so do not "fix" a 9-shot volley. It is also why a bug report about this
+  enemy needs a long, high-tier soak to reproduce: a short run only ever sees the short end.
+  **The timer machinery itself is sound and was measured to be** -- 1236 fire events across three
+  rigs and four simulated frame rates (60/30/12/6) produced no volley over the cap and no beat
+  closer than 133 ms, so "some timer issue" is refuted. `Timer.Update`'s wrap loop SWALLOWS a
+  big dt rather than multiplying it, so a hitch loses beats; it cannot dump them.
+  - **TWO real defects were found and fixed, and both fail SILENTLY.** `bulletsfired` was the one
+    piece of a pooled `EvilSkull`'s state nothing reset, so a skull killed mid-volley handed its
+    count to the next skull out of the pool and truncated that one's volley (measured: 42 of 194
+    volleys, 21.6%, opened part-way through) -- which is what made the length feel random. It is
+    reset in `Initialize`, beside the `isdead`/`awarded`/`netTeleported` per-life block.
+    Separately, the fire gate tested `fadeintimer.Active` and **not the fade OUT**, so a skull
+    shot through its whole 800 ms dissolve, by the end of which `Draw` has ramped its alpha to
+    zero -- bullets from a source the player cannot SEE (measured: 41 bullets, 6.1% of the
+    level's skull bullets, including **7 volleys that started after the skull was already
+    invisible**). Both branches now gate on **`Fading`**. Note what that predicate does and does
+    not cover: `PlayerShip.CollidesWith` and both AI predicates exclude a `Fading` skull, so it
+    can be neither rammed nor aimed at by the bot, but **it is still shootable** --
+    `Bullet.CollidesWith` lists the type unconditionally.
+  - **Fixing the counter RAISES the average bullet count** (it stops volleys being truncated) --
+    intended: the complaint was unpredictability, not volume.
+  - **Rig: `?skullvolley`** prints a `[skull]` line per beat (`shot=i/cap`, `fade=`,
+    `shot_fired=`) and per rearm (`fired=`, which must always be 0). Console **`eaSkullVolley()`**
+    / `eval SkullVolley` dumps every live skull's volley state. Nothing about a skull's
+    appearance changes with its volley position, so there is nothing to screenshot.
+    **The carried counter is NOT visible in the shot stream** -- it makes a truncated volley look
+    like the seamless continuation of the previous skull's, and an analysis segmenting volleys by
+    shot index alone reported the BROKEN build as clean during this card. That is why the rearm
+    line exists. Pinned by `tools/headless/probes/evilskull_volley.txt` (both legs mutation-tested).
 - **Flying spider (Level 2):** reuses the HD reared-up sheet, so `FlyingSpider.SizeFactor`
   (baked `DefaultSizeFactor` 0.75) scales sprite AND box hitbox together; `?flyspiderscale=`.
   Fast-boot a dense endless swarm with **`?level=Level2&flyspiders`** (background variant, the only

@@ -408,14 +408,19 @@ namespace EvilAliensWeb.Compat.Net
 
         // One world-snapshot packet carrying a single entry, built with the real WriteSnapshotEntry
         // so an entry-layout change moves this with it rather than silently passing.
+        private static ushort snapshotSeq;
+
         private static byte[] SnapshotFor(ushort id, byte typeIdx, byte flags, in NetBaseState state)
         {
             byte[] scratch = new byte[NetProtocol.SnapshotHeaderBytes
                 + NetProtocol.SnapshotEntryBaseBytes + 1];
             int off = NetProtocol.SnapshotHeaderBytes;
             NetProtocol.WriteSnapshotEntry(scratch, ref off, id, typeIdx, flags, state, null, 0);
-            scratch[0] = NetProtocol.MsgWorldSnapshot;
-            scratch[1] = 1;
+            // A MONOTONE seq per packet (card f5cf7a5c): the receiver refuses an entry that is
+            // not newer than the last it applied for that netId, so a hand-stamped header's
+            // fixed zero would make every packet after the first stale and this suite would
+            // silently stop delivering anything.
+            NetProtocol.WriteSnapshotHeader(scratch, 1, ++snapshotSeq);
             byte[] packet = new byte[off];
             Array.Copy(scratch, packet, off);
             return packet;

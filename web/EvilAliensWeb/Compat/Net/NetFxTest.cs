@@ -292,6 +292,8 @@ namespace EvilAliensWeb.Compat.Net
         // One world-snapshot packet carrying a single entry, so a scenario can drive a per-type
         // STATE EXTRA without a host to encode it. Built with the real WriteSnapshotEntry, so an
         // entry-layout change moves the callers with it rather than silently passing.
+        private static ushort snapshotSeq;
+
         private static byte[] SnapshotFor(ushort id, byte typeIdx, in NetBaseState state,
             byte[] extras, int extrasLen)
         {
@@ -300,8 +302,11 @@ namespace EvilAliensWeb.Compat.Net
             int off = NetProtocol.SnapshotHeaderBytes;
             NetProtocol.WriteSnapshotEntry(scratch, ref off, id, typeIdx,
                 NetProtocol.NetSnapshotFlags.None, state, extras, extrasLen);
-            scratch[0] = NetProtocol.MsgWorldSnapshot;
-            scratch[1] = 1;
+            // A MONOTONE seq per packet (card f5cf7a5c): the receiver refuses an entry that is
+            // not newer than the last it applied for that netId, so a hand-stamped header's
+            // fixed zero would make every packet after the first stale and this suite would
+            // silently stop delivering anything.
+            NetProtocol.WriteSnapshotHeader(scratch, 1, ++snapshotSeq);
             byte[] packet = new byte[off];
             Array.Copy(scratch, packet, off);
             return packet;

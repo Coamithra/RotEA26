@@ -1889,11 +1889,61 @@ the rest are tier-independent.
   frames. Rate-limiting the ANGLE instead is wrong: it forces a genuine 180 reversal the long way
   round.
 - **Wall navigation is look-ahead-by-TIME + a COMMITTED gap.** The 2008 code probed a fixed
-  `41.67 * MaxSpeed` = ~13.75px against tiles 67..267px wide, SLAMMED the steer on a hit
-  (`direction.X = -max(|direction.Y|,1)`), and re-picked left-vs-right every tick. Now:
+  `1.2 * dtMs * MaxSpeed` = **~6.6px** at 60Hz against tiles 67..267px wide, SLAMMED the steer on
+  a hit, and re-picked left-vs-right every tick. Now:
   `WallReactionMs` (baked 420) times the real closing speed (`MaxSpeed` + the wall's own
   `ObservedVelocity`); `ColumnScore` grades every column by clearance/travel/columns-to-cross and
   `GapSwitchMargin` stops it flip-flopping; the steer is proportional.
+  - **This bullet used to say the 2008 probe was `41.67 * MaxSpeed` = ~13.75px, and that was the
+    WRONG PROBE** (card d79b7ea7). ~13.75px is the 2008 *hard clamp*'s probe -- which the port
+    KEPT -- so the description credited the replacement with replacing something untouched, and
+    overstated the original's warning distance by 2x. The approach probe is a fifth of a
+    ship-width, not one ship-width.
+  - **`ClampIntoWallSpace` IS the 2008 block, not a port-era replacement** (same card, struck on
+    source inspection rather than measured). `src_decompiled/EvilAliens/PlayerShip.cs` lines
+    1114-1158: same two side probes at `41.666668 * MaxSpeed`, same ungated upward probe at 3x,
+    same `direction.X = -max(|direction.Y|,1)` slam. The port differs only in `WallClampMs` being
+    42 rather than 41.666668 (13.86px vs 13.75px, 0.8%), OR-ing the two corner probes into one
+    bool instead of assigning identically twice, and naming the 3x. **So it was never a suspect**
+    -- the 05a2b818 "struck on source inspection, 2008 == port" category. `?aiwallnav2008=1`
+    deliberately does not switch this half; there is nothing to switch it to.
+  - **The 2008 algorithm is REACHABLE, and that is what made this auditable** (`?aiwallnav2008=1`,
+    card d79b7ea7). `SteerThroughWall2008` + `FindNextTileOnMap2008` are verbatim transcriptions
+    with `src_decompiled` line ranges in their comments, kept so the comparison can be re-run
+    rather than trusted. Announces itself as `[aiwallnav] steering: 2008`.
+  - **THE WALL-NAV AUDIT (card d79b7ea7): NOTHING CHANGED, and here is the evidence.** The four
+    port-era constants were re-measured under card 05a2b818's doctrine -- `ai_sweep.py`, Very_Hard,
+    `?aiplayer`, `?invuln` OFF, seeds 1-30 x2 (N=60), paired diffs vs shipped, positive = worse.
+    Every one of them predated merge f6b6504, so their old N=30 campaign numbers were treated as
+    hypotheses and discarded rather than quoted.
+
+    | suspect | 2008-ward arm | ownlevel diff | verdict |
+    |---|---|---|---|
+    | **the whole algorithm** (`ColumnScore` + committed gap) | `?aiwallnav2008=1` | **+3.93 +- 1.54** | **VALIDATED.** Wall kills 266 -> 508, victories 38 -> 30 of 60. Beats its null hypothesis outright. |
+    | **`WallScanRows` 4** | `?aiscanrows=1` (2008 saw rows y and y-1 only) | **+2.97 +- 1.21** | **VALIDATED.** |
+    | **`WallReactionMs` 420** | `?aireact=80` | +0.13 +- 1.17 | **STANDS.** Flat here, but Level 3 Wall kills 188 -> 325; and Stage A had 800ms at +15.40 +- 1.53, 0 victories. A broad interior optimum. |
+    | **`WallCrossPenalty` 4** | `?aicrosspenalty=0` (2008 had none) | +1.10 +- 0.83 | **STANDS, WEAK.** n.s. at 2 SEM; victories 38 -> 26 is suggestive only. |
+    | **`GapSwitchMargin` 1.5** | `?aigapmargin=0` (2008 re-decided per tick) | +0.87 +- 0.80 | **STANDS, WEAK.** n.s. at 2 SEM. |
+
+    **Read the two weak rows honestly: they are "not refuted", not "confirmed".** Both point the
+    way the design argument says they should and neither clears 2 SEM at N=60, so the hysteresis
+    and the cross penalty survive on the doctrine's tie-goes-to-nobody boundary rather than on a
+    measured win. Their authority is real but small once the graded column search is in place --
+    which is consistent with `og2008` (which removes ALL of it at once) being the only decisive row.
+  - **THE JITTER JUSTIFICATION DOES NOT REPRODUCE, and the port wins on survival instead.** This
+    file has long justified the wall-nav rewrite with card f4d1721f's ~1050 deg/s of commanded-
+    heading churn. Measured head to head at N=60, the 2008 arm churns **LESS** than shipped
+    (ownlevel `turn` 550 vs 769 deg/s, coast 22.7% vs 10.9%; Level 3 268 vs 333) -- while dying
+    substantially more. So it is the `revs/s=0 turn=0` trap in mirror image: the original is
+    smoother AND worse, and what the port bought is survival, not smoothness. **Do not defend
+    these constants on churn.**
+  - **On `?level=Level3` the deaths column is SATURATED and cannot answer anything** (same card).
+    All six arms read 8.3-8.5 deaths and 0/60 victories -- that is the life cap, i.e. GAME OVER at
+    the same point every time, not six builds dodging equally well. Its `killers=Wall:` column is
+    the informative one there, and even that needs care: `?aiscanrows=1` posts the FEWEST wall
+    deaths of any arm (89 vs 188) while posting the most BattleSkull deaths (387 vs 302) -- a
+    reallocation under a fixed cap, not a safer bot, and ownlevel says that arm is significantly
+    WORSE overall. **Use `ownlevel` for a wall-nav verdict and Level 3 only for colour.**
   - **`ColumnScore` is GRADED, never a pass/fail `IsPassable`.** In a dense maze section no column
     is clear for the full look-ahead, so a boolean test reports "nothing passable" -- and an
     earlier revision then held station and let the wall scroll into the ship. There is always a

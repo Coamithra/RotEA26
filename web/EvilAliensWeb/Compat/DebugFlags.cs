@@ -44,6 +44,10 @@ namespace EvilAliensWeb.Compat
 	//   ?netaimease=0     turn the enemy charge glow's aim EASE off, so a puppet's telegraph
 	//                     teleports to each newly replicated aim once per snapshot turn again
 	//                     (card eb057163, the deliberate bug repro -- see NetChargeGlow)
+	//   ?aiwallnav2008=1  steer through walls with the 2008 ORIGINAL's algorithm (card d79b7ea7):
+	//                  findNextTileOnMap's per-tick left-vs-right re-decision and the slam-the-
+	//                  steer push, instead of the port's committed-gap column search. The AUDIT's
+	//                  null hypothesis, and the third deliberate bug reproduction -- IN `Active`.
 	//   ?netstaleguard=0  turn the world-snapshot staleness guard OFF, so a reordered or late
 	//                  snapshot entry drags a puppet backwards again (card f5cf7a5c). The other
 	//                  deliberate bug reproduction, and in `Active` for the same reason. ON by
@@ -1360,6 +1364,19 @@ namespace EvilAliensWeb.Compat
 		public static int? AiWallScanRows { get; private set; }
 
 		public static float? AiWallCrossPenalty { get; private set; }
+
+		// `?aiwallnav2008=1` -- steer through walls with the 2008 ORIGINAL's algorithm instead of
+		// the port's (card d79b7ea7). Not a knob: `findNextTileOnMap` + the slam-the-steer block
+		// are a different algorithm from `SteerThroughWall`'s committed-gap column search, so no
+		// combination of `?aireact`/`?aiscanrows`/`?aicrosspenalty`/`?aigapmargin` reconstitutes
+		// it -- which is why the wall-nav suspects could not be audited against the original at
+		// all until this seam existed.
+		//
+		// IN `Active`, the `?nethitstop=1` / `?netstaleguard=0` / `?netaimease=0` idiom: it
+		// deliberately reinstates behaviour the port replaced (measured at ~1050 deg/s of
+		// commanded-heading churn) and must never reach a public lobby. It is the AUDIT's null
+		// hypothesis, kept reachable so the comparison can be re-run rather than trusted.
+		public static bool AiWallNav2008 { get; private set; }
 
 		public static float? AiThreatLeadMs { get; private set; }
 
@@ -2914,6 +2931,9 @@ namespace EvilAliensWeb.Compat
 							InForce(AiWallCrossPenalty ?? EvilAliens.PlayerShip.DefaultWallCrossPenalty));
 					}
 					break;
+				case "aiwallnav2008":
+					AiWallNav2008 = IsOn(val);
+					break;
 				case "aithreatlead":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aitl) && aitl >= 0f)
 					{
@@ -4009,7 +4029,7 @@ namespace EvilAliensWeb.Compat
 					+ " -- the gameplay RNG (RandomHelper) is seeded, so two runs of this boot "
 					+ "reach the same world. Reload without the flag for normal random play.");
 			}
-			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || !NetChargeAimEase || AiFastForward > 1;
+			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || !NetChargeAimEase || AiWallNav2008 || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -4048,6 +4068,11 @@ namespace EvilAliensWeb.Compat
 						// Same rule as the line above: prints only on the deliberate bug repro, so
 						// a run whose puppets step their aim is tellable from one that sweeps it.
 						+ (!NetChargeAimEase ? " netaimease=0" : "")
+						// Same rule again, for the AI's deliberate bug repro: prints only when the
+						// 2008 wall-nav is standing in for the port's. A sweep arm that measured
+						// the ORIGINAL algorithm must be tellable from one that measured the
+						// shipped one -- the two produce plausible tables either way.
+						+ (AiWallNav2008 ? " aiwallnav2008" : "")
 						+ (Harness != null
 							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "") + " bg=" + HarnessBg
 							: ""));

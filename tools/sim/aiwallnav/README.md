@@ -87,6 +87,13 @@ Two consequences worth knowing:
   flat 226 contacts across four different look-ahead depths before this was fixed. That artifact
   looked exactly like a result; if a column ever stops responding to every knob, suspect the rig
   before the game.
+- **It can stop COMPILING without anyone noticing, and it had** (card d79b7ea7). This bench is
+  only picked up between tuning cards, and nothing in the normal build or probe suite touches it,
+  so a signature change in the game it reflects into sits undetected until the next card reaches
+  for it: `CollisionLevelMap`'s constructor gained a required `tileSize` and the bench had been
+  uncompilable ever since. It is repaired (the tile size is `800/width`, exactly what `Wall.Setup`
+  computes) and the table above reproduces unchanged -- but if you find it red, that is the
+  likeliest reason, and it is a build error rather than a wrong number, so it cannot mislead.
 - **Rebuild the game after changing it.** The bench references the built DLL, so an edited
   `PlayerShip.cs` that has not been rebuilt is benched in its *old* form — silently, with a
   perfectly plausible table. A first pass of this card published numbers taken against a stale

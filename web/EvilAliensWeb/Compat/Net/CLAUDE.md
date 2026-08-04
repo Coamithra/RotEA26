@@ -3406,7 +3406,8 @@ failing on **measurement**, not on the attach: position skew above the 12 px tol
 measured, against a documented interleave skew that reaches 17.9 px), `hp` on an entity under fire
 (a client hit-tests puppets with its own bullets, so hp diverges between snapshot turns -- `Boss
 205 vs 179` against a tolerance of 5), `dead`/`dying`/`is on the HOST and not on the joiner` and
-`score` drift, all of which come of the two ends being dumped at slightly different world instants,
+residual `score` staleness, all of which come of the two ends being dumped at slightly different
+world instants,
 plus the occasional vacuous join (`0 replicated entities`). The set changes run to run. **Do not
 widen a tolerance to force green** -- that is suite CALIBRATION work with its own card, and the
 assertions this tool exists for (`prov=`, `owner=`) are exact and clean. It is a standalone tool,
@@ -3499,6 +3500,26 @@ not a `run_probes.py` probe, so red is a finding rather than broken CI.
     EXACTLY (this is card c5228350's join-in-progress catch-up); score rides a 1 Hz reconcile
     against a provisional ledger and gets a tolerance, since the failure that design exists to
     stop is a one-way DRIFT, which a tolerance still catches.
+  - **SCORE IS COMPARED AS `pts - uns`, NOT `pts`, and dump v3 exists to carry that (card
+    94001db7).** A client's DISPLAYED score is the host's authoritative figure PLUS its own
+    unsettled provisional credits, by design (card b0ab09ec), while the host's display has no
+    such term -- so a raw `pts` compare is a category error, not a tolerance problem. It fired
+    hardest on DEFERRED-DEATH types: the joiner kills a `BattleSkull` on its lagged puppet and
+    books the award, while the host's copy is still `dying=1` two seconds into its animation and
+    has neither credited it nor sent the `EvDeath` that would settle it. Two classes, measured on
+    `--cadence 20 --cap 600 --seed 7`:
+    **joiner AHEAD, 2000-5550 points, NEVER converges** (a dense wave keeps the 3 s
+    `AwardSettleWindowMs` permanently occupied -- a re-dump loop read 3400/5200/5250/2400/5550/2800
+    over six further seconds), which the subtraction removes entirely; and
+    **host AHEAD, 250-4850, converges to 0 within one sync**, which is ordinary staleness and is
+    what the 250 limit now measures. **The attach is NOT implicated and that was checked first**:
+    the joiner's adopted host figure equals the host's `EvScoreSync` snapshot EXACTLY on every
+    failing join. `--score-tol` was NOT widened; sizing it for the residual class is card
+    d108c459's, and note `comboModify` has no ceiling, so a boss award group in flight can be far
+    larger than the measured 4850.
+    **The run-level `peak joiner unsettled` line is that leg's positive control and IS asserted**
+    -- a soak whose peak is 0 means the field stopped being reported, so the subtraction ran on
+    nothing and the compare silently reverted to the raw one.
   - **A host whose level has ENDED reports `scene none`, and the loop stops there** rather than
     grinding out the remaining cadence against an empty world. The settle frames are charged to
     `--cap` too: a join steps the host through the joiner's whole level warm, so charging only
@@ -3556,6 +3577,8 @@ about the code, not a weak assertion, and re-deriving them is a waste of an afte
 | force `CreatePuppet`'s extras length to 0 (every puppet built on defaults) | **no change.** The differ dropped extras-CONTENT comparison for the drift reason above, and `prov=` reads the self-heal flag rather than the bytes -- so an artificially defaulted puppet built from a real `EvSpawn` is invisible. Closing it means caching the bytes that CROSSED THE WIRE on both ends |
 | revert `Wall.NetScaleLocal` to false (`--level Level3 --host-extra "&wallsonly"`) | **no change**, and the reason is that another card already fixed it: protocol v19 raised the wire scale to 1/4096 with rounding, so the error `NetScaleLocal` defends against is now **0.090%**, far under any sane scale tolerance. `eaNetWalls` remains the pin |
 | drop `ReplayLive`'s `EvDying` re-announce | **not reached.** It needs a join timed into a 2.5-5 s deferred-death window, which the orchestrator does not control. `eaNetDeathFx` pins that beat directly |
+| force `NetJipDump`'s `uns=` to a constant 0 | **RED, deterministically**, on the run-level `no joiner reported ANY unsettled provisional credit` control -- 2 of 2 soaks. The score compare itself only reverts to the raw one, which is a nondeterministic failure, so the control is what carries this leg (card 94001db7) |
+| revert `ScoreVisualiser.NetSetScore` to the pre-b0ab09ec `max(local, host)` ratchet | **RED**, but only 1 soak in 4 -- each joiner lives ~8 s, so a ratchet barely accumulates. Its signature is unmistakable when it does fire (`32737 vs 32737`, i.e. IDENTICAL displayed scores 3200 apart authoritative -- a case the raw compare was blind to). **`eaNetScore.test()` is the deterministic pin for that policy**; do not rely on this suite for it |
 
 **WHAT IT DELIBERATELY DOES NOT COVER**, each because something else already pins it: the
 background APPLY path (`netbg_catchup.txt`), the slot-grant NEGOTIATION (`eaSlotTest`), the

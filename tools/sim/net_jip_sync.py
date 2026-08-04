@@ -46,7 +46,7 @@ EAHL = os.path.join(REPO, "tools", "headless", "bin", "Debug", "net8.0", "eahl.e
 # The dump's own format version. Bumped in NetJipDump.cs when a line's SHAPE changes, and
 # checked rather than assumed -- a differ silently comparing half a world is the failure this
 # tool exists to catch one layer down.
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 
 # A port deliberately outside the range PortForRoom derives into (49152..61151), so --no-pair
 # dials somewhere nothing can be listening whatever room name is in play.
@@ -390,22 +390,37 @@ def diff_hud(hline, cline, tol):
         for key in ("lv", "opt"):
             if h.get(key) != c.get(key):
                 bad.append("%s %s %s vs %s" % (slot, key, h.get(key), c.get(key)))
-        # CONTINUOUS: score is reconciled at 1 Hz against a provisional ledger, so it
-        # legitimately trails by a fraction of a second. Compared with a tolerance rather than
-        # ignored -- the failure the ledger design exists to stop is a one-way DRIFT, which a
-        # tolerance still catches while sub-second staleness does not trip it. The policy itself
-        # is eaNetScore.test's subject, not this tool's.
+        # CONTINUOUS, and COMPARED AFTER SUBTRACTING `uns` -- which is the difference between
+        # comparing what the two peers DISPLAY and comparing what they actually disagree about
+        # (card 94001db7). A client's displayed score is the host's authoritative figure PLUS its
+        # own unsettled provisional credits, by design (card b0ab09ec gives the player instant
+        # credit on their own kills); the host's display carries no such term. So a raw `pts`
+        # compare is a category error, and it fired hardest on DEFERRED-DEATH types: the joiner
+        # kills a `BattleSkull` on its lagged puppet and books the award, while the host's copy is
+        # still `dying=1` two seconds into its death animation and has neither credited it nor
+        # broadcast the `EvDeath` that would settle it. Measured: 2000-5550 points, permanently,
+        # because on a dense wave the 3 s AwardSettleWindowMs is never empty.
+        #
+        # Subtracting `uns` reduces that to the ordinary staleness case (host credited, our
+        # EvDeath not applied yet), which converges within a sync and is what the tolerance is
+        # for. The failure the ledger design exists to stop is a one-way DRIFT, and a tolerance on
+        # the AUTHORITATIVE figures still catches it -- more sharply than before, since the
+        # provisional term no longer masks it. The policy itself is eaNetScore.test's subject.
         #
         # `combo` and `pu=<type>@<progress>` are DUMP-ONLY, for reading by hand: both ride the
         # ~10 Hz MsgHudState and are re-derived per peer, so any threshold tight enough to catch
         # a real disagreement would flag ordinary staleness. eaNetCombo.test owns that policy.
         try:
-            gap = abs(float(h.get("pts", 0)) - float(c.get("pts", 0)))
+            hauth = float(h.get("pts", 0)) - float(h.get("uns", 0))
+            cauth = float(c.get("pts", 0)) - float(c.get("uns", 0))
+            gap = abs(hauth - cauth)
         except ValueError:
             gap = 0.0
         if gap > tol["score"]:
-            bad.append("%s score %s vs %s (%.0f apart, limit %.0f)"
-                       % (slot, h.get("pts"), c.get("pts"), gap, tol["score"]))
+            bad.append("%s score %s vs %s (%.0f apart authoritative, limit %.0f; "
+                       "unsettled %s / %s)"
+                       % (slot, h.get("pts"), c.get("pts"), gap, tol["score"],
+                          h.get("uns"), c.get("uns")))
     return bad
 
 
@@ -504,14 +519,24 @@ def run_join(host, room, port, args, index, stats):
                  or cd["ents"][i].get("owner", "-") != "-")
     stats["owners"] += owners
 
+    # HOW MUCH MATERIAL THE `uns` SUBTRACTION HAD, per join, for the same reason `owners` is
+    # reported: without it a run where every joiner happened to have an empty ledger would
+    # exercise the corrected compare vacuously and read exactly like a run where it worked.
+    # Unlike `owners` this IS asserted at the run level (see main) -- a joiner books a
+    # provisional credit for every kill it observes locally, so a whole soak seeing none means
+    # the field stopped being reported, not that the sampling was unlucky.
+    _, cslots = parse_hud(cd["hud"])
+    unsettled = max([abs(float(s.get("uns", 0) or 0)) for s in cslots.values()] or [0.0])
+    stats["unsettled"] = max(stats["unsettled"], unsettled)
+
     problems = diff_worlds(hd, cd, {
         "pos": args.pos_tol, "pos_path": args.pos_tol_path, "rot": args.rot_tol,
         "scale_abs": 0.0005, "scale_rel": args.scale_tol, "frame": args.frame_tol,
         "score": args.score_tol, "hp": args.hp_tol,
     })
-    print("    join %d: host ids=%d joiner ids=%d maxpos=%.2fpx owners=%d mismatches=%d"
+    print("    join %d: host ids=%d joiner ids=%d maxpos=%.2fpx owners=%d uns=%.0f mismatches=%d"
           % (index, hd["meta"]["ids"], cd["meta"]["ids"], max_pos_gap(hd, cd), owners,
-             len(problems)))
+             unsettled, len(problems)))
     return problems
 
 
@@ -586,7 +611,7 @@ def run_selftest(args):
     args.level = ["Level2"]
     args.cap = args.cadence * 2
     args.settle = 600          # it will never attach; do not spend the full budget waiting
-    failures = run_level("Level2", args, {"owners": 0})
+    failures = run_level("Level2", args, {"owners": 0, "unsettled": 0.0})
     paired = any("never paired" in m for _, _, msgs in failures for m in msgs)
     print("  1. joiner on a dead port -> %d failure(s), names the pairing: %s"
           % (len(failures), paired))
@@ -594,7 +619,7 @@ def run_selftest(args):
 
     args.no_pair = False
     args.cap = args.cadence     # the loop cannot run even once
-    failures = run_level("Level2", args, {"owners": 0})
+    failures = run_level("Level2", args, {"owners": 0, "unsettled": 0.0})
     nojoin = any("no join was attempted" in m for _, _, msgs in failures for m in msgs)
     print("  2. --cap == --cadence -> %d failure(s), names the empty loop: %s"
           % (len(failures), nojoin))
@@ -680,16 +705,29 @@ def main():
           % (len(levels), args.cadence))
     started = time.time()
     failures = []
-    stats = {"owners": 0}
+    stats = {"owners": 0, "unsettled": 0.0}
     for level in levels:
         failures.extend(run_level(level, args, stats))
+
+    # THE `uns` SUBTRACTION'S POSITIVE CONTROL. The score compare subtracts a client's
+    # provisional ledger before comparing, so a build where `uns` silently stopped being
+    # reported would read 0 everywhere and pass -- vacuously, and while quietly reverting to the
+    # raw-`pts` category error the subtraction exists to fix. A joiner books a provisional credit
+    # for every kill it observes locally, so a whole soak whose peak is 0 is that failure, not an
+    # unlucky sample. Skipped for --no-pair, where nothing ever attaches by design.
+    if not args.no_pair and stats["unsettled"] <= 0.0:
+        failures.append(("(run)", 0, [
+            "no joiner reported ANY unsettled provisional credit across the whole soak -- the "
+            "score compare's `uns` subtraction ran on nothing, so it cannot have been tested "
+            "(card 94001db7)"]))
 
     # The `owner=` leg's material for the whole run, so a reader can see at a glance
     # whether this run exercised it. See run_join for why it is reported and not
     # asserted, and where that leg's positive control lives instead.
-    print("\n%d join(s) failed, %.0fs wall clock, owner= compared on %d entit%s"
+    print("\n%d join(s) failed, %.0fs wall clock, owner= compared on %d entit%s, "
+          "peak joiner unsettled %.0f"
           % (len(failures), time.time() - started, stats["owners"],
-             "y" if stats["owners"] == 1 else "ies"))
+             "y" if stats["owners"] == 1 else "ies", stats["unsettled"]))
     for level, index, problems in failures:
         print("\nFAIL %s join %d:" % (level, index))
         for msg in problems:

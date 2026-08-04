@@ -305,9 +305,20 @@ public class PlayerShip : AlienDrawableGameComponent
 	// How far down the screen the "UFOs spawn here" danger band reaches, and how hard it pushes.
 	// Strong enough to stand up to a lane escape, so the ship settles below the spawn line
 	// instead of being held against it.
-	private const float TopEdgeDangerPx = 170f;
+	//
+	// A PORT ADDITION, and 2008 HAS NO COUNTERPART: the original's only top-edge term is the
+	// generic 150px/strength-4 screen-bound push, which this port still ships verbatim a few
+	// lines above (`edgeMargin`/`maxSteerStrength` in DoAIMove). So `?aitopedgestrength=0` does
+	// not disable an edge push, it restores the 2008 treatment exactly -- which is what makes it
+	// the null arm rather than a mutilation. Card 2248e5eb; verdict recorded in
+	// web/EvilAliensWeb/CLAUDE.md.
+	public const float DefaultTopEdgeDangerPx = 170f;
 
-	private const float TopEdgeAvoidStrength = 20f;
+	private static float TopEdgeDangerPx => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeDangerPx ?? DefaultTopEdgeDangerPx;
+
+	public const float DefaultTopEdgeAvoidStrength = 20f;
+
+	private static float TopEdgeAvoidStrength => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeAvoidStrength ?? DefaultTopEdgeAvoidStrength;
 
 	// Same, for the descent/climb column (the boss's standing box is 240px wide).
 	private const float VerticalLaneClearancePx = 240f;
@@ -323,14 +334,39 @@ public class PlayerShip : AlienDrawableGameComponent
 	// How many big UFOs to leave alive during the SpiderBoss fight -- see DoAIFire.
 	private const int SpiderBossLaserPlatforms = 2;
 
-	// A live beam kills along its whole length, so it earns a much wider berth than the 2008
-	// flat 150px -- with the same steep falloff, so the outer field is still cheap to cross.
-	private const float LazerAvoidRangePx = 260f;
+	// THE 2008 MAGNITUDES, RESTORED ON MEASUREMENT (card 2248e5eb). The port had widened the beam
+	// field to 260px / strength 14 and added a 7-strength lateral sidestep, all three unmeasured.
+	// Against the 2008 arm (150 / 4 / no sidestep) at N=60 paired the port values LOSE, and lose
+	// on the rig built around the beam: on `?level=Level2&spiderboss` the 2008 arm is **-4.55
+	// +- 0.69** deaths (8.67 -> 4.12) with victories 3/60 -> 24/60, and the mechanism is legible
+	// in the killer histogram -- `SpiderBoss(standing)` 290 -> 6. An oversized beam field was
+	// shoving the ship off the beam and into the stationary boss, which is the very failure card
+	// b56633fb was filed for. Level 1 prefers the port values (+0.98 +- 0.65) and that is a real
+	// but far smaller loss, stated rather than hidden. The port values stay reachable as
+	// `?ailazerpx=260&ailazerstrength=14&ailazerdodge=7`, which is the negative control.
+	//
+	// WHAT IS *NOT* RESTORED, and it is a stated confound of that A/B: the CURVE FAMILY. 2008 ran
+	// MyMath.PowerCurve, the classic max*(1-t^2) plateau; this term keeps the port's (1-t)^p
+	// spike, so at 150px it pushes less than the original did at the same range. Card 05a2b818
+	// ruled on the family GLOBALLY and decisively (?aifieldcurve=classic costs +11.37 SpaceDodge /
+	// +10.20 CrazyGame deaths), so re-opening it per-type would re-litigate a settled ruling.
+	// These are the 2008 MAGNITUDES inside the validated port shape, and the arm that was measured
+	// is exactly the configuration that ships.
+	public const float DefaultLazerAvoidRangePx = 150f;
 
-	private const float LazerAvoidStrength = 14f;
+	private static float LazerAvoidRangePx => EvilAliensWeb.Compat.DebugFlags.AiLazerAvoidRangePx ?? DefaultLazerAvoidRangePx;
 
-	// Lateral push while a big UFO is winding up, to make its locked-at-fire aim stale.
-	private const float LazerDodgeStrength = 7f;
+	public const float DefaultLazerAvoidStrength = 4f;
+
+	private static float LazerAvoidStrength => EvilAliensWeb.Compat.DebugFlags.AiLazerAvoidStrength ?? DefaultLazerAvoidStrength;
+
+	// Lateral push while a big UFO is winding up, to make its locked-at-fire aim stale. A port
+	// invention with no 2008 counterpart, OFF at the baked default per the verdict above -- the
+	// term is skipped entirely at 0 rather than summing a zero vector, and `?ailazerdodge=7`
+	// brings it back for anyone re-opening the question.
+	public const float DefaultLazerDodgeStrength = 0f;
+
+	private static float LazerDodgeStrength => EvilAliensWeb.Compat.DebugFlags.AiLazerDodgeStrength ?? DefaultLazerDodgeStrength;
 
 	// Station-keeping "arrive" behaviour, and THE anti-pingpong mechanism for the seek attractor
 	// (card ada9e839). Inside this radius the pull is switched off entirely, so the ship coasts
@@ -1839,7 +1875,10 @@ public class PlayerShip : AlienDrawableGameComponent
 			// moving ACROSS the UFO's line of sight during the windup makes the locked aim stale.
 			// Standing still and reacting to the beam afterwards cannot work: it appears along its
 			// whole length at once.
-			if (baddy is UFO && ((UFO)baddy).IsBig && ((UFO)baddy).AiChargingLazer)
+			// OFF at the baked default (card 2248e5eb) -- `dodgeStrength > 0` is what makes that a
+			// skip rather than a zero vector added to the sum every frame.
+			float dodgeStrength = LazerDodgeStrength;
+			if (dodgeStrength > 0f && baddy is UFO && ((UFO)baddy).IsBig && ((UFO)baddy).AiChargingLazer)
 			{
 				Vector2 fromUfo = base.Position - baddy.Position;
 				float range = (fromUfo).Length();
@@ -1852,7 +1891,7 @@ public class PlayerShip : AlienDrawableGameComponent
 					{
 						across = -across;
 					}
-					repel += LazerDodgeStrength * across;
+					repel += dodgeStrength * across;
 				}
 			}
 			// The vertical strips: the fixed X-600 landing column, and the climb that opens the
@@ -1939,15 +1978,20 @@ public class PlayerShip : AlienDrawableGameComponent
 			else if (baddy is Lazer)
 			{
 				getDistanceToLine(baddy, out var d, out var shortestpoint);
-				// A live beam is instant death along its whole length, so it gets a far wider
-				// berth than the 2008 flat 150px -- with the same steep falloff the threat field
-				// uses, so the outer part of the field stays cheap enough to fly in and shoot.
-				if (d <= LazerAvoidRangePx)
+				// A live beam is instant death along its whole length. The port widened this berth
+				// past the 2008 flat 150px and card 2248e5eb measured that back off again: the
+				// wider field pushed the ship off the beam and into whatever was behind it. See
+				// DefaultLazerAvoidRangePx for the numbers and the curve-family confound.
+				// `lazerRange > 0` is the guarded divisor, not a redundant test: ?ailazerpx=0 is a
+				// legitimate "no beam field at all" arm, and d can be exactly 0 (the ship standing
+				// on the beam), which would otherwise reach 0/0.
+				float lazerRange = LazerAvoidRangePx;
+				if (lazerRange > 0f && d <= lazerRange)
 				{
-					float strength = ThreatFieldStrength(d / LazerAvoidRangePx, LazerAvoidStrength);
+					float strength = ThreatFieldStrength(d / lazerRange, LazerAvoidStrength);
 					if (altSteering)
 					{
-						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, d / LazerAvoidRangePx);
+						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, d / lazerRange);
 					}
 					repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - shortestpoint) + dodgeAngle);
 				}

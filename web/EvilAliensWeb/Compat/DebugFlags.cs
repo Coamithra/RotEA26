@@ -1504,6 +1504,36 @@ namespace EvilAliensWeb.Compat
 
 		public static float? AiLaneWedgeFallAlong { get; private set; }
 
+		// ---- the two remaining port ADDITIONS in the steering surface (card 2248e5eb) ----
+		// Both were added by the port with no measured verdict, and in 2008 both got the generic
+		// flat 150px / strength-4 treatment every other threat got. These seams exist so each can
+		// be A/B'd against that null hypothesis; per card 05a2b818's protocol a port value
+		// survives only by BEATING the original at N=60 paired, and a tie reverts.
+		// ?aitopedgepx=<px>       how far down the "UFOs spawn here" band reaches, and
+		// ?aitopedgestrength=<f>  how hard it pushes. **0 IS THE 2008 ARM**, not a mutilation:
+		//                         the generic screen-edge repulsion (150px, strength 4) is still
+		//                         there underneath, so zeroing this restores the original exactly.
+		public static float? AiTopEdgeDangerPx { get; private set; }
+
+		public static float? AiTopEdgeAvoidStrength { get; private set; }
+
+		// ?ailazerpx=<px>        how wide a berth a live beam gets,
+		// ?ailazerstrength=<f>   how hard it pushes at the beam, and
+		// ?ailazerdodge=<f>      the lateral sidestep during a big UFO's windup, which 2008 has no
+		//                        counterpart for at all.
+		// **THE BAKED VALUES ARE NOW THE 2008 ONES** (150 / 4 / 0): the A/B went against the port
+		// here, so `?ailazerpx=260&ailazerstrength=14&ailazerdodge=7` is the NEGATIVE control --
+		// the refuted port configuration, kept reachable so the verdict can be reproduced.
+		// The CURVE FAMILY is deliberately not exposed here and is a stated confound of that A/B:
+		// 2008 used MyMath.PowerCurve, this term runs the port's (1-t)^p. Card 05a2b818 ruled on
+		// the family globally and decisively (?aifieldcurve=classic costs +11.37 SpaceDodge /
+		// +10.20 CrazyGame deaths), so these knobs move the magnitudes only.
+		public static float? AiLazerAvoidRangePx { get; private set; }
+
+		public static float? AiLazerAvoidStrength { get; private set; }
+
+		public static float? AiLazerDodgeStrength { get; private set; }
+
 		// ?aisweptmax=<px/ms>  the ceiling on a believable OBSERVED speed in the DEFAULT swept-path
 		//                      seam (card c1d783ad). Above it the path is refused, because a raw
 		//                      one-frame position delta reports an enormous velocity for anything
@@ -3243,6 +3273,63 @@ namespace EvilAliensWeb.Compat
 						// here where it is a legitimate floor for most of the family.
 						RejectFlagValue(key, val, "a number > 0",
 							InForce(AiThreatFieldFalloff ?? EvilAliens.PlayerShip.DefaultThreatFieldFalloff));
+					}
+					break;
+				case "aitopedgepx":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aitep) && aitep >= 0f)
+					{
+						AiTopEdgeDangerPx = MathHelper.Min(aitep, 600f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiTopEdgeDangerPx ?? EvilAliens.PlayerShip.DefaultTopEdgeDangerPx));
+					}
+					break;
+				case "aitopedgestrength":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aites) && aites >= 0f)
+					{
+						AiTopEdgeAvoidStrength = MathHelper.Min(aites, 100f);
+					}
+					else
+					{
+						// 0 is MEANINGFUL here (it is the 2008 arm), so the guard refuses only a
+						// negative -- the ?aisweptmax= shape.
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiTopEdgeAvoidStrength ?? EvilAliens.PlayerShip.DefaultTopEdgeAvoidStrength));
+					}
+					break;
+				case "ailazerpx":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ailzp) && ailzp >= 0f)
+					{
+						AiLazerAvoidRangePx = MathHelper.Min(ailzp, 800f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiLazerAvoidRangePx ?? EvilAliens.PlayerShip.DefaultLazerAvoidRangePx));
+					}
+					break;
+				case "ailazerstrength":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ailzs) && ailzs >= 0f)
+					{
+						AiLazerAvoidStrength = MathHelper.Min(ailzs, 100f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiLazerAvoidStrength ?? EvilAliens.PlayerShip.DefaultLazerAvoidStrength));
+					}
+					break;
+				case "ailazerdodge":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ailzd) && ailzd >= 0f)
+					{
+						AiLazerDodgeStrength = MathHelper.Min(ailzd, 100f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiLazerDodgeStrength ?? EvilAliens.PlayerShip.DefaultLazerDodgeStrength));
 					}
 					break;
 				case "aibossbias":

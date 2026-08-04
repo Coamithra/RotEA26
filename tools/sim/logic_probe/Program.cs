@@ -691,6 +691,19 @@ internal static class Program
             // back at us. 0 is a MEANINGFUL value here (guard off), so its guard refuses only a
             // negative -- which is the shape this table's negative leg already expects.
             new { Flag = "aisweptmax",     Prop = "AiSweptMaxSpeedPxPerMs",Good = "12",  Want = (object)12f,   Baked = "5"    },
+            // The two remaining port additions (card 2248e5eb). ?aitopedgestrength= and
+            // ?ailazerdodge= take 0 as a MEANINGFUL value (it is the 2008 arm), so like
+            // ?aisweptmax= their guards refuse only a negative -- the shape this table's
+            // negative leg already expects.
+            new { Flag = "aitopedgepx",    Prop = "AiTopEdgeDangerPx",     Good = "233", Want = (object)233f,  Baked = "170"  },
+            new { Flag = "aitopedgestrength",Prop = "AiTopEdgeAvoidStrength",Good = "33",Want = (object)33f,   Baked = "20"   },
+            new { Flag = "ailazerpx",      Prop = "AiLazerAvoidRangePx",   Good = "311", Want = (object)311f,  Baked = "150"  },
+            // Baked "" on the last two: since card 2248e5eb's revert they bake 4 and 0, single
+            // digits that occur elsewhere in the captured output, so the absence check would fire
+            // on text that is not the default -- the same escape aiscanrows/aicrosspenalty/
+            // aifieldfall/aiff already take below.
+            new { Flag = "ailazerstrength",Prop = "AiLazerAvoidStrength",  Good = "23",  Want = (object)23f,   Baked = ""     },
+            new { Flag = "ailazerdodge",   Prop = "AiLazerDodgeStrength",  Good = "29",  Want = (object)29f,   Baked = ""     },
         };
         // Baked "" = no default-absence check available for that row: aiscanrows/aicrosspenalty
         // bake 4, aifieldfall bakes 3 and aiff sits at 0, all single digits that occur inside the
@@ -710,7 +723,7 @@ internal static class Program
             return 2;
         }
 
-        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 31 knobs (card 48b7c6b1)");
+        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 36 knobs (cards 48b7c6b1 / 2248e5eb)");
 
         // One counter and its OWN first-problem detail per leg: a shared sink attaches the
         // diagnosis to whichever Check happens to print it, which in a mutation run put the only
@@ -848,7 +861,7 @@ internal static class Program
             "DefaultPowerupReachPx", "DefaultRepulseCancelDelta", "DefaultSteerNoiseFloor",
             "DefaultSeekArriveDeadzonePx", "ShipMaxSpeed", "ShipDeceleration",
             "SweepLaneAvoidStrength",
-            "LazerAvoidStrength", "LazerDodgeStrength"
+            "DefaultLazerAvoidStrength"
         };
         var vals = new Dictionary<string, float>();
         foreach (string n in names)
@@ -895,14 +908,18 @@ internal static class Program
         // The repellents' full-strength magnitudes. maxSteerStrength (4) is a DoAIMove local, so
         // the threat field's and the screen edges' shared peak is spelled here; the rest are
         // reflected.
-        // TopEdgeAvoidStrength is deliberately NOT in this min: it is added AFTER the low-pass
+        // DefaultTopEdgeAvoidStrength is deliberately NOT in this min: it is added AFTER the low-pass
         // and so never passes through RepulseCancelDelta at all. Folding it in would mix the two
         // populations this card just separated, and it could not fail today (20 against a min of
         // 4), which is exactly how a wrong invariant gets copied.
+        // DefaultLazerDodgeStrength LEFT this min in card 2248e5eb, when the measurement took it
+        // to 0 and DoAIMove started skipping the term outright. This bound is about a repellent
+        // that PUSHES being silently eaten by a floor; a term that is switched off pushes nothing,
+        // so including it would assert 0 > 0.2 and fail on a configuration that is correct. It
+        // comes back into the min the moment the sidestep is ever baked back on.
         const float MaxSteerStrength = 4f;
         float weakestRepellent = Math.Min(MaxSteerStrength,
-            Math.Min(vals["SweepLaneAvoidStrength"],
-            Math.Min(vals["LazerAvoidStrength"], vals["LazerDodgeStrength"])));
+            Math.Min(vals["SweepLaneAvoidStrength"], vals["DefaultLazerAvoidStrength"]));
         Check("every REPELLENT's full strength clears the repulsion cancellation delta",
             weakestRepellent > repelDelta,
             "weakest repellent " + weakestRepellent + " vs DefaultRepulseCancelDelta " + repelDelta

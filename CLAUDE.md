@@ -304,7 +304,8 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   ?aiasteroidscale= ?aiasteroidrange= ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge=
   ?ailaneescape= ?aiconelead= ?aiconemaxlen= ?aiconewidth= ?aiconetaper= ?aiconefallalong=
   ?aiconefallacross= ?aiconescale= ?aiconespread= ?aiconewidthmin= ?aiwedgestrength=
-  ?aiwedgefall= ?aisweptmax=`. Pair with `?aiplayer`.
+  ?aiwedgefall= ?aisweptmax= ?aitopedgepx= ?aitopedgestrength= ?ailazerpx= ?ailazerstrength=
+  ?ailazerdodge=`. Pair with `?aiplayer`.
   **`?aisweptmax=<px/ms>` is a GUARD, not a tuning knob** (card c1d783ad): above it the DEFAULT
   swept-path seam refuses the path, because a raw one-frame position delta reports an enormous
   velocity for anything repositioned in a single tick and the cone would sweep the screen for that

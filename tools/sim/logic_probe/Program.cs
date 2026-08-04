@@ -989,39 +989,54 @@ internal static class Program
         Console.WriteLine("[logic_probe] AI boss-approach attractor (card b56633fb)");
 
         const float MaxSteer = 4f;
+        // BOTH CURVE FAMILIES are swept (`?aifieldcurve=classic` restores the 2008 `max*(1-t^2)`
+        // plateau -- card e88e21ca), because the weight is solved against whichever one the boss's
+        // repellent is using and the plateau is a much flatter shape near r*. `classic` is a
+        // captured local rather than a parameter so the whole sweep below reads unchanged.
+        bool classic = false;
         float A(float d, float anchor, float range) => (float)weightM.Invoke(null,
-            new object[] { d, anchor, range, falloff, false, 1f, MaxSteer, noiseFloor });
+            new object[] { d, anchor, range, falloff, classic, 1f, MaxSteer, noiseFloor });
         float Repel(float d, float range) => d >= range
             ? 0f
-            : (float)strengthM.Invoke(null, new object[] { d / range, MaxSteer, falloff, false });
+            : (float)strengthM.Invoke(null, new object[] { d / range, MaxSteer, falloff, classic });
 
         // The whole reachable domain: every tier x the whole bulletlifetime range (450 base to the
-        // 1500 cap a maxed Range powerup reaches) x hull sizes from a bullet-sized boss to one
-        // wider than a third of the screen. `body` is the centre->edge term; a box's field radius
-        // scales with its half-extent, which is that term over sqrt(2).
+        // 1500 cap a maxed Range powerup reaches) x every level-halting boss's hull.
         float[] lifetimes = { 450f, 547f, 738f, 1000f, 1500f };
-        // EVERY LEVEL-HALTING BOSS'S HULL, as its centre->edge term, plus the range BrainBoss's own
-        // pulse sweeps and two hulls wider than anything in the game. Measured from each boss's own
-        // CollisionType: JunkBoss 60 (a circle, so its radius IS the term), ClassicBoss/BattleSkull
+        // EACH HULL IS A (body, radius) PAIR, and they are NOT interchangeable: `body` is the
+        // centre->edge term the anchor is measured in (ThreatBodyTerm), `radius` is the half-extent
+        // the FIELD size scales with (ThreatRadius). For a box they differ by sqrt(2); for a CIRCLE
+        // they are the same number, which is why JunkBoss cannot be derived from the others.
+        // Measured from each boss's own CollisionType: JunkBoss 60 (circle), ClassicBoss/BattleSkull
         // 106, FakeBoss 127, MarsBoss/StationaryBoss ~141, BrainBoss 233 -> 257 (hw 165 * sqrt2,
         // with `scale` pulsing 1.00 -> 1.10 as its HP drops -- the widest in the game, and the one
         // configuration the exponent damping exists for). 320 and 400 are unreachable today and are
         // swept anyway: the bound has to hold for a boss someone adds later, not just for today's.
-        float[] bodies = { 0f, 60f, 106f, 127f, 141f, 170f, 233f, 245f, 257f, 320f, 400f };
+        float Sq2 = (float)Math.Sqrt(2.0);
+        (float body, float radius)[] hulls =
+        {
+            (0f, 0f), (60f, 60f), (106f, 106f / Sq2), (127f, 127f / Sq2), (141f, 141f / Sq2),
+            (233f, 233f / Sq2), (245f, 245f / Sq2), (257f, 257f / Sq2),
+            (320f, 320f / Sq2), (400f, 400f / Sq2)
+        };
         int crossings = 0, bandsChecked = 0;
         float worstBand = float.MaxValue;
         bool crossingOk = true, bandOk = true, pushedOutOk = true, boundedOk = true;
         string crossingDetail = "", bandDetail = "", pushedOutDetail = "", boundedDetail = "";
+        foreach (bool curve in new[] { false, true })
+        {
+        classic = curve;
         for (int tier = 0; tier < tierFieldPx.Length; tier++)
         {
             foreach (float life in lifetimes)
             {
-                foreach (float body in bodies)
+                foreach ((float body, float radius) in hulls)
                 {
-                    float range = tierFieldPx[tier] + (body / (float)Math.Sqrt(2.0)) * sizeScale;
+                    float range = tierFieldPx[tier] + radius * sizeScale;
                     float anchorRaw = life * bulletPerMs - body;
                     float anchor = Math.Max(anchorRaw, minAnchor);
-                    string where = "tier " + tier + " life " + life + "ms body " + body + "px"
+                    string where = (classic ? "classic curve, " : "") + "tier " + tier + " life " + life
+                        + "ms body " + body + "px"
                         + " (anchor " + anchor.ToString("0.0") + "px, field " + range.ToString("0") + "px)";
 
                     // 1. AT FIRING RANGE THE NET NEVER POINTS OUT. Where the repellent is still
@@ -1107,6 +1122,8 @@ internal static class Program
                 }
             }
         }
+        }
+        classic = false;
 
         Check("the net force never points AWAY at firing range, over every tier x weapon x hull",
             crossingOk, crossingDetail.Length > 0 ? crossingDetail
@@ -1126,16 +1143,22 @@ internal static class Program
             pushedOutOk, pushedOutDetail.Length > 0 ? pushedOutDetail : "over every combination");
         Check("closing never outranks not dying (the pull stays under the threat field's 4)",
             boundedOk, boundedDetail.Length > 0 ? boundedDetail
-                : "capped by BossApproachMaxWeight " + maxWeight);
+                : "ceiling max(BossApproachMaxWeight " + maxWeight + ", the solved anchor weight)");
 
         // 5. THE SHIPPED CONFIGURATION, spelled out so a future reader can see the actual numbers
-        // rather than only the inequalities: Very_Hard, base weapon, the spider boss's hull.
-        float vhRange = tierFieldPx[3] + 120f * sizeScale;
-        float vhAnchor = 450f * bulletPerMs - 170f;
+        // rather than only the inequalities: the top tier, base weapon, and BRAINBOSS's hull --
+        // a boss the approach can actually target. (An earlier revision used the spider boss's
+        // 170px here, which section 7 forty lines below asserts is never a boss-approach target
+        // at all, so the worked example described a configuration the code cannot enter.)
+        // The tier is read off the END of the ladder rather than by index, so inserting a tier
+        // cannot silently re-label this example.
+        float brainBody = 233f;
+        float vhRange = tierFieldPx[tierFieldPx.Length - 1] + (brainBody / Sq2) * sizeScale;
+        float vhAnchor = 450f * bulletPerMs - brainBody;
         float vhW = A(vhAnchor, vhAnchor, vhRange);
         Check("a COMMITMENT outranks a DETOUR at engagement range (approach > the 0.8 powerup seek)",
             A(vhAnchor * 1.5f, vhAnchor, vhRange) > 0.8f,
-            "Very_Hard / base weapon: pull " + A(vhAnchor * 1.5f, vhAnchor, vhRange).ToString("0.00")
+            "top tier / base weapon / BrainBoss: pull " + A(vhAnchor * 1.5f, vhAnchor, vhRange).ToString("0.00")
             + " at 1.5x firing range (anchor " + vhAnchor.ToString("0.0") + "px, solved weight "
             + vhW.ToString("0.000") + ") -- a halting boss stops the level advancing at all,"
             + " a pickup does not");
@@ -1146,7 +1169,7 @@ internal static class Program
         // the very place the ship was being sent. Run it here and require it to FAIL, or every
         // inequality above could be satisfied by a build that never changed anything.
         const float PreCardWeight = 1.1f;
-        float preStandoffEdge = Math.Min(Math.Max(450f * bulletPerMs * 0.6f, 130f), 300f) - 170f;
+        float preStandoffEdge = Math.Min(Math.Max(450f * bulletPerMs * 0.6f, 130f), 300f) - brainBody;
         float preRepel = Repel(preStandoffEdge, vhRange);
         Check("control: the pre-card standoff+1.1 is OUT-VOTED at its own destination, and this build is not",
             PreCardWeight < preRepel && Math.Abs(A(vhAnchor, vhAnchor, vhRange) - Repel(vhAnchor, vhRange)) <= 0.0005f,

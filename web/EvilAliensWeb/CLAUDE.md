@@ -1958,13 +1958,19 @@ the rest are tier-independent.
       body term against a 351px gun range, which undamped bands 13.5px falling to 10.0px at its
       pulse peak. Do not delete the damping as dead code.
     - **MEASURED (eahl, Very_Hard, paired seeds 1-16 x2, N=32 per side).** `?level=Level3&brainboss`:
-      `bossfar` **99.9% -> 26.0%**, `idle%` (a shootable target on screen and no shot fired)
-      **49.3% -> 12.1%**. On the FULL Level 3 deaths are IDENTICAL seed-by-seed (10/8/8/9 both
-      sides) while `bossfar` still falls 86/85/88/70 -> 44/67/61/76. **On the `?brainboss`
-      fast-boot deaths rise 2.00 -> 3.06**, and there it is attributable -- sweeping
-      `?aiseekapproach=` 0.05/0.5/1.0 reads 2.00/2.31/3.00, i.e. deaths track the pull. That rig is
-      nothing but a boss fight, so it is the worst case rather than the representative one, and
-      closing on a boss costing deaths is the trade card 31ceb6ff already made.
+      `bossfar` **99.9% -> 27.1%**, `idle%` (a shootable target on screen and no shot fired)
+      **49.4% -> 12.4%**, powerups collected **45% -> 51%**. On the FULL Level 3 deaths are
+      IDENTICAL seed-by-seed (10/8/8/9 both sides) while `bossfar` still falls
+      86/85/88/70 -> 44/67/61/76. **On the `?brainboss` fast-boot deaths rise 1.94 -> 2.88**, and
+      there it is attributable -- sweeping `?aiseekapproach=` 0.05/0.5/1.0 reads 2.00/2.31/3.00,
+      i.e. deaths track the pull. That rig is nothing but a boss fight, so it is the worst case
+      rather than the representative one, and closing on a boss costing deaths is the trade card
+      31ceb6ff already made.
+    - **It only takes the wheel from a target something else CHOSE if it OUT-VOTES it** -- one
+      `steerTarget` carries one destination, so a boss term quieted to a fraction of the 0.8
+      powerup seek must not delete a live detour, least of all inside firing range where it is
+      designed to fall silent. With nothing else chosen (the `X > 2000` sentinel) it takes the
+      wheel at any weight, or the bot hovers at a station the boss may not be in range of.
     - **`?aiseekapproach=` IS NOW A SCALE on that solved weight (default 1), not a weight.** A
       value from before this card means something else; the two are not commensurable.
     - **SpiderBoss's exclusion from `IsAiPriorityTarget` is EXPLICIT now**, not by omission -- it

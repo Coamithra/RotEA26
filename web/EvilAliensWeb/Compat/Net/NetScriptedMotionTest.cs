@@ -22,7 +22,7 @@ namespace EvilAliensWeb.Compat.Net
     //   * the FINITE DIFFERENCE is a whole snapshot turn LATE. A difference reported at turn T
     //     describes [T-1, T] while the client dead-reckons over [T, T+1], so every phase change
     //     of a scripted set-piece is driven on the PREVIOUS phase's velocity for up to a turn --
-    //     60 ms at 16 live entities, ~1.2 s at 128.
+    //     `SnapshotTurnMs` is live*60/16, i.e. 60 ms at 16 live entities and 480 ms at 128.
     //
     // The second is the bigger half and the card's real subject: the boss steps from a standing
     // 0 to a 0.78 px/ms screen-crossing sweep, so at a 480 ms turn a COLLIDABLE puppet trails the
@@ -202,9 +202,15 @@ namespace EvilAliensWeb.Compat.Net
                 anchored.Count == 3 && anchored.Contains("FlyingSpider")
                     && anchored.Contains("Asteroid") && anchored.Contains("Wall"));
 
-            // Behavioural, not reflective, and on a properly built instance: the seam has to
-            // answer, not merely exist. A UFO beside it, since the base implementation is what
-            // every other type in the census relies on.
+            // Behavioural, not reflective: the seam has to ANSWER, not merely exist. A UFO
+            // beside it, since the base implementation is what every other type in the census
+            // relies on.
+            //
+            // These two are constructed and NOT Setup, which the census above deliberately avoids
+            // -- it is safe here only because `SpiderBossState`'s first member is `flyleft`, whose
+            // arm reads no `oracle`. Reorder that enum so 0 is `standing` or `jump` and this leg
+            // NREs into the suite's catch-all; Setup(intro: true) pins `flyleft` if it ever needs
+            // to stop depending on the default.
             SpiderBoss boss = new SpiderBoss(game);
             UFO ufo = new UFO(game);
             Check("the base implementation answers false and yields no velocity",
@@ -466,6 +472,12 @@ namespace EvilAliensWeb.Compat.Net
                 return; // SendWorldSnapshot is peer-gated; every leg below would be vacuous
             }
 
+            // NetSession.Metrics is a process-wide counter with no reset, and eaNetTeleport
+            // deliberately raises this one as its own section-1c control -- so the leg at the end
+            // of this section reads a DELTA, never the absolute (the house rule for every
+            // scenario suite here).
+            long unmarkedBefore = NetSession.Metrics.UnmarkedTeleports;
+
             HashSet<GameComponent> before = SnapshotBin(game);
             SpiderBoss boss = SpiderBoss.NewSpiderBoss(bin, game);
             boss.Setup(intro: true);
@@ -485,12 +497,12 @@ namespace EvilAliensWeb.Compat.Net
             INetEntity seam = boss;
             // AN ENTITY'S TURN IS NOT THE SNAPSHOT INTERVAL. The host sends a packet every 60 ms
             // but each packet carries at most SnapshotMaxEntries (16) of the live set, so a given
-            // entity is sampled every interval * ceil(live/16) -- 60 ms at 16 live entities,
-            // 480 ms at 64, ~1.2 s at 128. THAT is the blind window this card is about, so the
-            // drive advances both the boss and the injected clock by 29 ticks (~483 ms) per
-            // snapshot, which is the N=64 world modelled exactly with one entity in it. At the
-            // 60 ms floor the same run reads a pre-card error of only ~0.195 px/ms (measured):
-            // the defect is real there too, but it is the big world that makes it a pop.
+            // entity is sampled every interval * live/16 -- 60 ms at 16 live entities, 480 ms at
+            // 128, ~1.2 s at 320. THAT is the blind window this card is about, so the drive
+            // advances both the boss and the injected clock by 29 ticks (~483 ms) per snapshot,
+            // which is the N=128 world modelled exactly with one entity in it. At the 60 ms floor
+            // the same run reads a pre-card error of only ~0.195 px/ms (measured): the defect is
+            // real there too, but it is the big world that makes it a pop.
             const int ticksPerTurn = 29;
 
             Vector2 prevSample = boss.Position;
@@ -621,9 +633,9 @@ namespace EvilAliensWeb.Compat.Net
             // judged -- but the SpiderBoss holds three of the game's four reposition sites, so
             // CaptureBaseState recomputes the raw difference for the diagnostic alone. A whole
             // fly-by cycle with every park MARKED must produce no accusation.
-            Check("a fully-marked cycle raises no unmarked-teleport report ("
-                + NetSession.Metrics.UnmarkedTeleports + ")",
-                NetSession.Metrics.UnmarkedTeleports == 0);
+            Check("a fully-marked cycle raises no unmarked-teleport report (+"
+                + (NetSession.Metrics.UnmarkedTeleports - unmarkedBefore) + ")",
+                NetSession.Metrics.UnmarkedTeleports == unmarkedBefore);
 
             peer.OnData -= Sniff;
             foreach (GameComponent extra in NewSince(game, before))

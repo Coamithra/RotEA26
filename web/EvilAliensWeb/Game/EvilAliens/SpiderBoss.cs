@@ -939,6 +939,12 @@ internal class SpiderBoss : AlienDrawableGameComponent
 	// puts real px/ms on the wire, since the joiner's modifier is its own (the Lazer sent-rate
 	// rule).
 	//
+	// ONE CASE CANNOT BE EXACT, and it is worth knowing rather than hunting: `jump`'s climb gate
+	// is `animationProgress > 30f`, and Update ADVANCES that accumulator (by a dt this seam does
+	// not have) BEFORE reading it. So on the single tick the crouch becomes the climb, this
+	// announces the crouch. It is one tick of one boundary, the correction blend absorbs it, and
+	// predicting it would mean duplicating Update's own frame maths here on a guessed dt.
+	//
 	// DO NOT REDIRECT THIS AT TryGetAiSweptPath. The two disagree deliberately, on exactly one
 	// case and for opposite reasons: during the "Danger!" hold Update early-returns on
 	// `waittimer.Active`, so the boss is genuinely STILL and this must say so, while the AI seam
@@ -951,6 +957,16 @@ internal class SpiderBoss : AlienDrawableGameComponent
 	// follow fails there rather than silently shipping a wrong velocity to the other player.
 	internal override bool TryGetNetScriptedVelocity(out Vector2 velocity)
 	{
+		// Update's FIRST early-return, and the only line of it this transcription would otherwise
+		// skip: a `SetupPreload()` boss sits in the bin for one tick while Level2 warms its art
+		// (`PreloadGraphicalContent`), and its Update returns before touching Position. Reachable
+		// only in that window and pre-card it sent zero anyway, but a host announcing a descent
+		// for an entity that is not descending is precisely the failure this seam exists to stop.
+		if (isPreload)
+		{
+			velocity = Vector2.Zero;
+			return true;
+		}
 		// The warning hold freezes Update outright (`if (waittimer.Active) return;`), and it is
 		// the state the three fly-by parks land in -- so this is the case the card is about.
 		if (waittimer.Active)

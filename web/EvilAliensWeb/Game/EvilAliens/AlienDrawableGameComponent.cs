@@ -1002,10 +1002,10 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	//   * the FINITE DIFFERENCE is a whole snapshot turn LATE at every phase boundary. A
 	//     difference reported at turn T describes the interval [T-1, T] and the client applies
 	//     it over [T, T+1], so each phase change is dead-reckoned on the PREVIOUS phase's
-	//     velocity for up to a full turn -- 60 ms at 16 live entities, ~1.2 s at 128. The
-	//     SpiderBoss steps from a standing 0 to a 0.78 px/ms screen-crossing sweep, so at a
-	//     480 ms turn the puppet of a COLLIDABLE boss trails the host by ~375 px and then pops
-	//     past SnapThresholdPx. The marked-teleport case (card e79bb994) is the extreme of the
+	//     velocity for up to a full turn -- `NetSession.SnapshotTurnMs` is live*60/16, i.e.
+	//     60 ms at 16 live entities, 480 ms at 128 and ~1.2 s at 320. The SpiderBoss steps from
+	//     a standing 0 to a 0.78 px/ms screen-crossing sweep, so at a 480 ms turn the puppet of
+	//     a COLLIDABLE boss trails the host by ~375 px and then pops past SnapThresholdPx. The marked-teleport case (card e79bb994) is the extreme of the
 	//     same defect and not a separate one: there the fallback is zero rather than merely
 	//     stale, so the puppet stands still instead of lagging.
 	// What this returns is therefore FORWARD-looking where a difference is backward-looking,

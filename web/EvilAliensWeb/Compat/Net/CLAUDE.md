@@ -2719,14 +2719,15 @@ velocities the layer already had are wrong for it -- and the fix is neither of t
   velocity (0,0). And the FINITE DIFFERENCE is a whole snapshot turn **LATE**: a difference
   reported at turn T describes `[T-turn, T]` while the client dead-reckons over `[T, T+turn]`, so
   every phase change of a scripted set-piece is driven on the PREVIOUS phase's velocity for up to
-  a turn -- 60 ms at 16 live entities, ~1.2 s at 128.
+  a turn -- `SnapshotTurnMs` is `live * 60 / 16`, i.e. 60 ms at 16 live entities, **480 ms at 128**
+  and ~1.2 s at 320.
 - **THE SECOND IS THE BIGGER HALF, AND THE CARD'S TITLE UNDERSTATES IT.** The card is filed as
   "a marked teleport freezes the puppet", and at SpiderBoss's three parks the zero is momentarily
   CORRECT -- each reposition immediately starts `waittimer` for the 1000 ms "Danger!" hold, so the
   boss really is stationary. What actually costs the joiner is the pause -> sweep boundary right
   after it: the boss steps from 0 to `0.78 * DifficultyModifier` px/ms and the puppet drives the
   old value for a turn. **Measured** (`--smoothness`, boss-fly-by shape, mean puppet lag / pops
-  past `SnapThresholdPx`): N=16 10.4 px / 0, N=64 21.7 px / 17, **N=128 48.9 px / 26**.
+  past `SnapThresholdPx`): N=16 10.1 px / 0, N=64 22.7 px / 20, **N=128 51.7 px / 33**.
 - **THE FIX IS A THIRD SOURCE OF TRUTH: `AlienDrawableGameComponent.TryGetNetScriptedVelocity`,**
   the type's own answer to "what will Update do next tick", used on EVERY turn rather than only
   where the fallbacks would have caught it. It is FORWARD-looking where a difference is
@@ -2763,9 +2764,11 @@ velocities the layer already had are wrong for it -- and the fix is neither of t
   difference purely to hand to `NoteIfUnmarkedTeleport`, and it never reaches the wire. Only
   reached on an UNMARKED turn, where that difference describes genuine motion.
 - **THE RESIDUAL, STATED AND ASSERTED: this fixes WHAT the puppet dead-reckons with, never WHEN it
-  hears about a phase change.** That is still up to one snapshot turn, so the PEAK lag barely
-  moves (361.5 -> 344.0 px at N=128) while the MEAN lag and the pops roughly halve
-  (48.9 -> 27.5 px, 26 -> 14). Closing the timing half means a per-phase model on the wire -- phase
+  hears about a phase change.** That is still up to one snapshot turn, so at N=128 the MEAN lag
+  falls 51.7 -> 35.0 px and the pops 33 -> 20, while the PEAK lag does not improve at all
+  (352.7 -> 356.0 px -- the two are inside the noise of where a boundary happens to fall in a
+  turn, and the peak is set by that latency rather than by the velocity's accuracy). Closing the
+  timing half means a per-phase model on the wire -- phase
   id plus elapsed ms, so the client can advance the hold and start the sweep on schedule -- which
   was designed, costed and DECLINED on this card: it buys a second-order gain in exchange for wire
   bytes on the lane card f5cf7a5c just guarded, a client-side mirror of a script the host owns (a
@@ -2773,8 +2776,8 @@ velocities the layer already had are wrong for it -- and the fix is neither of t
   the peak barely moves, so if that leg ever fails someone has closed the gap and this text is
   stale.
 - **DO NOT READ THE JERK FIGURE HERE.** It REWARDS a puppet that ignores the choreography: the
-  pre-card column reads a vector jerk of 1.02 against the host's own 1.00 while sitting up to
-  361 px behind, because a velocity that never steps is beautifully smooth and simply wrong. Read
+  pre-card column reads a vector jerk of ~1.02 against the host's own ~1.00 while sitting over
+  350 px behind, because a velocity that never steps is beautifully smooth and simply wrong. Read
   the ERROR and the POPS. (Same trap as reading the AI bench's `turn` with no survival column.)
 - **VERIFY IN THREE PLACES, and they answer different questions.**
   **`eaNetScriptedMotion()` / `tools/headless/probes/net_scripted_motion.txt`** (35 assertions,

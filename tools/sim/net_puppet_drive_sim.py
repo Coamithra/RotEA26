@@ -765,7 +765,7 @@ def _anchored_offset(t_ms):
 # tools/headless/probes/net_scripted_motion.txt, which drives the real class.
 SCRIPT_MOVE_PX_PER_MS = 0.78
 SCRIPT_HOLD_MS = 1000.0
-SCRIPT_SWEEP_MS = 1910.0 / SCRIPT_MOVE_PX_PER_MS   # -345 .. 1145 at move speed
+SCRIPT_SWEEP_MS = 1490.0 / SCRIPT_MOVE_PX_PER_MS   # x -345 .. 1145 at move speed
 SCRIPT_PERIOD_MS = SCRIPT_HOLD_MS + SCRIPT_SWEEP_MS
 
 
@@ -1067,7 +1067,7 @@ def smoothness():
     #
     # READ THE ERROR AND THE POPS, NOT THE JERK. A jerk figure REWARDS a puppet that ignores the
     # choreography: the pre-card column reads 1.02 against the host's own 1.00 while sitting up to
-    # 361 px behind, because a velocity that never steps is beautifully smooth and simply wrong.
+    # 350+ px behind, because a velocity that never steps is beautifully smooth and simply wrong.
     # It is the same trap as reading the AI bench's `turn` without a survival column.
     print("\n  SCRIPTED CHOREOGRAPHY (boss fly-by: hold, sweep, hold) -- card 76ec8bdb")
     print("  the pre-card column DIFFERENCES positions; the post-card one sends the"
@@ -1083,7 +1083,7 @@ def smoothness():
     big = [r for r in scripted_rows if r[0] == 128][0]
     _, big_pre, big_post = big
     # THE CLAIM. In a big world the mean lag and the number of corrections past SnapThresholdPx
-    # both roughly halve -- 48.9 -> 27.5 px and 26 -> 14 pops as measured.
+    # both fall by a third or more -- 51.7 -> 35.0 px and 33 -> 20 pops as measured at N=128.
     if not big_post["meanerr"] < 0.75 * big_pre["meanerr"]:
         fails.append("the announced velocity did not cut the mean lag at N=128 (%.1f px vs the "
                      "differenced %.1f px) -- the scripted branch is the whole card"
@@ -1094,7 +1094,7 @@ def smoothness():
                      % (big_post["pops"], big_pre["pops"]))
     # NON-VACUITY. Both figures are differences between two runs, so a rig that quietly stopped
     # driving the choreography would report 0 vs 0 and pass.
-    if not big_pre["pops"] > 0 and big_pre["meanerr"] > 10.0:
+    if not (big_pre["pops"] > 0 and big_pre["meanerr"] > 10.0):
         fails.append("the pre-card scripted run did not misbehave (mean %.1f px, %d pops) -- the "
                      "comparison above is vacuous, check _scripted_truth is still moving"
                      % (big_pre["meanerr"], big_pre["pops"]))

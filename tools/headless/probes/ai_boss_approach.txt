@@ -1,53 +1,66 @@
-# PROBE: the AI's level-halting-boss approach term is LIVE, not parked
+# PROBE: the AI's level-halting-boss approach term is LIVE, and CALIBRATED
 #
-# PINS:   card 31ceb6ff. The term itself was added by card f4d1721f and was correct code the
-#         whole time -- but it expresses "close on that boss" by writing `steerTarget`, and every
-#         steerTarget vote used to weigh SeekWeight 0.8 against a whole-sum "park" of 0.95. So
-#         DoAIMove's last act zeroed it, and the ship never went. Card 31ceb6ff gave the
-#         standoff its own weight (DefaultSeekApproachWeight 1.1) above that park; card ada9e839
-#         then DELETED the park itself (the 2008 value was 0.2, not 0.95) and rebuilt DoAIMove as
-#         a proper attraction/repulsion composition, so this probe now guards the term against a
-#         different failure: it is no longer "did the weight clear a threshold", it is "does the
-#         standoff still out-vote what is pushing back". NOTE the 1.1 is a park-CLEARANCE number
-#         and is mis-calibrated under the new composition -- card b56633fb recalibrates it, and
-#         this probe's thresholds should be revisited with it.
+# PINS:   cards f4d1721f -> 31ceb6ff -> b56633fb. The term expresses "close on that boss" by
+#         writing `steerTarget`, and it has failed twice in two different ways. First it was
+#         PARKED: every steerTarget vote weighed SeekWeight 0.8 against a whole-sum 0.95 "park",
+#         so DoAIMove's last act zeroed it and the ship never went (card 31ceb6ff gave it its own
+#         weight, card ada9e839 deleted the park). Then it was MIS-CALIBRATED: that weight, 1.1,
+#         was only ever chosen to clear the park, and the boss's own repellent at the point the
+#         ship was being sent is 2.9 -- so the net force pointed AWAY from its own destination and
+#         `bossfar` read ~99% forever. Card b56633fb solves the weight against that repellent at
+#         firing range instead (PlayerShip.BossApproachWeight).
 #
-# WHY A PROBE AND NOT A SCREENSHOT: the failure is a ship that does not move, on a rig where a
-# dozen other terms are also pushing, so a frame shows nothing and `deaths`/`prog` move for
-# unrelated reasons. What the card is about is DISTANCE, so `AiBench.NoteBossApproach` counts it
-# where the term acts and the run prints `boss=<meanpx> bossfar=<pct>`.
+# WHY A PROBE AND NOT A SCREENSHOT: the failure is a ship that does not GO somewhere, on a rig
+# where a dozen other terms are also pushing, so a frame shows nothing and `deaths`/`prog` move
+# for unrelated reasons. `AiBench.NoteBossApproach` counts it where the term acts and the run
+# prints `boss=<mean edge px> bossfar=<pct> bossw=<mean solved weight>`.
 #
-# THE ASSERTION IS POSITIVE, and deliberately weak on the number. `bossfar` is asserted to be
-# high, which sounds backwards until you know the standing result below -- what is actually
-# pinned is that the counters EXIST and the boss was seen at all. A dead term and a live one
-# differ here by ~10px of mean distance, which is far inside this rig's run-to-run spread, so an
-# assertion tight enough to catch the regression would be flaky. The regression is caught by
-# logic_probe's ProbeAiFieldComposition instead (the weight-vs-park ordering, which is the mechanism);
-# this probe's job is to prove that ordering is WIRED to a real boss, which logic_probe cannot do.
+# THIS PROBE NOW ASSERTS A NUMBER, and picking WHICH number needed the mutation run rather than
+# an argument. It was deliberately weak before (`bossfar=[0-9]+%`, i.e. "the counter exists")
+# because the parked and un-parked builds both read ~99% and nothing here separated them.
 #
-# STANDING RESULT, so the numbers below are readable (eahl, Very_Hard, ?invuln, 180 sim-s):
-#   `bossfar` is ~99% at BOTH weights -- the ship essentially never reaches its standoff radius
-#   on the BrainBoss, because the boss sits at the top of the screen and TopEdgeAvoidStrength
-#   (20) permanently out-votes the approach (1.1). That is not a bug: the top band is where UFOs
-#   spawn and being pinned there is a death. The approach still buys ~10px of mean closing and
-#   a drop in `idle%` (ticks with a shootable target and no shot fired -- the card's original
-#   symptom).
+# `bossfar` alone would still not do it, and the reason is a trap worth stating: the pre-card
+# ~99% was measured against the pre-card REFERENCE, the 41px-edge standoff radius. Card b56633fb
+# re-references it to r* -- firing range, 118px edge on this rig -- which is much farther out, so
+# the SAME steering scores far better on the new metric. Measured over seeds 1-3, pre-card
+# standoff+1.1 reads 49/60/52% here, not 99%.
+#
+# So the discriminating leg is `idle%` -- ticks with a shootable target and no shot fired, i.e.
+# whether the bot is actually in range to FIGHT the boss, which is what closing was ever for.
+# Measured, Very_Hard / ?invuln / 180 sim-s / seeds 1-3: this build 15/10/11%, pre-card standoff
+# 31/41/32%. The 25% threshold sits 1.7x above the worst passing run and 1.24x below the best
+# failing one. `bossfar` keeps a leg too, at 45% (36% worst pass / 49% best fail), because the two
+# fail in different ways -- a bot held out of range and a bot in range that has stopped shooting.
+#
+# `boss=` IS AN EDGE DISTANCE since that card, not a centre distance, so the same rig reads
+# ~130-165px where it used to read ~390. Do not compare the two across the card.
+#
+# `bossw=` is the SOLVED weight, averaged over the ticks the term ran. It reads 0.7-1.2 here. It
+# is asserted merely to be present and non-zero: a weight of zero is an inert term, which is the
+# whole failure class above, and its exact value is a function of the live weapon range (a Range
+# powerup moves it) so a tight bound would be flaky.
 #
 # FAILURE MEANS:
 #   * `boss=` / `bossfar=` missing  -> NoteBossApproach is no longer called, i.e. the haltingBoss
 #                                      branch of DoAIMove was removed or its predicate
 #                                      (IsAiPriorityTarget) stopped matching BrainBoss. The term
 #                                      is gone, not merely mistuned.
+#   * `bossfar` back near 99%       -> the term runs but is out-voted at its own destination --
+#                                      the card b56633fb defect, or a repellent that has grown.
+#                                      Read `bossw=` next: near-zero means the solve went inert,
+#                                      a healthy weight means something else is winning.
 #   * `boss=0px`                    -> the branch runs but the boss is never on screen; the
 #                                      ?brainboss fast-boot changed, not the AI.
 #   * `pickups=` missing            -> AiBench's counters were reshaped; see card ada9e839.
 #
-# MUTATION-TESTED: deleting the AiBench.NoteBossApproach call drops both fields and turns the
-# boss legs red while every other line still passes. Setting DefaultSeekApproachWeight back to
-# SeekWeight (the pre-card bug) does NOT turn this probe red -- by design, see above; that
-# mutation is caught by logic_probe, which was mutation-tested against it.
+# MUTATION-TESTED: restoring the pre-card standoff+1.1 verbatim (the geometric standoff point
+# carrying DefaultSeekApproachWeight) turns the idle and bossfar legs red while every other line
+# still passes -- which is the mutation the previous revision of this probe could NOT catch, and
+# said so. Deleting the AiBench.NoteBossApproach call drops the boss fields and turns four legs
+# red. NOTE the first mutation passed an 80% bossfar threshold, which is how the numbers above
+# came to be measured rather than reasoned: re-mutate before loosening either bound.
 #
-# eahl: --flags "?level=Level3&brainboss&aiplayer&aibench&difficulty=Very_Hard&invuln"
+# eahl: --flags "?level=Level3&brainboss&aiplayer&aibench&difficulty=Very_Hard&invuln&seed=1"
 
 step 150 nodraw
 mark
@@ -63,7 +76,17 @@ eval AiBench
 expect \[aibench\].*Level3
 expect \[aibench\].*ticks=[1-9][0-9][0-9][0-9]
 expect \[aibench\].*boss=[1-9][0-9]+px
-expect \[aibench\].*bossfar=[0-9]+%
+
+# CALIBRATED, the discriminating leg: the bot is in range to FIGHT the boss, so it is not sitting
+# on a shootable target doing nothing. Under 25% -- see the header for how that bound was measured.
+expect \[aibench\].*idle=([0-9]|1[0-9]|2[0-4])%
+
+# ...and it got there by closing: under 45% of ticks outside firing range.
+expect \[aibench\].*bossfar=([0-9]|[1-3][0-9]|4[0-4])%
+
+# The solved weight is live and non-zero (an inert term is the failure class this card fixed).
+expect \[aibench\].*bossw=[0-9]+\.[0-9]+
+expect-not \[aibench\].*bossw=0\.00
 
 # The powerup counters ride the same report (card ada9e839) -- if they vanish, the histogram
 # reshaped and the matrix runner's Row() contract is the next thing to check.

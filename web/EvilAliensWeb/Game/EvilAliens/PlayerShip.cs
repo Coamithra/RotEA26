@@ -145,16 +145,20 @@ public class PlayerShip : AlienDrawableGameComponent
 	// WHOLE-SUM equilibrium guard, applied last (see the end of DoAIMove for the placement
 	// argument). Same 0.2, same job at a different level: a steer that has cancelled to noise is
 	// full throttle in an arbitrary direction, because Move() keeps only the angle. It is BELOW
-	// every deliberate force by construction -- the weakest attractor is SeekWeight 0.8 and a
+	// every FIXED-weight attractor by construction -- the weakest is SeekWeight 0.8 and a
 	// surviving repellent already beats DefaultRepulseCancelDelta -- so it can only ever fire on
 	// real cancellation, never censor a lone vote. That bound is the whole difference from the
 	// 0.95 this port shipped, and it is asserted by logic_probe's ProbeAiFieldComposition.
 	//
-	// FUTURE HAZARD, stated because the probe is the only thing that would catch it: an attractor
-	// that FADES with distance (there is none today -- the seek is a flat 0.8 however far away its
-	// target is) would drop under this floor at range and be parked exactly as the 0.95 park
-	// parked everything. Such a term must either keep its full-strength magnitude above the floor
-	// or accept being inert at range as a deliberate choice.
+	// THAT HAZARD IS NOW REALISED, DELIBERATELY (card b56633fb). This note used to read "an
+	// attractor that FADES with distance (there is none today) would drop under this floor and be
+	// parked exactly as the 0.95 park parked everything -- such a term must either keep its
+	// magnitude above the floor or accept being inert as a deliberate choice". The boss approach
+	// is that term and takes the second option ON PURPOSE: its weight is solved to CROSS the
+	// repellent at firing range, so this floor is what widens that crossing into a band the ship
+	// can come to rest in. It is therefore out of ProbeAiFieldComposition's weakest-attractor
+	// bound; ProbeAiBossApproach asserts the band instead. The warning still stands for any
+	// FIXED-weight attractor added later.
 	public const float DefaultSteerNoiseFloor = 0.2f;
 
 	private static float SteerSmoothUrgentMs => EvilAliensWeb.Compat.DebugFlags.AiSteerSmoothUrgentMs ?? DefaultSteerSmoothUrgentMs;
@@ -218,17 +222,85 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	// Bullet travel per ms of its lifetime -- i.e. `bulletlifetime * this` is how far a shot
 	// reaches. The 0.78 factor is the 2008 range test in DoAIFire, named here because the
-	// boss-approach standoff has to agree with it or the ship closes to somewhere it still
-	// cannot shoot from.
+	// boss-approach ANCHOR r* is derived from it, so "close until you can shoot" and "a shot
+	// reaches this far" cannot drift apart.
 	private const float BulletRangePerMs = 0.78f;
 
-	// Where to sit relative to a halting boss: a fraction of gun range, clamped so a short-lived
-	// bullet does not demand ramming distance and a long-lived one does not park off-screen.
-	private const float BossStandoffFraction = 0.6f;
+	// ---- THE BOSS-APPROACH ATTRACTOR (card b56633fb) ----------------------------------------
+	//
+	// WHAT WAS WRONG. The approach used to fly at a geometric standoff point
+	// (clamp(gunRange * 0.6, 130, 300) = 211px centre = 41px EDGE at the base weapon) carrying a
+	// CONSTANT weight, DefaultSeekApproachWeight 1.1. That 1.1 was never calibrated against
+	// anything: it was picked to sit above the 0.95 whole-sum park, which card ada9e839 has since
+	// deleted. At the very point the ship was asked to reach, the boss's own repellent is
+	// 4*(1-41/406)^3 = 2.9 -- so the net force at the destination pointed AWAY, by a factor of
+	// 2.6, and `bossfar` read ~99% forever. A destination inside your own repellent is not a
+	// destination.
+	//
+	// THE SHAPE, and why it is INVERTED. A(d) grows with edge distance and quiets to ~0 inside
+	// firing range -- the opposite of every other falloff in this file, and deliberately so:
+	//   * outside r* the attractor always OUTWEIGHS the repellent, because A is climbing while
+	//     repel is decaying. The outweigh invariant holds by SHAPE, not by a solved constant that
+	//     a Range powerup could invalidate;
+	//   * at r* the two are EQUAL by construction (that is what the weight is solved for), so the
+	//     net crosses zero exactly at the distance the ship can shoot from -- in the case where the
+	//     repellent is still audible there at all; where a Range powerup has put r* beyond the
+	//     field's own radius, repel is 0 and the weight floors instead, so the term keeps closing
+	//     until there is something to balance against;
+	//   * inside r* the attractor has quieted and the boss repellent pushes back out, which makes
+	//     the equilibrium self-limiting rather than a point the ship has to hit.
+	// There is no deadzone and no standoff radius. The whole-sum floor (DefaultSteerNoiseFloor
+	// 0.2) then turns the crossing into a BAND -- |A - repel| <= 0.2 reads as "hold still" -- and
+	// that band has to be wider than the ship's 11.3px stopping distance or it coasts through and
+	// pingpongs. Width is 0.4 / (|A'| + |repel'|); at the shipped numbers (Very_Hard, base weapon:
+	// r* = 181.3px edge, w = 0.678, |repel'| = 0.00905/px, |A'| = w/r* = 0.00374/px) that is
+	// **31px**, i.e. 2.7x the stopping distance. Swept over every tier and the whole
+	// bulletlifetime range by logic_probe's ProbeAiBossApproach, which is where the bound lives.
+	//
+	// KNOWN LIMIT -- THE BAND ASSUMES THE TWO FORCES ARE COLLINEAR, AND FOR SEATS 3/4 THEY ARE NOT.
+	// The radial threat push is emitted at `VectorToAngle(...) + dodgeAngle`, a per-slot rotation
+	// that fans co-op ships apart: +-PI/16 for players 0/1, +-PI/6 for players 2/3. The attractor
+	// points straight at the boss, so at the crossing the two equal magnitudes cancel to
+	// 2*w*sin(dodge/2) rather than to zero -- 0.13 at PI/16 (under the 0.2 floor, so the band is
+	// real) but 0.35 at PI/6, where there is no parked band at all and such a ship orbits instead.
+	// Stated rather than solved: every measurement here and every AI rig is slot 0, four AI ships
+	// is a case nothing exercises today, and rotating the attractor to match would change the
+	// meaning of "aim at the boss" for the human-facing seats too.
+	//
+	// EXPONENT 1 -- A is LINEAR in edge distance, and this is a CEILING rather than the exponent
+	// itself (see the damping below). The band width is what constrains it: |A'(r*)| = k*w/r*, and
+	// the card's arithmetic puts the usable ceiling near 0.02/px, which k=1 clears by 5x at the
+	// shipped configuration. Linear also keeps "quiet inside r*" honest without a second mechanism
+	// -- at half firing range A is w/2 against a repellent of 1.9. Note both of those are the k=1
+	// reading: where the damping below bites, A falls off far more gently inside r* (at k=0.24,
+	// A(r*/2) is 0.85w) and "quiet" means only that the repellent still wins there, which the probe
+	// asserts directly rather than taking on the shape's word.
+	private const float BossApproachExponent = 1f;
 
-	private const float BossStandoffMinPx = 130f;
+	// Anchor floor. r* is derived (gun range minus the boss's own body term), so a boss whose hull
+	// is bigger than the weapon's reach would drive it to zero or below -- and a tiny r* is what
+	// makes |A'| = w/r* explode and collapses the band. Floored at 3x the 11.3px stopping distance:
+	// below that the ship cannot hold a standoff there anyway, and the band bound is verified AT
+	// the floor rather than assumed away.
+	// IT IS THE FIRST RESORT, NOT THE WHOLE ANSWER: it can only rescue an anchor that has gone to
+	// zero, and the measured failure is a boss with a LIVE anchor of ~100px, which the floor never
+	// touches. That case is what the exponent damping below exists for. Raising this floor instead
+	// was measured and rejected: covering it needs ~115px, and asking the ship to stand 115px
+	// clear of a hull that wide parks it OUTSIDE gun range -- reinstating the never-shoots failure
+	// this whole term exists to remove.
+	private const float BossApproachMinAnchorPx = 34f;
 
-	private const float BossStandoffMaxPx = 300f;
+	// SAFETY FACTOR on the band bound: the parked band must be at least this many stopping
+	// distances wide. 1x would be the bare "does not coast straight through"; 2x is what the
+	// exponent is solved against, so a band sits comfortably clear of the bound rather than on it.
+	private const float BossApproachBandMargin = 2f;
+
+	// Ceiling on the attractor's GROWTH away from the boss (see the return of BossApproachWeight
+	// for why it does not bind the anchor), so it can never out-vote a full-strength threat
+	// field (the structural bound ProbeAiFieldComposition asserts about every seek: Move() keeps
+	// only the ANGLE, so a seek that can beat the field is a bot that flies into things to reach
+	// them). Only reachable far off-screen at the shipped numbers.
+	private const float BossApproachMaxWeight = 3.5f;
 
 	// How far down the screen the "UFOs spawn here" danger band reaches, and how hard it pushes.
 	// Strong enough to stand up to a lane escape, so the ship settles below the spawn line
@@ -285,8 +357,8 @@ public class PlayerShip : AlienDrawableGameComponent
 	// ---- seek weights for a target the bot CHOSE (cards ada9e839 / 31ceb6ff) ----------------
 	//
 	// THE BUG THAT WAS HERE, AND HOW IT IS GONE. Every deliberate destination in DoAIMove rides
-	// ONE `steerTarget` carrying ONE weight: the idle station, a powerup, a level-halting boss's
-	// standoff point, a partner to dock with, a blastable cluster. The port ended DoAIMove with a
+	// ONE `steerTarget` carrying ONE weight: the idle station, a powerup, a level-halting boss,
+	// a partner to dock with, a blastable cluster. The port ended DoAIMove with a
 	// 0.95 "park" that zeroed the whole steer whenever it came out at or below that -- so a lone
 	// 0.8 seek produced NO MOTION AT ALL and the bot simply did not go anywhere unless something
 	// else happened to be pushing that tick. That is the whole of "the AI is uninterested in
@@ -300,22 +372,22 @@ public class PlayerShip : AlienDrawableGameComponent
 	// threshold to be heard at all.
 	public const float DefaultSeekPowerupWeight = SeekWeight;
 
-	// THE LEVEL-HALTING BOSS STANDOFF (card 31ceb6ff). Judged on the challenge-level COMPLETION
-	// MATRIX, not on deaths: eight of the nine challenge levels run with score.Lives = -1, so a
-	// death there is free and the failure that matters is a level that never finishes. Closing on
-	// a boss costs deaths by design.
-	// Above SeekWeight because a halting boss is a COMMITMENT (nothing in the level advances
-	// until it dies), while a powerup or a rendezvous is a DETOUR whose value has to beat its
-	// risk. It used to have a second job -- clearing the 0.95 park, which was the only reason it
-	// moved the ship at all -- and card ada9e839 retired that job; the value is unchanged so the
-	// configuration card 31ceb6ff measured is preserved.
-	// Its own anti-pingpong mechanism is the standoff RADIUS: the term switches off once the ship
-	// is inside gun range, so it never pulls toward a point it is sitting on.
-	public const float DefaultSeekApproachWeight = 1.1f;
+	// THE LEVEL-HALTING BOSS APPROACH (cards 31ceb6ff -> b56633fb). There is no constant weight
+	// here any more -- see BossApproachExponent above for the shape that replaced
+	// DefaultSeekApproachWeight, and BossApproachWeight for the solve. The two claims that const
+	// carried are now properties of the curve: it is above SeekWeight wherever the bot is
+	// deliberately closing (a halting boss is a COMMITMENT -- nothing in the level advances until
+	// it dies -- while a powerup is a DETOUR), and it is bounded below the threat field's 4 by
+	// BossApproachMaxWeight.
+	// The multiplier below is what `?aiseekapproach=` now sets: 1 = the solved weight.
+	public const float DefaultBossApproachScale = 1f;
 
 	private static float SeekPowerupWeight => EvilAliensWeb.Compat.DebugFlags.AiSeekPowerupWeight ?? DefaultSeekPowerupWeight;
 
-	private static float SeekApproachWeight => EvilAliensWeb.Compat.DebugFlags.AiSeekApproachWeight ?? DefaultSeekApproachWeight;
+	// A SCALE on the solved anchor weight since card b56633fb, NOT the weight itself -- the flag
+	// key is unchanged so the rejection sweep and the flag list are, but a value from before that
+	// card means something else entirely and the two are not commensurable.
+	private static float BossApproachScale => EvilAliensWeb.Compat.DebugFlags.AiSeekApproachWeight ?? DefaultBossApproachScale;
 
 	// How far out a powerup exerts its own direct pull. The 2008 code reused `steerRange`, which
 	// is really the screen-EDGE margin -- two unrelated quantities that happened to be equal, so
@@ -1442,6 +1514,21 @@ public class PlayerShip : AlienDrawableGameComponent
 	// fight plinking at the skulls the boss keeps spawning.
 	private static bool IsAiPriorityTarget(AlienDrawableGameComponent baddy)
 	{
+		// SPIDERBOSS IS EXCLUDED, EXPLICITLY (card b56633fb). It was excluded by OMISSION from the
+		// list below, which is the same behaviour and no protection at all: the obvious "the AI
+		// ignores the spider boss" edit is to add it to that list, and doing so would make card
+		// b56633fb's symptom -- the bot walking into the PARKED boss, its single largest killer --
+		// dramatically worse, with nothing failing to say so. It must be DODGED, not sought:
+		// bullets deflect off it (only a Lazer hurts it, which is why IsAiShootable excludes it
+		// too), so approaching it buys nothing and costs the fight. Pinned by logic_probe's
+		// ProbeAiBossApproach with BrainBoss as the positive control.
+		// IF YOU ARE HERE BECAUSE ADDING SpiderBoss TO THE LIST BELOW CHANGED NOTHING: this guard
+		// is why, and it wins deliberately. Removing it needs card b56633fb read first -- the
+		// standing boss is the bot's single largest killer, and seeking it makes that worse.
+		if (baddy is SpiderBoss)
+		{
+			return false;
+		}
 		return baddy is BrainBoss || baddy is FakeBoss || baddy is MarsBoss || baddy is JunkBoss
 			|| baddy is ClassicBoss || baddy is Boss || baddy is StationaryBoss || baddy is BattleSkull;
 	}
@@ -1663,11 +1750,12 @@ public class PlayerShip : AlienDrawableGameComponent
 		Vector2 steerTarget = new Vector2(float.MaxValue, float.MaxValue);
 		// How hard to pull toward whatever steerTarget ends up being. It carries the WEIGHT rather
 		// than a flag because the answer is not two-valued: the idle station and every DETOUR park
-		// (SeekWeight, as before this card), while a level-halting boss's standoff point has to
-		// clear the park or it is dead code.
+		// at SeekWeight, while a level-halting boss carries a weight SOLVED per tick against that
+		// boss's own repellent (card b56633fb, BossApproachWeight), which is the one write here
+		// that is not a constant.
 		// INVARIANT: a steerTarget write that can run AFTER another one must set this too, even
 		// to SeekWeight -- otherwise it inherits the previous writer's weight rather than the
-		// default, and a detour silently flies at the standoff's. Only the two writes inside the
+		// default, and a detour silently flies at the boss approach's. Only the two writes inside the
 		// baddy loop (a blastable cluster, a JunkBoss) are exempt, and only because nothing has
 		// written a weight yet by then; the two station fallbacks are exempt because they run
 		// solely while steerTarget is still MaxValue.
@@ -1792,7 +1880,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			// boss happened to drift within range -- measured as 55% of ticks with a shootable
 			// target and no shot fired, against a BrainBoss parked at the top of the screen.
 			// Same on-screen predicate DoAIFire uses. BrainBoss eases in from a negative Y, and
-			// without this the ship is dragged toward a standoff point off the top of the screen
+			// without this the ship is dragged toward a point off the top of the screen
 			// during the entry -- while DoAIFire is still refusing to shoot at it.
 			if (IsAiPriorityTarget(baddy) && baddy.Position.X > 0f && baddy.Position.X < 800f
 				&& baddy.Position.Y > 0f && baddy.Position.Y < 600f)
@@ -1858,28 +1946,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				{
 					continue;
 				}
-				float dist;
-				if (baddy.GetCollisionType() is CollisionBox)
-				{
-					Vector2 toBaddy = base.Position - baddy.Position;
-					dist = (toBaddy).Length() - ((CollisionBox)baddy.GetCollisionType()).Width / 2f * (float)Math.Sqrt(2.0);
-				}
-				else if (baddy.GetCollisionType() is CollisionMultibox)
-				{
-					Vector2 toBaddy = base.Position - baddy.Position;
-					dist = (toBaddy).Length() - ((CollisionMultibox)baddy.GetCollisionType()).Items[0].Width / 2f * (float)Math.Sqrt(2.0);
-				}
-				else if (baddy.GetCollisionType() is CollisionSimpleCircle)
-				{
-					float radius = ((CollisionSimpleCircle)baddy.GetCollisionType()).Radius;
-					Vector2 toBaddy = base.Position - baddy.Position;
-					dist = MathHelper.Clamp((toBaddy).Length() - radius, 0f, 1000f);
-				}
-				else
-				{
-					Vector2 toBaddy = base.Position - baddy.Position;
-					dist = (toBaddy).Length();
-				}
+				float dist = ThreatEdgeDistance(base.Position, baddy);
 				// Personal-space field, sized to the THREAT (card f4d1721f). The 2008 code gave
 				// everything the same flat 150px, which is nothing to something the size of the
 				// spider boss -- by the time it pushed at all the ship was already inside the
@@ -1959,23 +2026,40 @@ public class PlayerShip : AlienDrawableGameComponent
 		// still on a chosen spot waiting to be shot at measured 24 -> 75 deaths, because the
 		// boss simply landed on the stationary ship. Sparing the big UFOs in DoAIFire is the
 		// whole mechanism; where the ship stands is the evasion code's business.
-		// Close on a level-halting boss that is out of gun range (card f4d1721f). Nothing else in
+		// Close on a level-halting boss (cards f4d1721f -> 31ceb6ff -> b56633fb). Nothing else in
 		// the level advances until it dies, so hovering at the default station waiting for it to
-		// drift into range is not a strategy -- it is the stall. The standoff point keeps the
-		// ship's current bearing on the boss and only closes the distance, so this asks to get in
-		// RANGE, never to ram it; the threat repulsion above still owns how close is too close.
+		// drift into range is not a strategy -- it is the stall. The target is the BOSS, not a
+		// geometric standoff point: where the ship comes to rest is decided by this attractor
+		// meeting the boss's own repellent, which is the whole design (see BossApproachExponent).
+		// So this asks to get in RANGE, never to ram it, and the threat repulsion above still owns
+		// how close is too close.
 		// Placed after the powerup pass so a boss fight outranks a pickup detour.
 		if (haltingBoss != null)
 		{
-			float gunRange = bulletlifetime * BulletRangePerMs;
-			Vector2 fromBoss = base.Position - haltingBoss.Position;
-			float bossDist = (fromBoss).Length();
-			float standoff = MathHelper.Clamp(gunRange * BossStandoffFraction, BossStandoffMinPx, BossStandoffMaxPx);
-			EvilAliensWeb.Compat.AiBench.NoteBossApproach(this, bossDist, standoff);
-			if (bossDist > standoff && bossDist > 0.001f)
+			float bossEdgeDist = ThreatEdgeDistance(base.Position, haltingBoss);
+			// Gun range is a CENTRE distance (it is what DoAIFire range-tests), so the body term
+			// converts it into the edge space everything here is measured in.
+			float anchorPx = bulletlifetime * BulletRangePerMs - ThreatBodyTerm(haltingBoss);
+			float pull = BossApproachWeight(bossEdgeDist, anchorPx, ThreatFieldRange(haltingBoss),
+				ThreatTypeFalloff(haltingBoss), ThreatTypeClassicCurve(haltingBoss),
+				ThreatTypeScale(haltingBoss), maxSteerStrength, SteerNoiseFloor) * BossApproachScale;
+			// The bench call is UNCONDITIONAL -- the term's calibration is what it measures, and a
+			// tick where the boss lost the vote is exactly the tick worth counting.
+			EvilAliensWeb.Compat.AiBench.NoteBossApproach(this, bossEdgeDist,
+				MathHelper.Max(anchorPx, BossApproachMinAnchorPx), pull);
+			// It has to OUT-VOTE a destination something else CHOSE, not merely exist. One
+			// `steerTarget` carries one destination, so writing it unconditionally would let a boss
+			// term that has quieted to a fraction of SeekPowerupWeight delete a live powerup detour
+			// -- the opposite of "a boss fight outranks a pickup detour", and arriving precisely
+			// inside firing range, where this term is DESIGNED to fall silent.
+			// The X > 2000 sentinel means NOBODY has chosen yet (the idle station is assigned below,
+			// after this), and there the boss takes the wheel at any weight: the alternative is
+			// hovering at a station the boss may not be in range of, which is the stall this whole
+			// term exists to end. So the comparison is against a real competing vote only.
+			if (steerTarget.X > 2000f || pull > steerTargetWeight)
 			{
-				steerTarget = haltingBoss.Position + (fromBoss / bossDist) * standoff;
-				steerTargetWeight = SeekApproachWeight;
+				steerTarget = haltingBoss.Position;
+				steerTargetWeight = pull;
 			}
 		}
 		foreach (PlayerShip ship in oracle.GetShips())
@@ -1984,8 +2068,8 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				steerTarget = ship.Position;
 				// EVERY steerTarget write sets its own weight, including the ones that keep the
-				// station's. This one overwrites the boss standoff above, so inheriting silently
-				// would fly the DETOUR at the standoff's weight -- the one case where "leave it
+				// station's. This one overwrites the boss approach above, so inheriting silently
+				// would fly the DETOUR at the approach's weight -- the one case where "leave it
 				// at the default" and "leave it at whatever the last writer set" differ.
 				steerTargetWeight = SeekWeight;
 			}
@@ -2160,9 +2244,17 @@ public class PlayerShip : AlienDrawableGameComponent
 		// for a potential field is the CORRECT answer at an equilibrium point.
 		//
 		// IT CANNOT CENSOR A REAL FORCE, and that is by construction rather than by luck: every
-		// deliberate attractor weighs at least SeekWeight 0.8, and any repellent that survived the
+		// FIXED-weight attractor weighs at least SeekWeight 0.8, and any repellent that survived the
 		// repulsion floor above already exceeds 0.2. So the only way to land here is genuine
 		// cancellation between an attractor and a repellent that both really are pushing.
+		//
+		// THE BOSS APPROACH IS THE ONE DELIBERATE EXCEPTION (card b56633fb), and it is the case
+		// DefaultSteerNoiseFloor's own "FUTURE HAZARD" note predicted: it is an attractor whose
+		// weight VARIES with distance and passes down through this floor near firing range. Being
+		// zeroed there is the DESIGN, not a censored force -- the floor is what turns the crossing
+		// into a parked band wide enough for the ship to stop in, which BossApproachWeight solves
+		// its exponent against. It is out of ProbeAiFieldComposition's weakest-attractor bound for
+		// that reason and pinned by ProbeAiBossApproach instead.
 		// Read that as CONVERGED magnitude, because this runs downstream of the low-pass: a lone
 		// 0.8 seek starting from rest blends to only ~0.135 on its first tick and IS zeroed for
 		// that one frame. `aiSteer` itself is not zeroed, so the next tick continues converging
@@ -2615,6 +2707,109 @@ public class PlayerShip : AlienDrawableGameComponent
 				?? EvilAliensWeb.Compat.DebugFlags.AiClassicFieldCurve ?? false;
 		}
 		return ClassicFieldCurve;
+	}
+
+	// The boss-approach attractor, solved (card b56633fb). PURE -- primitives in, weight out, no
+	// ship and no component -- so logic_probe can sweep it over every difficulty tier and the whole
+	// bulletlifetime range with no game running. See BossApproachExponent for the shape argument.
+	//   edgeDist   how far the ship's hull is from the boss's, now
+	//   anchorPx   r*: firing range expressed in that same EDGE space (gun range - body term)
+	//   the rest   the boss's OWN repellent parameters, passed through so the weight is solved
+	//              against the very field it has to cross rather than a restatement of it
+	//   minWeight  the whole-sum floor; without it a weapon out-ranging the field solves to w=0
+	//              (repel is genuinely zero out there) and the attractor would go inert exactly
+	//              when it is most needed
+	public static float BossApproachWeight(float edgeDist, float anchorPx, float fieldRange,
+		float falloff, bool classic, float typeScale, float maxSteerStrength, float minWeight)
+	{
+		float anchor = MathHelper.Max(anchorPx, BossApproachMinAnchorPx);
+		// Clamped before the curve, not inside it: the classic family is max*(1-t^2), which goes
+		// NEGATIVE past t=1, and an anchor beyond the field's radius is the ordinary Range-powerup
+		// case rather than an error.
+		// ONE guarded divisor for all three ratios below: ?aifieldpx=0 really can make the field
+		// radius zero, and the slope probe divides by it too.
+		float safeRange = (fieldRange > 0f) ? fieldRange : 1f;
+		float t = MathHelper.Clamp(anchor / safeRange, 0f, 1f);
+		float w = ThreatFieldStrength(t, maxSteerStrength, falloff, classic) * typeScale;
+		w = MathHelper.Max(w, minWeight);
+
+		// THE EXPONENT IS DAMPED SO THE PARKED BAND SURVIVES A BIG HULL UP CLOSE, and this is
+		// derived, not tuned. The band the whole-sum floor manufactures is
+		// 2*floor / (|A'| + |repel'|) wide, and |A'(r*)| = k*w/r* -- so a boss whose hull eats most
+		// of the weapon's reach has a small r* with a LARGE w sitting on it, and the linear k=1
+		// curve turns over too fast for the ship to stop inside the band.
+		//
+		// THE ONE CONFIGURATION THAT MAKES THIS BITE -- do not delete it as dead code. BrainBoss at
+		// its pulse peak on the base weapon: its hitbox is hw = 165 * scale and `scale` pulses
+		// 1.00 -> 1.10 (deeper as its HP drops), so the body term runs 233 -> 257px against a
+		// 351px gun range, leaving r* at 118 -> 94px. Undamped that bands 13.5px at scale 1.0 and
+		// 10.0px at the peak -- through the 11.3px stopping distance, i.e. the ship coasts across
+		// its own equilibrium and pingpongs while shooting the brain. Damped, k solves to 0.24 at
+		// rest and 0.09 at the peak, and the band is 22.2px at both. Every OTHER halting boss, tier and weapon in the game
+		// solves to k = 1 and is untouched (the next-tightest band is 53px), and any Range powerup
+		// removes the case entirely by growing r*.
+		//
+		// The repellent's slope is measured on the REAL curve rather than differentiated by hand,
+		// so this stays correct across both curve families and any per-type falloff.
+		float h = 1f;
+		float repelSlope = Math.Abs(ThreatFieldStrength(MathHelper.Clamp((anchor - h) / safeRange, 0f, 1f), maxSteerStrength, falloff, classic)
+			- ThreatFieldStrength(MathHelper.Clamp((anchor + h) / safeRange, 0f, 1f), maxSteerStrength, falloff, classic)) * typeScale / (2f * h);
+		float stoppingPx = ShipMaxSpeed * ShipMaxSpeed / (2f * ShipDeceleration);
+		float slopeBudget = 2f * minWeight / (BossApproachBandMargin * stoppingPx) - repelSlope;
+		// A budget of zero means the repellent alone is steeper than the bound allows: nothing the
+		// attractor does can widen the band, so it goes FLAT (k=0, a constant w) -- the best
+		// available shape there, and the constant-weight design the card started from.
+		float k = (w > 0f)
+			? MathHelper.Clamp(MathHelper.Max(slopeBudget, 0f) * anchor / w, 0f, BossApproachExponent)
+			: BossApproachExponent;
+
+		float reach = MathHelper.Max(edgeDist, 0f) / anchor;
+		float pull = w * (float)Math.Pow(reach, k);
+		// THE CEILING BINDS GROWTH, NOT THE ANCHOR -- hence max(cap, w) rather than the cap alone.
+		// It exists so the pull far from the boss cannot out-vote a full-strength threat field; at
+		// r* itself the pull IS the repellent by construction, so it can never overpower anything
+		// there, and clamping it below w would move the crossing outward and leave the net pointing
+		// AWAY at firing range. A deep field with a shallow curve reaches that: at
+		// ?aifieldcurve=classic the repellent at r* can be 3.75 against the 3.5 cap (found by
+		// ProbeAiBossApproach sweeping both curve families, not by inspection).
+		return MathHelper.Clamp(pull, 0f, MathHelper.Max(BossApproachMaxWeight, w));
+	}
+
+	// Centre-to-EDGE offset of a threat's hull -- what `dist` subtracts from a centre distance to
+	// get the EDGE distance every field here is measured in. Extracted from the four-branch switch
+	// that used to sit inline in DoAIMove (card b56633fb) because the boss-approach anchor has to
+	// convert gun RANGE (a centre distance, from DoAIFire) into that same edge space: two copies of
+	// this switch would let the attractor and the repellent it is solved against drift apart, which
+	// is the one way the crossing could silently stop being at firing range.
+	// Not `ThreatRadius`: that is the half-extent the FIELD SIZE scales with, this is the sqrt(2)
+	// corner-inclusive offset the DISTANCE is measured from. They differ by that factor on a box.
+	private static float ThreatBodyTerm(AlienDrawableGameComponent baddy)
+	{
+		ICollisionType type = baddy.GetCollisionType();
+		if (type is CollisionBox)
+		{
+			return ((CollisionBox)type).Width / 2f * (float)Math.Sqrt(2.0);
+		}
+		if (type is CollisionMultibox)
+		{
+			return ((CollisionMultibox)type).Items[0].Width / 2f * (float)Math.Sqrt(2.0);
+		}
+		if (type is CollisionSimpleCircle)
+		{
+			return ((CollisionSimpleCircle)type).Radius;
+		}
+		return 0f;
+	}
+
+	// Edge distance from a point to a threat. The circle branch CLAMPS and the others do not --
+	// that asymmetry is inherited verbatim from the 2008 code and is preserved on purpose; a box's
+	// edge distance goes negative once the ship is inside the corner radius, which the (1-t)^p
+	// falloff already saturates at full strength.
+	private static float ThreatEdgeDistance(Vector2 from, AlienDrawableGameComponent baddy)
+	{
+		Vector2 toBaddy = from - baddy.Position;
+		float dist = (toBaddy).Length() - ThreatBodyTerm(baddy);
+		return (baddy.GetCollisionType() is CollisionSimpleCircle) ? MathHelper.Clamp(dist, 0f, 1000f) : dist;
 	}
 
 	// Rough half-extent of a threat, so a boss the size of a quarter of the screen is given more

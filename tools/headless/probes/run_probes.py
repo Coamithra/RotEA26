@@ -199,14 +199,26 @@ def run(path, extra_argv, verbose):
         proc = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
                               cwd=REPO, timeout=TIMEOUT_S)
     except subprocess.TimeoutExpired as ex:
-        out = (ex.stdout or "") + (ex.stderr or "")
-        if isinstance(out, bytes):
-            out = out.decode("utf-8", "replace")
+        # TimeoutExpired.stdout/stderr are NOT governed by text=True -- subprocess fills them
+        # from the raw buffered reads, so either can arrive as bytes while the other is None.
+        # Concatenating before decoding therefore raises TypeError (bytes + str) on the one path
+        # that only runs when a probe has ALREADY failed, which is when the output matters most.
+        # Decode each side on its own instead.
+        out = _text(ex.stdout) + _text(ex.stderr)
         return "timeout", out + "\nerr eahl did not exit within %ds\n" % TIMEOUT_S, cmd
-    out = (proc.stdout or "") + (proc.stderr or "")
+    out = _text(proc.stdout) + _text(proc.stderr)
     if verbose:
         sys.stdout.write(out)
     return proc.returncode, out, cmd
+
+
+def _text(chunk):
+    """One stream of a finished/timed-out process as str -- None, bytes and str all welcome."""
+    if chunk is None:
+        return ""
+    if isinstance(chunk, bytes):
+        return chunk.decode("utf-8", "replace")
+    return chunk
 
 
 def failure_tail(out, limit=12):
@@ -216,6 +228,37 @@ def failure_tail(out, limit=12):
         if ln.startswith("err "):
             return lines[max(0, i - 3):i + 2]
     return lines[-limit:]
+
+
+# Where a failing run's FULL output is kept. The tail above is a summary, and a rare flake is
+# exactly the case it summarises away: card de82597f had to be filed with no evidence beyond
+# "'[netmotion] 32 passed, 0 failed' never printed", because the run that did not print it was
+# discarded the moment the runner moved on. --verbose is not the answer -- it streams all 50
+# probes, which is unreadable for a soak and useless after the fact.
+#
+# Gitignored, and named per run so a soak's failures accumulate rather than overwrite.
+FAILURE_DIR = os.path.join(HERE, "_failures")
+
+
+def capture(name, out, cmd):
+    """Write a run's full output to FAILURE_DIR; return the path, or None if it could not be."""
+    try:
+        os.makedirs(FAILURE_DIR, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        path = os.path.join(FAILURE_DIR, "%s-%s.log" % (os.path.splitext(name)[0], stamp))
+        # A soak can fail the same probe twice inside one second.
+        n = 2
+        while os.path.exists(path):
+            path = os.path.join(FAILURE_DIR, "%s-%s.%d.log" % (os.path.splitext(name)[0], stamp, n))
+            n += 1
+        with open(path, "w", encoding="utf-8", errors="replace") as fh:
+            fh.write("# %s\n\n" % " ".join(shlex.quote(c) for c in cmd))
+            fh.write(out)
+        return path
+    except OSError:
+        # Losing the log must not turn a probe failure into a runner error -- the tail still
+        # prints, which is exactly what was available before this existed.
+        return None
 
 
 def selftest():
@@ -347,6 +390,8 @@ def main():
     ap.add_argument("--allow-stale", action="store_true",
                     help="run even when eahl is older than the sources (warns loudly)")
     ap.add_argument("--verbose", action="store_true", help="stream each probe's output")
+    ap.add_argument("--keep-output", action="store_true",
+                    help="also log PASSING runs to _failures/ (for soaking a rare flake)")
     ap.add_argument("--selftest", action="store_true",
                     help="test the stale-binary rule itself and exit (no dotnet, no probes)")
     args = ap.parse_args()
@@ -401,6 +446,11 @@ def main():
         print("WARNING: STALE BINARY -- running anyway (--allow-stale).\n" + head + stale + fix,
               file=sys.stderr)
 
+    if args.keep_output:
+        # The FAIL branch names each log it writes; the PASS branch cannot (50 paths per suite
+        # run is not a report), so say once where a soak's output is going.
+        print("--keep-output: logging every run to %s" % rel(FAILURE_DIR))
+
     failed = []
     for path in paths:
         name = os.path.basename(path)
@@ -417,6 +467,8 @@ def main():
         rc, out, cmd = run(path, extra, args.verbose)
         if rc == 0:
             print("PASS")
+            if args.keep_output:
+                capture(name, out, cmd)
         else:
             print("FAIL (%s)" % ("timeout" if rc == "timeout" else "exit %d" % rc))
             failed.append(name)
@@ -424,6 +476,9 @@ def main():
             print("    %s" % " ".join(shlex.quote(c) for c in cmd))
             for ln in failure_tail(out):
                 print("    | %s" % ln)
+            log = capture(name, out, cmd)
+            if log:
+                print("    full output: %s" % rel(log))
 
     print()
     print("%d/%d probes passed" % (len(paths) - len(failed), len(paths)))

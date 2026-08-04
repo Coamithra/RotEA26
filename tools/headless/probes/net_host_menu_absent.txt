@@ -29,6 +29,14 @@
 # reads PausedScene. That is the empty-submenu guard working; the probe catches the stale row
 # either way, which is why the assertion names ConfirmationMenu rather than either failure.
 #
+# ONE REPORTED FLAKE, NEVER INDEPENDENTLY REPRODUCED, and now covered by construction (card
+# 83054936). The down-3-from-Continue walk below has 3-frame gaps and the pause menu's rows sit at
+# screen centre, so it was exposed to the same defect that made menu_backtip fail 15 of 20 runs:
+# eahl read the DEVELOPER'S DESKTOP pointer (SDL_GetGlobalMouseState), and MenuSub1.HandleMouse
+# hover-selects whatever it moves over while swallowing that tick's keypress. eahl now suppresses
+# the physical mouse, so the walk is deterministic; nothing here had to change, and the suspected
+# save-state dependence was never demonstrated.
+#
 # eahl: --flags "?level=Level2&invuln"
 
 step 400 nodraw

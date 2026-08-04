@@ -19,10 +19,34 @@
 #         or that menu's boxes did. Do not "fix" it by shrinking the assertion; the click really
 #         does double-fire in that state.
 #
-# The POSITIVE assertions are load-bearing, not decoration: `expect-not` alone would pass on a
+# The POSITIVE assertions are structural, not decoration: `expect-not` alone would pass on a
 # run that never opened a menu at all, which is the failure mode this file is most likely to
 # rot into. Mutation-tested by widening the recorded tip box by 200px -- the main menu then
 # reports `overlap=7` (Exit) and this goes red on both the expect-not and the main-menu expect.
+#
+# ---------------------------------------------------------------------------------------------
+# WHY THIS FILE ALSO ASSERTS THE MOUSE (card 83054936)
+#
+# This probe used to fail 15 of 20 runs, on a leg that VARIED between runs, and it was not the
+# tip maths -- it was the DEVELOPER'S DESKTOP MOUSE. KNI's SDL2 backend answers Mouse.GetState()
+# from SDL_GetGlobalMouseState (decompiled from Kni.Platform.dll), a global focus-INDEPENDENT
+# read of the pointer and the button mask minus the hidden window's origin, so an eahl run
+# sampled whatever the human's hand was doing. MenuSub1.HandleMouse then hover-selected whatever
+# entry the cursor moved over AND returned true, which makes HandleInput return early and swallow
+# that tick's keypress -- so `down`+`enter` from Start once launched the TUTORIAL. A physically
+# HELD left button separately ate section 2's scripted click, because pressedAndIdle[Mouse1] was
+# already true when the rising edge was scripted.
+#
+# eahl now declares that there is no physical mouse (HeadlessHost.Boot ->
+# DebugInput.SuppressPhysicalMouse), which fixes it for every probe at once rather than sprinkling
+# `eval MouseAt` into the nine that navigate menus. The `[mousestate]` line below is the POSITIVE
+# assertion of that guard -- it changes no pixel, so nothing else can see it, and a probe suite
+# that merely runs green proves nothing about a guard it never looks at.
+#
+# MUTATION: run this probe with `--real-mouse`. Both of that line's fields flip -- `physical=live`
+# and a `pos=` reading off the real desktop pointer -- so it goes red deterministically, which is
+# exactly why that flag exists.
+# ---------------------------------------------------------------------------------------------
 #
 # eahl: --flags "?menu&unlockall&noattract"
 
@@ -34,6 +58,13 @@ mark
 
 # Settle past the boot white fade.
 step 200
+
+# THE RIG'S OWN PRECONDITION, asserted before anything depends on it (probes README rule 5): the
+# keyboard navigation below is only repeatable because no physical cursor can steal the selection.
+# `pos=` is the consequence, `physical=` is the cause -- both fields are pinned in the one regex,
+# since a suppression flag that stopped being READ would still report `physical=suppressed`.
+eval MouseState
+expect      \[mousestate\] physical=suppressed override=none pos=-1000,-1000
 
 # --- the framed main menu, all 8 rows unlocked (the 45c16ef6 shifted layout) ---
 # The tip GEOMETRY is pinned exactly, not wildcarded, because section 2 clicks a hard-coded

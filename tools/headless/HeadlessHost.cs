@@ -88,6 +88,15 @@ namespace EvilAliensWeb.Headless
             DebugFlags.Parse(_opt.Flags);
             LoadProfiler.Init(_js);
 
+            // BEFORE the boot tick, which already polls input. There is no window to point at
+            // here, but KNI's SDL2 backend does not know that: it answers Mouse.GetState() from
+            // SDL_GetGlobalMouseState, so without this the run reads the developer's desktop
+            // pointer and desktop button mask -- an uncontrolled external input, in the one host
+            // whose entire value is repeatability. It is the same reason the boot dt is pinned
+            // just below. Card 83054936; the mechanism and the two probes it flaked are at
+            // DebugInput.SuppressPhysicalMouse.
+            Compat.DebugInput.SuppressPhysicalMouse = !_opt.RealMouse;
+
             _game = new HeadlessGame();
 
             // Game1 deliberately does not pin a back-buffer size (KNI's BlazorGL rewrites it
@@ -144,6 +153,10 @@ namespace EvilAliensWeb.Headless
             if (pp.BackBufferWidth != _opt.Width || pp.BackBufferHeight != _opt.Height)
                 Log("WARNING  back buffer is " + pp.BackBufferWidth + "x" + pp.BackBufferHeight
                     + ", not the requested " + _opt.Width + "x" + _opt.Height);
+            // Announced rather than assumed: a run that IS reading the desktop mouse looks
+            // exactly like one that is not until something flakes, which is the whole history
+            // of card 83054936.
+            Log("input    physical mouse " + (_opt.RealMouse ? "LIVE (--real-mouse)" : "suppressed"));
             Log("boot     " + sw.ElapsedMilliseconds + "ms");
         }
 

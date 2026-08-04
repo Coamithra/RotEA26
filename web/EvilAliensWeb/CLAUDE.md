@@ -472,6 +472,8 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `eaShake()`, `eaHitstop(ms)`, `eaSlowmo()`,
   `eaRipple.fire(x,y,power)`/`.park(phase)`/`.state()` (throw a bomb ripple on demand, park one
   at a phase for a screenshot, read the knobs -- a real bomb needs a pickup and a live ship),
+  `eaMouseState()` (where the cursor resolved to last tick and where it came from -- the only
+  observable for a parked cursor, and under `eahl` for the suppressed physical mouse),
   `eaPreloadExport()`, `eaWallPerf(true)`+`eaWallStats()`,
   `eaFps()`+`eaFps.stats()`/`.test()`/`.uncap()`/`.gpu()`,
   `eaNetBg()`+`eaNetBgTest()` (the JIP scenery catch-up dump + its round-trip self-test),
@@ -925,8 +927,9 @@ site now lives under:
   - **`eaMouseAt(x, y)` is the CURSOR half, and a scripted click needs both.** `eaPress('Mouse1')`
     supplies only the button, but every mouse consumer is position-dependent -- `HandleMouse`
     hit-tests the cursor against the entry boxes, `BackTipHit` against the tip box -- and the
-    position came only from `Mouse.GetState()`, which no script can move (under `eahl` it is
-    wherever SDL reports). So the whole mouse surface was unreachable from this seam and every
+    position came only from `Mouse.GetState()`, which no script can move (under `eahl` it used
+    to be the real DESKTOP pointer -- see the bullet below). So the whole mouse surface was
+    unreachable from this seam and every
     menu click needed a real Chrome pass. `eaMouseAt` parks the pointer at a **design-space**
     (800x600) point, the same coordinates `RecordEntryHit` and `BackTipHit.Record` store, so a
     probe can read a box off a `[backtip]` line and click it. Persistent like `eaHold` (a click
@@ -942,6 +945,30 @@ site now lives under:
     Esc whenever the untouched mouse position happened to sit in the back tip's box -- shipped
     behaviour from a debug seam. Touch keeps its own BACK button and gains nothing here, the
     same line the `MouseLatch` pointerType filter draws.
+  - **UNDER `eahl` THE PHYSICAL MOUSE IS SUPPRESSED, and before card 83054936 it was not --
+    which silently flaked the probe suite.** KNI's SDL2 backend answers `Mouse.GetState()` from
+    **`SDL_GetGlobalMouseState`** (decompiled from `Kni.Platform.dll`): the DESKTOP pointer and
+    the DESKTOP button mask, with **no focus check**, minus the hidden window's origin. So a
+    headless run sampled whatever the developer's hand was doing. It is the only physical input
+    that gets in -- `Keyboard.GetState()` reads a key list filled from window key EVENTS and
+    `eahl` never pumps the SDL event loop, so the real keyboard is inert. Two distinct failures
+    came out of it, and both are worth recognising if a probe ever flakes again:
+    POSITION (`HandleMouse` hover-selects on any cursor movement AND returns true, so
+    `HandleInput` returns early and **swallows that tick's keypress** -- `menu_backtip.txt` failed
+    **15 of 20** runs, once launching the Tutorial from one `down` off Start) and BUTTONS (a
+    physically-held left button keeps `pressedAndIdle[Mouse1]` true, eating a scripted rising edge
+    and making a scripted `Hold("Mouse1", false)` release a no-op -- which turned
+    `net_single_tap.txt`'s two-taps-in-one-cadence-period leg into one continuous hold).
+    `HeadlessHost.Boot` sets `DebugInput.SuppressPhysicalMouse` before the boot tick:
+    `InputHandler` then parks the cursor at `(-1000,-1000)` design space and reads both buttons
+    released. **Never set in the browser, so the shipped build is untouched**, and scripted input
+    is unaffected either way (`eaMouseAt` still wins on position, `Consume`/`PeekScripted` still
+    supply the buttons). Read it back with **`eaMouseState()`** / `eval MouseState`
+    (`[mousestate] physical=<suppressed|live> override=<x,y|none> pos=<x,y>`) -- it changes no
+    pixel, so that is its only observable; every eahl run also prints
+    `[eahl] input    physical mouse suppressed`. **`eahl --real-mouse`** restores the old
+    behaviour and is the mutation control `menu_backtip.txt` is pinned against. Side benefit: a
+    `?level=` probe's mouse-aim is now a fixed off-screen point rather than the human's cursor.
 - **Menus are mouse-selectable + clickable.** Each `DrawMenu` records the design-space box of every
   entry it draws via `MenuSub1.RecordEntryHit(index, centre, w, h)` (locked/undrawn entries
   skipped); `MenuSub1.HandleMouse()` (gated on the `normal` state) maps the cursor to hover-select

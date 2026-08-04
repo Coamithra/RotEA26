@@ -132,6 +132,15 @@
         };
         window.eaMouseClear = () => window.eaMouseAt();
 
+        // Read back where the cursor resolved to last tick and where it came from. Nothing here
+        // changes a pixel, so this is the only observable a parked cursor has -- and under eahl
+        // it is also how a probe asserts that the physical mouse really is suppressed
+        // (`physical=suppressed`), which in the browser is always `live`.
+        window.eaMouseState = () => {
+            try { return DotNet.invokeMethod('EvilAliensWeb', 'debugMouseState'); }
+            catch (e) { console.warn('[debug] eaMouseState failed (game not booted yet?): ' + e.message); }
+        };
+
         // Online co-op dev transport (?net=host / ?net=join): a BroadcastChannel between two
         // local tabs -- zero network, dev-only. JS owns the platform object (this channel),
         // C# sees only Compat/Net/NetInterop (the webcam.js pattern); card 11.4 adds a

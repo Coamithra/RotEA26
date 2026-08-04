@@ -161,6 +161,22 @@ unavailable · `4` `--fake-no-audio-device` could not install its `alsoft.ini`.
   how long they are. `?loadlog`'s `COLD decode` lines DO work (they are a preload-bracket fact, not
   a timing one), as does `eval PreloadExport`. Anything phrased as "confirm the hitches stop" needs
   Chrome.
+- **The PHYSICAL MOUSE is suppressed, and it was not always** (card 83054936). KNI's SDL2 backend
+  answers `Mouse.GetState()` from `SDL_GetGlobalMouseState` — the desktop pointer AND the desktop
+  button mask, with **no focus check** — so a headless run used to sample whatever the developer's
+  hand was doing and feed it into menus, the back tip and mouse-aim. It is the ONE physical input
+  that gets in: `Keyboard.GetState()` reads a key list filled from window key *events*, and this
+  host never pumps the SDL event loop. That silently flaked the committed probe suite
+  (`menu_backtip.txt` failed 15 of 20 runs), because `MenuSub1.HandleMouse` hover-selects on cursor
+  movement *and* swallows that tick's keypress, and a held button eats a scripted click's rising
+  edge. Every run now says which it is:
+  ```
+  [eahl] input    physical mouse suppressed
+  ```
+  The cursor parks at `-1000,-1000` in design space and both buttons read released. `eval MouseAt`
+  / `Press` / `Hold` are unaffected — scripted input never came from `Mouse.GetState()`.
+  `eval MouseState` reads the whole thing back; **`--real-mouse`** restores the old behaviour and
+  is the mutation control for the probe assertions that pin it. See `probes/README.md`.
 - **Reproducibility: `?seed=<n>` gets you most of the way, and the residual is the boot frame.**
   Two runs of the same gameplay flags are otherwise different worlds — measured on
   `?level=OwnLevel&noattract`, mean |diff| **0.2**, **MAX 210** of 255, which is a bigger signal

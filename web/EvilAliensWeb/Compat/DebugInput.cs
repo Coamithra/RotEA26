@@ -103,6 +103,54 @@ namespace EvilAliensWeb.Compat
 		// press tick and a release tick, and a one-shot position would strand the second one.
 		private static bool mouseOverride;
 
+		// Under `eahl` the "real mouse" is the DEVELOPER'S DESKTOP mouse, and that is not a figure
+		// of speech. KNI's SDL2 backend resolves Mouse.GetState() through
+		// SDL_GetGlobalMouseState (verified by decompiling Kni.Platform.dll):
+		//
+		//     Sdl.Mouse.Button button = SDL.MOUSE.GetGlobalState(out val.X, out val.Y);
+		//     SDL.WINDOW.GetPosition(wndHandle, out val2.X, out val2.Y);
+		//     return new MouseState((val - val2).X, ..., button & Left, ...);
+		//
+		// -- a GLOBAL, focus-INDEPENDENT read of the pointer AND the button mask, minus the
+		// hidden window's origin. It needs no SDL event pump, which is why it is the ONE physical
+		// input that reaches a headless run at all (Keyboard.GetState reads a key list filled from
+		// window key EVENTS, and eahl never pumps them, so the real keyboard is inert).
+		//
+		// So every headless run sampled where the human's pointer happened to be and whether their
+		// left button happened to be down -- an uncontrolled external input in a rig whose whole
+		// value is repeatability, the same class as reading the wall clock that HeadlessHost
+		// already pins. It was silently flaking the committed probe suite two different ways
+		// (card 83054936):
+		//   * POSITION -- MenuSub1.HandleMouse hover-selects whatever entry the cursor is over the
+		//     moment it moves, AND returns true, which makes HandleInput return early and swallow
+		//     that tick's keypress. Keyboard menu navigation on fixed step counts then lands
+		//     somewhere else entirely: menu_backtip.txt failed 15 of 20 runs, on a varying leg.
+		//   * BUTTONS -- a physically-held left button keeps pressedAndIdle[Mouse1] true, so a
+		//     scripted rising edge is eaten and a scripted Hold(Mouse1, down: false) release is a
+		//     no-op. That is what made net_single_tap.txt's "two taps inside one cadence period"
+		//     leg read as one continuous hold.
+		//
+		// Set once by HeadlessHost.Boot and by nothing else -- the browser never sets it, so the
+		// shipped build is untouched. `eahl --real-mouse` leaves it clear, which is both the escape
+		// hatch and the negative control menu_backtip's [mousestate] assertions are mutation-tested
+		// against.
+		internal static bool SuppressPhysicalMouse;
+
+		// Where the cursor sits while the physical one is suppressed and no MouseAt override is
+		// parked. Off the 800x600 design surface on BOTH axes, so no hit test can match -- nothing
+		// is hoverable, nothing is clickable -- and every ?level= probe's mouse-aim now points at
+		// one fixed place instead of at wherever the human left their pointer.
+		//
+		// "Off the surface" is about HIT TESTING, not about drawing: MousePointer.Draw CLAMPS to
+		// 0..800/0..600, so the reticle sprite still draws, parked in the top-left corner, for as
+		// long as that method draws it at all (the ~2 s intro showtimer, or every frame with
+		// Settings.HWMouse off). That is not new -- it previously drew whatever the desktop
+		// pointer mapped to -- but it is now deterministic, and it is why a capture taken inside
+		// a level's first couple of seconds may show a corner reticle that nothing put there.
+		internal const float SuppressedMouseX = -1000f;
+
+		internal const float SuppressedMouseY = -1000f;
+
 		private static float mouseOverrideX;
 
 		private static float mouseOverrideY;
@@ -143,6 +191,35 @@ namespace EvilAliensWeb.Compat
 			x = mouseOverrideX;
 			y = mouseOverrideY;
 			return mouseOverride;
+		}
+
+		// What the cursor resolved to on the LAST tick, and where it came from. Neither the
+		// suppression above nor a parked override changes a single pixel, so this is the only
+		// observable either has -- and a probe that merely runs green proves nothing about a guard
+		// it cannot see (probes README rule 1). `physical=suppressed` plus a `pos=` reading at the
+		// off-screen sentinel is what says the guard is actually IN FORCE rather than merely
+		// declared; `eahl --real-mouse` flips both and is the mutation.
+		//
+		// `pos` is read back off the live InputHandler rather than recomputed here, so it reports
+		// what the game acted on, not what this class thinks it should have been.
+		[JSInvokable("debugMouseState")]
+		public static string MouseState()
+		{
+			EvilAliens.IInputHandlerService svc = EvilAliens.ServiceHelper.Get<EvilAliens.IInputHandlerService>();
+			EvilAliens.InputHandler input = svc?.InputHandler;
+			string pos = "(no InputHandler service)";
+			if (input != null)
+			{
+				Microsoft.Xna.Framework.Vector2 m = input.MousePosition;
+				pos = m.X.ToString(System.Globalization.CultureInfo.InvariantCulture) + ","
+					+ m.Y.ToString(System.Globalization.CultureInfo.InvariantCulture);
+			}
+			return "[mousestate] physical=" + (SuppressPhysicalMouse ? "suppressed" : "live")
+				+ " override=" + (mouseOverride
+					? mouseOverrideX.ToString(System.Globalization.CultureInfo.InvariantCulture) + ","
+						+ mouseOverrideY.ToString(System.Globalization.CultureInfo.InvariantCulture)
+					: "none")
+				+ " pos=" + pos;
 		}
 
 		// Non-destructive read of a SCRIPTED hold. `Consume` DECREMENTS one, so it must be called

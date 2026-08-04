@@ -107,6 +107,48 @@ Five rules, each of which has already cost something:
    as "no ship". `eval OracleRoster`'s `aliveSlots=` is the ship-liveness readout (a bracketed slot list:
    `aliveSlots=[0]` is slot 0 flying, `aliveSlots=[]` is a shipless world).
 
+## The physical mouse is OFF, and that is why menu navigation is repeatable
+
+**`eahl` does not read your desktop mouse, and you must not put it back.** KNI's SDL2 backend
+answers `Mouse.GetState()` from `SDL_GetGlobalMouseState` — the desktop pointer **and** the
+desktop button mask, focus-independent, minus the hidden window's origin. So before card
+83054936 every headless run sampled whatever the human's hand happened to be doing, and it broke
+probes two ways:
+
+* **Position** — `MenuSub1.HandleMouse` hover-selects whatever entry the cursor moves over *and*
+  returns `true`, which makes `HandleInput` return early and **swallow that tick's keypress**. A
+  `Press down` / `Press enter` walk therefore landed somewhere else: `menu_backtip.txt` failed
+  **15 of 20** runs, on a leg that varied between runs, and once launched the Tutorial from a
+  single `down` off Start.
+* **Buttons** — a physically-held left button keeps `pressedAndIdle[Mouse1]` true, so a scripted
+  rising edge is eaten and a scripted `Hold("Mouse1", down: false)` release is a no-op. That is
+  what made `net_single_tap.txt`'s "two taps inside one cadence period" leg read as one continuous
+  hold.
+
+`HeadlessHost.Boot` now sets `DebugInput.SuppressPhysicalMouse`: the position parks off the design
+surface at `-1000,-1000` and the buttons read released. **Scripted input is untouched** —
+`eval MouseAt` still wins on position, `eval Press` / `eval Hold` still supply the buttons — so a
+probe that drives the mouse works exactly as before. Every run announces it
+(`[eahl] input    physical mouse suppressed`), and `eval MouseState` reads it back as
+`[mousestate] physical=<suppressed|live> override=<x,y|none> pos=<x,y>`.
+
+Three consequences worth knowing:
+
+1. **`eval MouseAt <corner>` in an existing probe is now belt-and-braces, not the fix.**
+   `net_menumode_reset.txt`'s "not optional" note predates this and is left as written; do not
+   copy the pattern into new probes as if it were required.
+2. **A `?level=` probe's mouse-aim is now deterministic** — it points at one fixed off-screen
+   place instead of at wherever you left your pointer.
+3. **`--real-mouse` restores the old behaviour**, and its real job is to be the mutation for
+   `menu_backtip.txt`'s `[mousestate]` assertion — the only thing in the suite that looks at the
+   guard at all. It pins both of that line's fields (`physical=` and `pos=`) and goes red
+   deterministically, which no amount of re-running a flake can.
+
+**This does NOT make eahl deterministic**, and the bar was never that (card d937c721): the
+gameplay RNG is unseeded without `?seed=`, and the boot `Tick`'s catch-up step count still varies
+with machine load. It removes one *external* input, which is the class a probe can never defend
+against on its own.
+
 ## The trap that will otherwise cost you an afternoon
 
 **A preload/`COLD` probe must drive the MENU, never `?level=<Name>`.** A `?level=` boot has no

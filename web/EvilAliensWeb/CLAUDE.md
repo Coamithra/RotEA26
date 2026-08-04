@@ -2135,6 +2135,44 @@ the rest are tier-independent.
     sweeps to the right screen edge, so the swept band is not symmetric about the body. That is
     choreography-as-data, which is what the field principle asks for -- the knowledge lives in the
     shape's INPUTS, not in a special case inside `DoAIMove`.
+  - **THE DEFAULT REFUSES A TELEPORT-SHAPED PATH, and finding out why fixed a live bug** (card
+    c1d783ad). `ObservedVelocity` is a raw ONE-FRAME position delta, so anything repositioned in a
+    single tick reports an enormous speed for that frame -- and cone length is `speed * ConeLeadMs`
+    capped at `ConeMaxLenPx`, so one such frame closes a full-screen corridor at full strength and
+    shoves the bot somewhere arbitrary. The default now returns false above a ceiling and says so
+    once per type on an `[ai] implausible swept path refused: <T> at <n> px/ms` line -- which is
+    the term's ONLY observable, since a refused cone changes no pixel and moves no counter.
+    - **The ceiling IS `NetSession.MaxObservedSpeedPxPerMs` (5.0), referenced, not copied** -- the
+      project's existing "that was a teleport, not motion" number, measured by `eaNetVelScan` from
+      the gap between the fastest genuine mover (~2.5 px/ms) and the slowest reposition (11.6).
+      The two uses differ in RISK DIRECTION -- over there a wrong value prints a spurious line,
+      here it deletes a real mover's cone -- so `logic_probe`'s `ProbeAiSweptPathGuard` asserts the
+      SEPARATION property (>= 2x the fastest real mover, <= half the slowest reposition). A
+      net-side retune that leaves that band fails there instead of quietly changing how the bot
+      flies. `?aisweptmax=<px/ms>` overrides it; **`0` turns the guard off**, which is the A/B seam.
+    - **THE HAZARD WAS LIVE, NOT LATENT, AND THE ROOT CAUSE WAS POOL RECYCLING.** `Initialize`
+      reset `netTeleported` per life but NOT `_prevPosition`/`_hasPrevPosition`, so a recycled
+      entity's first `Update` differenced its new spawn point against its PREVIOUS LIFE's last
+      position. Measured before the fix: `EvilBullet` at **14.9 px/ms against a declared 0.24**,
+      `UFO` 15.0, `EvilSkull` 21.4 -- i.e. every recycled bullet, UFO and skull was projecting a
+      bogus full-length cone, and `EvadeMovingThreat` (which reads `ObservedVelocity` directly)
+      was being fed the same phantom. The net layer never saw it: it keeps its own per-entity
+      history in `NetIdRegistry`, and its scan hit the identical artefact and reported the same
+      14.9. The three-line per-life reset is the fix; the guard is the safety net.
+    - **THREE TYPES STILL TRIP IT, all correctly.** The SCREEN WRAPPERS are the reason the card
+      exists: a `wrapping` Braineroid and a wrapping `Ball` really do teleport across the screen
+      (each already calls `NetNoteTeleport` at the same site), measured at ~52 refusals a run on
+      Level 1 at 47.9 px/ms -- 52 bogus full-screen corridors that no longer exist. The third is
+      `MarsBoss`, which reads 7.8 px/ms for a SINGLE frame at the top of its entry ramp:
+      `eaNetVelScan` measured that same curve at 2.404 sustained over its 60 ms cadence, so 7.8 is
+      a finite-difference artefact of an acceleration sampled at 16.7 ms rather than a speed it
+      travels. Accepted at one frame of one cone per arrival; the body is still covered by the
+      radial field. **This is the general caveat: the ceiling was measured at 60 ms and is applied
+      per frame**, so an accelerating mover reads higher here than in the scan.
+    - Pinned by `logic_probe`'s `ProbeAiSweptPathGuard` (the measured genuine/reposition tables,
+      the boundary, the separation property) and the probe PAIR
+      `tools/headless/probes/ai_swept_guard.txt` (the line is absent on a recycle-heavy rig) +
+      `ai_swept_guard_trip.txt` (the same detector made to fire). Read the two as one probe.
   - **BOTH SUPERSESSION CANDIDATES WERE MEASURED AND BOTH SURVIVED -- nothing was deleted.** The
     card's ruling was to delete them outright; the match-the-number bar refuted it, which is what
     that bar is for. The cone is an ADDITION.

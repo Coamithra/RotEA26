@@ -1478,6 +1478,18 @@ namespace EvilAliensWeb.Compat
 
 		public static float? AiConeScale { get; private set; }
 
+		// ?aisweptmax=<px/ms>  the ceiling on a believable OBSERVED speed in the DEFAULT swept-path
+		//                      seam (card c1d783ad). Above it the path is refused, because a raw
+		//                      one-frame position delta reports an enormous velocity for anything
+		//                      repositioned in a single tick and the cone would then sweep the
+		//                      screen for that frame. **0 turns the guard OFF**, which is the A/B
+		//                      seam the card's measurement pass runs against and the negative
+		//                      control for `logic_probe`'s ProbeAiSweptPathGuard. Null => the
+		//                      measured NetSession.MaxObservedSpeedPxPerMs; see
+		//                      AlienDrawableGameComponent.AiSweptMaxSpeedPxPerMs for why the
+		//                      number is shared rather than copied.
+		public static float? AiSweptMaxSpeedPxPerMs { get; private set; }
+
 		// ?aiwedgestrength=<f> the wedge's peak magnitude, and
 		// ?aiwedgefall=<p>     its own along-axis plateau exponent -- separate from the cone's
 		//                      because the wedge spans the play field rather than a cone length.
@@ -2974,6 +2986,18 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(AiConeWidthMinPx ?? EvilAliens.PlayerShip.DefaultConeWidthMinPx));
+					}
+					break;
+				case "aisweptmax":
+					// 0 is MEANINGFUL here (guard off), so the predicate is >= 0 rather than > 0.
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiswm) && aiswm >= 0f)
+					{
+						AiSweptMaxSpeedPxPerMs = MathHelper.Min(aiswm, 10000f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0 (0 = no guard)",
+							InForce(AiSweptMaxSpeedPxPerMs ?? Net.NetSession.MaxObservedSpeedPxPerMs));
 					}
 					break;
 				case "aiconetaper":

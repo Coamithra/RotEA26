@@ -3407,8 +3407,8 @@ measured, against a documented interleave skew that reaches 17.9 px), `hp` on an
 (a client hit-tests puppets with its own bullets, so hp diverges between snapshot turns -- `Boss
 205 vs 179` against a tolerance of 5), `dead`/`dying`/`is on the HOST and not on the joiner` and
 residual `score` staleness, all of which come of the two ends being dumped at slightly different
-world instants,
-plus the occasional vacuous join (`0 replicated entities`). The set changes run to run. **Do not
+world instants, plus the occasional vacuous join (`0 replicated entities`). The set changes run
+to run. **Do not
 widen a tolerance to force green** -- that is suite CALIBRATION work with its own card, and the
 assertions this tool exists for (`prov=`, `owner=`) are exact and clean. It is a standalone tool,
 not a `run_probes.py` probe, so red is a finding rather than broken CI.

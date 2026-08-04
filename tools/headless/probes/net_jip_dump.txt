@@ -16,7 +16,7 @@
 #   * no `[net] listed (join-in-progress) host armed` -> ?net=jiphost stopped arming (the
 #     DebugFlags case, NetSession.Start's JipHost branch, or the transport failed to open).
 #     net_jip_sync would then report "the host never paired" with no explanation.
-#   * no `dump v2 ... end` -> NetJipDump threw before its sentinel, or the FORMAT VERSION moved
+#   * no `dump v3 ... end` -> NetJipDump threw before its sentinel, or the FORMAT VERSION moved
 #     without net_jip_sync's FORMAT_VERSION moving with it. Those two are one edit.
 #   * `scene none` or a missing `hud` -> the dump lost a whole section. Both are compared
 #     verbatim between the two peers, so losing one silently removes a dimension from the diff.
@@ -25,9 +25,12 @@
 # MUTATIONS (all rebuild tools/headless first -- it source-links Game/ and Compat/):
 #   * delete the `case "jiphost"` from DebugFlags -> the arm line goes, red on line 1.
 #   * make NetJipDump.AppendExtras return before the scene line -> red on the `scene speed=`
-#     line, while the `dump v2 ... end` sentinel still passes -- which is the point of asserting
+#     line, while the `dump v3 ... end` sentinel still passes -- which is the point of asserting
 #     the sections separately from the sentinel.
-#   * bump NetJipDump.FormatVersion without touching the probe -> red on `dump v2`.
+#   * bump NetJipDump.FormatVersion without touching the probe -> red on `dump v3`.
+#   * drop the `uns=` append from NetJipDump.AppendExtras -> red on the uns line alone (card
+#     94001db7). The differ subtracts that field, so losing it silently reverts its score
+#     compare to the raw one.
 #
 # eahl: --flags "?level=Level2&invuln&aiplayer&noattract&seed=7&netjip&net=jiphost&room=jipprobe"
 
@@ -47,7 +50,7 @@ eval NetJipDump
 
 # 2. the SENTINEL, with the format version the differ speaks. Also the peerless state, asserted
 #    positively: no session, no peer, no replicated set.
-expect      \[netjip\] dump v2 role=none active=0 peer=0 ids=0 end
+expect      \[netjip\] dump v3 role=none active=0 peer=0 ids=0 end
 
 # 3. the scenery/music section is POPULATED, not the `none` a dump taken outside a level gives.
 expect      \[netjip\] scene speed=.*base=.*song=
@@ -56,6 +59,13 @@ expect      \[netjip\] scene speed=.*base=.*song=
 #    on an empty roster, which is what a dump taken at the menu produces.
 expect      \[netjip\] hud lives=.*s0 seat=Keyboard
 expect      \[netjip\] hud .*lv=.*opt=
+#    `uns=` is the one HUD field the differ does ARITHMETIC with -- it subtracts a client's
+#    unsettled provisional credits before comparing scores (card 94001db7) -- so a build that
+#    silently stopped emitting it would revert that compare to the raw `pts` category error with
+#    nothing saying so. net_jip_sync's own run-level control catches it too, but only over a soak
+#    and only nondeterministically; this is the deterministic pin for the field's SHAPE. It reads
+#    0 with no session, which is why it is assertable here at all.
+expect      \[netjip\] hud .*uns=
 
 # 5. nothing threw on the way through (a descriptor re-encode, a missing service).
 expect-not  \[netjip\] err

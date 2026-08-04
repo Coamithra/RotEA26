@@ -39,13 +39,13 @@
 #
 # eahl now declares that there is no physical mouse (HeadlessHost.Boot ->
 # DebugInput.SuppressPhysicalMouse), which fixes it for every probe at once rather than sprinkling
-# `eval MouseAt` into the nine that navigate menus. The two lines below are the POSITIVE assertion
-# of that guard -- it changes no pixel, so nothing else can see it, and a probe suite that merely
-# runs green proves nothing about a guard it never looks at.
+# `eval MouseAt` into the nine that navigate menus. The `[mousestate]` line below is the POSITIVE
+# assertion of that guard -- it changes no pixel, so nothing else can see it, and a probe suite
+# that merely runs green proves nothing about a guard it never looks at.
 #
-# MUTATION: run this probe with `--real-mouse`. `physical=live` and a `pos=` reading off the real
-# desktop pointer make both lines go red, deterministically -- which is exactly why that flag
-# exists.
+# MUTATION: run this probe with `--real-mouse`. Both of that line's fields flip -- `physical=live`
+# and a `pos=` reading off the real desktop pointer -- so it goes red deterministically, which is
+# exactly why that flag exists.
 # ---------------------------------------------------------------------------------------------
 #
 # eahl: --flags "?menu&unlockall&noattract"
@@ -61,8 +61,8 @@ step 200
 
 # THE RIG'S OWN PRECONDITION, asserted before anything depends on it (probes README rule 5): the
 # keyboard navigation below is only repeatable because no physical cursor can steal the selection.
-# `pos=` is the consequence, `physical=` is the cause -- assert both, since a suppression flag
-# that stopped being READ would leave the first line green.
+# `pos=` is the consequence, `physical=` is the cause -- both fields are pinned in the one regex,
+# since a suppression flag that stopped being READ would still report `physical=suppressed`.
 eval MouseState
 expect      \[mousestate\] physical=suppressed override=none pos=-1000,-1000
 

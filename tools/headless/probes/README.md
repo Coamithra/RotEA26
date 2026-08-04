@@ -140,8 +140,9 @@ Three consequences worth knowing:
 2. **A `?level=` probe's mouse-aim is now deterministic** — it points at one fixed off-screen
    place instead of at wherever you left your pointer.
 3. **`--real-mouse` restores the old behaviour**, and its real job is to be the mutation for
-   `menu_backtip.txt`'s two `[mousestate]` assertions — the only thing in the suite that looks at
-   the guard at all. It goes red deterministically, which no amount of re-running a flake can.
+   `menu_backtip.txt`'s `[mousestate]` assertion — the only thing in the suite that looks at the
+   guard at all. It pins both of that line's fields (`physical=` and `pos=`) and goes red
+   deterministically, which no amount of re-running a flake can.
 
 **This does NOT make eahl deterministic**, and the bar was never that (card d937c721): the
 gameplay RNG is unseeded without `?seed=`, and the boot `Tick`'s catch-up step count still varies

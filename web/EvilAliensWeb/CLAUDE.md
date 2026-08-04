@@ -923,8 +923,9 @@ site now lives under:
   - **`eaMouseAt(x, y)` is the CURSOR half, and a scripted click needs both.** `eaPress('Mouse1')`
     supplies only the button, but every mouse consumer is position-dependent -- `HandleMouse`
     hit-tests the cursor against the entry boxes, `BackTipHit` against the tip box -- and the
-    position came only from `Mouse.GetState()`, which no script can move (under `eahl` it used to
-    be the real DESKTOP pointer -- see the bullet below). So the whole mouse surface was unreachable from this seam and every
+    position came only from `Mouse.GetState()`, which no script can move (under `eahl` it used
+    to be the real DESKTOP pointer -- see the bullet below). So the whole mouse surface was
+    unreachable from this seam and every
     menu click needed a real Chrome pass. `eaMouseAt` parks the pointer at a **design-space**
     (800x600) point, the same coordinates `RecordEntryHit` and `BackTipHit.Record` store, so a
     probe can read a box off a `[backtip]` line and click it. Persistent like `eaHold` (a click

@@ -137,9 +137,16 @@ namespace EvilAliensWeb.Compat
 		internal static bool SuppressPhysicalMouse;
 
 		// Where the cursor sits while the physical one is suppressed and no MouseAt override is
-		// parked. Off the 800x600 design surface on BOTH axes, so nothing is hoverable and nothing
-		// is clickable -- and every ?level= probe's mouse-aim now points at one fixed place
-		// instead of at wherever the human left their pointer.
+		// parked. Off the 800x600 design surface on BOTH axes, so no hit test can match -- nothing
+		// is hoverable, nothing is clickable -- and every ?level= probe's mouse-aim now points at
+		// one fixed place instead of at wherever the human left their pointer.
+		//
+		// "Off the surface" is about HIT TESTING, not about drawing: MousePointer.Draw CLAMPS to
+		// 0..800/0..600, so the reticle sprite still draws, parked in the top-left corner, for as
+		// long as that method draws it at all (the ~2 s intro showtimer, or every frame with
+		// Settings.HWMouse off). That is not new -- it previously drew whatever the desktop
+		// pointer mapped to -- but it is now deterministic, and it is why a capture taken inside
+		// a level's first couple of seconds may show a corner reticle that nothing put there.
 		internal const float SuppressedMouseX = -1000f;
 
 		internal const float SuppressedMouseY = -1000f;

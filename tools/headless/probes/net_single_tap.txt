@@ -66,7 +66,8 @@
 # the release BETWEEN the two taps a no-op, so "two taps inside one cadence period" became one
 # continuous hold and reported `bullets=2 counter+2`. eahl now suppresses the physical mouse
 # (DebugInput.SuppressPhysicalMouse); nothing here had to change. If this leg ever flakes again,
-# check `[eahl] input physical mouse ...` on the failing run before suspecting the arithmetic.
+# grep the failing run for `[eahl] input` (the banner is column-aligned, so the literal line is
+# `[eahl] input    physical mouse suppressed`) before suspecting the arithmetic.
 #
 # DESTRUCTIVE, so it gets a process to itself (the runner gives every probe one anyway): it pairs a
 # real host session onto the live level, seats a Remote puppet, fires real bullets into the world

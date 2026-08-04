@@ -337,6 +337,12 @@ Full docs + the option list: `tools/headless/README.md`. The essentials:
   `--build` builds first, `--allow-stale` warns and runs anyway, `--selftest` tests the rule
   itself with no dotnet and no probes. Content and the probe files are read live off disk and
   are deliberately outside the check.
+  **A failing probe's FULL output lands in `probes/_failures/` (gitignored), and `--keep-output`
+  logs the passing runs too** -- card de82597f, which had to be filed off a 12-line tail that had
+  already discarded the evidence. Same card: the default save dir is now **per process**
+  (`%TEMP%/eahl-saves/<pid>-<ticks>`, removed on exit) because every eahl shared one path and
+  wiped it at boot, so concurrent runs deleted each other's saves mid-write -- and an `eval`
+  failure now names its own innermost cause instead of `TargetInvocationException`.
   **The trap: a preload/`COLD` probe must drive the MENU, never `?level=<Name>`** -- a `?level=`
   boot drains `QueueIdleWarm` into that level's cold population (exactly 20 spurious
   `gfx/game/space/*` lines, measured on Level2/Paratrooper/InsaneBossI alike).

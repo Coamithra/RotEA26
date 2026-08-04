@@ -687,6 +687,14 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   Serializing WHO edits `NetProtocol.cs` in a parallel batch is an orchestration concern; it must
   not shape the design.
 
+- **MALFORMED-WIRE-INPUT HARDENING IS CAPPED -- do not file or accept cards growing it (user
+  ruling, 2026-08-04).** The robustness bar is: matched builds work, mismatched builds are
+  refused by the build-hash handshake, and everything else may simply break. What EXISTS stays
+  (the decode-boundary validators, the length gates, their tests -- several double as vacuity
+  controls on positive legs, e.g. NetMotionTest's spawn-anchor control), but no new work
+  hardening or testing exotic bad-bytes-from-a-peer paths: those scenarios either cannot occur
+  between matched builds or fail loudly enough to be found in an ordinary playtest.
+
 - **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v15):** the 3
   layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim, alive flag,
   CUMULATIVE shot count, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (see the

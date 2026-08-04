@@ -344,10 +344,18 @@ public class PlayerShip : AlienDrawableGameComponent
 	// how close to the target it comes to rest. 2008 used 10px -- i.e. the author sized it to
 	// exactly this figure -- and the port widened it to 30 while the 0.95 park was in force,
 	// which is a confounded measurement, since a lone 0.8 seek was being zeroed outright and
-	// could not fidget. Both were re-measured on the jitter gate once the park was gone; see the
-	// card's closing comment for the numbers behind the baked value.
+	// could not fidget.
+	//
+	// 15 IS AN AUDIT RESULT AND THE 30 IT REPLACES IS REFUTED (card 05a2b818). Re-measured clean
+	// at N=60, the response is MONOTONE in this radius on CrazyGame and flat on the other four
+	// rigs -- paired against 30: 10px -3.60 deaths, 15px -2.87, 20px -1.97 (victories 36 -> 50 /
+	// 48 / 44 of 60). **10 measured BEST and was rejected anyway**, on the bound rather than on
+	// the number: it sits BELOW the 11.3px stopping distance, so the ship cannot come to rest
+	// inside it and the radius stops being a deadzone at all -- which is the idle fidget the port
+	// widened it for, and the invariant ProbeAiFieldComposition pins. 15 is the smallest value
+	// that keeps the bound intact, and it takes ~80% of the measured win.
 	// Pinned against the motion constants by logic_probe's ProbeAiFieldComposition.
-	public const float DefaultSeekArriveDeadzonePx = 30f;
+	public const float DefaultSeekArriveDeadzonePx = 15f;
 
 	private static float SeekArriveDeadzonePx => EvilAliensWeb.Compat.DebugFlags.AiSeekDeadzonePx ?? DefaultSeekArriveDeadzonePx;
 
@@ -403,15 +411,28 @@ public class PlayerShip : AlienDrawableGameComponent
 	// Fraction of a wall tile across which co-op AI ships fan out inside their shared gap.
 	private const float GapSeatSpreadFraction = 0.5f;
 
-	// Clearance the AI wants beyond ANY threat's hull, before the size term below. Much larger
-	// than the 2008 flat 150 -- see ThreatFieldStrength for why a bigger field is not a bigger
-	// no-go zone.
+	// Clearance the AI wants beyond ANY threat's hull, before the size term below.
 	// NOT the value every tier uses -- this is the VERY_HARD row of AiSkillByDifficulty, hence
 	// the name rather than Default* like the tier-independent knobs.
-	public const float VeryHardThreatFieldBasePx = 190f;
+	//
+	// 150 IS THE 2008 BASE, restored (card 05a2b818). The port shipped 190, and the audit split
+	// this formula's two parameters and measured them separately: the BASE is refuted (190 costs
+	// CrazyGame -2.67 deaths paired against 150, N=60) while the SIZE SCALE below is validated.
+	// So what ships is neither era's formula -- 2008's base with the port's size term -- and it
+	// survives on MEASUREMENT, not on either doctrine: zero significant losses on any of the five
+	// rigs, and the best spider-rig victory count of every arm tried. The full table is in
+	// web/EvilAliensWeb/CLAUDE.md; the arms are reachable as ?aifieldpx= x ?aifieldsize=.
+	public const float VeryHardThreatFieldBasePx = 150f;
 
 	// Extra clearance per pixel of the threat's own half-extent. The spider boss gets a field
 	// several times a bullet's.
+	//
+	// VALIDATED SEPARATELY FROM THE BASE (card 05a2b818), and it is the half of the formula that
+	// earns its keep: dropping it to 0 -- i.e. the 2008 flat field -- costs the spider rig +1.28
+	// deaths and 3 of its 4 victories (big-UFO kills 117 -> 187), because a flat field is nothing
+	// next to a 90px-half UFO. It is also what makes BrainBoss expensive (a ~250px hull draws a
+	// ~600px field), which is the trade the base reduction above partly pays for. Do not "simplify"
+	// it away to a flat number: that experiment is this card's og150 arm and it loses.
 	public const float DefaultThreatFieldSizeScale = 1.8f;
 
 	// Exponent of the (1-t)^p falloff. Higher = the field bites later and harder.
@@ -634,6 +655,9 @@ public class PlayerShip : AlienDrawableGameComponent
 	// separate the pilot from the enemies:
 	//   AimRad         Level1, 15deg -> 57.3deg  : progress 50/64 -> 45/64.  KEPT
 	//   FieldPx        spiderboss, 190 -> 30px   : deaths 11 -> 14.          KEPT (weak)
+	//                  (that pair is PARK-ERA and its 190 is no longer the anchor -- it survives
+	//                   only as evidence of the knob's DIRECTION, which card 05a2b818 confirmed
+	//                   is non-monotone between 150 and 190. Do not quote the numbers.)
 	//   WallReactionMs OwnLevel, 420 -> 600ms     : victories 25 -> 0 of 30.
 	//                                               NOT TIERABLE (card 21bb6849)
 	//   ThreatLeadMs   CrazyGame, 700 -> 200ms    : victories 23 -> 14 of 30.
@@ -691,15 +715,28 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	// Indexed by Settings.DifficultyLevel (Easy, Medium, Hard, Very_Hard, Inzane). Aim is in
 	// DEGREES so the ladder is inspectable at a glance; the anchor row alone is passed in radians.
-	// Inzane's FIELD is deliberately NOT pushed past the anchor's 190: every measurement bracketed
-	// this knob between 30 and 190, so shrinking it is evidence-backed while GROWING it is pure
+	// Inzane's FIELD is deliberately NOT pushed past the anchor: every measurement has bracketed
+	// this knob at or below it, so shrinking it is evidence-backed while GROWING it is pure
 	// extrapolation -- and ThreatFieldStrength's own note warns a bigger field is a trade-off, not
-	// a free win (the bot still has to close in to shoot). Inzane earns its edge on aim only.
+	// a free win (the bot still has to close in to shoot). Card 05a2b818 sharpened that from a
+	// caution into a result: 190 was measured against 150 and LOST. Inzane earns its edge on aim
+	// only.
+	//
+	// THE FIELD COLUMN IS RESCALED, NOT RE-MEASURED (card 05a2b818). That card moved the anchor
+	// 190 -> 150, which would otherwise have collapsed the ladder outright -- the old Easy row was
+	// itself 150, so Easy would have equalled Very_Hard and the two middle rows would have come
+	// out BETTER than the anchor. Every field row is therefore multiplied by 150/190 (~0.789),
+	// which preserves each tier's spacing relative to the new anchor and nothing more. The AIM
+	// column is untouched.
+	// It is a rescale rather than a fresh sweep on purpose: the doc's own argument stands that
+	// tier-vs-tier cannot be measured end-to-end (the ENEMIES scale with the same tier, so an
+	// outcome delta between tiers is unattributable), and only the ANCHOR row has evidence behind
+	// it. So do not read the lower rows as measured values -- they are the old proportions.
 	private static readonly AiSkill[] AiSkillByDifficulty = new AiSkill[5]
 	{
-		/* Easy      */ AiSkill.Deg(150f, 22.5f),
-		/* Medium    */ AiSkill.Deg(163f, 19.5f),
-		/* Hard      */ AiSkill.Deg(176f, 17f),
+		/* Easy      */ AiSkill.Deg(118f, 22.5f),
+		/* Medium    */ AiSkill.Deg(129f, 19.5f),
+		/* Hard      */ AiSkill.Deg(139f, 17f),
 		/* Very_Hard */ new AiSkill(VeryHardThreatFieldBasePx, VeryHardAimSpreadRad),
 		/* Inzane    */ AiSkill.Deg(VeryHardThreatFieldBasePx, 11.25f)
 	};

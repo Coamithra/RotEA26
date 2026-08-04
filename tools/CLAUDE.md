@@ -893,6 +893,28 @@ level-select screenshot cropped from the meme splash). Don't hand-edit.
   which pinned `contacts` at a flat 226 across four look-ahead depths, an artifact that read
   exactly like a result; **(4)** scroll speed is PINNED per table, never pooled -- run duration is
   `distance / scroll`, so averaging a sweep silently weights it onto the slowest rung.
+- **`tools/sim/ai_sweep.py`** (card 05a2b818): the paired-seed AI bench sweep driver — `--rig` x
+  `--arm` x `--seeds` through `eahl`, scored off `AiBench`'s machine-readable row. Use it instead
+  of hand-rolling a loop, because it enforces the four measurement rules that a hand-rolled loop
+  silently breaks (web CLAUDE.md, the AI section's measurement bullet):
+  **N=60 per arm-rig** (`--seeds 1-30 --captures 2`), **pairing by seed** with `+-1 SEM of the
+  paired difference` (seeds are the dominant variance source, so an unpaired comparison of two
+  16-run means cannot see a real 3-death effect — during that card a "46% improvement" at N=16
+  evaporated at N=60 and the arm that looked worst turned out best), **unstable-seed flagging**
+  (a seed whose own two captures disagree cannot carry a cross-arm conclusion), and
+  **time-to-victory beside deaths** (deaths are a COUNT, not a rate: a build that takes twice as
+  long to finish a world dies twice as often in it while dodging just as well — that alone
+  explained card c1d783ad's handed-off "SpaceDodge regression", which did not exist).
+  ```sh
+  python tools/sim/ai_sweep.py --list-rigs
+  python tools/sim/ai_sweep.py --rig crazygame --rig spider \
+      --arm "shipped=" --arm "og150=aifieldpx=150&aifieldsize=0" --seeds 1-30 --captures 2
+  ```
+  Rigs are presets (level + the cap that card used) or `name:flags:seconds`; an arm is
+  `label=<bare ?ai* query>`, so `shipped=` is the baked configuration. `--workers` defaults to 4 —
+  **this box runs up to eight worktree agents, so do not raise it casually.** It needs a built
+  `eahl` (`dotnet build tools/headless -c Debug`) and, like `aiwallnav`, benches whatever was last
+  built — rebuild after editing `PlayerShip.cs` or you will measure the old constants.
 - **`tools/xnb/unpack.py`**: unpacked the original content; emits decoded RGBA verbatim (straight
   alpha — the basis for the project-wide straight-alpha rule).
 - **`tools/audit_add_order.py`**: lint for the ComponentBin instant-add contract (card 02d9ad67)

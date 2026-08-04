@@ -21,6 +21,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -158,6 +159,8 @@ namespace EvilAliensWeb.Headless
             finally
             {
                 NoAudioDeviceSim.Remove();
+                // After the host is disposed, so nothing is still holding a save file open.
+                TempSaveDir.Release();
             }
         }
 
@@ -319,9 +322,86 @@ namespace EvilAliensWeb.Headless
             {
                 // Never let a bad command kill the session -- an agent should be able to
                 // recover by sending a corrected one.
-                Console.WriteLine("err " + ex.GetType().Name + ": " + ex.Message);
+                Console.WriteLine("err " + Describe(ex));
+                foreach (string frame in Trace(ex))
+                    Console.WriteLine("    " + frame);
                 return false;
             }
+        }
+
+        // `eval` calls DebugInput by reflection, so ANY failure inside the game surfaces as
+        // "TargetInvocationException: Exception has been thrown by the target of an invocation."
+        // -- which names neither the fault nor where it happened. That is not a hypothetical:
+        // screenshot_alpha.txt failed exactly once in a batch run and card de82597f could say
+        // nothing about it beyond the wrapper's name, because the wrapper is all that was
+        // printed. So the chain is unwrapped and the INNERMOST cause leads, since that is the
+        // one that says what actually went wrong.
+        //
+        // TargetInvocationException itself is dropped from the report: its message is boilerplate
+        // and its type only restates that `eval` uses reflection. Any other wrapper is kept --
+        // an AggregateException or a rethrow carries real context about the layer it crossed.
+        private static string Describe(Exception ex)
+        {
+            var sb = new StringBuilder();
+            foreach (Exception e in Chain(ex))
+            {
+                if (sb.Length > 0) sb.Append(" <- ");
+                sb.Append(e.GetType().Name).Append(": ").Append(e.Message);
+            }
+            // Everything was reflection plumbing (an eval whose target threw a bare
+            // TargetInvocationException). Report it rather than an empty `err`.
+            return sb.Length > 0 ? sb.ToString() : ex.GetType().Name + ": " + ex.Message;
+        }
+
+        // The innermost exception's stack, and only when there WAS an inner one -- a plain bad
+        // command ("unknown command 'stpe'") needs no trace and would only bury the message.
+        //
+        // SOURCE-LOCATED FRAMES FIRST, and that ordering is the whole value here. run_probes.py's
+        // failure_tail prints exactly ONE line after the `err` it stopped on, so whichever frame
+        // leads is the only one an agent reading a suite failure ever sees. A raw stack leads with
+        // BCL plumbing (SafeFileHandle.CreateFile, OSFileStreamStrategy..ctor, ...) and says
+        // nothing; the frames carrying `in <file>:line <n>` are this repo's, and one of those
+        // names the call site. Both sets are printed -- only the order changes -- and the whole
+        // thing is bounded so a deep stack cannot bury the `err` line in a scrolled log.
+        private static IEnumerable<string> Trace(Exception ex)
+        {
+            if (ex.InnerException == null)
+                yield break;
+            Exception innermost = ex;
+            while (innermost.InnerException != null)
+                innermost = innermost.InnerException;
+            string trace = innermost.StackTrace;
+            if (string.IsNullOrEmpty(trace))
+                yield break;
+
+            var located = new List<string>();
+            var rest = new List<string>();
+            foreach (string line in trace.Split('\n'))
+            {
+                string frame = line.Trim();
+                if (frame.Length == 0)
+                    continue;
+                // " in <path>:line <n>" is present only for a frame whose PDB shipped, i.e. ours.
+                (frame.Contains(":line ") ? located : rest).Add(frame);
+            }
+            int shown = 0;
+            foreach (string frame in located.Concat(rest))
+            {
+                yield return frame;
+                if (++shown == 8)
+                    yield break;
+            }
+        }
+
+        // Innermost first, skipping the reflection wrappers. See Describe.
+        private static List<Exception> Chain(Exception ex)
+        {
+            var chain = new List<Exception>();
+            for (Exception e = ex; e != null; e = e.InnerException)
+                if (!(e is TargetInvocationException))
+                    chain.Add(e);
+            chain.Reverse();
+            return chain;
         }
 
         // Everything after the command word, verbatim. `expect` takes a REGEX, which may hold
@@ -456,8 +536,9 @@ namespace EvilAliensWeb.Headless
             if (opt.NoDraw && opt.OutPath != null)
                 throw new ArgumentException("--nodraw cannot be combined with --out");
 
-            // A default so --jscalls / --nodraw runs still have somewhere to put a download.
-            opt.SaveDir = opt.SaveDir ?? Path.Combine(Path.GetTempPath(), "eahl-saves");
+            // A default so --jscalls / --nodraw runs still have somewhere to put a download,
+            // PER PROCESS -- see TempSaveDir.
+            opt.SaveDir = opt.SaveDir ?? TempSaveDir.Claim();
             return true;
         }
 
@@ -505,7 +586,8 @@ OPTIONS
                     runs flat out; this is the dt the game is told it got.
   --nodraw          update only, no rendering. Much faster for behaviour/timing soaks.
   --content <dir>   path to web/EvilAliensWeb/wwwroot (found automatically by default)
-  --saves <dir>     persist saves here (default: a temp dir, wiped, so runs start clean)
+  --saves <dir>     persist saves here (default: a PER-PROCESS temp dir, removed on exit,
+                    so runs start clean and concurrent runs cannot wipe each other)
   --audio           let the game make noise (default: silent -- the mixer, the decodes and
                     every source still run, the gain is just zero)
   --fake-no-audio-device

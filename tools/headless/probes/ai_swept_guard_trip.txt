@@ -1,0 +1,52 @@
+# PROBE: the swept-path teleport guard actually FIRES, and says which type
+#
+# PINS:   card c1d783ad. This is the POSITIVE CONTROL for ai_swept_guard.txt, which asserts the
+#         refusal line is absent -- an assertion a build with the guard ripped out passes just as
+#         happily as a healthy one. A reproduction seam that has quietly stopped reproducing is
+#         worse than no seam at all (the `?nethitstop=1` / `?netstaleguard=0` rule), so the two
+#         files are one probe and must be read together.
+#
+# HOW IT FIRES: `?aisweptmax=0.2` drops the plausibility ceiling from the measured 5.0 px/ms to
+# a value under most of the movers in the game (0.2 sits below an asteroid's 0.38 and an
+# EvilBullet's 0.24), so ordinary flight is refused. That is the same seam the
+# card's measurement pass uses in the other direction (`?aisweptmax=0` turns the guard OFF, which
+# is how branch-vs-branch A/B isolates the guard from the Initialize fix beside it).
+#
+# WHAT IT PROVES, precisely: that the default TryGetAiSweptPath consults the ceiling at all, that
+# the ceiling is reachable from a URL flag, and that the refusal NAMES ITS TYPE and its speed --
+# because the line is the guard's only observable, and an unnamed one would leave a future
+# repositioner undiagnosable. It does NOT prove the shipped ceiling is right; that is
+# `logic_probe`'s ProbeAiSweptPathGuard (the measured genuine/reposition tables and the
+# separation property).
+#
+# FAILURE MEANS:
+#   * no line at all         -> either the guard's call site is gone from the DEFAULT seam, or
+#                               ?aisweptmax= stopped reaching AiSweptMaxSpeedPxPerMs. Check
+#                               logic_probe's flag-rejection row for `aisweptmax` next: if that
+#                               passes, the flag parses and the loss is at the consumer.
+#   * a line naming no type  -> the message shape changed; ai_swept_guard.txt's grep and any
+#                               future diagnosis depend on it.
+#
+# MUTATION-TESTED: deleting the `if (!IsAiSweptPathPlausible(velocity))` branch turns this red
+# while ai_swept_guard.txt stays green, which is the exact hole this file closes.
+#
+# eahl: --flags "?level=OwnLevel&aiplayer&aibench&difficulty=Very_Hard&invuln&seed=1&noattract&aisweptmax=0.2"
+
+step 150 nodraw
+mark
+
+eval AiBenchRun 60
+
+# The flag was accepted rather than reported as a bad value.
+expect-not unknown \?aisweptmax=
+
+# THE LEG: at a 0.2 px/ms ceiling ordinary motion is refused, and the line names the type and
+# the speed it was refused at.
+expect \[ai\] implausible swept path refused: [A-Za-z]+ at [0-9]+\.[0-9] px/ms \(ceiling 0\.2\)
+
+# ...on the rig that ai_swept_guard.txt asserts is silent, so the two runs differ only in the
+# ceiling.
+eval AiBench
+expect \[aibench\].*OwnLevel
+
+quit

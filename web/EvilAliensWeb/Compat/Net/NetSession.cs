@@ -168,6 +168,14 @@ namespace EvilAliensWeb.Compat.Net
         // a first cut at 3.0 clipped MarsBoss's own arrival, and the scan's own sampler was
         // differencing across POOL RECYCLES, which reported an EvilBullet whose declared speed is
         // 0.24 px/ms at a sustained 14.9.
+        //
+        // BLAST RADIUS BEYOND THE NET LAYER (card c1d783ad): the AI's swept-path seam
+        // (AlienDrawableGameComponent.AiSweptMaxSpeedPxPerMs) consumes this same constant, and
+        // there it IS a guard -- a value set too low deletes a genuinely fast mover's directional
+        // repellent instead of merely printing a line. `logic_probe`'s ProbeAiSweptPathGuard
+        // asserts the measured SEPARATION above (>= 2x the fastest real mover, <= half the
+        // slowest reposition), so a retune that leaves that band fails there rather than quietly
+        // changing how the bot flies.
         internal const float MaxObservedSpeedPxPerMs = 5.0f;
         private const long ScoreSyncIntervalMs = 1000;
         private const long HelloIntervalMs = 1000;

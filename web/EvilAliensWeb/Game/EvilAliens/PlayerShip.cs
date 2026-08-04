@@ -2302,6 +2302,16 @@ public class PlayerShip : AlienDrawableGameComponent
 		// reads zero for everything that writes Position directly -- including the spider boss's
 		// fly states, i.e. the case this method exists for.
 		Vector2 threatVelocity = baddy.ObservedVelocity;
+		// THE SAME TELEPORT GUARD THE SWEPT-PATH SEAM APPLIES (card c1d783ad), and this path needs
+		// it MORE, not less: a reposition passes the speed gate below trivially, collapses `t` to
+		// almost nothing, and so lands inside ThreatPanicMs -- a ThreatPanicStrength (16) shove,
+		// four times maxSteerStrength, aimed along a course the thing never took. The screen
+		// wrappers reach here for real. Refusing is the same answer a stationary threat gets, and
+		// the radial field still describes the body.
+		if (!AlienDrawableGameComponent.IsAiSweptPathPlausible(threatVelocity))
+		{
+			return false;
+		}
 		// The player ship's own MaxSpeed is 0.33 px/ms, so this is ~a third of that.
 		if ((threatVelocity).Length() < ThreatMinSpeed)
 		{

@@ -294,7 +294,15 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   ?aiasteroidscale= ?aiasteroidrange= ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge=
   ?ailaneescape= ?aiconelead= ?aiconemaxlen= ?aiconewidth= ?aiconetaper= ?aiconefallalong=
   ?aiconefallacross= ?aiconescale= ?aiconespread= ?aiconewidthmin= ?aiwedgestrength=
-  ?aiwedgefall=`. Pair with `?aiplayer`.
+  ?aiwedgefall= ?aisweptmax=`. Pair with `?aiplayer`.
+  **`?aisweptmax=<px/ms>` is a GUARD, not a tuning knob** (card c1d783ad): above it the DEFAULT
+  swept-path seam refuses the path, because a raw one-frame position delta reports an enormous
+  velocity for anything repositioned in a single tick and the cone would sweep the screen for that
+  frame. `0` turns it off (the A/B seam). The value is `NetSession.MaxObservedSpeedPxPerMs`,
+  referenced rather than copied. **The same card found the hazard was LIVE**: `Initialize` did not
+  reset the observed-velocity history per life, so every POOL-RECYCLED entity reported a phantom
+  teleport on its first tick (`EvilBullet` at 14.9 px/ms against a declared 0.24). Details: web
+  CLAUDE.md.
   **The bench also reports `killers=<Type>:<n>` (with `SpiderBoss(standing)` split out),
   `pickups=<n>/<spawned>(<pct>%)` and `boss=<px> bossfar=<pct>`** (cards 31ceb6ff / ada9e839) --
   which is what turned "the AI runs into the stationary spider boss" and "the AI ignores

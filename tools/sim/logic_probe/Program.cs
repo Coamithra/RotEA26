@@ -1399,8 +1399,10 @@ internal static class Program
             Console.WriteLine("FAIL: could not reflect PlayerShip.ThreatFieldStrength(t, max, falloff, classic)");
             return 2;
         }
-        // The asteroid's shipped radial field: ThreatFieldBasePx 190 + halfExtent * 1.8, on the
-        // (1-t)^3 curve. Reflected, so retuning the field re-derives the comparison.
+        // The asteroid's shipped radial field: ThreatFieldBasePx + halfExtent * the size scale,
+        // on the (1-t)^p curve. Every term is REFLECTED rather than restated, so retuning the
+        // field re-derives the comparison instead of silently invalidating it -- which is what
+        // card 05a2b818 relied on when it moved the base 190 -> 150.
         float fieldPx = (float)ship.GetField("VeryHardThreatFieldBasePx", anyStatic).GetRawConstantValue();
         float sizeScale = (float)ship.GetField("DefaultThreatFieldSizeScale", anyStatic).GetRawConstantValue();
         float falloff = (float)ship.GetField("DefaultThreatFieldFalloff", anyStatic).GetRawConstantValue();

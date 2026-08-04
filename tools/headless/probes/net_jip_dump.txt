@@ -1,0 +1,63 @@
+# PROBE: the join-in-progress world dump reports, and ?net=jiphost arms a listed host
+#
+# PINS:   card 054947f3's two single-process halves. The card's real instrument is
+#         `python tools/sim/net_jip_sync.py`, which drives TWO eahl processes and diffs a host
+#         world against a joiner's -- and a two-process run cannot be a --script probe, since
+#         run_probes.py runs one. What CAN live here is the thing that would make that tool
+#         silently green: a dump that stopped reporting. Both of its non-entity sections and its
+#         end sentinel are asserted below, plus the boot flag the host half rides on.
+#
+#         WHAT IT DOES NOT COVER, deliberately: the `ent` lines. A peerless process has no
+#         session, so NetIdRegistry is not enabled and the replicated set is EMPTY BY DESIGN --
+#         which is why `ids=0` is asserted as a positive here rather than treated as a failure.
+#         The entity diff is net_jip_sync's whole subject and lives there.
+#
+# FAILURE MEANS:
+#   * no `[net] listed (join-in-progress) host armed` -> ?net=jiphost stopped arming (the
+#     DebugFlags case, NetSession.Start's JipHost branch, or the transport failed to open).
+#     net_jip_sync would then report "the host never paired" with no explanation.
+#   * no `dump v1 ... end` -> NetJipDump threw before its sentinel, or the FORMAT VERSION moved
+#     without net_jip_sync's FORMAT_VERSION moving with it. Those two are one edit.
+#   * `scene none` or a missing `hud` -> the dump lost a whole section. Both are compared
+#     verbatim between the two peers, so losing one silently removes a dimension from the diff.
+#   * any `[netjip] err` -> a descriptor re-encode or a service lookup threw.
+#
+# MUTATIONS (all rebuild tools/headless first -- it source-links Game/ and Compat/):
+#   * delete the `case "jiphost"` from DebugFlags -> the arm line goes, red on line 1.
+#   * make NetJipDump.AppendExtras return before the scene line -> red on the `scene speed=`
+#     line, while the `dump v1 ... end` sentinel still passes -- which is the point of asserting
+#     the sections separately from the sentinel.
+#   * bump NetJipDump.FormatVersion without touching the probe -> red on `dump v1`.
+#
+# eahl: --flags "?level=Level2&invuln&aiplayer&noattract&seed=7&netjip&net=jiphost&room=jipprobe"
+
+# 1. the flag armed a LISTED host: transport open, no session yet (a listed game is plain
+#    single-player until a stranger arrives -- that is the branch, not an accident).
+#    ASSERTED BEFORE THE `mark`, because both lines are printed during BOOT -- the arm happens in
+#    Game1.Initialize, long before the first step. Marking first would scope them out and the
+#    probe would fail on a build where nothing was wrong.
+expect      \[net\] listed \(join-in-progress\) host armed on room jipprobe
+expect      single-player until a peer arrives
+
+# Past the intro white fade and far enough in that the level is really running.
+step 300 nodraw
+mark
+
+eval NetJipDump
+
+# 2. the SENTINEL, with the format version the differ speaks. Also the peerless state, asserted
+#    positively: no session, no peer, no replicated set.
+expect      \[netjip\] dump v1 role=none active=0 peer=0 ids=0 end
+
+# 3. the scenery/music section is POPULATED, not the `none` a dump taken outside a level gives.
+expect      \[netjip\] scene speed=.*base=.*song=
+
+# 4. the score/HUD section, with the local player really seated -- `hud lives=` alone would pass
+#    on an empty roster, which is what a dump taken at the menu produces.
+expect      \[netjip\] hud lives=.*s0 seat=Keyboard
+expect      \[netjip\] hud .*lv=.*opt=
+
+# 5. nothing threw on the way through (a descriptor re-encode, a missing service).
+expect-not  \[netjip\] err
+
+quit

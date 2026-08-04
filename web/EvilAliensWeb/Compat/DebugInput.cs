@@ -353,6 +353,16 @@ namespace EvilAliensWeb.Compat
 			return scene == null ? "[netbg] no level" : "[netbg] " + scene.NetCatchUpStateLine();
 		}
 
+		// JS bridge for the join-in-progress world dump (eaNetJipDump in index.html; card
+		// 054947f3). One peer's whole replicated world, in a form the OTHER peer's dump can be
+		// diffed against -- the observable behind `python tools/sim/net_jip_sync.py`. Read-only:
+		// it enumerates and re-encodes, and changes nothing, so it is safe at any point in play.
+		[JSInvokable("debugNetJipDump")]
+		public static string NetJipDump()
+		{
+			return EvilAliensWeb.Compat.Net.NetJipDump.Run();
+		}
+
 		// JS bridge for the JIP catch-up round-trip self-test (eaNetBgTest in index.html).
 		// One tab, no peer, no timing: capture the burst, wipe the scenery to a fresh joiner's,
 		// replay through the real client apply path, diff. See GameScene.NetCatchUpSelfTest --

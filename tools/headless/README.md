@@ -282,6 +282,28 @@ unavailable · `4` `--fake-no-audio-device` could not install its `alsoft.ini`.
   `ProjectReference` either way (that project targets browser-wasm and cannot be referenced from a
   desktop exe), and CI only publishes `web/EvilAliensWeb`. The shipped build is unaffected.
 
+## Two processes, one co-op session (`?net=`, `--nettime game`, `--net-port`)
+
+The `eaNet` loopback -- the `BroadcastChannelTransport` every `?net=` boot uses -- was stubbed
+here as three no-ops, so a headless `?net=host` opened a channel with nobody on it.
+`LocalSocketNet.cs` backs `eaNet.open/send/close` with a **localhost TCP socket**, so two eahl
+PROCESSES can hold a real session between them (card 054947f3). Which end dials is decided by the
+boot role, never by who started first: `?net=host`/`?net=jiphost` listen, `?net=join`/`?net=jipjoin`
+dial. The port is derived from `?room=` so both sides agree with no configuration; `--net-port`
+overrides it, and a bind clash is reported and survived rather than killing the run.
+
+**`--nettime game` is required for such a run.** It advances the net layer's clock by one `--fps`
+step per frame instead of reading the wall clock -- without it `--nodraw`'s ~17x real time makes
+the wire's cadences fire ~17x too rarely per unit of world motion, and any comparison between the
+two peers measures that artifact. Off by default, so every existing probe is unchanged.
+
+Two processes must be stepped in TURN: each advances only when told to, and a peer left behind in
+net time is dropped (3 s + 5 s grace = 480 frames), so keep interleave chunks well under that.
+`python tools/sim/net_jip_sync.py` is the driver that does all of it, plus the world diff.
+
+Nothing here is linked into the WASM build -- `System.Net.Sockets` is meaningless in the browser,
+which is why the file lives under `tools/headless/` rather than in `Compat/`.
+
 ## `--software` (CPU rasterization)
 
 You do not need this on a dev box — the default path is already headless and background-safe, it

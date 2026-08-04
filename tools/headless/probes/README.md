@@ -242,6 +242,7 @@ persists. Read `[loadprofile] <Level> preload:` and `eval ScoreDump` for that in
 | `net_menumode_reset.txt` | a level launch leaves the menu OUT of the Online Co-op flow (card c337222a). `MenuScene` is a singleton re-ADDED on every return from a level, so `netMode` used to survive a launch and every reader of it after a lobby match read a lie -- worst of all `difficultyMenu_difficultySelected`, which then silently aborted the next ordinary launch after the main menu and the selector were already gone (reload-only). Plants the flag with `eaMenuNetMode`, round-trips through the Tutorial (the one launch path that reads no `netMode`, so it works on both sides of the fix), then requires the flag CLEAR *and* an ordinary Mission 1 launch to still launch. Nothing here is visible in a frame -- `eaMenuNetState` is the observable |
 | `respawn_summon.txt` | the co-op branch of card 37f3a663's summon gate: one death with a partner still flying raises the indicator (with its duration), and the death that WIPES the world raises none. Both branches come out of one `eval KillShips` on TeamChallenge, the one level that seats a second local ship with no gamepad -- deliberately NOT the tether, whose timing `?seed=` does not pin |
 | `respawn_singleplayer.txt` | the same predicate's other branch, as the card actually reported it: a lone player's death raises no summon, so there is nothing for `LoseLife` to purge a frame later |
+| `net_jip_dump.txt` | the join-in-progress world dump reports at all, and `?net=jiphost` arms a listed host (card 054947f3). The card's real instrument is `python tools/sim/net_jip_sync.py`, which drives TWO eahl processes and cannot be a `--script` probe; this covers the thing that would make that tool silently green -- a dump that stopped reporting. Its `ent` lines are deliberately out of scope: a peerless process enables no `NetIdRegistry`, so `ids=0` is asserted as a POSITIVE here rather than treated as a failure |
 | `net_scene_order.txt` | scenario 6 of the step-4 harness (card 25ad0659): reset / pause / checkpoint reach a REAL GameScene in the order the ordered lane carried them, a repeated pause on-edge does not latch a freeze one off-edge cannot clear, and a reset arriving mid-pause neither unfreezes the world early nor survives the peer's resume. DESTRUCTIVE, like `net_reset_spawn.txt` -- it pairs a real client session onto the running scene and applies a real `EvReset`. Scenarios 1-5 are menu-runnable and ride `net_selftests.txt` instead |
 
 All are mutation-tested. Each `preload_*` goes red, naming the first missing asset, when that
@@ -263,6 +264,13 @@ entry scene and the run still prints **PASS** with the full `ops=` list, caught 
 mutants it does NOT catch, both correctly — an unconditional `flaptimer.Randomize()` is undone by
 the pinned branch's `Reset()` (so behaviour is unchanged), and removing that `Reset()` only shows
 on a RECYCLED spider, which a bench spawned at level entry never has.
+`net_jip_dump` goes red three ways, each isolated and each failing a DIFFERENT assertion: deleting
+`case "jiphost"` from `DebugFlags` drops the arm line (leg 1); making `NetJipDump.AppendExtras`
+return early drops the `scene speed=` line while the `dump v1 ... end` sentinel still passes, which
+is why the sections are asserted separately from the sentinel; and bumping
+`NetJipDump.FormatVersion` without touching the probe fails the sentinel -- that pair is one edit
+in practice, since `net_jip_sync.py`'s `FORMAT_VERSION` must move with it.
+
 `net_menumode_reset` is mutation-tested by deleting `ResetNetFlowState()`'s call from
 `MenuScene.Initialize` -- the shape the regression takes -- and BOTH of its subject legs go red
 independently: the `netMode=False ...` line first, and (with that line removed so the run gets

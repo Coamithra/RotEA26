@@ -2769,8 +2769,19 @@ namespace EvilAliensWeb.Compat
 						case "client":
 							NetRole = NetRole.Join;
 							break;
+						// Join-in-progress shapes (card 054947f3). The host attaches a REAL
+						// listed session to its running level once a peer appears; the joiner is
+						// a real menu-session client that mirrors the launch. See NetRole.
+						case "jiphost":
+							NetRole = NetRole.JipHost;
+							break;
+						case "jipjoin":
+							NetRole = NetRole.JipJoin;
+							break;
 						default:
-							Console.WriteLine("[net] unknown ?net= value '" + val + "' (use host or join)");
+							Console.WriteLine("[net] unknown ?net= value '" + val
+								+ "' (use host, join, jiphost or jipjoin) -- ignored, staying on "
+								+ (NetRole == NetRole.None ? "no session" : NetRole.ToString().ToLowerInvariant()));
 							break;
 						}
 					}
@@ -4030,6 +4041,18 @@ namespace EvilAliensWeb.Compat
 				Console.WriteLine("[debug] ?seed=" + Seed.Value.ToString(CultureInfo.InvariantCulture)
 					+ " -- the gameplay RNG (RandomHelper) is seeded, so two runs of this boot "
 					+ "reach the same world. Reload without the flag for normal random play.");
+			}
+			// ?net=jipjoin makes a real MENU session, and HandleHello refuses one of those while
+			// our own DebugFlags.Active is set -- which the ?net= flag itself sets. So the joiner
+			// half of the two-process JIP rig cannot pair without ?netallowdebug, and it fails by
+			// simply never connecting, which reads as a broken socket rather than a missing flag
+			// (card 054947f3). Said out loud rather than waived: whoever carries the flags is the
+			// one who opts in, and waiving it here would opt a boot in behind its own back.
+			if (NetRole == NetRole.JipJoin && !NetAllowDebug)
+			{
+				Console.WriteLine("[net] ?net=jipjoin without ?netallowdebug -- this peer will "
+					+ "REFUSE its own pairing (a menu session rejects while debug flags are active). "
+					+ "Add &netallowdebug.");
 			}
 			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || !NetChargeAimEase || AiWallNav2008 || AiFastForward > 1;
 			if (Active)

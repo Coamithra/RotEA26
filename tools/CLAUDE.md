@@ -201,6 +201,16 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   `held |= MouseLatch.Consume(i)` lines -- turns 3, namely the two section-2 positives plus the
   leaves-nothing-latched check (that build never drains the latch at all), with every section-1
   leg still passing.
+- **Scripted-velocity ranking case set: `ProbeScriptedVelocity`** (card 76ec8bdb) --
+  `NetSession.ResolveBaseVelocity`, which now has FOUR branches, every one chosen by a flag or a
+  history bit rather than by the numbers. It pins the RANKING only (scripted beats both fallbacks
+  and the finite difference; anchored still beats scripted), because whether the SpiderBoss's
+  announced number is CORRECT is ground-truth work that needs a `Game` and lives in
+  `tools/headless/probes/net_scripted_motion.txt`. Every positive has the SAME call with
+  `scripted: false` beside it, which must give the pre-card answer -- without those a build
+  returning the announced vector unconditionally passes the lot. The declared vector is ZERO in
+  most rows on purpose: that is the real situation for a type that never assigns
+  `Speed`/`Direction`, and it is why the two fallbacks were not good enough in the first place.
 - **Latest case set: `?seed=<n>`** (card d937c721) -- the flag that seeds `RandomHelper`, the
   gameplay RNG. **It is here because the claim is about a SEQUENCE, not a picture**: an eahl A/B
   can only show that two frames happened to match, and the card's own measurements are why that is

@@ -209,6 +209,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeScriptedVelocity(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         // LAST ON PURPOSE -- it is the only set that seeds RandomHelper, and it cannot unseed
         // afterwards (there is no un-seed API and adding one for a probe would be a production
         // change made for a test). Nothing above draws from RandomHelper, so the order costs
@@ -1192,6 +1198,106 @@ internal static class Program
             !spiderPriority, "IsAiPriorityTarget(SpiderBoss) = " + spiderPriority);
         Check("control: BrainBoss IS one, so the predicate is not simply refusing everything",
             brainPriority, "IsAiPriorityTarget(BrainBoss) = " + brainPriority);
+        return 0;
+    }
+
+    // ---- the scripted-velocity ranking (card 76ec8bdb) --------------------------------------
+    //
+    // NetSession.ResolveBaseVelocity decides what velocity a snapshot carries, and it now has
+    // FOUR branches. Every one of them is chosen by something other than the numbers -- a flag,
+    // a latch, a history bit -- so only a table can cover them, and the card that split this out
+    // as a pure function did so after measuring that a mutation dropping one branch passed an
+    // entire probe suite (see the ANCHORED MOTION section of Compat/Net/CLAUDE.md).
+    //
+    // The new branch is SCRIPTED: a type that moves by writing Position directly can ANNOUNCE the
+    // velocity it is moving at, and that answer outranks both fallbacks (a marked teleport, a
+    // first observation) as well as the finite difference. What is asserted here is the RANKING,
+    // which is the whole of the decision; whether SpiderBoss's announced number is CORRECT is
+    // ground-truth work that needs a Game, and lives in tools/headless/probes/net_scripted_motion.
+    //
+    // The declared vector is deliberately ZERO in most rows, because that is the real situation:
+    // a type that never assigns Speed/Direction reports zero, which is exactly why the two
+    // fallbacks were not good enough.
+    private static int ProbeScriptedVelocity(Assembly asm)
+    {
+        Console.WriteLine("-- NetSession.ResolveBaseVelocity: the scripted branch and its ranking");
+        Type session = asm.GetType("EvilAliensWeb.Compat.Net.NetSession", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo resolve = session.GetMethod("ResolveBaseVelocity", anyStatic);
+        if (resolve == null)
+        {
+            Console.WriteLine("FAIL: could not reflect NetSession.ResolveBaseVelocity -- renamed or no longer static?");
+            return 2;
+        }
+        // Off the signature, not by name: Vector2 lives in the KNI assembly, not the probed one.
+        Type vec2 = resolve.GetParameters()[0].ParameterType;
+        object V(float x, float y) => Activator.CreateInstance(vec2, x, y);
+        float VX(object v) => (float)vec2.GetField("X").GetValue(v);
+        float VY(object v) => (float)vec2.GetField("Y").GetValue(v);
+        string Fmt(object v) => VX(v).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) + ","
+            + VY(v).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
+        bool Same(object a, object b) => Math.Abs(VX(a) - VX(b)) < 1e-6f && Math.Abs(VY(a) - VY(b)) < 1e-6f;
+
+        object Resolve(object declared, bool anchored, bool teleported, object pos, bool hasLast,
+            object lastPos, long lastMs, long now, bool scripted, object announced) =>
+            resolve.Invoke(null, new object[]
+            {
+                declared, anchored, teleported, pos, hasLast, lastPos, lastMs, now, scripted, announced,
+            });
+
+        object zero = V(0f, 0f);
+        object honest = V(0f, 0.31f);          // a Level-3 wall's real scroll -- an ANCHORED type
+        object announced = V(-0.78f, 0f);      // the SpiderBoss sweep
+        object last = V(700f, 235f);
+        object crawl = V(697f, 235f);          // 3px over 60ms: the PREVIOUS phase, still reported
+        object park = V(1145f, 70f);           // a fly-by reposition
+        object observed = V(-0.05f, 0f);       // what differencing `last`->`crawl` must give
+
+        // 1. THE NEW BRANCH, on every input shape that used to defeat it.
+        Check("scripted beats the finite difference (an ordinary turn)",
+            Same(Resolve(zero, false, false, crawl, true, last, 0L, 60L, true, announced), announced),
+            "-> " + Fmt(Resolve(zero, false, false, crawl, true, last, 0L, 60L, true, announced)));
+        Check("scripted beats a MARKED teleport's declared-vector fallback",
+            Same(Resolve(zero, false, true, park, true, last, 0L, 60L, true, announced), announced),
+            null);
+        Check("scripted beats the FIRST-observation fallback, so a puppet is born moving",
+            Same(Resolve(zero, false, false, crawl, false, last, 0L, 60L, true, announced), announced),
+            null);
+        Check("scripted beats the zero-elapsed guard too",
+            Same(Resolve(zero, false, false, crawl, true, last, 60L, 60L, true, announced), announced),
+            null);
+
+        // 2. THE CONTROLS. Each is the SAME call with `scripted` false, and each must give the
+        //    PRE-CARD answer -- without these, a build that returned `announced` unconditionally
+        //    would pass everything above.
+        Check("CONTROL unscripted, ordinary turn -> the finite difference",
+            Same(Resolve(zero, false, false, crawl, true, last, 0L, 60L, false, announced), observed),
+            "-> " + Fmt(Resolve(zero, false, false, crawl, true, last, 0L, 60L, false, announced)));
+        Check("CONTROL unscripted, marked teleport -> the declared vector (zero: the card's bug)",
+            Same(Resolve(zero, false, true, park, true, last, 0L, 60L, false, announced), zero),
+            null);
+        Check("CONTROL unscripted, first observation -> the declared vector",
+            Same(Resolve(zero, false, false, crawl, false, last, 0L, 60L, false, announced), zero),
+            null);
+
+        // 3. THE RANKING AGAINST ANCHORED. No type may hold both (eaNetScriptedMotion asserts
+        //    that over the whole registry); this is the tie-break of last resort, and it must
+        //    stay ANCHORED-first, because an anchored type's declared vector is exact by
+        //    definition while a scripted answer is only ever as good as its transcription.
+        Check("ANCHORED outranks scripted when a type somehow claims both",
+            Same(Resolve(honest, true, false, crawl, true, last, 0L, 60L, true, announced), honest),
+            "-> " + Fmt(Resolve(honest, true, false, crawl, true, last, 0L, 60L, true, announced)));
+        Check("CONTROL ...and anchored alone is unchanged by this card",
+            Same(Resolve(honest, true, false, crawl, true, last, 0L, 60L, false, announced), honest),
+            null);
+
+        // 4. THE ANNOUNCED VALUE IS PASSED THROUGH, NOT DERIVED. A zero announcement from a
+        //    genuinely parked boss must reach the wire as zero rather than falling through to the
+        //    difference -- the pause IS the warning, and sliding the puppet out of it early is
+        //    the failure the AI seam's opposite contract would have caused.
+        Check("a scripted ZERO is honoured, not treated as 'no answer'",
+            Same(Resolve(zero, false, false, crawl, true, last, 0L, 60L, true, zero), zero),
+            "-> " + Fmt(Resolve(zero, false, false, crawl, true, last, 0L, 60L, true, zero)));
         return 0;
     }
 

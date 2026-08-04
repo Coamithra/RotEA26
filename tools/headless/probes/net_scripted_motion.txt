@@ -1,0 +1,70 @@
+# PROBE: scripted motion -- the scripted-position bosses announce the velocity they move at.
+#
+# PINS: card 76ec8bdb -- Compat/Net/NetScriptedMotionTest, driven by eaNetScriptedMotion() /
+# `eval NetScriptedMotion`. A type that moves by writing Position directly never assigns
+# Speed/Direction, so BOTH velocities the net layer already had are wrong for it: its declared
+# NetSpeedVector is a flat ZERO (what a marked teleport falls back to -- card e79bb994) and a
+# finite difference is a whole snapshot turn LATE at every phase boundary. The seam is
+# AlienDrawableGameComponent.TryGetNetScriptedVelocity, overridden by SpiderBoss alone, and
+# NetSession.ResolveBaseVelocity now ranks that answer above both fallbacks.
+#
+# FAILURE MEANS: read the quoted PASS/FAIL line. Like the rest of the smoothness family, every
+# defect this lane can develop degrades to the PRE-CARD build -- which shipped, and whose symptom
+# is a boss puppet lagging or standing still on the OTHER player's screen. Nothing throws, no
+# counter moves, and `pupPops` reads a contented 0 throughout (the error stays under
+# SnapThresholdPx for most of a turn). That is why this is a probe and not something a person
+# notices on their own screen.
+#
+# SECTION 2 IS THE LEG THIS CARD RESTS ON, and it is shaped the way it is on purpose. The override
+# transcribes SpiderBoss.Update's own switch, so an expectation TABLE written from the same
+# reading would only prove that two copies of one misreading agree. Instead the REAL Update is
+# driven through a full choreography cycle and its ACTUAL per-tick displacement is
+# finite-differenced to produce the expected value -- ground truth from the game, not from a
+# reader. It doubles as a standing tripwire: change the choreography without following it in the
+# override and this fails rather than shipping a wrong velocity onto a collidable puppet.
+#
+# WHY IT IS NOT A logic_probe CASE SET (unlike ProbeScriptedVelocity, which pins the pure decision
+# NetSession.ResolveBaseVelocity makes): sections 2 and 4 build and drive a real SpiderBoss, and
+# constructing an entity needs a Game. eahl is the only headless runner for those.
+#
+# WHAT THIS DOES NOT COVER, deliberately: whether the announced velocity is actually SMOOTHER over
+# a whole run. That belongs to `python tools/sim/net_puppet_drive_sim.py --smoothness`, which
+# asserts it against a host control. This suite asserts the mechanism is wired and EXACT.
+#
+# MUTATION-TESTED FIVE WAYS, each isolated and each failing a DIFFERENT leg:
+#   * SpiderBoss.TryGetNetScriptedVelocity -> false (the pre-card build)  12 FAIL
+#   * ...answering the AI seam's velocity instead (no waittimer branch)    1 FAIL (section 2)
+#   * ...dropping the jump case's animationProgress climb term             1 FAIL (section 2)
+#   * ResolveBaseVelocity drops its scripted branch                        5 FAIL
+#   * ...ranks scripted ABOVE anchored                                     1 FAIL (section 3)
+# The first is the important one: it is the shipped pre-card behaviour verbatim, and what it fails
+# includes this card's own claims -- the wire velocity over a real fly-by, and the sweep-start
+# pair. The two middle ones are the reason section 2 drives the real Update rather than comparing
+# against a table: each is a plausible misreading of the choreography that changes NOTHING else,
+# and ground truth is the only thing that catches either.
+#
+# Menu-runnable and leave-no-trace: the boss is driven far off-screen and everything its own
+# choreography spawns (the "Danger!" banners, the helper mothership) is collected off the bin and
+# removed with it. No level: `?menu&noattract` only keeps the attract demo from taking the scene
+# over mid-window, which would put a live world under the boss this suite drives.
+#
+# eahl: --flags "?menu&noattract"
+
+step 200 nodraw
+mark
+eval NetScriptedMotion
+
+expect \[netscript\] scripted motion
+expect 1\. the seam census over all 29 replicable types
+# The census itself, as an assertion rather than a printout: every extra override is a
+# hand-transcribed script that can dead-reckon a collidable puppet wrong, so a new name here is a
+# decision someone has to re-make rather than inherit.
+expect     scripted: SpiderBoss
+expect 2\. the announced velocity against the REAL Update's displacement
+expect 3\. NetSession.ResolveBaseVelocity ranks the scripted answer
+expect 4\. the velocity the peer receives, over a real fly-by
+# A TALLY, never `expect-not FAIL` on its own: an absence assertion passes on a run where the
+# eval never happened at all. Raise it when legs are added; never lower it to make a run green.
+expect \[netscript\] 35/35 checks passed
+expect-not FAIL
+quit

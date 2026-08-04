@@ -366,9 +366,9 @@ namespace EvilAliensWeb.Compat.Net
             Vector2 now = new Vector2(0f, -4968f); // 32px over 100ms, not 31
 
             Vector2 anchored = NetSession.ResolveBaseVelocity(
-                declared, anchored: true, teleported: false, now, true, last, 0L, 100L);
+                declared, anchored: true, teleported: false, now, true, last, 0L, 100L, scripted: false, announced: default);
             Vector2 observed = NetSession.ResolveBaseVelocity(
-                declared, anchored: false, teleported: false, now, true, last, 0L, 100L);
+                declared, anchored: false, teleported: false, now, true, last, 0L, 100L, scripted: false, announced: default);
             check("the host sends a wall's DECLARED scroll velocity", anchored == declared);
             check("...where the pre-card path differenced the samples instead (control)",
                 observed != declared);

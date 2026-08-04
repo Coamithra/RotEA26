@@ -989,6 +989,45 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	// offset contributes nothing and only its CHANGE moves the puppet.
 	internal virtual Vector2 NetPathOffset => Vector2.Zero;
 
+	// ---- scripted motion (card 76ec8bdb) ------------------------------------------------
+	// Does this type know the velocity it is moving at RIGHT NOW, because its motion is a
+	// script it wrote rather than a Speed/Direction it declared? A true answer makes the HOST
+	// send this vector instead of the finite difference NetSession.CaptureBaseState measures.
+	//
+	// THIS IS THE THIRD SOURCE OF TRUTH, and it exists because the other two both fail for a
+	// scripted set-piece:
+	//   * NetSpeedVector LIES -- a type that writes Position directly never assigns
+	//     Speed/Direction, so its declared vector reads ZERO. That is why NetPathAnchored is
+	//     forbidden here (see its header): anchoring would dead-reckon a stale nothing;
+	//   * the FINITE DIFFERENCE is a whole snapshot turn LATE at every phase boundary. A
+	//     difference reported at turn T describes the interval [T-1, T] and the client applies
+	//     it over [T, T+1], so each phase change is dead-reckoned on the PREVIOUS phase's
+	//     velocity for up to a full turn -- 60 ms at 16 live entities, ~1.2 s at 128. The
+	//     SpiderBoss steps from a standing 0 to a 0.78 px/ms screen-crossing sweep, so at a
+	//     480 ms turn the puppet of a COLLIDABLE boss trails the host by ~375 px and then pops
+	//     past SnapThresholdPx. The marked-teleport case (card e79bb994) is the extreme of the
+	//     same defect and not a separate one: there the fallback is zero rather than merely
+	//     stale, so the puppet stands still instead of lagging.
+	// What this returns is therefore FORWARD-looking where a difference is backward-looking,
+	// which is the direction dead reckoning actually needs.
+	//
+	// THE CONTRACT IS "WHAT Update WILL DO ON THE NEXT TICK", and it is not the same contract
+	// as TryGetAiSweptPath's. That seam deliberately announces the velocity a frozen boss is
+	// ABOUT to move at, because a warning hold is exactly when the AI must already be leaving
+	// the lane. Here a paused entity is genuinely not moving and must report ZERO, or the
+	// puppet slides out of the park a second before the host does. Do not wire one to the other.
+	//
+	// ONLY OVERRIDE IT WHERE THE ANSWER IS EXACT, transcribed from the type's own Update. A
+	// wrong value here is dead-reckoned onto a collidable puppet on the other player's screen,
+	// which is the failure mode this whole family keeps re-learning. Any per-peer factor
+	// (Settings.DifficultyModifier, the oracle's scroll) must be applied HERE, host-side, so the
+	// wire carries real px/ms -- the Lazer sent-rate rule (card c1a38ef9).
+	internal virtual bool TryGetNetScriptedVelocity(out Vector2 velocity)
+	{
+		velocity = Vector2.Zero;
+		return false;
+	}
+
 	// ---- INetEntity (card 25ad0659 step 2c-ii) ------------------------------------------
 	// The net cores read this type through EvilAliensWeb.Compat.Net.INetEntity rather than by
 	// name. Every member above is already the implementation; these are the forwards for the
@@ -1062,6 +1101,11 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	bool EvilAliensWeb.Compat.Net.INetEntity.NetPathAnchored => NetPathAnchored;
 
 	Vector2 EvilAliensWeb.Compat.Net.INetEntity.NetPathOffset => NetPathOffset;
+
+	bool EvilAliensWeb.Compat.Net.INetEntity.TryGetNetScriptedVelocity(out Vector2 velocity)
+	{
+		return TryGetNetScriptedVelocity(out velocity);
+	}
 
 	void EvilAliensWeb.Compat.Net.INetEntity.NetSetFrame(float frame)
 	{

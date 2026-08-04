@@ -92,6 +92,13 @@ namespace EvilAliensWeb.Compat.Net
         bool NetPathAnchored { get; }
         Vector2 NetPathOffset { get; }
 
+        // Scripted motion (card 76ec8bdb). A type that moves by writing Position directly can
+        // ANNOUNCE the velocity it is moving at this instant, and the HOST sends that instead of
+        // a finite difference -- which for such a type is both zero across a marked teleport and
+        // a whole snapshot turn stale at every phase boundary. The contract, and the rule for
+        // when a type may answer true, is on AlienDrawableGameComponent.TryGetNetScriptedVelocity.
+        bool TryGetNetScriptedVelocity(out Vector2 velocity);
+
         // Frozen-puppet upkeep, all driven by NetPuppets.Drive on REAL dt.
         void NetSetFrame(float frame);
         void NetAdvanceFrame(float dtSeconds);

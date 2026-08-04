@@ -513,6 +513,13 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   which shipped and merely looks rougher — so nothing throws and no counter moves. Menu-runnable
   and leave-no-trace; whether it is actually SMOOTHER is
   `python tools/sim/net_puppet_drive_sim.py --smoothness`'s question, not this one's),
+  `eaNetScriptedMotion()` (scripted motion -- card 76ec8bdb: the scripted-position bosses
+  announce the velocity they are moving at, so the host stops sending a zero across a marked park
+  and a whole-turn-stale difference at every phase boundary. Its ground-truth section drives the
+  REAL `SpiderBoss.Update` through a full choreography cycle and finite-differences the
+  displacement it actually produces, so the override cannot agree with a hand-copied expectation
+  table instead of with the game. Menu-runnable and leave-no-trace; whether it is actually
+  SMOOTHER is `python tools/sim/net_puppet_drive_sim.py --smoothness`'s question, not this one's),
   `eaNetWalls()` (the Level-3 wall's replication — cards 4392bd30 / 80749dc4: the base state's
   u16-at-1/256 scale is 4.9% out on a wall's tiny derived scale, which drew the joiner's grid 402px
   short of the host's and put its collision rows below its towers. Asserts that a real puppet keeps

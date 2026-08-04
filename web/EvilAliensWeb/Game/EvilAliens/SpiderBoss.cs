@@ -925,6 +925,73 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		}
 	}
 
+	// THE BOSS ANNOUNCES ITS NET VELOCITY (card 76ec8bdb). The one override of
+	// AlienDrawableGameComponent.TryGetNetScriptedVelocity in the game -- read its header for why
+	// the two seams the net layer already had (a declared NetSpeedVector, a finite difference)
+	// both fail for a scripted set-piece. This boss is the worst case of both: it never assigns
+	// Speed, so its declared vector is a flat ZERO, and it changes phase six times a cycle behind
+	// three marked teleports.
+	//
+	// A LINE-FOR-LINE TRANSCRIPTION OF Update's SWITCH, and it has to stay one -- every case below
+	// is the same expression Update applies to Position on the next tick, divided by that tick's
+	// dt. `moveSpeed` is recomputed rather than cached for the reason the AI seam gives: Update
+	// reads it per tick too, and DifficultyModifier ramps within a fight. Applying it HERE is what
+	// puts real px/ms on the wire, since the joiner's modifier is its own (the Lazer sent-rate
+	// rule).
+	//
+	// DO NOT REDIRECT THIS AT TryGetAiSweptPath. The two disagree deliberately, on exactly one
+	// case and for opposite reasons: during the "Danger!" hold Update early-returns on
+	// `waittimer.Active`, so the boss is genuinely STILL and this must say so, while the AI seam
+	// announces the velocity it is about to move at because leaving the lane during the warning is
+	// the whole point of the warning. Reporting the AI's answer here would slide the puppet out of
+	// its park a full second before the host leaves it -- collidably.
+	//
+	// tools/headless/probes/net_scripted_motion.txt drives the REAL Update through every phase and
+	// finite-differences its actual positions, so a choreography change that this switch does not
+	// follow fails there rather than silently shipping a wrong velocity to the other player.
+	internal override bool TryGetNetScriptedVelocity(out Vector2 velocity)
+	{
+		// The warning hold freezes Update outright (`if (waittimer.Active) return;`), and it is
+		// the state the three fly-by parks land in -- so this is the case the card is about.
+		if (waittimer.Active)
+		{
+			velocity = Vector2.Zero;
+			return true;
+		}
+		float moveSpeed = 0.78f * Settings.GetInstance().DifficultyModifier;
+		switch (state)
+		{
+		case SpiderBossState.flyleft:
+			velocity = new Vector2(0f - moveSpeed, 0f);
+			return true;
+		case SpiderBossState.flyright:
+			velocity = new Vector2(moveSpeed, 0f);
+			return true;
+		case SpiderBossState.flyup:
+			velocity = new Vector2(0f, 0f - moveSpeed);
+			return true;
+		case SpiderBossState.land:
+			velocity = new Vector2(0f, moveSpeed);
+			return true;
+		case SpiderBossState.standing:
+			// Grounded, so it rides the scrolling background rather than its own move speed.
+			velocity = new Vector2(oracle.BackgroundSpeed.X, 0f);
+			return true;
+		case SpiderBossState.jump:
+			// Rides the background for the whole crouch, and the climb is ADDED partway through
+			// it -- the one case with two terms, and the reason this is a transcription and not
+			// a table keyed on `state`.
+			velocity = new Vector2(oracle.BackgroundSpeed.X,
+				(animationProgress > 30f) ? (0f - moveSpeed) : 0f);
+			return true;
+		default:
+			// `dead` moves only its debris list, which is drawn from replicated state and never
+			// from Position. Nothing left to announce.
+			velocity = Vector2.Zero;
+			return true;
+		}
+	}
+
 	// THE BOSS ANNOUNCES ITS SWEPT PATH (card e425781b). This is the one override of
 	// AlienDrawableGameComponent.TryGetAiSweptPath in the game, and it exists because all three
 	// things the default gets from Position/ObservedVelocity are wrong for a scripted set-piece:

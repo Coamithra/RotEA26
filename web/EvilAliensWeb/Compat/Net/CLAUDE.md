@@ -1434,7 +1434,7 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     "the puppet ignores non-player contacts" silently drops shadows on Mars. With fix 1 removing
     the observed mis-simulation and fix 2 removing its destructive consequence, there is no
     remaining victim to justify the risk.
-  - **Verify with `eaNetIdReuse()`** (`Compat/Net/NetIdReuseTest.cs`, 35 assertions;
+  - **Verify with `eaNetIdReuse()`** (`Compat/Net/NetIdReuseTest.cs`, 48 assertions;
     `tools/headless/probes/net_id_reuse.txt`). MENU-ONLY and leave-no-trace, the `eaNetFx` shape.
     **The leg that carries the card is a PAIR** -- the ownerless configuration DAMAGES the
     emitter over the identical geometry and the owned one does not -- because "the UFO survived"
@@ -3400,10 +3400,17 @@ python tools/sim/net_jip_sync.py --level Level2 --cap 120 --verbose
 python tools/sim/net_jip_sync.py --selftest          # the tool's own vacuity control
 ```
 
-**IT IS RED ON `main` AS OF THIS CARD'S MERGE, ON PURPOSE.** Its first soak found a real defect
-(below) and the assertion for it was NOT softened -- a verification tool that goes quiet on the
-first thing it catches has taught everyone to ignore it on day one. It is a standalone tool, not
-a `run_probes.py` probe, so red is a finding rather than broken CI.
+**IT IS STILL RED ON `main`, BUT NO LONGER FOR THE DEFECT IT WAS BUILT AROUND.** The provisional
+puppets it found are FIXED (card 9a7ee4c0, below); what is left is a handful of joins per soak
+failing on **measurement**, not on the attach: position skew above the 12 px tolerance (13-25 px
+measured, against a documented interleave skew that reaches 17.9 px), `hp` on an entity under fire
+(a client hit-tests puppets with its own bullets, so hp diverges between snapshot turns -- `Boss
+205 vs 179` against a tolerance of 5), `dead`/`dying`/`is on the HOST and not on the joiner` and
+`score` drift, all of which come of the two ends being dumped at slightly different world instants,
+plus the occasional vacuous join (`0 replicated entities`). The set changes run to run. **Do not
+widen a tolerance to force green** -- that is suite CALIBRATION work with its own card, and the
+assertions this tool exists for (`prov=`, `owner=`) are exact and clean. It is a standalone tool,
+not a `run_probes.py` probe, so red is a finding rather than broken CI.
 
 - **WHY TWO PROCESSES, and why that is not over-engineering.** The claim is "the joiner ends up
   with the host's world", which is a DIFF and needs both worlds to exist -- and one process holds
@@ -3446,7 +3453,14 @@ a `run_probes.py` probe, so red is a finding rather than broken CI.
     legitimately re-encode different spawn bytes and a byte compare cries wolf on every wasp.
     The extras are therefore compared for LENGTH (a structural mismatch is still real) and the
     dimension they were meant to cover is reported DIRECTLY as **`prov=`**, off the puppet
-    layer's own `SelfHealed` flag.
+    layer's own `SelfHealed` flag -- and, one hop downstream, as **`owner=`**, the emitter's netId
+    off the generic `INetEntity.NetOwner` seam (card 9a7ee4c0). Both are exact and compared
+    exactly; `owner=` reads `-` on BOTH ends for a legitimately unowned beam. **Its one benign
+    disagreement is an emitter's REMOVAL**, which is not simultaneous on the two peers: a beam
+    drops its owner reference when its emitter leaves the world (`Lazer.OnComponentRemoved`, both
+    ends), so a dump landing inside that lag reads `owner N vs -` with nothing wrong. One
+    snapshot lane wide -- a persistent disagreement is the defect, a single join's is worth
+    re-running before believing.
   - Continuous replicated values get tolerances and the tool PRINTS `maxpos=` on every join so a
     tightening regression is visible even while passing. Measured across 39 joins: 0.0-17.9 px
     at the default `--chunk 3`, which is the interleave's own skew (one peer has always stepped
@@ -3468,32 +3482,43 @@ a `run_probes.py` probe, so red is a finding rather than broken CI.
     the cadence made the cap under-count by ~3x and a 600 s run played the level out and then
     reported a dozen vacuous joins.
 
-**THE DEFECT IT FOUND, and it is open: SOME ENTITIES IN A JOINER'S WORLD ARE PROVISIONAL.**
-Reproducible at roughly **12 of 39 joins** across the three story levels
-(`--cadence 20 --cap 600 --seed 7`), i.e. every level, not a Level-2 quirk.
+**THE DEFECT IT FOUND, NOW FIXED: A JOINER PURGED THE HOST'S CATCH-UP BURST** (card 9a7ee4c0).
+It cost ~12 of 39 joins across all three story levels, and the mechanism is pinned, not inferred.
 
-- A `prov=1` puppet was built by the SNAPSHOT SELF-HEAL on default spawn extras and no reliable
-  `EvSpawn` ever rebuilt it -- card de4d5d65's shape, at a real attach. Observed: a `UFO` on the
-  wrong saucer sheet (host `spawn=0800`, joiner `0000`), both `MarsBoss` twins (whose spawn extra
-  is the left/right position byte, so both can come up as the left one), `StarMine`, `EvilSkull`,
-  `Powerup`.
-- **It cascades into card 9ccfe295's precondition.** In the same join both `Lazer` puppets read
-  `spawn=0000` against the host's `6f00`/`7000` -- i.e. **owner = no emitter**, because
-  `FindPuppet` could not resolve a MarsBoss that did not exist yet. That is exactly the ownerless
-  beam that made a big laser UFO shoot itself dead on the joiner.
-- Joiner metrics at a failing join: `dupLive=0 dupBad=0 snapNew=2 snapDead=120`. `dupLive=0` says
-  the rebuild never got the chance -- the `EvSpawn` for those ids never arrived after the
-  self-heal; the large `snapDead` says a batch of ids was removed LOCALLY shortly before.
-- **Leading hypothesis, NOT pinned:** `GameScene.UpdateStartup` runs
-  `Collection.Purge<AlienDrawableGameComponent>(standing: false)` during the joiner's own 1300 ms
-  Startup -- AFTER `NetActiveScene` is set, so `EvReady` has fired and the host has already
-  replayed. The catch-up burst would be built and then wiped, leaving a blind window until the
-  snapshots self-heal the ids provisionally. It does not fully explain the data (one join split
-  the MarsBoss twins, one `prov=1` and one `prov=0`). **Note the precedent**: card 74403f83
-  exempted the puppet layer from the STANDING filter, and this purge is `standing: false`.
-- **`ReplayLive` on `EvReady` is doing less than it appears**, which is the same finding one
-  level up: deleting it -- or BOTH `ReplayLive` calls -- changes nothing measurable on Level 2 at
-  the shipped settle, because the self-heal reconstructs the world anyway (as provisionals).
+- **`GameScene.UpdateStartup` ran `Collection.Purge<AlienDrawableGameComponent>(standing: false)`
+  on a CLIENT.** The joiner's scene comes up, `EvReady` goes out, the host replays -- and 1300 ms
+  later the joiner deletes the lot. Nothing repairs it: a purge is not a gameplay death, so
+  `NetPuppets.Components_ComponentRemoved` files no claim (the card-9ccfe295 re-announce path
+  never runs), the id only `MarkRemoved`s, reads `LeftDead` for `RecentRemovalWindowMs` and then
+  self-heals PROVISIONAL on default spawn extras -- permanently. Card 74403f83's exemption does
+  NOT cover it: that one spares puppet ADDS from a STANDING purge; this one REMOVES what is
+  already there. **The fix is that a client does not clear a field it does not own.**
+- **The evidence, one id's whole life on the joiner's clock** (`--nettime game`, so both peers
+  share it): self-healed at 2566 ms, correctly REBUILT by the reliable `EvSpawn` at 2616,
+  `startuppurge client=True` at 3866 wiping it, and self-healed provisional again at 6916 --
+  exactly `RecentRemovalWindowMs` later. Joiner metrics matched: `dupLive=0` (no rebuild ever got
+  the chance) with a large `snapDead` (a batch removed LOCALLY).
+- **THE PURGE IS A TICK BOUNDARY, NOT A BLANKET WIPE**, which is what explained the one join that
+  split the `MarsBoss` twins (`prov=1` and `prov=0`). Everything the joiner holds at that ONE tick
+  dies; everything arriving from that tick onward survives (the rx drain runs after `base.Update`
+  in the same tick, and `standing: false` arms no filter). `Level2.spawnBosses` adds both twins in
+  one HOST tick, but their two `EvSpawn` frames need not land in one joiner drain -- the transport
+  delivers per socket read / per channel message -- so the boundary can fall between them. Moot
+  now: the fix removes the boundary.
+- **It cascaded into card 9ccfe295's precondition**, which is why `owner=` is in the dump. In the
+  same join both `Lazer` puppets read `spawn=0000` against the host's `6f00`/`7000` -- **owner = no
+  emitter**, because `FindPuppet` could not resolve a MarsBoss that did not exist yet: the
+  ownerless beam that made a big laser UFO shoot itself dead on the joiner.
+- **`ReplayLive` on `EvReady` is REAL again.** Before the fix, deleting it changed nothing
+  measurable -- the burst was being thrown away regardless. Deleting it now costs 8 provisional
+  puppets on a default soak, so it discriminates and the matrix row below is updated.
+- **The `owner=` leg's positive control is NOT here** -- it is `eaNetIdReuse` section 7, pinned by
+  `tools/headless/probes/net_id_reuse.txt`, which builds an owned beam on a host world and on a
+  client world and asserts the dump names the emitter through each of the two registries. Only
+  `Boss` and `MarsBoss` fire an owned beam, and over a full soak (~39 joins) every `Lazer` that
+  reached a settle dump was a `GameScene` warm-up prime, legitimately ownerless on both ends -- so
+  a run-level "an owner was compared" assertion here would be red on a sampling coincidence. The
+  suite REPORTS its material instead (`owners=` per join and per run).
 
 **MUTATION MATRIX, including the three that did NOT discriminate** -- each of those is a finding
 about the code, not a weak assertion, and re-deriving them is a waste of an afternoon:
@@ -3502,7 +3527,9 @@ about the code, not a weak assertion, and re-deriving them is a waste of an afte
 |---|---|
 | delete `NetScene.Current?.NetReplayCatchUp()` from the `EvReady` handler | **RED**, naming the scenery line (host `speed=-0.012` vs joiner `speed=-0.6`). Needs a LATE join -- `--cadence 200 --cap 500`; at 20 s Level 2's scenery has not moved off its initial state and there is nothing to replay |
 | the tool's own `--selftest` (a joiner on a dead port; a `--cap` at the cadence) | **RED** on both arms -- the vacuity control, committed rather than performed once |
-| delete `NetIdRegistry.ReplayLive()` from the `EvReady` handler | **no change.** See the bullet above -- the self-heal covers for it |
+| restore the unconditional `Purge<AlienDrawableGameComponent>` in `GameScene.UpdateStartup` (i.e. undo card 9a7ee4c0) | **RED**, 19 `PROVISIONAL` lines on a default soak against 0 with the fix. The card's own mutation |
+| delete `NetIdRegistry.ReplayLive()` from the `EvReady` handler | **RED since card 9a7ee4c0**: 8 `PROVISIONAL` lines on a default soak. It used to read "no change", because the burst was purged either way -- the row was measuring the defect, not the call |
+| drop the owner resolve in `LazerDescriptor.CreatePuppet`, or the host-side resolve in `NetJipDump.OwnerId` | **RED in `net_id_reuse.txt`**, one arm each and independently (client arm / host arm) -- that probe is where the `owner=` leg is proven, since this suite rarely sees an owned beam |
 | force `CreatePuppet`'s extras length to 0 (every puppet built on defaults) | **no change.** The differ dropped extras-CONTENT comparison for the drift reason above, and `prov=` reads the self-heal flag rather than the bytes -- so an artificially defaulted puppet built from a real `EvSpawn` is invisible. Closing it means caching the bytes that CROSSED THE WIRE on both ends |
 | revert `Wall.NetScaleLocal` to false (`--level Level3 --host-extra "&wallsonly"`) | **no change**, and the reason is that another card already fixed it: protocol v19 raised the wire scale to 1/4096 with rounding, so the error `NetScaleLocal` defends against is now **0.090%**, far under any sane scale tolerance. `eaNetWalls` remains the pin |
 | drop `ReplayLive`'s `EvDying` re-announce | **not reached.** It needs a join timed into a 2.5-5 s deferred-death window, which the orchestrator does not control. `eaNetDeathFx` pins that beat directly |

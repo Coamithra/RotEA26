@@ -266,7 +266,7 @@ the pinned branch's `Reset()` (so behaviour is unchanged), and removing that `Re
 on a RECYCLED spider, which a bench spawned at level entry never has.
 `net_jip_dump` goes red three ways, each isolated and each failing a DIFFERENT assertion: deleting
 `case "jiphost"` from `DebugFlags` drops the arm line (leg 1); making `NetJipDump.AppendExtras`
-return early drops the `scene speed=` line while the `dump v1 ... end` sentinel still passes, which
+return early drops the `scene speed=` line while the `dump v2 ... end` sentinel still passes, which
 is why the sections are asserted separately from the sentinel; and bumping
 `NetJipDump.FormatVersion` without touching the probe fails the sentinel -- that pair is one edit
 in practice, since `net_jip_sync.py`'s `FORMAT_VERSION` must move with it.

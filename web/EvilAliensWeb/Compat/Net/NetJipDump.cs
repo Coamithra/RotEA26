@@ -58,7 +58,7 @@ namespace EvilAliensWeb.Compat.Net
     {
         // Bumped when a line's SHAPE changes, so the python differ can refuse a dump it does not
         // understand instead of silently comparing half a world.
-        internal const int FormatVersion = 1;
+        internal const int FormatVersion = 2;
 
         // Descriptor extras are small (the widest shipped block is a handful of bytes); this is
         // an order of magnitude over any of them and is asserted rather than assumed below.
@@ -105,7 +105,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 foreach (var p in NetPuppets.LiveEntries())
                 {
-                    AppendEntity(sb, p.Id, p.TypeIdx, p.Comp, p.Provisional, scratch);
+                    AppendEntity(sb, p.Id, p.TypeIdx, p.Comp, p.Provisional, client: true, scratch);
                     n++;
                 }
             }
@@ -114,7 +114,7 @@ namespace EvilAliensWeb.Compat.Net
                 foreach (NetIdRegistry.Entry e in NetIdRegistry.Live)
                 {
                     // The host's own entities are never provisional -- it built the world.
-                    AppendEntity(sb, e.Id, e.TypeIdx, e.Comp, false, scratch);
+                    AppendEntity(sb, e.Id, e.TypeIdx, e.Comp, false, client: false, scratch);
                     n++;
                 }
             }
@@ -122,7 +122,7 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         private static void AppendEntity(StringBuilder sb, ushort id, byte typeIdx, INetEntity comp,
-            bool provisional, byte[] scratch)
+            bool provisional, bool client, byte[] scratch)
         {
             // Safe by construction: NetTypeRegistry only ever matches AlienDrawableGameComponent
             // subclasses, and CreatePuppet returns one -- the same invariant the three production
@@ -149,12 +149,38 @@ namespace EvilAliensWeb.Compat.Net
                 // the extras below: a self-healed puppet built on defaults is an ordinary-looking
                 // entity of the right type, so nothing about it can be read off the entity.
                 .Append(" prov=").Append(provisional ? 1 : 0)
+                // THE EMITTER, as a netId (card 9a7ee4c0). The visible half of a puppet that
+                // was never built: a beam whose owner the joiner could not resolve is card
+                // 9ccfe295's ownerless shape, and it is what made a big laser UFO shoot itself
+                // dead. Compared EXACTLY by net_jip_sync -- netIds are identity-mapped, and
+                // this reports the same thing the host's own spawn extra encodes, so the legit
+                // "no emitter, or an emitter that is not replicated" case reads `-` on BOTH
+                // ends (a GameScene warm-up beam) instead of inventing a mismatch.
+                .Append(" owner=").Append(OwnerId(comp, client))
                 .Append(" spawn=").Append(Extra(desc, adc, scratch, spawn: true))
                 .Append(" state=").Append(Extra(desc, adc, scratch, spawn: false))
                 // The declared local-simulation seams. The differ skips a key because THIS says
                 // the game simulates it locally -- never because of a type name in the tool.
                 .Append(" local=").Append(LocalSeams(comp))
                 .Append('\n');
+        }
+
+        // The netId of whatever emitted this entity, or "-" for none. The two ends read
+        // DIFFERENT registries for it, the same asymmetry AppendEntities has: the host's
+        // authoritative NetIdRegistry, the client's puppet map.
+        private static string OwnerId(INetEntity comp, bool client)
+        {
+            if (!(comp.NetOwner is GameComponent emitter))
+            {
+                return "-";
+            }
+            if (client)
+            {
+                return NetPuppets.TryGetId(emitter, out ushort pid)
+                    ? pid.ToString(CultureInfo.InvariantCulture) : "-";
+            }
+            return NetIdRegistry.TryGetByComp(emitter, out NetIdRegistry.Entry e)
+                ? e.Id.ToString(CultureInfo.InvariantCulture) : "-";
         }
 
         // Runs the type's REAL descriptor over the entity and prints the bytes. A throw is

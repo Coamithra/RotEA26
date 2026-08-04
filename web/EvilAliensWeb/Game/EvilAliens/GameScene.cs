@@ -2497,7 +2497,24 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 			// (AlienDrawableGameComponent) and the Get Ready banners (AnimatedMessage, via
 			// ShowStartMessages) are re-added in this same tick and must not be diverted by
 			// the standing purge filter (card 02d9ad67).
-			Collection.Purge<AlienDrawableGameComponent>(standing: false);
+			//
+			// ...but a CLIENT does not own the field, so it must not clear it (card 9a7ee4c0).
+			// A join-in-progress peer spends this same 1300 ms building the host's catch-up
+			// burst (EvReady -> ReplayLive + NetReplayCatchUp), and wiping it here deleted
+			// correctly-built puppets with no repair path: a purge is not a gameplay death, so
+			// NetPuppets sends no claim, the id just reads LeftDead for RecentRemovalWindowMs
+			// and then self-heals PROVISIONAL on default spawn extras, forever. Card 74403f83's
+			// exemption does not cover this -- that one spares puppet ADDS from a STANDING
+			// purge, and this one REMOVES what is already there. The skip lives here rather
+			// than inside ComponentBin.Purge because every OTHER purge of this set (this
+			// scene's UpdateResetting, NetApplyReset, the boss field-clears) is one the host
+			// performs too and announces an EvDeath per removal for. Nothing is lost on a
+			// client: UpdateResetting purges this same set immediately before handing back to
+			// Startup, and NetApplyReset takes the ships.
+			if (!EvilAliensWeb.Compat.Net.NetSession.IsClient)
+			{
+				Collection.Purge<AlienDrawableGameComponent>(standing: false);
+			}
 			Collection.Purge<AnimatedMessage>(standing: false);
 			Collection.Purge<TutorialMessage>(standing: false);
 			SpawnAllPlayers(invulnerable: false);

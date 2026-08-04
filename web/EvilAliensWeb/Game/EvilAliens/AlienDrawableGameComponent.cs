@@ -1254,9 +1254,14 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 
 	EvilAliensWeb.Compat.Net.INetPickup EvilAliensWeb.Compat.Net.INetEntity.NetPickup => NetPickupSelf;
 
+	EvilAliensWeb.Compat.Net.INetEntity EvilAliensWeb.Compat.Net.INetEntity.NetOwner => NetOwnerSelf;
+
 	private protected virtual EvilAliensWeb.Compat.Net.INetKillable NetKillableSelf => null;
 
 	private protected virtual EvilAliensWeb.Compat.Net.INetPickup NetPickupSelf => null;
+
+	// Most types are not emitted BY anything. Lazer is the one that is.
+	private protected virtual EvilAliensWeb.Compat.Net.INetEntity NetOwnerSelf => null;
 
 	public virtual void OnComponentAdded(GameComponentCollectionEventArgs e)
 	{

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Text;
 using EvilAliens;
 using Microsoft.Xna.Framework;
@@ -98,6 +99,7 @@ namespace EvilAliensWeb.Compat.Net
                 Section4HostKeepsUnattributed(sb, Check, bin, game, planted);
                 Section5ClientReportsLostEntity(sb, Check, bin, game, planted);
                 Section6SameFrameReuse(sb, Check, bin, game, planted);
+                Section7DumpReportsEmitter(sb, Check, bin, game, planted);
             }
             catch (Exception ex)
             {
@@ -677,10 +679,170 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
+        // ---- 7. the JIP dump reports the emitter, on BOTH ends (card 9a7ee4c0) --------------
+        //
+        // `net_jip_sync.py` compares `owner=` between the two peers' worlds, which is how an
+        // ownerless beam at a REAL attach becomes an assertion rather than something to notice
+        // by hand in the spawn-extra hex. But that compare only bites on a join whose settle
+        // instant happens to hold a live owned beam, and only `Boss` and `MarsBoss` ever fire
+        // one: measured over a full three-level soak (~39 joins), every `Lazer` in a dump was a
+        // `GameScene` warm-up prime, legitimately ownerless on both ends. So the suite cannot
+        // host that leg's POSITIVE CONTROL -- it would be red on a sampling coincidence -- and
+        // this is where the control lives instead, on a world built to contain the material.
+        //
+        // BOTH ARMS, because the dump resolves the emitter through a DIFFERENT registry per
+        // role -- the host's NetIdRegistry, the client's puppet map -- and those two can fail
+        // independently. Each arm carries its own negative: an ownerless beam must read `-`, or
+        // an arm that reported `-` for everything would pass.
+        private static void Section7DumpReportsEmitter(StringBuilder sb, Action<string, bool> Check,
+            ComponentBin bin, Game game, List<GameComponent> planted)
+        {
+            sb.Append(" 7. the JIP dump names each beam's emitter, host side and client side\n");
+
+            // -- HOST arm: resolved through NetIdRegistry.
+            NetWire wire = new NetWire(2);
+            InMemoryTransport ours = wire[0];
+            InMemoryTransport peer = wire[1];
+            try
+            {
+                NetSession.StartForTest(game, host: true, ours, Room);
+                peer.Open(Room);
+                peer.SendReliable(NetProtocol.EncodeHello(NetSession.ProtocolVersion, false,
+                    NetSession.LocalBuildHash, 0, NetProtocol.SlotNone, PeerToken, 0));
+                wire.Pump();
+                NetSession.Update();
+                if (!NetSession.IsHost || !NetSession.PeerUp)
+                {
+                    Check("PRECONDITION a real HOST session paired (section 7)", false);
+                    return;
+                }
+
+                UFO emitter = PlantUfo(bin, game, planted, big: true);
+                if (!NetIdRegistry.TryGetByComp((GameComponent)(object)emitter,
+                    out NetIdRegistry.Entry ufoEntry))
+                {
+                    Check("PRECONDITION the planted emitter got a netId (section 7)", false);
+                    return;
+                }
+                Lazer owned = Lazer.NewLazer(bin, game);
+                owned.Setup(emitter.Position, MathHelper.PiOver2, emitter, 75f);
+                bin.Add((GameComponent)(object)owned);
+                planted.Add((GameComponent)(object)owned);
+                Lazer solo = Lazer.NewLazer(bin, game);
+                solo.SetupSingleShot(Nowhere, MathHelper.PiOver2, 75f, playSound: false);
+                bin.Add((GameComponent)(object)solo);
+                planted.Add((GameComponent)(object)solo);
+                bin.TopOfTickFlush();
+
+                string dump = NetJipDump.Run();
+                ushort ownedId = NetIdOf(owned);
+                ushort soloId = NetIdOf(solo);
+                Check("PRECONDITION both host beams are in the dump",
+                    ownedId != 0 && soloId != 0
+                    && DumpOwner(dump, ownedId) != null && DumpOwner(dump, soloId) != null);
+                Check("the host dump names the emitter (" + DumpOwner(dump, ownedId) + " == "
+                    + ufoEntry.Id + ")",
+                    DumpOwner(dump, ownedId) == ufoEntry.Id.ToString(CultureInfo.InvariantCulture));
+                Check("...and reports an ownerless beam as '-' (" + DumpOwner(dump, soloId) + ")",
+                    DumpOwner(dump, soloId) == "-");
+            }
+            finally
+            {
+                NetSession.Stop("netidreuse section 7 host arm");
+            }
+
+            // -- CLIENT arm: the same claim, resolved through the puppet map.
+            wire = new NetWire(2);
+            ours = wire[0];
+            peer = wire[1];
+            ushort eventSeq = 1;
+            try
+            {
+                NetScene.Current = new ReuseScene();
+                NetSession.StartForTest(game, host: false, ours, Room);
+                peer.Open(Room);
+                peer.SendReliable(NetProtocol.EncodeHello(NetSession.ProtocolVersion, true,
+                    NetSession.LocalBuildHash, 0, PeerSlot, PeerToken, 0));
+                wire.Pump();
+                NetSession.Update();
+                if (!NetSession.IsClient || !NetSession.PeerUp)
+                {
+                    Check("PRECONDITION a real CLIENT session paired (section 7)", false);
+                    return;
+                }
+
+                byte ufoIdx = TypeIdxOf(new UFO(game));
+                byte lazerIdx = TypeIdxOf(new Lazer(game));
+                NetBaseState state = default(NetBaseState);
+                state.Pos = Nowhere;
+                state.Scale = 1f;
+                state.Hp = 11;
+                peer.SendReliable(NetProtocol.EncodeSpawnEvent(eventSeq++, UfoId, ufoIdx, state,
+                    UfoSpawnExtras(), 2));
+                peer.SendReliable(NetProtocol.EncodeSpawnEvent(eventSeq++, LazerId, lazerIdx, state,
+                    OwnerExtras(UfoId), 2));
+                peer.SendReliable(NetProtocol.EncodeSpawnEvent(eventSeq++, OwnlessLazerId, lazerIdx,
+                    state, OwnerExtras(0), 2));
+                wire.Pump();
+                NetSession.Update();
+                TrackPuppets(game, planted);
+
+                string dump = NetJipDump.Run();
+                Check("PRECONDITION all three puppets are in the client dump",
+                    DumpOwner(dump, UfoId) != null && DumpOwner(dump, LazerId) != null
+                    && DumpOwner(dump, OwnlessLazerId) != null);
+                Check("the client dump resolves the emitter to the same netId ("
+                    + DumpOwner(dump, LazerId) + " == " + UfoId + ")",
+                    DumpOwner(dump, LazerId) == UfoId.ToString(CultureInfo.InvariantCulture));
+                Check("...and reports a netId-0 beam as '-' ("
+                    + DumpOwner(dump, OwnlessLazerId) + ")",
+                    DumpOwner(dump, OwnlessLazerId) == "-");
+                // The EMITTER itself has no emitter, so the field must not appear as a number on
+                // every entity -- otherwise "-" above could be the only value the dump ever
+                // prints and both negatives would be vacuous.
+                Check("...and a non-emitted entity reports '-' too (" + DumpOwner(dump, UfoId) + ")",
+                    DumpOwner(dump, UfoId) == "-");
+            }
+            finally
+            {
+                NetSession.Stop("netidreuse section 7 client arm");
+                NetScene.Current = null;
+            }
+        }
+
         // ---- helpers -------------------------------------------------------------------------
 
         // A real UFO through its own factory + Setup, planted off screen so nothing is drawn.
         // `big` picks the laser-firing variant the card is about (11 hit points, mediumship).
+        // The `owner=` token off the dump's `ent` line for one netId, or null when that entity is
+        // not in the dump at all -- which is a different answer from "no emitter" and must not
+        // read as one.
+        private static string DumpOwner(string dump, ushort netId)
+        {
+            foreach (string line in dump.Split('\n'))
+            {
+                if (line.IndexOf("[netjip] ent id=" + netId.ToString(CultureInfo.InvariantCulture) + " ",
+                        StringComparison.Ordinal) < 0)
+                {
+                    continue;
+                }
+                foreach (string tok in line.Split(' '))
+                {
+                    if (tok.StartsWith("owner=", StringComparison.Ordinal))
+                    {
+                        return tok.Substring("owner=".Length);
+                    }
+                }
+                return null;
+            }
+            return null;
+        }
+
+        private static ushort NetIdOf(GameComponent comp)
+        {
+            return NetIdRegistry.TryGetByComp(comp, out NetIdRegistry.Entry e) ? e.Id : (ushort)0;
+        }
+
         private static UFO PlantUfo(ComponentBin bin, Game game, List<GameComponent> planted, bool big)
         {
             UFO u = UFO.NewUFO(bin, game);

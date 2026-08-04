@@ -61,7 +61,7 @@
 # which is the over-correction to watch for (a fix that made every enemy immune to every other
 # enemy's laser would pass both of the first two).
 #
-# MUTATION-TESTED FIVE WAYS, each failing DISJOINT legs:
+# MUTATION-TESTED NINE WAYS, each failing DISJOINT legs:
 #   * dropping `owner = null` from `SetupSingleShot`      -> 1 leg (the pooling leg, section 1)
 #   * `CreatePuppet` ignoring the wired owner             -> 1 leg (the adopt leg, section 5)
 #   * `EncodeSpawnExtra` always writing 0                 -> 1 leg (the emitter leg, section 3)
@@ -71,6 +71,22 @@
 #   * `HandleClaim` restored to its exact pre-card shape  -> 5 legs (section 4a only), and it
 #     reproduces the report verbatim: the entity leaves the world, an `EvDeath` goes out, and
 #     "no explosion was spawned" still PASSES -- it vanishes silently, which is the bug.
+#   * `CreatePuppet` dropping `NetSetOwner`                -> section 7's CLIENT arm (plus the
+#     section 5 adopt leg above -- it is the same edit seen from two sides)
+#   * `NetJipDump.OwnerId`'s HOST branch returning "-"     -> section 7's HOST arm only
+#
+# SECTION 7 IS THE `owner=` LEG'S POSITIVE CONTROL FOR A TOOL THAT CANNOT HOST ONE (card
+# 9a7ee4c0). `python tools/sim/net_jip_sync.py` compares `owner=` between a real host's world and
+# a real joiner's, which is how an ownerless beam at an actual attach becomes an assertion rather
+# than something to spot by hand in the spawn-extra hex. But that compare only bites on a join
+# whose settle instant holds a LIVE OWNED BEAM, and only `Boss` and `MarsBoss` ever fire one:
+# measured over a full three-level soak (~39 joins), every `Lazer` that reached a dump was a
+# `GameScene` warm-up prime, legitimately ownerless on both ends. So the suite reports its
+# material (`owners=`) and this section asserts the claim, on a world built to contain it.
+# BOTH ARMS, because the dump resolves the emitter through a different registry per role -- the
+# host's `NetIdRegistry`, the client's puppet map -- and the two mutations above show they fail
+# independently. Each arm carries its own negative (an ownerless beam must read `-`), and the
+# client arm adds a non-emitted entity, so `-` cannot be the only value the dump ever prints.
 #
 # SECTION 6 IS A FINDING, NOT A FIX (card 54e9a590, "what if a game object dies and is reused in
 # the same frame?"). `ComponentBin.Add` on a component whose removal is still QUEUED cancels the
@@ -96,6 +112,6 @@ eval NetIdReuse
 # The tally, not `expect-not FAIL`: an absence assertion passes on a run where the eval never
 # happened, and this suite reports a SKIP (which is not a pass) whenever a session, level or
 # attract demo is up. Raise the count when legs are added.
-expect \[netidreuse\] 41 passed, 0 failed
+expect \[netidreuse\] 48 passed, 0 failed
 expect-not SKIP
 quit

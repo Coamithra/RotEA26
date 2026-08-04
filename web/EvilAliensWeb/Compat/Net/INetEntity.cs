@@ -167,6 +167,16 @@ namespace EvilAliensWeb.Compat.Net
         // never take the generic death-burst branch -- an explosion where the other player
         // picked something up.
         INetPickup NetPickup { get; }
+
+        // The entity that EMITTED this one, or null for a type that has no emitter concept
+        // (card 9a7ee4c0). Declared here rather than read off a type name so NetJipDump can
+        // print an `owner=` for anything that has one: a beam whose emitter did not resolve on
+        // the joiner is card 9ccfe295's ownerless shape -- the big laser UFO that shot itself
+        // dead -- and it is the visible half of a puppet that was never built. Null is BOTH
+        // "no such concept" and "genuinely unowned" (a GameScene warm-up beam is really
+        // ownerless on both peers), which is why the dump compares the two ends' answers
+        // rather than requiring one.
+        INetEntity NetOwner { get; }
     }
 
     // The KillableAlien half of the discriminant above.

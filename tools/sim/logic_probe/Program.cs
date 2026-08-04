@@ -131,6 +131,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeAiBossApproach(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         rc = ProbeFlagRejectionSweep(asm);
         if (rc != 0)
         {
@@ -817,7 +823,11 @@ internal static class Program
         const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
         string[] names =
         {
-            "SeekWeight", "DefaultSeekPowerupWeight", "DefaultSeekApproachWeight",
+            // DefaultSeekApproachWeight is GONE (card b56633fb) -- the boss approach carries no
+            // constant weight any more, it is solved per tick. Its two claims here (below the
+            // threat field, above a detour) moved to ProbeAiBossApproach, where they are asserted
+            // about the live curve instead of about a literal.
+            "SeekWeight", "DefaultSeekPowerupWeight",
             "DefaultPowerupReachPx", "DefaultRepulseCancelDelta", "DefaultSteerNoiseFloor",
             "DefaultSeekArriveDeadzonePx", "ShipMaxSpeed", "ShipDeceleration",
             "SweepLaneAvoidStrength",
@@ -837,7 +847,6 @@ internal static class Program
 
         Console.WriteLine("[logic_probe] AI steering field composition (card ada9e839)");
         float station = vals["SeekWeight"], powerup = vals["DefaultSeekPowerupWeight"];
-        float approach = vals["DefaultSeekApproachWeight"];
         float repelDelta = vals["DefaultRepulseCancelDelta"], noiseFloor = vals["DefaultSteerNoiseFloor"];
         float deadzone = vals["DefaultSeekArriveDeadzonePx"];
 
@@ -860,7 +869,7 @@ internal static class Program
         // weakest ATTRACTOR (they are never floored on their own, but they still cross this one)
         // and below the weakest full-strength REPELLENT. Both bounds together are what make the
         // floor an equilibrium guard rather than the veto this port shipped for two cards.
-        float weakestAttractor = Math.Min(station, Math.Min(powerup, approach));
+        float weakestAttractor = Math.Min(station, powerup);
         Check("the whole-sum floor is below the weakest ATTRACTOR",
             weakestAttractor > noiseFloor,
             "weakest attractor " + weakestAttractor + " vs DefaultSteerNoiseFloor " + noiseFloor
@@ -888,15 +897,8 @@ internal static class Program
             + " -- otherwise a repellent can pass the first floor and be eaten by the second,"
             + " which is a veto wearing two names");
 
-        // 3. Closing on a boss never outranks not dying. Not a tuned bound, a structural one:
-        // Move() throws the magnitude away and thrusts at full acceleration along the ANGLE, so a
-        // seek that can out-vote the threat field is a bot that flies into things to reach them.
-        Check("closing never outranks not dying (approach < the threat field's 4)",
-            approach < MaxSteerStrength,
-            "DefaultSeekApproachWeight " + approach);
-        Check("a COMMITMENT outranks a DETOUR (approach > powerup)", approach > powerup,
-            "DefaultSeekApproachWeight " + approach + " vs DefaultSeekPowerupWeight " + powerup
-            + " -- a halting boss stops the level advancing at all, a pickup does not");
+        // 3. The boss approach's two ordering claims (below the threat field, above a detour) are
+        // ProbeAiBossApproach's now -- it has no constant to compare here since card b56633fb.
         Check("the powerup reach is its own quantity, not the screen-edge margin",
             vals["DefaultPowerupReachPx"] > 0f,
             "DefaultPowerupReachPx " + vals["DefaultPowerupReachPx"]
@@ -913,6 +915,260 @@ internal static class Program
             "weakest attractor " + weakestAttractor + " is at or below the pre-card park "
             + PreCardParkDemand + " (so that build zeroed it) and above the shipped floor "
             + noiseFloor + " (so this build does not) -- that gap is the whole fix");
+        return 0;
+    }
+
+    // ---- the solved boss-approach attractor (card b56633fb) --------------------------------
+    //
+    // PlayerShip.BossApproachWeight is a pure function of the boss's own repellent parameters, so
+    // the whole design is checkable here over EVERY difficulty tier and the whole bulletlifetime
+    // range with no game running -- which matters because the properties that make the design
+    // sound (the crossing sits at firing range, the parked band is wider than the ship's stopping
+    // distance) hold or fail per weapon and per tier, and no single run can visit more than one
+    // combination.
+    //
+    // The repellent side is the SHIPPED ThreatFieldStrength, reflected rather than transcribed --
+    // a mirrored curve here would agree with itself forever while the field drifted, and the whole
+    // point of the design is that the two are solved against each other.
+    private static int ProbeAiBossApproach(Assembly asm)
+    {
+        Type ship = asm.GetType("EvilAliens.PlayerShip", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+
+        MethodInfo weightM = ship.GetMethod("BossApproachWeight", anyStatic);
+        MethodInfo strengthM = ship.GetMethod("ThreatFieldStrength", anyStatic, null,
+            new[] { typeof(float), typeof(float), typeof(float), typeof(bool) }, null);
+        MethodInfo priorityM = ship.GetMethod("IsAiPriorityTarget", anyStatic);
+        if (weightM == null || strengthM == null || priorityM == null)
+        {
+            Console.WriteLine("FAIL: could not reflect PlayerShip.BossApproachWeight / ThreatFieldStrength"
+                + " / IsAiPriorityTarget -- renamed or moved?");
+            return 2;
+        }
+
+        float Const(string n)
+        {
+            FieldInfo f = ship.GetField(n, anyStatic);
+            if (f == null || !f.IsLiteral)
+            {
+                throw new InvalidOperationException("could not reflect PlayerShip." + n + " as a const");
+            }
+            return (float)f.GetRawConstantValue();
+        }
+
+        float minAnchor, maxWeight, exponent, noiseFloor, sizeScale, falloff, bulletPerMs, stoppingPx;
+        float[] tierFieldPx;
+        try
+        {
+            minAnchor = Const("BossApproachMinAnchorPx");
+            maxWeight = Const("BossApproachMaxWeight");
+            exponent = Const("BossApproachExponent");
+            noiseFloor = Const("DefaultSteerNoiseFloor");
+            sizeScale = Const("DefaultThreatFieldSizeScale");
+            falloff = Const("DefaultThreatFieldFalloff");
+            bulletPerMs = Const("BulletRangePerMs");
+            stoppingPx = Const("ShipMaxSpeed") * Const("ShipMaxSpeed") / (2f * Const("ShipDeceleration"));
+            // The per-tier field radius, read out of the real ladder rather than restated -- a tier
+            // added or retuned is then swept by this probe automatically.
+            FieldInfo skillF = ship.GetField("AiSkillByDifficulty", anyStatic);
+            Array skills = (Array)skillF.GetValue(null);
+            FieldInfo fieldPxF = skills.GetType().GetElementType()
+                .GetField("FieldPx", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            tierFieldPx = new float[skills.Length];
+            for (int i = 0; i < skills.Length; i++)
+            {
+                tierFieldPx[i] = (float)fieldPxF.GetValue(skills.GetValue(i));
+            }
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine("FAIL: " + e.Message);
+            return 2;
+        }
+
+        Console.WriteLine("[logic_probe] AI boss-approach attractor (card b56633fb)");
+
+        const float MaxSteer = 4f;
+        float A(float d, float anchor, float range) => (float)weightM.Invoke(null,
+            new object[] { d, anchor, range, falloff, false, 1f, MaxSteer, noiseFloor });
+        float Repel(float d, float range) => d >= range
+            ? 0f
+            : (float)strengthM.Invoke(null, new object[] { d / range, MaxSteer, falloff, false });
+
+        // The whole reachable domain: every tier x the whole bulletlifetime range (450 base to the
+        // 1500 cap a maxed Range powerup reaches) x hull sizes from a bullet-sized boss to one
+        // wider than a third of the screen. `body` is the centre->edge term; a box's field radius
+        // scales with its half-extent, which is that term over sqrt(2).
+        float[] lifetimes = { 450f, 547f, 738f, 1000f, 1500f };
+        // EVERY LEVEL-HALTING BOSS'S HULL, as its centre->edge term, plus the range BrainBoss's own
+        // pulse sweeps and two hulls wider than anything in the game. Measured from each boss's own
+        // CollisionType: JunkBoss 60 (a circle, so its radius IS the term), ClassicBoss/BattleSkull
+        // 106, FakeBoss 127, MarsBoss/StationaryBoss ~141, BrainBoss 233 -> 257 (hw 165 * sqrt2,
+        // with `scale` pulsing 1.00 -> 1.10 as its HP drops -- the widest in the game, and the one
+        // configuration the exponent damping exists for). 320 and 400 are unreachable today and are
+        // swept anyway: the bound has to hold for a boss someone adds later, not just for today's.
+        float[] bodies = { 0f, 60f, 106f, 127f, 141f, 170f, 233f, 245f, 257f, 320f, 400f };
+        int crossings = 0, bandsChecked = 0;
+        float worstBand = float.MaxValue;
+        bool crossingOk = true, bandOk = true, pushedOutOk = true, boundedOk = true;
+        string crossingDetail = "", bandDetail = "", pushedOutDetail = "", boundedDetail = "";
+        for (int tier = 0; tier < tierFieldPx.Length; tier++)
+        {
+            foreach (float life in lifetimes)
+            {
+                foreach (float body in bodies)
+                {
+                    float range = tierFieldPx[tier] + (body / (float)Math.Sqrt(2.0)) * sizeScale;
+                    float anchorRaw = life * bulletPerMs - body;
+                    float anchor = Math.Max(anchorRaw, minAnchor);
+                    string where = "tier " + tier + " life " + life + "ms body " + body + "px"
+                        + " (anchor " + anchor.ToString("0.0") + "px, field " + range.ToString("0") + "px)";
+
+                    // 1. AT FIRING RANGE THE NET NEVER POINTS OUT. Where the repellent is still
+                    // audible there the two are EQUAL -- that is what the weight is solved for --
+                    // and where it has decayed under the floor the attractor holds at the floor and
+                    // keeps closing, which is the Range-powerup case the solve alone could not
+                    // survive (a solved w of 0 is an inert term).
+                    float net = A(anchor, anchor, range) - Repel(anchor, range);
+                    if (net < -0.0005f)
+                    {
+                        crossingOk = false;
+                        crossingDetail = where + ": net " + net.ToString("0.000") + " points AWAY at firing range";
+                    }
+                    else if (Repel(anchor, range) >= noiseFloor)
+                    {
+                        crossings++;
+                        if (Math.Abs(net) > 0.0005f)
+                        {
+                            crossingOk = false;
+                            crossingDetail = where + ": net " + net.ToString("0.000")
+                                + " at firing range, expected 0 (the weight is solved for exactly this)";
+                        }
+                    }
+
+                    // 2. THE PARKED BAND IS WIDER THAN THE SHIP'S STOPPING DISTANCE. The whole-sum
+                    // floor turns the crossing into a band of |net| <= floor; a ship entering it at
+                    // full speed coasts `stoppingPx` before it halts, so a narrower band is one it
+                    // sails through -- the ping-pong the deadzones elsewhere exist to prevent.
+                    // Measured on the real curves rather than from the derivative, so it stays true
+                    // for whatever shape a later card gives either side.
+                    float lo = -1f, hi = -1f;
+                    for (float d = 1f; d <= 1400f; d += 0.5f)
+                    {
+                        if (Math.Abs(A(d, anchor, range) - Repel(d, range)) <= noiseFloor)
+                        {
+                            if (lo < 0f)
+                            {
+                                lo = d;
+                            }
+                            hi = d;
+                        }
+                        else if (lo >= 0f)
+                        {
+                            break;
+                        }
+                    }
+                    float band = (lo < 0f) ? 0f : (hi - lo);
+                    bandsChecked++;
+                    if (band < worstBand)
+                    {
+                        worstBand = band;
+                        bandDetail = where + ": band " + band.ToString("0.0") + "px";
+                    }
+                    if (band <= stoppingPx)
+                    {
+                        bandOk = false;
+                    }
+
+                    // 3. INSIDE FIRING RANGE THE BOSS PUSHES BACK OUT. The attractor has quieted
+                    // (it is anchored at the crossing and grows with distance), so at half firing
+                    // range the repellent must win -- that is what makes the equilibrium
+                    // self-limiting instead of a point the ship has to hit. Skipped where the
+                    // repellent is genuinely zero at the anchor: there is nothing to push with, and
+                    // the term correctly keeps closing until there is.
+                    float half = anchor * 0.5f;
+                    if (Repel(anchor, range) >= noiseFloor && A(half, anchor, range) >= Repel(half, range))
+                    {
+                        pushedOutOk = false;
+                        pushedOutDetail = where + ": at half firing range the attractor "
+                            + A(half, anchor, range).ToString("0.00") + " is not out-voted by the repellent "
+                            + Repel(half, range).ToString("0.00");
+                    }
+
+                    // 4. CLOSING NEVER OUTRANKS NOT DYING, at any distance the world can hold.
+                    // Move() keeps only the ANGLE, so a seek that can out-vote a full-strength
+                    // threat field is a bot that flies into things to reach them.
+                    if (A(1400f, anchor, range) >= MaxSteer)
+                    {
+                        boundedOk = false;
+                        boundedDetail = where + ": " + A(1400f, anchor, range).ToString("0.00")
+                            + " at 1400px reaches the threat field's " + MaxSteer;
+                    }
+                }
+            }
+        }
+
+        Check("the net force never points AWAY at firing range, over every tier x weapon x hull",
+            crossingOk, crossingDetail.Length > 0 ? crossingDetail
+                : (bandsChecked + " combinations, " + crossings + " of them with a repellent still"
+                   + " audible at r* (where the crossing is required to be exact)"));
+        // THE ASSERTION THE EXPONENT DAMPING EXISTS FOR. Mutation-tested: forcing k to
+        // BossApproachExponent (i.e. deleting the damping) fails this and nothing else: the worst
+        // cell drops 20.5px -> 3.0px, and the BrainBoss's own cells go 22.2px -> 13.5px at rest and
+        // 10.0px at its pulse peak, i.e. through the 11.3px stopping distance. That is the whole
+        // reason the damping is not dead code.
+        Check("the parked band is wider than the ship's stopping distance, over the WHOLE domain",
+            bandOk, "worst " + bandDetail + " vs a stopping distance of " + stoppingPx.ToString("0.0")
+            + "px -- below it the ship coasts through the equilibrium and pingpongs"
+            + " (" + bandsChecked + " combinations: every tier x weapon x boss hull, including"
+            + " BrainBoss's 233->257px pulse and two hulls wider than anything in the game)");
+        Check("inside firing range the boss repellent wins, so the equilibrium is self-limiting",
+            pushedOutOk, pushedOutDetail.Length > 0 ? pushedOutDetail : "over every combination");
+        Check("closing never outranks not dying (the pull stays under the threat field's 4)",
+            boundedOk, boundedDetail.Length > 0 ? boundedDetail
+                : "capped by BossApproachMaxWeight " + maxWeight);
+
+        // 5. THE SHIPPED CONFIGURATION, spelled out so a future reader can see the actual numbers
+        // rather than only the inequalities: Very_Hard, base weapon, the spider boss's hull.
+        float vhRange = tierFieldPx[3] + 120f * sizeScale;
+        float vhAnchor = 450f * bulletPerMs - 170f;
+        float vhW = A(vhAnchor, vhAnchor, vhRange);
+        Check("a COMMITMENT outranks a DETOUR at engagement range (approach > the 0.8 powerup seek)",
+            A(vhAnchor * 1.5f, vhAnchor, vhRange) > 0.8f,
+            "Very_Hard / base weapon: pull " + A(vhAnchor * 1.5f, vhAnchor, vhRange).ToString("0.00")
+            + " at 1.5x firing range (anchor " + vhAnchor.ToString("0.0") + "px, solved weight "
+            + vhW.ToString("0.000") + ") -- a halting boss stops the level advancing at all,"
+            + " a pickup does not");
+
+        // 6. NEGATIVE CONTROL -- the PRE-CARD configuration over the same curve. The standoff was
+        // clamp(gunRange * 0.6, 130, 300) as a CENTRE distance carrying a flat 1.1, and the defect
+        // was that the boss's own repellent AT THAT POINT is 2.9: the net force pointed away from
+        // the very place the ship was being sent. Run it here and require it to FAIL, or every
+        // inequality above could be satisfied by a build that never changed anything.
+        const float PreCardWeight = 1.1f;
+        float preStandoffEdge = Math.Min(Math.Max(450f * bulletPerMs * 0.6f, 130f), 300f) - 170f;
+        float preRepel = Repel(preStandoffEdge, vhRange);
+        Check("control: the pre-card standoff+1.1 is OUT-VOTED at its own destination, and this build is not",
+            PreCardWeight < preRepel && Math.Abs(A(vhAnchor, vhAnchor, vhRange) - Repel(vhAnchor, vhRange)) <= 0.0005f,
+            "pre-card: weight " + PreCardWeight + " against a repellent of " + preRepel.ToString("0.00")
+            + " at its " + preStandoffEdge.ToString("0.0") + "px edge standoff (net points AWAY, which is why"
+            + " bossfar read ~99%); this build: net 0 at its " + vhAnchor.ToString("0.0") + "px anchor");
+
+        // 7. SPIDERBOSS IS EXCLUDED FROM BOSS APPROACH, EXPLICITLY. It was excluded by omission,
+        // which is the same behaviour and no protection: adding it to the list is the obvious edit,
+        // and it would make the card's own symptom -- the bot walking into the PARKED boss, its
+        // largest single killer -- dramatically worse with nothing failing. BrainBoss is the
+        // positive control, or a predicate returning false for everything would pass this.
+        Type spiderT = asm.GetType("EvilAliens.SpiderBoss", true);
+        Type brainT = asm.GetType("EvilAliens.BrainBoss", true);
+        object spider = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(spiderT);
+        object brain = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(brainT);
+        bool spiderPriority = (bool)priorityM.Invoke(null, new object[] { spider });
+        bool brainPriority = (bool)priorityM.Invoke(null, new object[] { brain });
+        Check("SpiderBoss is NOT a boss-approach target (it must be dodged, not sought)",
+            !spiderPriority, "IsAiPriorityTarget(SpiderBoss) = " + spiderPriority);
+        Check("control: BrainBoss IS one, so the predicate is not simply refusing everything",
+            brainPriority, "IsAiPriorityTarget(BrainBoss) = " + brainPriority);
         return 0;
     }
 

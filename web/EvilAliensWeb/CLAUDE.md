@@ -1937,11 +1937,42 @@ the rest are tier-independent.
     ?aiasteroidfall= ?aievade=`, the cone/wedge family above, plus
     `?aiseekapproach= ?aiseekpowerup= ?aipowerupreach=`. Wiring that `logic_probe` cannot reach is
     covered by `tools/headless/probes/ai_boss_approach.txt`.
-  - **`DefaultSeekApproachWeight` 1.1 is a PARK-CLEARANCE number, not a calibrated one** -- it was
-    chosen only to sit above the 0.95 park. Under the new composition the boss standoff is
-    mis-calibrated by construction (at the point the ship is asked to reach, the boss repellent is
-    **2.9** against that 1.1, so the net force points AWAY -- which is why `bossfar` reads ~99%).
-    The recalibration is **card b56633fb**, which carries the worked arithmetic.
+  - **THE BOSS APPROACH IS SOLVED AGAINST THE BOSS'S OWN REPELLENT, with an INVERTED falloff**
+    (card b56633fb, `PlayerShip.BossApproachWeight`). `DefaultSeekApproachWeight` 1.1 was a
+    PARK-CLEARANCE number -- chosen only to sit above the 0.95 park -- and under the composition
+    above it was mis-calibrated by construction: at the geometric standoff point the ship was
+    being sent to, the boss's own repellent is **2.9** against that 1.1, so the net force pointed
+    AWAY from its own destination and `bossfar` read ~99% forever. There is no constant now, and
+    no standoff point: the target is the BOSS, and the weight `A(d)` is recomputed every tick.
+    - **The shape is upside down on purpose** -- `A` GROWS with distance and quiets to ~0 inside
+      firing range, anchored so `A(r*) = repel(r*)` at `r* = the live max bullet range` (gun range
+      minus the boss's own body term, in edge space). So the net crosses zero exactly where the
+      ship can shoot from, the whole-sum floor turns that crossing into a parked BAND, and outside
+      it the attractor always outweighs the repellent **by shape rather than by a solved constant**
+      -- which is what makes it survive a Range powerup, including one out-ranging the threat field
+      entirely (`repel` is 0 out there, so the weight floors at `DefaultSteerNoiseFloor`).
+    - **The band must stay wider than the ship's 11.3px stopping distance**, or it coasts through
+      its own equilibrium. That is what damps the exponent: `k = min(1, budget * r* / w)` with the
+      budget derived from that stopping distance and the repellent's real slope. `k = 1` for every
+      boss, tier and weapon in the game **except BrainBoss up close** -- its hull is 233->257px of
+      body term against a 351px gun range, which undamped bands 13.5px falling to 10.0px at its
+      pulse peak. Do not delete the damping as dead code.
+    - **MEASURED (eahl, Very_Hard, paired seeds 1-16 x2, N=32 per side).** `?level=Level3&brainboss`:
+      `bossfar` **99.9% -> 26.0%**, `idle%` (a shootable target on screen and no shot fired)
+      **49.3% -> 12.1%**. On the FULL Level 3 deaths are IDENTICAL seed-by-seed (10/8/8/9 both
+      sides) while `bossfar` still falls 86/85/88/70 -> 44/67/61/76. **On the `?brainboss`
+      fast-boot deaths rise 2.00 -> 3.06**, and there it is attributable -- sweeping
+      `?aiseekapproach=` 0.05/0.5/1.0 reads 2.00/2.31/3.00, i.e. deaths track the pull. That rig is
+      nothing but a boss fight, so it is the worst case rather than the representative one, and
+      closing on a boss costing deaths is the trade card 31ceb6ff already made.
+    - **`?aiseekapproach=` IS NOW A SCALE on that solved weight (default 1), not a weight.** A
+      value from before this card means something else; the two are not commensurable.
+    - **SpiderBoss's exclusion from `IsAiPriorityTarget` is EXPLICIT now**, not by omission -- it
+      must be dodged, not sought, and adding it to that list is the obvious edit that would make
+      card b56633fb's own symptom (the bot walking into the PARKED boss) dramatically worse.
+      `logic_probe`'s **`ProbeAiBossApproach`** pins that plus the crossing, the band bound over
+      every tier x weapon x boss hull, the self-limiting interior and the pre-card configuration as
+      a negative control; `tools/headless/probes/ai_boss_approach.txt` pins the wiring.
   - **Boss PROXIMITY is descriptive, never a gate.** `bossfar%` and `boss=<px>` describe where the
     ship is; the bot moving closer to a boss to dodge, collect or line up a shot is the field
     working. Gate boss work on OUTCOMES -- `SpiderBoss(standing)` deaths -- not on distance.

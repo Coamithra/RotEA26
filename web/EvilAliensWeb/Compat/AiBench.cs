@@ -84,6 +84,11 @@ internal static class AiBench
 		public long BossTicks;
 		public double BossDistTotal;
 		public long BossOutOfRangeTicks;
+		// The solved attractor weight itself (card b56633fb). It is recomputed every tick from the
+		// live weapon range and the tier's own repellent, so it is the one number that says whether
+		// the term is CALIBRATED -- a distance alone cannot tell "pulling hard and being out-voted"
+		// from "not pulling at all", which is exactly how the pre-card 1.1 hid for two cards.
+		public double BossWeightTotal;
 		// What killed it, by type name (card b56633fb). `Deaths` alone cannot answer "does the
 		// bot still fly into the grounded spider boss" — a death to a stray bullet and a death
 		// to the boss are the same number, which is why that report was unverifiable.
@@ -316,11 +321,14 @@ internal static class AiBench
 		}
 	}
 
-	// DoAIMove, once per tick per AI ship while a level-HALTING boss is on screen. `standoff` is
-	// the radius the ship is asking to reach, so `dist > standoff` is precisely "the term is
-	// currently trying to move me" -- and the share of such ticks is the metric that separates a
-	// live approach from a parked one.
-	internal static void NoteBossApproach(PlayerShip ship, float dist, float standoff)
+	// DoAIMove, once per tick per AI ship while a level-HALTING boss is on screen. Since card
+	// b56633fb both distances are EDGE distances and `anchor` is r*, firing range -- so
+	// `dist > anchor` is precisely "the ship cannot shoot the boss from here", and `weight` is
+	// the solved attractor the term is pulling with at that distance.
+	// PROXIMITY IS DESCRIPTIVE, NEVER A GATE (user ruling on card b56633fb): the bot moving closer
+	// to a boss to dodge, collect or line up a shot is the field composition working. Gate boss
+	// work on OUTCOMES.
+	internal static void NoteBossApproach(PlayerShip ship, float dist, float anchor, float weight)
 	{
 		if (!Enabled)
 		{
@@ -329,7 +337,8 @@ internal static class AiBench
 		ShipRec rec = Rec(ship);
 		rec.BossTicks++;
 		rec.BossDistTotal += dist;
-		if (dist > standoff)
+		rec.BossWeightTotal += weight;
+		if (dist > anchor)
 		{
 			rec.BossOutOfRangeTicks++;
 		}
@@ -517,6 +526,10 @@ internal static class AiBench
 			{
 				sb.Append(" boss=").Append(Fmt(r.BossDistTotal / r.BossTicks, 0)).Append("px");
 				sb.Append(" bossfar=").Append(Fmt(100.0 * r.BossOutOfRangeTicks / r.BossTicks, 0)).Append('%');
+				// Line() only, like the pickup percentage above -- Row()'s parser is `split(. .)`
+				// then the first `=`, and one more field there is one more thing to keep in step
+				// with `eaAiBench.matrix`'s contract for no gain (card b56633fb).
+				sb.Append(" bossw=").Append(Fmt(r.BossWeightTotal / r.BossTicks, 2));
 			}
 			if (r.Killers.Count > 0)
 			{

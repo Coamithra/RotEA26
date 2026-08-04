@@ -1358,8 +1358,12 @@ namespace EvilAliensWeb.Compat
 		public static float? AiSeekDeadzonePx { get; private set; }
 
 		// ?aiseekpowerup=<w>    the pull toward a POWERUP the bot has chosen to fetch, and
-		// ?aiseekapproach=<w>   the pull toward a destination it COMMITS to -- a halting boss's
-		//                       standoff point, a partner to dock with, a blastable cluster.
+		// ?aiseekapproach=<s>   REDEFINED BY CARD b56633fb: a SCALE on the boss approach's own
+		//                       SOLVED weight (1 = as shipped), not a weight any more. The boss
+		//                       attractor is now solved per tick against the boss's own repellent
+		//                       at firing range, so there is no constant to override -- a value
+		//                       from before that card (the 1.1 default, say) means something
+		//                       entirely different here and the two are NOT commensurable.
 		// ?aipowerupreach=<px>  how far out a powerup exerts its own direct pull, on top of
 		//                       being eligible as that chosen target.
 		// All card ada9e839 -- see PlayerShip.DefaultSeekPowerupWeight for the history.
@@ -3075,7 +3079,7 @@ namespace EvilAliensWeb.Compat
 					else
 					{
 						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiSeekApproachWeight ?? EvilAliens.PlayerShip.DefaultSeekApproachWeight));
+							InForce(AiSeekApproachWeight ?? EvilAliens.PlayerShip.DefaultBossApproachScale));
 					}
 					break;
 				case "aipowerupreach":

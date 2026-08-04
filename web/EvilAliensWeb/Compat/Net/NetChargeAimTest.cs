@@ -105,14 +105,28 @@ namespace EvilAliensWeb.Compat.Net
                 // would be a confound rather than a control.
                 SectionSweeps(bin, game, planted, sb, Check);
 
-                sb.Append(" 3. the HOST re-reads its live aim every encode\n");
-                SectionHostEncode(bin, game, planted, sb, Check);
+                // THE SESSION GOES DOWN HERE, and it is not tidiness. Sections 3-5 add REAL
+                // replicable-type entities to the live bin, and while a CLIENT session is up
+                // `NetSession.SuppressWorldSpawn` diverts exactly those into the recycle pool
+                // (that is the world-authority split doing its job) -- so every one of them
+                // would have been a component the world never held, quietly, with each section
+                // still green. Found by review, not by a failing assertion, which is why the
+                // sections below now ASSERT that what they planted really landed.
+                NetSession.Stop("netaim sweeps done");
+                Check("the session is down before anything else is planted (or the client's own"
+                    + " world-spawn suppression would divert it)", !NetSession.Active);
 
-                sb.Append(" 4. an emitter whose offset does NOT track is unaffected\n");
-                SectionFixedOffset(sb, Check);
+                sb.Append(" 3. the HOST re-reads its live aim every encode\n");
+                SectionHostEncode(bin, game, Check);
+
+                sb.Append(" 4. an emitter whose offset does NOT track is left alone\n");
+                SectionFixedOffset(Check);
 
                 sb.Append(" 5. the charge-off edge, and the recycle trap behind it\n");
-                SectionEdges(sb, Check);
+                SectionEdges(Check);
+
+                sb.Append(" 6. the dt the driver really hands it\n");
+                SectionTiming(Check);
             }
             finally
             {
@@ -178,7 +192,12 @@ namespace EvilAliensWeb.Compat.Net
             NetSession.Update();
             check("session started as a CLIENT and paired", NetSession.IsClient && NetSession.PeerUp);
 
-            byte typeIdx = TypeIdxOfMarsBoss(bin, game, planted, check);
+            byte? typeIdxOrNull = TypeIdxOfMarsBoss(bin, game, check);
+            if (!typeIdxOrNull.HasValue)
+            {
+                return;
+            }
+            byte typeIdx = typeIdxOrNull.Value;
 
             NetBaseState state = default(NetBaseState);
             state.Pos = Nowhere;
@@ -198,7 +217,7 @@ namespace EvilAliensWeb.Compat.Net
             // THE PRE-CARD PATH FIRST. Without it, "the fixed aim sweeps smoothly" would pass on
             // a build where the aim never moved at all -- one of the two faults under test.
             host.AimEase = false;
-            AimTrace stepped = SweepAim(wire, peer, boss, IdBoss, typeIdx, state);
+            AimTrace stepped = SweepAim(wire, peer, IdBoss, typeIdx, state, boss);
 
             check("the puppet is charging at all (the glow is up -- otherwise this is card 57ea30cd)",
                 stepped.Samples > 0 && boss.NetCharging);
@@ -218,9 +237,9 @@ namespace EvilAliensWeb.Compat.Net
 
             // The charge-off edge between the two sweeps also hands section 5's recycle case its
             // precondition for free: the second sweep starts from a FRESH child.
-            EndCharge(wire, peer, boss, IdBoss, typeIdx, state);
+            EndCharge(wire, peer, IdBoss, typeIdx, state);
             host.AimEase = true;
-            AimTrace swept = SweepAim(wire, peer, boss, IdBoss, typeIdx, state);
+            AimTrace swept = SweepAim(wire, peer, IdBoss, typeIdx, state, boss);
             sb.Append("    eased     ").Append(swept.Describe()).Append('\n');
 
             check("the glow SWEEPS -- it moves on (nearly) every tick, not one per turn ("
@@ -239,23 +258,31 @@ namespace EvilAliensWeb.Compat.Net
 
             // ...and it ARRIVES. A chase converging on something else would satisfy every
             // assertion above while pointing the telegraph in the wrong direction.
-            Vector2 lastAim = AimAt(SweepHalfAngle);
+            Vector2 lastAim = swept.LastWireAim;
             for (int i = 0; i < 200; i++)
             {
                 NetPuppets.Drive(TickMs);
             }
+            // EXACTLY on it, not near it: the target is the DECODED aim, which is what the client
+            // was told, so a tolerance here would hide a chase that stopped fractionally short.
             check("...and settles ON the last aim the host sent once it stops moving ("
                 + Show(boss.NetChargeOffset) + " vs " + Show(lastAim) + ")",
-                Near(boss.NetChargeOffset, lastAim, 1.5f));
+                Near(boss.NetChargeOffset, lastAim, 0.001f));
         }
 
         // ---- 4. a non-tracking emitter ---------------------------------------------------------
         //
         // All five charge emitters share NetChargeGlow, but only three of them AIM: the big UFO's
-        // lazor and the JunkBoss' suck swarm sit at a FIXED offset from the emitter. The ease has
-        // to be a provable no-op there, or one rule for five emitters would be paying for itself
-        // with a wobble on two of them.
-        private static void SectionFixedOffset(StringBuilder sb, Action<string, bool> check)
+        // lazor and the JunkBoss' suck swarm sit at a FIXED offset from the emitter. One rule for
+        // five emitters must therefore not pay for itself with a wobble on two of them.
+        //
+        // BE CLEAR WHAT THIS LEG CAN AND CANNOT FAIL. With target == current the update is
+        // `Offset += (Target - Offset) * f`, which is identically Offset for ANY f -- so the
+        // no-op is ALGEBRAIC and no test can discriminate a good ease from a bad one here. What
+        // it does catch, and did catch under mutation, is the charge-on RESET going missing:
+        // without it the eased offset starts at default (0,0) and this emitter sweeps in from
+        // the emitter's own centre over its first window (measured 26.66px of drift).
+        private static void SectionFixedOffset(Action<string, bool> check)
         {
             ComponentBin bin = ServiceHelper.Get<IComponentBinService>().ComponentBin;
             UFO ufo = UFO.NewUFO(bin, bin.Game);
@@ -264,6 +291,8 @@ namespace EvilAliensWeb.Compat.Net
             try
             {
                 ufo.Position = Nowhere;
+                check("the planted UFO really landed in the world (not diverted)",
+                    InWorld(bin.Game, (GameComponent)(object)ufo));
                 Vector2 fixedOffset = new Vector2(0f, 30f);
                 GameTime tick = new GameTime(TimeSpan.Zero, TimeSpan.FromMilliseconds(TickMs));
 
@@ -278,8 +307,9 @@ namespace EvilAliensWeb.Compat.Net
                     float err = (ufo.NetChargeOffset - fixedOffset).Length();
                     if (err > worst) { worst = err; }
                 }
-                check("...and a FIXED offset never moves under the ease (worst " + Px(worst)
-                    + " over 200 ticks)", worst < 0.001f);
+                check("...and a FIXED offset is left exactly alone (worst " + Px(worst)
+                    + " over 200 ticks -- see the section: this catches a missing charge-on"
+                    + " reset, not a bad ease)", worst < 0.001f);
 
                 ufo.NetApplyCharge(false, Vector2.Zero, Windup, SwarmSize);
                 ufo.NetDriveExtras(tick);
@@ -297,7 +327,7 @@ namespace EvilAliensWeb.Compat.Net
         // value lives on the EMITTER, so without the reset a boss winding up again would swing its
         // telegraph across the screen from wherever its previous beam pointed -- the recycle trap
         // Lazer.SetupSingleShot's owner clear and FlyingSpider's anchor reset both document.
-        private static void SectionEdges(StringBuilder sb, Action<string, bool> check)
+        private static void SectionEdges(Action<string, bool> check)
         {
             ComponentBin bin = ServiceHelper.Get<IComponentBinService>().ComponentBin;
             MarsBoss boss = MarsBoss.NewMarsBoss(bin, bin.Game);
@@ -306,6 +336,8 @@ namespace EvilAliensWeb.Compat.Net
             try
             {
                 boss.Position = Nowhere;
+                check("the planted boss really landed in the world (not diverted)",
+                    InWorld(bin.Game, (GameComponent)(object)boss));
                 GameTime tick = new GameTime(TimeSpan.Zero, TimeSpan.FromMilliseconds(TickMs));
 
                 Vector2 aimA = AimAt(-SweepHalfAngle);
@@ -334,8 +366,105 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
+        // ---- 6. the dt ---------------------------------------------------------------------------
+        //
+        // Every other section ticks at a constant 16.7ms, which is the ONE dt the driver is least
+        // likely to hand this code. Two real cases, both found by review rather than by a run:
+        //
+        //   dt == 0    NetPuppetDriver derives dt from TickCount64, an INTEGER-millisecond clock,
+        //              so two ticks inside one millisecond -- routine on a high-refresh display or
+        //              under ?fpsuncapped -- produce exactly 0. A zero tick must HOLD. Treating it
+        //              as "the window is over" would teleport the glow on those frames, i.e. put
+        //              the staircase back on a subset of them, which no constant-dt rig can see.
+        //   coarse dt  The sweep must not depend on the frame rate. A fraction of the WHOLE window
+        //              per tick (the obvious one-liner, and the first cut) fails this: it decays
+        //              exponentially, so a 30Hz client and a 60Hz client sweep at different speeds
+        //              and neither ever lands.
+        private static void SectionTiming(Action<string, bool> check)
+        {
+            ComponentBin bin = ServiceHelper.Get<IComponentBinService>().ComponentBin;
+            Vector2 aimA = AimAt(-SweepHalfAngle);
+            Vector2 aimB = AimAt(SweepHalfAngle);
+
+            MarsBoss zero = Charged(bin, aimA);
+            try
+            {
+                zero.NetApplyCharge(true, aimB, Windup, SwarmSize);
+                zero.NetDriveExtras(new GameTime(TimeSpan.Zero, TimeSpan.Zero));
+                check("a ZERO-length tick HOLDS the aim rather than teleporting it ("
+                    + Show(zero.NetChargeOffset) + ")", Near(zero.NetChargeOffset, aimA, 0.001f));
+
+                // ...and the very next real tick moves, so the hold above is not just a dead ease.
+                zero.NetDriveExtras(new GameTime(TimeSpan.Zero, TimeSpan.FromMilliseconds(TickMs)));
+                check("...and the next real tick resumes the sweep",
+                    (zero.NetChargeOffset - aimA).Length() > 0.001f);
+            }
+            finally
+            {
+                Discard(bin, zero);
+            }
+
+            // The SAME elapsed time in different-sized ticks must land in the same place. The
+            // window is >= 150ms, so 300ms of either cadence is comfortably past it and both must
+            // have ARRIVED -- which is also the property an exponential drain cannot have.
+            MarsBoss fast = Charged(bin, aimA);
+            MarsBoss slow = Charged(bin, aimA);
+            try
+            {
+                fast.NetApplyCharge(true, aimB, Windup, SwarmSize);
+                slow.NetApplyCharge(true, aimB, Windup, SwarmSize);
+                GameTime fastTick = new GameTime(TimeSpan.Zero, TimeSpan.FromMilliseconds(5f));
+                GameTime slowTick = new GameTime(TimeSpan.Zero, TimeSpan.FromMilliseconds(30f));
+                for (int i = 0; i < 60; i++) { fast.NetDriveExtras(fastTick); }
+                for (int i = 0; i < 10; i++) { slow.NetDriveExtras(slowTick); }
+                check("300ms at 5ms/tick and at 30ms/tick land in the SAME place ("
+                    + Show(fast.NetChargeOffset) + " vs " + Show(slow.NetChargeOffset) + ")",
+                    Near(fast.NetChargeOffset, slow.NetChargeOffset, 0.01f));
+                check("...and both have ARRIVED, which an exponential drain never does",
+                    Near(fast.NetChargeOffset, aimB, 0.001f)
+                    && Near(slow.NetChargeOffset, aimB, 0.001f));
+            }
+            finally
+            {
+                Discard(bin, fast);
+                Discard(bin, slow);
+            }
+        }
+
+        // A real MarsBoss in the world with its charge glow up and settled at `aim`.
+        private static MarsBoss Charged(ComponentBin bin, Vector2 aim)
+        {
+            MarsBoss boss = MarsBoss.NewMarsBoss(bin, bin.Game);
+            boss.Setup(MarsBoss.BossPosition.left);
+            bin.Add((GameComponent)(object)boss);
+            boss.Position = Nowhere;
+            boss.NetApplyCharge(true, aim, Windup, SwarmSize);
+            boss.NetDriveExtras(new GameTime(TimeSpan.Zero, TimeSpan.FromMilliseconds(TickMs)));
+            return boss;
+        }
+
+        private static void Discard(ComponentBin bin, MarsBoss boss)
+        {
+            boss.NetApplyCharge(false, Vector2.Zero, Windup, SwarmSize);
+            boss.NetDriveExtras(new GameTime(TimeSpan.Zero, TimeSpan.FromMilliseconds(TickMs)));
+            bin.Remove((GameComponent)(object)boss);
+        }
+
+        // Did ComponentBin.Add actually seat this component, or divert it? The suppression that
+        // diverts a replicable type on a client is silent by design, so a section that plants one
+        // has to look rather than assume -- the whole of sections 3-6 used to be about entities
+        // the world did not hold.
+        private static bool InWorld(Game game, GameComponent c)
+        {
+            foreach (IGameComponent item in game.Components)
+            {
+                if (ReferenceEquals(item, c)) { return true; }
+            }
+            return false;
+        }
+
         // Tells the puppet the host has stopped charging, so the next sweep builds a fresh child.
-        private static void EndCharge(NetWire wire, InMemoryTransport peer, MarsBoss boss,
+        private static void EndCharge(NetWire wire, InMemoryTransport peer,
             ushort id, byte typeIdx, NetBaseState state)
         {
             peer.SendStream(SnapshotFor(id, typeIdx, state, new byte[1], 1));
@@ -355,13 +484,16 @@ namespace EvilAliensWeb.Compat.Net
         // MarsBossDescriptor.EncodeStateExtra + NetChargeWire.Decode read it back), so it needs
         // no live boss and none of the ~8 sim-minutes of Level 2 that reaching one costs.
         private static void SectionHostEncode(ComponentBin bin, Game game,
-            List<GameComponent> planted, StringBuilder sb, Action<string, bool> check)
+            Action<string, bool> check)
         {
             MarsBoss boss = MarsBoss.NewMarsBoss(bin, game);
             boss.Setup(MarsBoss.BossPosition.left);
             bin.Add((GameComponent)(object)boss);
-            planted.Add((GameComponent)(object)boss);
+            try
+            {
             boss.Position = Nowhere;
+            check("the planted boss really landed in the world (not diverted)",
+                InWorld(game, (GameComponent)(object)boss));
 
             Descriptors.MarsBossDescriptor desc = new Descriptors.MarsBossDescriptor();
             GameTime tick = new GameTime(TimeSpan.Zero, TimeSpan.FromMilliseconds(TickMs));
@@ -384,6 +516,11 @@ namespace EvilAliensWeb.Compat.Net
             boss.NetApplyCharge(false, Vector2.Zero, Windup, SwarmSize);
             boss.NetDriveExtras(tick);
             check("...and stops claiming to charge once the glow is gone", !boss.NetCharging);
+            }
+            finally
+            {
+                bin.Remove((GameComponent)(object)boss);
+            }
         }
 
         // Drives the glow until the aim ease has converged, so section 3 reads the ENCODER rather
@@ -400,10 +537,11 @@ namespace EvilAliensWeb.Compat.Net
         // ---- the rig ---------------------------------------------------------------------------
 
         // Plays one full host charge over the wire and samples the client's drawn aim every tick.
-        private static AimTrace SweepAim(NetWire wire, InMemoryTransport peer, MarsBoss boss,
-            ushort id, byte typeIdx, NetBaseState state)
+        private static AimTrace SweepAim(NetWire wire, InMemoryTransport peer,
+            ushort id, byte typeIdx, NetBaseState state, MarsBoss boss)
         {
             AimTrace trace = new AimTrace();
+            trace.LastWireAim = Vector2.Zero;
             int turns = (int)(ChargeMs / TurnMs);
             int ticksPerTurn = (int)Math.Round(TurnMs / TickMs);
 
@@ -412,11 +550,16 @@ namespace EvilAliensWeb.Compat.Net
                 // The host's aim at this turn: the target crossing from -30 to +30 degrees.
                 float u = (turns > 1) ? (float)t / (turns - 1) : 0f;
                 Vector2 aim = AimAt(MathHelper.Lerp(-SweepHalfAngle, SweepHalfAngle, u));
-                trace.Sent(aim);
-
                 byte[] extras = new byte[1 + NetChargeWire.Bytes];
                 extras[0] = NetChargeWire.FlagChargingBit1;
                 NetChargeWire.Encode(extras, 1, aim, Windup, SwarmSize);
+                // THE TRACE FOLLOWS WHAT THE CLIENT WILL ACTUALLY BE TOLD, not what was sent.
+                // NetChargeWire quantises the offset to whole px, so the eased sweep converges on
+                // the DECODED aim -- and truncation can put that a fraction PAST the exact one
+                // along the direction of travel, which an overshoot assertion measured against
+                // the exact value reads as an overshoot that never happened.
+                NetChargeWire.Decode(extras, 1, out Vector2 wireAim, out _, out _);
+                trace.Sent(wireAim);
                 peer.SendStream(SnapshotFor(id, typeIdx, state, extras, extras.Length));
                 wire.Pump();
                 NetSession.Update();
@@ -438,6 +581,8 @@ namespace EvilAliensWeb.Compat.Net
             private bool has;
             private readonly List<Vector2> distinct = new List<Vector2>();
 
+            public Vector2 LastWireAim;
+
             public int Samples;
             public int Turns;
             public int MovedTicks;
@@ -456,6 +601,7 @@ namespace EvilAliensWeb.Compat.Net
                 Turns++;
                 target = aim;
                 hasTarget = true;
+                LastWireAim = aim;
             }
 
             public void Sample(Vector2 aim)
@@ -538,13 +684,17 @@ namespace EvilAliensWeb.Compat.Net
         // The registry index for MarsBoss, asserted against the live table rather than hard-coded
         // -- the wire typeIdx IS the registry order, so a reordering would otherwise silently
         // spawn some other enemy and every aim assertion would be about the wrong thing.
-        private static byte TypeIdxOfMarsBoss(ComponentBin bin, Game game,
-            List<GameComponent> planted, Action<string, bool> check)
+        // The instance is a THROWAWAY -- never added to the bin, so it takes no NetId and needs
+        // no cleanup (NetFxTest's TypeIdxOf, same shape). A failure returns null rather than 0:
+        // 0 is a real registry index, so falling through would spawn some OTHER enemy and every
+        // aim assertion after it would be about the wrong entity while still reading green.
+        private static byte? TypeIdxOfMarsBoss(ComponentBin bin, Game game,
+            Action<string, bool> check)
         {
             MarsBoss probe = MarsBoss.NewMarsBoss(bin, game);
             bool ok = NetTypeRegistry.TryGet((GameComponent)(object)probe, out byte idx, out _);
             check("MarsBoss is a replicable type (registry idx " + idx + ")", ok);
-            return idx;
+            return ok ? idx : (byte?)null;
         }
 
         // The aim vector a MarsBoss would hold at this bearing: a NORMALIZED direction scaled by

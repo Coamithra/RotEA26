@@ -192,7 +192,7 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   into a level; a `Levels` value, e.g. `Level1`/`ClassicAliens`/`WebcamAliens`) · `?invuln` (aka
   `?god`) · `?unlockall` · `?skipsplash` / `?autostart`.
 - **Level fast-boots** (replace a level's event list with one fight/section): `?spiderboss` ·
-  `?marsboss` (Level 2's TWIN motherships, the one fight that is otherwise ~8 sim-minutes in) ·
+  `?marsboss` (Level 2's TWIN motherships -- otherwise ~8 sim-minutes into a Level 2 soak) ·
   `?spiders` · `?wallsonly` · `?brainboss` (bypasses the Hard+ gate). Pair with `?invuln`.
   e.g. `…:5280/?level=Level3&brainboss&invuln`.
   **`?wallsonly` serves TWO levels** (card b174b00f): on `Level3` it loops the wall sections; on
@@ -266,9 +266,9 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
 - **`?netaimease=0`** (card eb057163): stop a puppet's enemy charge glow SWEEPING toward each
   newly replicated aim, so it teleports to it once per snapshot turn again -- the pre-card
   staircase (measured: 15 moving ticks of 144, 7.62px each, over one 2500ms MarsBoss windup at a
-  150ms turn). **The third deliberate bug reproduction** (the `?nethitstop=1` / `?netstaleguard=0`
-  idiom) and IN `DebugFlags.Active` for the same reason; like `?netstaleguard` it DEFAULTS TRUE,
-  so `Active` tests its negation. The glow is draw-only, so nothing desyncs either way -- the two
+  150ms turn). **Another deliberate bug reproduction** (the `?nethitstop=1` / `?netstaleguard=0` /
+  `?teampartner=pad` idiom) and IN `DebugFlags.Active` for the same reason; like `?netstaleguard`
+  it turns a shipped FIX off, so it DEFAULTS TRUE and `Active` tests its negation. The glow is draw-only, so nothing desyncs either way -- the two
   peers simply disagree about where an enemy is aiming, which is what the card was reported for.
   Console `eaNetChargeAim()` / `eval NetChargeAim` is the suite (it drives the flag through the
   injected host, so no reboot); no protocol change, still v19. Details: net CLAUDE.md.

@@ -149,12 +149,34 @@ namespace EvilAliensWeb.Compat.Net
             check("NetLog == DebugFlags.NetLog", host.NetLog == DebugFlags.NetLog);
             check("NetDropGrant == DebugFlags.NetDropGrant", host.NetDropGrant == DebugFlags.NetDropGrant);
             check("NetLocal == DebugFlags.NetLocal", host.NetLocal == DebugFlags.NetLocal);
+            // The two flags that turn a shipped FIX off, so they default TRUE and `Active` tests
+            // their negation. Same equal-to-source limitation as the block above -- and here it
+            // bites HARDER, because both default true, so a cross-wire between the two passes on
+            // an ordinary boot. The decorator leg below is what discriminates them.
+            check("SnapshotStaleGuard == DebugFlags.NetSnapshotStaleGuard",
+                host.SnapshotStaleGuard == DebugFlags.NetSnapshotStaleGuard);
+            check("ChargeAimEase == DebugFlags.NetChargeAimEase",
+                host.ChargeAimEase == DebugFlags.NetChargeAimEase);
+            // ...so drive them APART through PinnedNetHost's own overrides, which is the one place
+            // the two can differ without a reboot -- and is exactly how NetStaleTest and
+            // NetChargeAimTest reach their negative controls. A member wired to the other one
+            // fails this whichever way round the cross went.
+            PinnedNetHost split = new PinnedNetHost(0L, host);
+            split.AimEase = false;
+            split.StaleGuard = true;
+            check("...and the two are DISTINCT members (aim ease off, stale guard on)",
+                !split.ChargeAimEase && split.SnapshotStaleGuard);
+            split.AimEase = true;
+            split.StaleGuard = false;
+            check("...and the other way round", split.ChargeAimEase && !split.SnapshotStaleGuard);
             sb.Append("  flags in force: active=").Append(host.DebugActive)
                 .Append(" jip=").Append(host.NetJip)
                 .Append(" allowdebug=").Append(host.NetAllowDebug)
                 .Append(" log=").Append(host.NetLog)
                 .Append(" dropgrant=").Append(host.NetDropGrant)
-                .Append(" local=").Append(host.NetLocal).Append('\n');
+                .Append(" local=").Append(host.NetLocal)
+                .Append(" staleguard=").Append(host.SnapshotStaleGuard)
+                .Append(" aimease=").Append(host.ChargeAimEase).Append('\n');
 
             // The impairment triple, driven to three DISTINCT values through the panel's own
             // runtime setter. Any swap among the three fails; so does a member left pointing at

@@ -41,6 +41,9 @@ namespace EvilAliensWeb.Compat
 	//                  (card 68f62e92 refuses every hit-stop there — one peer's world halting
 	//                  while the wire streams on is what rewound the other peer's enemies).
 	//                  THE DELIBERATE BUG REPRODUCTION, and IN `Active` for that reason.
+	//   ?netaimease=0     turn the enemy charge glow's aim EASE off, so a puppet's telegraph
+	//                     teleports to each newly replicated aim once per snapshot turn again
+	//                     (card eb057163, the deliberate bug repro -- see NetChargeGlow)
 	//   ?netstaleguard=0  turn the world-snapshot staleness guard OFF, so a reordered or late
 	//                  snapshot entry drags a puppet backwards again (card f5cf7a5c). The other
 	//                  deliberate bug reproduction, and in `Active` for the same reason. ON by
@@ -410,12 +413,14 @@ namespace EvilAliensWeb.Compat
 		// turns it OFF, restoring the pre-card behaviour where a reordered or late snapshot entry
 		// applies an older position than the one already on screen and drags the puppet backwards.
 		//
-		// DEFAULTS TRUE, which makes it one of only two booleans in this file that do: every other
-		// one turns something ON, so `Active` asks "was it set". This turns a FIX OFF, so `Active`
-		// asks the inverse (`!NetSnapshotStaleGuard`); `?netaimease` below is the other -- and it is in `Active` for the
-		// `?nethitstop=1` reason, being a deliberate bug reproduction that must never reach a
-		// public lobby. A negative control you cannot run two months later is not a negative
-		// control, which is why it ships rather than living inside the test suite.
+		// It DEFAULTS TRUE, and it is one of the two booleans here that default true AND sit in
+		// `Active` -- `?netaimease` below is the other. (Three render/feel toggles also default
+		// true -- ?slowmotrail, ?metalscore, ?walltowers -- but those are deliberately OUT of
+		// `Active`; defaulting true is not the distinguishing property, turning a shipped FIX off
+		// is.) So `Active` has to ask the INVERSE here, `!NetSnapshotStaleGuard`, and it asks it
+		// for the `?nethitstop=1` reason: this is a deliberate bug reproduction that must never
+		// reach a public lobby. A negative control you cannot run two months later is not a
+		// negative control, which is why it ships rather than living inside the test suite.
 		public static bool NetSnapshotStaleGuard { get; private set; } = true;
 
 		// The enemy charge-glow's AIM EASE (card eb057163), ON by default -- `?netaimease=0` turns
@@ -425,10 +430,11 @@ namespace EvilAliensWeb.Compat
 		// then a jump (measured 15 moving ticks of 144, 7.62px each, at a 150ms turn).
 		//
 		// DEFAULTS TRUE, so `Active` asks the inverse (`!NetChargeAimEase`) -- the
-		// `?netstaleguard=0` shape, and in `Active` for the same reason: it is a deliberate
-		// bug reproduction and must never reach a public lobby. Unlike `?nethitstop=1` it cannot
-		// desync anything (the glow is draw-only), but the two peers would disagree about where an
-		// enemy is aiming, which is exactly what this card was reported for.
+		// `?netstaleguard=0` shape above, and the other of the two flags here that turn a shipped
+		// FIX off. In `Active` for the same reason: it is a deliberate bug reproduction and must
+		// never reach a public lobby. Unlike `?nethitstop=1` it cannot desync anything (the glow
+		// is draw-only), but the two peers would disagree about where an enemy is aiming, which is
+		// exactly what this card was reported for.
 		public static bool NetChargeAimEase { get; private set; } = true;
 
 		// Gates ONLY the automatic per-kill/boss-kill hit-stop freeze frame fired from

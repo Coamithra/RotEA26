@@ -77,7 +77,8 @@ namespace EvilAliensWeb.Compat.Net
         float NetLossPct { get; }   // ?netloss
         float NetJitterMs { get; }  // ?netjitter
         // ?netstaleguard=0 -- one of the two flags here whose default answer is TRUE, because it
-        // turns a fix OFF rather than a diagnostic on. Card f5cf7a5c; see NetPuppets.OnSnapshotEntry.
+        // turns a shipped fix OFF rather than a diagnostic on. Card f5cf7a5c; see
+        // NetPuppets.OnSnapshotEntry.
         bool SnapshotStaleGuard { get; }
         // ?netaimease=0 -- the SECOND flag here defaulting TRUE, and for the same reason: it turns
         // a fix off rather than a diagnostic on. Card eb057163; see Compat/Net/NetChargeGlow.

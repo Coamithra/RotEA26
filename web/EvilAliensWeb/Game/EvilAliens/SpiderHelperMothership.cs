@@ -601,11 +601,11 @@ internal class SpiderHelperMothership : KillableAlien
 
 	private float netChargeSize = 2f;
 
-	// This emitter's own eased copy of the replicated aim (card eb057163). The wire value only
-	// changes on this entity's snapshot turn, so the glow SWEEPS toward it instead of stepping;
+	// This emitter instance's own eased copy of the replicated aim (card eb057163). The wire value
+	// only changes on this entity's snapshot turn, so the glow SWEEPS toward it instead of stepping;
 	// it lives here rather than in NetChargeGlow because the child is pooled and the emitter is
-	// what persists across a charge. Host-side this is never read (Drive is client-only).
-	private Vector2 netEasedChargeOffset;
+	// what persists across a charge. Host-side it is never read (Drive is client-only).
+	private EvilAliensWeb.Compat.Net.NetChargeGlow.AimEase netChargeAim;
 
 	internal bool NetCharging => windup != null;
 
@@ -625,6 +625,8 @@ internal class SpiderHelperMothership : KillableAlien
 
 	internal override void NetDriveExtras(GameTime gameTime)
 	{
-		EvilAliensWeb.Compat.Net.NetChargeGlow.Drive(ref windup, ref netEasedChargeOffset, netCharging, netChargeOffset, netChargeWindup, netChargeSize, 1f, collection, base.Game, base.Position, (float)gameTime.ElapsedGameTime.TotalMilliseconds);
+		EvilAliensWeb.Compat.Net.NetChargeGlow.Drive(ref windup, ref netChargeAim, netCharging,
+			netChargeOffset, netChargeWindup, netChargeSize, 1f, collection, base.Game,
+			base.Position, (float)gameTime.ElapsedGameTime.TotalMilliseconds);
 	}
 }

@@ -24,6 +24,13 @@
 # fires along the host's true angle. A telegraph that LIES is worse than one that lags, and the
 # repo's grain runs away from difference-estimators (cards e79bb994, c1a38ef9).
 #
+# THE DRAIN SHAPE IS NetPuppets.Drive'S, VERBATIM -- a fraction of what remains OF THE WINDOW, so
+# it lands exactly on the target on the window's last tick and is FRAME-RATE INDEPENDENT. The
+# obvious one-liner (a fraction of the whole window each tick) is an exponential decay that never
+# lands and whose speed depends on the frame rate -- i.e. precisely the drain CorrectionWindowFor's
+# own header records as measured and REJECTED. It shipped that way in the first cut and review
+# caught it; section 6 is what would have caught it, and is why section 6 exists.
+#
 # FAILURE MEANS: read the quoted PASS/FAIL line. NOTHING here throws and NO counter moves -- the
 # glow is draw-only, so both the defect and the fix are invisible to every metric the game already
 # produces, and a STEPPING aim and a SWEEPING aim are the same still frame. Data is the only
@@ -35,26 +42,48 @@
 # on -- one session, one puppet, no confound. Without section 1, "the fixed aim sweeps smoothly"
 # would pass on a build where the aim never moved at all, which is one of the two faults under test.
 #
-# MUTATION-TESTED FOUR WAYS, each isolated:
-#   * the ease removed entirely (i.e. pre-card)      4 FAIL (every section-2 leg)
-#   * the charge-on edge's recycle reset dropped     3 FAIL (s1 aim count, s4 fixed offset,
-#                                                            s5 first charge) -- note it fails the
-#                                                            FIXED-offset emitter too, which is the
-#                                                            pooled-child trap doing real damage
-#   * the ease made to OVERSHOOT (take > 1)          2 FAIL (the small-step leg + the overshoot leg)
+# MUTATION-TESTED SIX WAYS, each isolated, five of them failing DISJOINT legs:
+#   * the ease removed entirely (i.e. pre-card)      4 FAIL (all three s2 comparisons + the s6
+#                                                            zero-tick hold)
+#   * the charge-on edge's recycle reset dropped     5 FAIL (s1 aim count, s4, both s5 legs, s6)
+#                                                           -- note it fails the FIXED-offset
+#                                                           emitter too, i.e. the pooled-emitter
+#                                                           trap does real damage on a type whose
+#                                                           aim never moves at all
+#   * an EXPONENTIAL drain (fraction of the whole     2 FAIL (both s6 dt legs, and NOTHING else --
+#     window per tick, the first cut)                        which is exactly why s6 exists)
 #   * the ?netaimease=0 flag made inert              4 FAIL (s1's staircase verdict + s2's controls)
-# A merely FASTER ease (take doubled) fails nothing, and should not: it is still a convergent
-# chase. Only take > 1 overshoots.
+#   * a zero-length tick read as "window over"       1 FAIL (the s6 zero-tick hold)
+#   * the window LATCH dropped (re-read live)        0 FAIL -- see below
 #
-# NOTE section 4 is what lets one rule serve five emitters: the big UFO's lazor and the JunkBoss'
-# suck swarm sit at a FIXED offset, so the ease has to be a provable no-op there (measured: 0.000px
-# of drift over 200 ticks) rather than paying for the three aiming emitters with a wobble on two.
+# THE WINDOW LATCH IS A REVIEW INVARIANT HERE, NOT A PROBED ONE, and that is stated rather than
+# papered over: the rig holds ONE puppet, so `CorrectionWindowMsNow` is constant throughout and
+# re-reading it mid-drain is indistinguishable from latching it. It matters in play (a spawn burst
+# mid-drain would otherwise rescale the fraction already applied), and covering it would mean
+# driving the live puppet population up and down mid-sweep for one assertion.
 #
-# MENU-ONLY and leave-no-trace. It starts a REAL (in-process, wire-backed) client session and
-# builds real puppets into the live bin, so it SKIPs itself over a live session, level or attract
-# demo -- `?noattract` is not decoration, without it the idle demo makes every leg skip.
-# Everything it plants is bin.Remove'd BY HAND in the finally, because NetPuppets.Disable() clears
-# the id maps and nothing else.
+# NOTE section 4's no-op is ALGEBRAIC and no test can discriminate a good ease from a bad one
+# there: with target == current, `Offset += (Target - Offset) * f` is identically Offset for any f.
+# What it catches -- and did catch under mutation -- is the charge-on RESET going missing. The
+# section says so; do not re-read it as "the ease was measured not to wobble".
+#
+# NOTE the pinned EASED numbers (135/144 ticks, 0.85px) are a function of
+# `NetPuppets.CorrectionWindowMs` (150) and the suite's own 16.7ms tick. A legitimate retune of
+# that SHARED constant will fail those two lines for a reason that has nothing to do with the aim
+# -- re-derive them rather than assuming a regression. The pre-card pair (15/144, 7.62px) is
+# policy-free and is the one that pins the defect.
+#
+# MENU-ONLY and leave-no-trace (verified by running the suite TWICE in one process -- identical
+# tallies). It starts a REAL (in-process, wire-backed) client session and builds real puppets into
+# the live bin, so it SKIPs itself over a live session, level or attract demo -- `?noattract` is
+# not decoration, without it the idle demo makes every leg skip. It is NOT silent: the charge glow
+# is deliberately audible on a join peer (cards 57ea30cd / c146422f), so a run plays the looped
+# `lazercharge` cue several times.
+#
+# GOTCHA the suite now asserts against, because it was silently true for three whole sections:
+# while a CLIENT session is up, `NetSession.SuppressWorldSpawn` DIVERTS any replicable-type
+# `ComponentBin.Add` into the recycle pool. A section that plants a real enemy must therefore stop
+# the session first AND check the plant landed, or it tests an entity the world never held.
 #
 # DELIBERATELY ABSENT FROM net_selftests.txt despite being menu-runnable -- it has its own probe,
 # which carries this card's write-up and mutation matrix, so listing it in both would run it twice
@@ -70,8 +99,9 @@ expect \[netaim\] enemy charge-glow AIM on a join peer
 expect 1\. the mechanism: FREEZE or STALENESS, measured
 expect 2\. the EASE -- the same frames, swept instead of stepped
 expect 3\. the HOST re-reads its live aim every encode
-expect 4\. an emitter whose offset does NOT track is unaffected
+expect 4\. an emitter whose offset does NOT track is left alone
 expect 5\. the charge-off edge, and the recycle trap behind it
+expect 6\. the dt the driver really hands it
 
 # THE VERDICT ITSELF, as printed rather than only as a PASS line -- if the mechanism ever changes
 # shape (a freeze creeping in, or the pre-card path somehow sweeping) this is what says so.
@@ -80,15 +110,15 @@ expect eased     verdict=SWEEPING
 # The defect as a NUMBER, at the conditions the card quotes it at. A build that stopped stepping
 # with the flag off would make every section-2 comparison vacuous.
 expect pre-card .* moved on 15/144 ticks  maxStep=7\.62px
-# ...and the fix as one. Read these together: the same 16 aims, the same ~100px of travel, spread
-# over 135 ticks in 1.25px steps instead of 15 ticks in 7.62px ones.
-expect eased .* moved on 135/144 ticks  maxStep=1\.25px
+# ...and the fix as one. Read these together: the same 16 aims and the same ~105px of travel,
+# spread over 135 ticks in sub-pixel steps instead of 15 ticks in 7.62px ones.
+expect eased .* moved on 135/144 ticks  maxStep=0\.85px
 
 # The SKIP guard: a run that skipped prints no tally, so this is what tells "the menu was busy"
 # from "the suite passed".
 expect-not SKIP \(run from the main menu
 # A TALLY, never `expect-not FAIL` on its own: an absence assertion passes on a run where the eval
 # never happened at all. Raise it when legs are added; never lower it to make a run green.
-expect \[netaim\] 20 passed, 0 failed
+expect \[netaim\] 28 passed, 0 failed
 expect-not FAIL
 quit

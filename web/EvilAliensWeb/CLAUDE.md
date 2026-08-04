@@ -571,6 +571,12 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   asserting the EFFECT on the live puppet. The hit blink and the detach burst are private state
   that no metric moves and no frame can be timed to — which is the same reason those effects
   needed a wire beat at all. Menu-only and leave-no-trace),
+  `eaNetChargeAim()` (the enemy charge glow's AIM on a join peer -- card eb057163: a scripted host
+  charges a MarsBoss puppet over a real client session while the client ticks between snapshot
+  turns, and the drawn aim is sampled every tick. It reports a VERDICT, freeze vs staleness vs
+  sweeping, because the two faults behind "the twin motherships do not change where they are
+  aiming" need opposite fixes. Menu-only and leave-no-trace; no frame can see any of it, since a
+  stepping aim and a sweeping aim are the same still picture),
   `eaNetIdReuse()` (the vanishing laser UFO — cards 9ccfe295 / 54e9a590: a client's replicated
   beam had no EMITTER, so `UFO.CollidesWith`'s `owner != this` test made a big laser UFO shoot
   itself dead on the joiner, and the `KillerNone` claim that followed deleted the host's live

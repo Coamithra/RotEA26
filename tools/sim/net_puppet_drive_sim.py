@@ -749,10 +749,59 @@ def _anchored_offset(t_ms):
     return (0.0, amp * math.sin(2 * math.pi * phase))
 
 
+# ---- the SCRIPTED-POSITION shape (card 76ec8bdb) ---------------------------------------------
+#
+# A boss fly-by is neither the linear rock nor the periodic wasp: it is a piecewise-constant
+# CHOREOGRAPHY -- park at the edge, hold for the warning, sweep across, park again -- and every
+# phase boundary is a velocity STEP. That is what makes a finite difference wrong for it in a way
+# no amount of correction-window tuning fixes: the difference reported at turn T describes
+# [T-turn, T] while the client drives [T, T+turn] with it, so each boundary is dead-reckoned on
+# the PREVIOUS phase for up to a whole turn.
+#
+# The numbers are SpiderBoss's own: moveSpeed 0.78 px/ms at DifficultyModifier 1, a 1000 ms
+# waittimer hold (flyPauseMs, the "Danger!" warning), and a sweep long enough to cross the 1490 px
+# the boss travels between its parks. Only the shape matters here -- the EXACTNESS of the shipped
+# override against the real Update is ground-truth work and belongs to
+# tools/headless/probes/net_scripted_motion.txt, which drives the real class.
+SCRIPT_MOVE_PX_PER_MS = 0.78
+SCRIPT_HOLD_MS = 1000.0
+SCRIPT_SWEEP_MS = 1490.0 / SCRIPT_MOVE_PX_PER_MS   # x -345 .. 1145 at move speed
+SCRIPT_PERIOD_MS = SCRIPT_HOLD_MS + SCRIPT_SWEEP_MS
+
+
+def _scripted_phase(t_ms):
+    """(is_sweeping, ms into the current phase) for the choreography above."""
+    u = t_ms % SCRIPT_PERIOD_MS
+    if u < SCRIPT_HOLD_MS:
+        return False, u
+    return True, u - SCRIPT_HOLD_MS
+
+
+def _scripted_truth(t_ms):
+    """The boss's real position: still through each hold, sweeping between them."""
+    cycles = int(t_ms // SCRIPT_PERIOD_MS)
+    sweeping, into = _scripted_phase(t_ms)
+    x = cycles * SCRIPT_SWEEP_MS * SCRIPT_MOVE_PX_PER_MS
+    if sweeping:
+        x += into * SCRIPT_MOVE_PX_PER_MS
+    return (x, 235.0)
+
+
+def _scripted_announced(t_ms):
+    """What TryGetNetScriptedVelocity answers: the velocity Update will apply NEXT tick.
+
+    ZERO through the hold -- the boss really is parked there, and announcing the upcoming sweep
+    (which is what the AI's own TryGetAiSweptPath deliberately does) would slide the puppet out of
+    the park a second before the host leaves it, collidably."""
+    sweeping, _ = _scripted_phase(t_ms)
+    return (SCRIPT_MOVE_PX_PER_MS, 0.0) if sweeping else (0.0, 0.0)
+
+
 def run_smoothness(n_live, window_mode, total_ms=20000.0, exponential=False,
                    teleport_at=None, teleport_dx=0.0, marked=False,
                    declared_vel=(FLYSPIDER_BASE_VX, 0.0), anchored=False,
-                   truth_fn=None, path_offset=None, shot_at=None, shot_vel=None):
+                   truth_fn=None, path_offset=None, shot_at=None, shot_vel=None,
+                   scripted_vel=None):
     turn = snap_turn_ms(n_live)
     window = {"fixed150": CORRECTION_WINDOW_MS,
               "2xturn": max(CORRECTION_WINDOW_MS, 2.0 * turn)}[window_mode]
@@ -769,6 +818,7 @@ def run_smoothness(n_live, window_mode, total_ms=20000.0, exponential=False,
     last_pos, last_ms, has_last = truth_of(0.0), 0.0, True
     next_turn, t = turn, 0.0
     steps, host_steps, step_vecs, host_vecs = [], [], [], []
+    max_err, err_sum, err_n = 0.0, 0.0, 0
     prev_host = truth_of(0.0)
     # The entity's declared baseline, which is what an ANCHORED type puts on the wire instead of
     # the finite difference. `shot_at`/`shot_vel` model a bullet nudging an asteroid's heading.
@@ -785,7 +835,14 @@ def run_smoothness(n_live, window_mode, total_ms=20000.0, exponential=False,
             jumped = (teleport_at is not None and last_ms < teleport_at <= t)
             flag = marked and jumped
             vel = declared_vel
-            if anchored:
+            if scripted_vel is not None:
+                # THE SCRIPTED BRANCH (card 76ec8bdb). The entity ANNOUNCES the velocity it is
+                # moving at right now, and NetSession.ResolveBaseVelocity sends that instead of
+                # differentiating -- on every turn, not only the ones the fallbacks caught. Note
+                # it is read at the SAMPLE INSTANT, which is the whole point: a difference
+                # describes [t-turn, t] and the client then drives [t, t+turn] with it.
+                vel = scripted_vel(t)
+            elif anchored:
                 # NetPathAnchored (card c1a38ef9): the host sends the entity's own linear
                 # velocity, so the periodic component never pollutes it and there is nothing to
                 # differentiate. Same BRANCH as a marked teleport in CaptureBaseState, opposite
@@ -805,6 +862,14 @@ def run_smoothness(n_live, window_mode, total_ms=20000.0, exponential=False,
             last_pos, last_ms, has_last = truth, t, True
             pup.apply_snapshot(truth, vel, teleported=flag)
         steps.append(pup.drive(TICK_MS))
+        # HOW FAR BEHIND THE HOST THE PUPPET IS, which is the quantity a scripted mover's defect
+        # is measured in -- a velocity that is one turn stale integrates into real px, and past
+        # SnapThresholdPx (100) it stops being a lag and becomes a pop.
+        err = math.hypot(pup.pos[0] - truth[0], pup.pos[1] - truth[1])
+        if err > max_err:
+            max_err = err
+        err_sum += err
+        err_n += 1
         step_vecs.append(pup.last_step)
         host_vecs.append((truth[0] - prev_host[0], truth[1] - prev_host[1]))
         host_steps.append(math.hypot(*host_vecs[-1]))
@@ -812,10 +877,28 @@ def run_smoothness(n_live, window_mode, total_ms=20000.0, exponential=False,
     return {
         "vjerk": _stddev_of_vector_deltas(step_vecs),
         "host_vjerk": _stddev_of_vector_deltas(host_vecs),
-        "turn": turn, "window": window, "pops": pup.pops,
+        "turn": turn, "window": window, "pops": pup.pops, "maxerr": max_err,
+        "meanerr": (err_sum / err_n) if err_n else 0.0,
         "jerk": _stddev_of_deltas(steps), "maxstep": max(steps), "endpos": pup.pos,
         "host_jerk": _stddev_of_deltas(host_steps), "host_maxstep": max(host_steps),
     }
+
+
+def _scripted_rows():
+    """The scripted-choreography A/B: announced velocity vs the finite difference.
+
+    Run at the world sizes where the blind window actually hurts. A snapshot turn is
+    60 ms x ceil(live/16), so N=16 is the 60 ms floor (where a one-turn-stale velocity costs
+    almost nothing and the two policies should look alike) and N=128 is ~480 ms (where it is the
+    whole defect)."""
+    rows = []
+    for n in (16, 64, 128):
+        pre = run_smoothness(n, "2xturn", total_ms=30000.0, declared_vel=(0.0, 0.0),
+                             truth_fn=_scripted_truth)
+        post = run_smoothness(n, "2xturn", total_ms=30000.0, declared_vel=(0.0, 0.0),
+                              truth_fn=_scripted_truth, scripted_vel=_scripted_announced)
+        rows.append((n, pre, post))
+    return rows
 
 
 def smoothness():
@@ -976,14 +1059,63 @@ def smoothness():
     print("  (both runs end tracking the host; easing only spreads the velocity STEP over the"
           "\n   correction window, which is the 'periodic slight nudges' the card asks for.)")
 
+    # ---- SCRIPTED CHOREOGRAPHY: announced velocity vs the finite difference ------------------
+    #
+    # Card 76ec8bdb. The pre-card column is the SHIPPED behaviour for a type that writes Position
+    # directly -- a zero declared vector and a difference that is one turn stale at every phase
+    # boundary -- so it is the refuted control, on the identical host truth.
+    #
+    # READ THE ERROR AND THE POPS, NOT THE JERK. A jerk figure REWARDS a puppet that ignores the
+    # choreography: the pre-card column reads 1.02 against the host's own 1.00 while sitting up to
+    # 350+ px behind, because a velocity that never steps is beautifully smooth and simply wrong.
+    # It is the same trap as reading the AI bench's `turn` without a survival column.
+    print("\n  SCRIPTED CHOREOGRAPHY (boss fly-by: hold, sweep, hold) -- card 76ec8bdb")
+    print("  the pre-card column DIFFERENCES positions; the post-card one sends the"
+          "\n  velocity the entity announces. Error is the puppet's distance from host truth.")
+    print("  %-5s %-8s | %-24s | %-24s" % ("N", "turn", "pre-card (differenced)", "post (announced)"))
+    print("  %-5s %-8s | %-7s %-7s %-8s | %-7s %-7s %-8s"
+          % ("", "", "mean", "max", "pops", "mean", "max", "pops"))
+    scripted_rows = _scripted_rows()
+    for n, pre, post in scripted_rows:
+        print("  %-5d %-8s | %-7.1f %-7.1f %-8d | %-7.1f %-7.1f %-8d"
+              % (n, "%.0fms" % pre["turn"], pre["meanerr"], pre["maxerr"], pre["pops"],
+                 post["meanerr"], post["maxerr"], post["pops"]))
+    big = [r for r in scripted_rows if r[0] == 128][0]
+    _, big_pre, big_post = big
+    # THE CLAIM. In a big world the mean lag and the number of corrections past SnapThresholdPx
+    # both fall by a third or more -- 51.7 -> 35.0 px and 33 -> 20 pops as measured at N=128.
+    if not big_post["meanerr"] < 0.75 * big_pre["meanerr"]:
+        fails.append("the announced velocity did not cut the mean lag at N=128 (%.1f px vs the "
+                     "differenced %.1f px) -- the scripted branch is the whole card"
+                     % (big_post["meanerr"], big_pre["meanerr"]))
+    if not big_post["pops"] < big_pre["pops"]:
+        fails.append("the announced velocity did not reduce pops at N=128 (%d vs %d) -- a pop is "
+                     "a correction the layer could not absorb, and halving them is the visible win"
+                     % (big_post["pops"], big_pre["pops"]))
+    # NON-VACUITY. Both figures are differences between two runs, so a rig that quietly stopped
+    # driving the choreography would report 0 vs 0 and pass.
+    if not (big_pre["pops"] > 0 and big_pre["meanerr"] > 10.0):
+        fails.append("the pre-card scripted run did not misbehave (mean %.1f px, %d pops) -- the "
+                     "comparison above is vacuous, check _scripted_truth is still moving"
+                     % (big_pre["meanerr"], big_pre["pops"]))
+    # THE RESIDUAL, ASSERTED SO IT STAYS HONEST. The announced velocity fixes WHAT the puppet
+    # dead-reckons with, never WHEN it hears about a phase change -- that is still up to one
+    # snapshot turn, so the PEAK lag barely moves and only a phase model on the wire would close
+    # it. If this ever starts failing, someone has closed the timing gap and the docs are stale.
+    if big_post["maxerr"] < 0.5 * big_pre["maxerr"]:
+        fails.append("the peak lag at N=128 improved more than the design allows (%.1f vs %.1f) "
+                     "-- the turn-latency residual is supposed to survive this card; re-read the "
+                     "SCRIPTED MOTION section before believing it" % (big_post["maxerr"], big_pre["maxerr"]))
+
     if fails:
         print("\nFAIL:")
         for f in fails:
             print("  - " + f)
         return False
-    print("\nOK: window scaling holds, the exponential alternative stays refuted, and the"
+    print("\nOK: window scaling holds, the exponential alternative stays refuted, the"
           "\n    teleport marker removes the fling AND the sub-threshold slide while still"
-          "\n    putting the puppet where the host says it is.")
+          "\n    putting the puppet where the host says it is, and an announced scripted"
+          "\n    velocity halves both the mean lag and the pops on a boss fly-by.")
     return True
 
 def run_host_stall(stall_ms, n_enemies=16, speed=0.15, total_ms=6000.0):

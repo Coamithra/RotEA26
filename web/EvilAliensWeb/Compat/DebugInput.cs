@@ -693,6 +693,18 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetTeleportTest.Run();
 		}
 
+		// JS bridge for scripted motion (eaNetScriptedMotion in wwwroot/index.html, card
+		// 76ec8bdb). The scripted-position bosses announce the velocity they are moving at, so
+		// the host stops sending a zero across a marked park and a whole-turn-stale difference at
+		// every phase boundary. Its ground-truth section drives the REAL SpiderBoss.Update and
+		// finite-differences its actual displacement, so the override cannot agree with a
+		// hand-copied expectation table instead of with the game. Menu-only and leave-no-trace.
+		[JSInvokable("debugNetScriptedMotion")]
+		public static string NetScriptedMotion()
+		{
+			return EvilAliensWeb.Compat.Net.NetScriptedMotionTest.Run();
+		}
+
 		// JS bridge for scenario 6 (eaNetSceneOrder in wwwroot/index.html, card 25ad0659 step 4).
 		// Reset / pause / checkpoint ORDERING against a REAL GameScene -- which is what makes it
 		// DESTRUCTIVE and keeps it out of NetScenarios: a stand-in scene would make every

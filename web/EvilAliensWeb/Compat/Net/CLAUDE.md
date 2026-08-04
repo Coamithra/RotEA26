@@ -74,6 +74,10 @@ inputs; the other peer's ship is an interpolated puppet.
   is refused -- the guard `NetFrameLocal` gave animation frames, which positions never had. Same
   card raises `NetBaseState.Scale` 1/256 -> 1/4096 and makes it ROUND, in the same u16. See the
   SNAPSHOT STALENESS section.
+- **The scripted-position bosses announce their own velocity** (`76ec8bdb`, no protocol change):
+  a type that writes `Position` directly gets a third source of truth, so a SpiderBoss fly-by
+  stops being dead-reckoned on a zero or on a whole-turn-stale difference -- mean puppet lag and
+  pops both roughly halve. See the SCRIPTED MOTION section.
 - **Puppet smoothness** (`c92f3817` / `0dfc4495` / `d3add86f` / `8dabe812` / `0108d1fc`), and its
   wire-first successor: the host now MARKS a reposition instead of the observed-velocity estimator
   guessing at one (`e79bb994`, v13) -- see the teleport-marker bullet under "Puppet SMOOTHNESS".
@@ -2463,8 +2467,13 @@ reads a contented 0 throughout. The instrument is
     `Speed`/`Direction`, so its `NetSpeedVector` is **ZERO**: a marked park sends zero velocity and
     the puppet stands still until its next turn, up to ~1.2 s in a big world. That is the correct
     trade against flinging it across the screen collidably, and it is exactly what card 8dabe812's
-    cap already did -- putting real motion parameters on the wire is card `c1a38ef9`. Do not read
-    the fallback as informative.
+    cap already did. Do not read the fallback as informative.
+    **FIXED for `SpiderBoss` by card 76ec8bdb -- see the SCRIPTED MOTION section**, which gives a
+    scripted-position type a third source of truth (its own announced velocity) rather than either
+    of the two that lie. The sentence above still describes every type that has NOT taken that
+    seam, which is all of them bar one; note also that at these three parks the zero is momentarily
+    CORRECT (the boss is genuinely held for the 1000 ms warning), and it is the pause -> sweep
+    boundary after it that costs the joiner.
   - **The reposition sites are the whole feature, and there are exactly four types.** Found by
     auditing every direct `Position =` on the 29 replicable types: `Braineroid`'s four wrap
     branches, `EvilSkull`'s random respawn in `CollidesWith`, `SpiderBoss`'s three fly-by parks,
@@ -2620,6 +2629,10 @@ ruling; the two shipped estimators it replaces were both bent around avoiding wi
     type that writes `Position` directly -- the very reason the observed baseline exists -- so a
     scripted position curve (a UFO) must NOT take this path or it dead-reckons at a stale
     `SpeedVector`. The two users both move by `Speed`/`Direction` and nothing else.
+    **The ban STANDS, and card 76ec8bdb is not an exception to it**: a scripted type still may not
+    anchor, it announces a velocity that does not come from `Speed`/`Direction` at all
+    (`TryGetNetScriptedVelocity`). Anchored outranks scripted where a type somehow claims both, and
+    no type does -- the SCRIPTED MOTION section has the census.
 - **Velocity is EASED, not assigned, for an anchored puppet** -- over the SAME
   `CorrectionWindowFor(live)` the position error already drains over, so it inherits the cadence
   and needs no second constant. That is the whole asteroid fix: a declared velocity is a STEP
@@ -2694,6 +2707,102 @@ ruling; the two shipped estimators it replaces were both bent around avoiding wi
 - **`eaNetMotion` is deliberately ABSENT from `net_selftests.txt`** -- it has its own probe, which
   carries this card's mutation matrix, so listing it in both would run it twice for nothing. The
   `eaNetDeathFx` precedent.
+
+## SCRIPTED MOTION -- the bosses announce their own velocity (card 76ec8bdb, no protocol change)
+
+The third and last member of the smoothness family, and the one the two above kept pointing at.
+A type that moves by writing `Position` directly never assigns `Speed`/`Direction`, so **both**
+velocities the layer already had are wrong for it -- and the fix is neither of them.
+
+- **THE TWO FALLBACKS AND WHY EACH FAILS.** Its declared `NetSpeedVector` is a flat **ZERO**, which
+  is what a marked teleport falls back to (card e79bb994) -- so a parked SpiderBoss went out at
+  velocity (0,0). And the FINITE DIFFERENCE is a whole snapshot turn **LATE**: a difference
+  reported at turn T describes `[T-turn, T]` while the client dead-reckons over `[T, T+turn]`, so
+  every phase change of a scripted set-piece is driven on the PREVIOUS phase's velocity for up to
+  a turn -- `SnapshotTurnMs` is `live * 60 / 16`, i.e. 60 ms at 16 live entities, **480 ms at 128**
+  and ~1.2 s at 320.
+- **THE SECOND IS THE BIGGER HALF, AND THE CARD'S TITLE UNDERSTATES IT.** The card is filed as
+  "a marked teleport freezes the puppet", and at SpiderBoss's three parks the zero is momentarily
+  CORRECT -- each reposition immediately starts `waittimer` for the 1000 ms "Danger!" hold, so the
+  boss really is stationary. What actually costs the joiner is the pause -> sweep boundary right
+  after it: the boss steps from 0 to `0.78 * DifficultyModifier` px/ms and the puppet drives the
+  old value for a turn. **Measured** (`--smoothness`, boss-fly-by shape, mean puppet lag / pops
+  past `SnapThresholdPx`): N=16 10.1 px / 0, N=64 22.7 px / 20, **N=128 51.7 px / 33**.
+- **THE FIX IS A THIRD SOURCE OF TRUTH: `AlienDrawableGameComponent.TryGetNetScriptedVelocity`,**
+  the type's own answer to "what will Update do next tick", used on EVERY turn rather than only
+  where the fallbacks would have caught it. It is FORWARD-looking where a difference is
+  backward-looking, which is the direction dead reckoning needs.
+  **`NetSession.ResolveBaseVelocity` gains a fourth branch**, ranked below `anchored` and above
+  both fallbacks. Any per-peer factor (`DifficultyModifier`, the oracle's scroll) is applied
+  HOST-SIDE so the wire carries real px/ms -- the Lazer sent-rate rule.
+- **NO WIRE BYTES AND NO PROTOCOL BUMP: it is a better number in `NetBaseState.Vel`, which already
+  ships.** The batch's bump authorisation went unused. **The CLIENT is untouched too** -- the
+  scripted velocity is ASSIGNED, not eased, exactly as the Lazer rates are: a phase velocity is a
+  genuine step function, and easing across it would delay a collidable sweep's start further.
+- **THIS IS WHAT `NetPathAnchored` COULD NOT DO, so read the two together.** Anchoring makes the
+  host send the DECLARED vector, and for these types that vector is the thing that lies -- card
+  c1a38ef9's header forbids them the seam for exactly that reason, and the ban stands. This adds a
+  vector that does not come from `Speed`/`Direction` at all. **Anchored still outranks scripted**
+  and no type may hold both (a type claiming both is a contradiction, not a blend); the suite
+  asserts nobody does, over the whole registry.
+- **ONE OVERRIDE SHIPS, and every additional one is a decision to re-make.** `SpiderBoss` is the
+  card's named type and the only marked-teleport type whose declared vector is zero -- audited:
+  `Braineroid`, `EvilSkull` and `Ball` all assign `Speed`/`Direction`, so their marked repositions
+  already carried an honest velocity. A wrong value here is dead-reckoned onto a COLLIDABLE puppet
+  on the other player's screen, which is this family's recurring failure mode, so the census in
+  section 1 of the suite asserts the list is exactly one name long.
+- **ITS CONTRACT IS NOT `TryGetAiSweptPath`'S, and wiring one to the other is the mistake to
+  avoid.** The AI seam deliberately announces the velocity a FROZEN boss is about to move at,
+  because leaving the lane during the warning is the whole point of the warning. Here a paused
+  entity is genuinely not moving and must report ZERO, or the puppet slides out of its park a
+  second before the host does. The two disagree on exactly one case, on purpose.
+- **THE UNMARKED-TELEPORT SAFETY NET STAYS ARMED FOR SCRIPTED TYPES -- deliberately ASYMMETRIC
+  with the anchored branch, which skips it.** Both send an announced rather than an observed
+  velocity, so neither is fit to judge; the difference is that `SpiderBoss` holds three of the
+  game's four reposition sites and is the type most likely to grow a fourth, where neither
+  anchored type repositions at all. `CaptureBaseState` therefore recomputes the raw finite
+  difference purely to hand to `NoteIfUnmarkedTeleport`, and it never reaches the wire. Only
+  reached on an UNMARKED turn, where that difference describes genuine motion.
+- **THE RESIDUAL, STATED AND ASSERTED: this fixes WHAT the puppet dead-reckons with, never WHEN it
+  hears about a phase change.** That is still up to one snapshot turn, so at N=128 the MEAN lag
+  falls 51.7 -> 35.0 px and the pops 33 -> 20, while the PEAK lag does not improve at all
+  (352.7 -> 356.0 px -- the two are inside the noise of where a boundary happens to fall in a
+  turn, and the peak is set by that latency rather than by the velocity's accuracy). Closing the
+  timing half means a per-phase model on the wire -- phase
+  id plus elapsed ms, so the client can advance the hold and start the sweep on schedule -- which
+  was designed, costed and DECLINED on this card: it buys a second-order gain in exchange for wire
+  bytes on the lane card f5cf7a5c just guarded, a client-side mirror of a script the host owns (a
+  new divergence surface in a distributed-authority design), and a compat split. The sim ASSERTS
+  the peak barely moves, so if that leg ever fails someone has closed the gap and this text is
+  stale.
+- **DO NOT READ THE JERK FIGURE HERE.** It REWARDS a puppet that ignores the choreography: the
+  pre-card column reads a vector jerk of ~1.02 against the host's own ~1.00 while sitting over
+  350 px behind, because a velocity that never steps is beautifully smooth and simply wrong. Read
+  the ERROR and the POPS. (Same trap as reading the AI bench's `turn` with no survival column.)
+- **VERIFY IN THREE PLACES, and they answer different questions.**
+  **`eaNetScriptedMotion()` / `tools/headless/probes/net_scripted_motion.txt`** (35 assertions,
+  `Compat/Net/NetScriptedMotionTest.cs`) asserts the mechanism is WIRED AND EXACT.
+  **`logic_probe`'s `ProbeScriptedVelocity`** pins the pure RANKING with no Game at all.
+  **`python tools/sim/net_puppet_drive_sim.py --smoothness`** asserts it is WORTH HAVING, with
+  the pre-card differencing policy as the refuted control on identical host truth.
+  - **SECTION 2 OF THE SUITE IS THE ONE THAT CANNOT BE FAKED, and it is the shape to copy for any
+    future override.** The override transcribes `SpiderBoss.Update`'s own switch, so an
+    expectation TABLE written from the same reading would prove only that two copies of one
+    misreading agree. Instead the REAL `Update` is driven through a full choreography cycle and
+    its ACTUAL per-tick displacement is finite-differenced to produce the expected value -- ground
+    truth from the game, not from a reader. The pause reading zero falls out of it for free, and
+    it doubles as a standing tripwire on the choreography. Two classes of tick are excluded on
+    EVIDENCE rather than by being listed: a marked teleport (detected by the entity's own latch)
+    and a phase boundary (detected BOTH by the state byte changing and by the announced velocity
+    stepping -- neither alone is enough, since `jump` -> `flyup` announces the same vector on both
+    sides while moving zero, and the climb boundary INSIDE `jump` changes no state). Both
+    exclusions are then asserted to be rare and non-empty.
+  - **GOTCHA -- "sweeping" is a FRACTION of the boss's own top speed, never a px/ms literal.**
+    `moveSpeed` is `0.78 * Settings.DifficultyModifier`, which is 0.27 on Easy and ramps within a
+    fight, so a hard-coded threshold silently means "did it move at all" on one tier and "did it
+    sweep" on another. An early cut of this suite reported five spurious failures exactly that way.
+  - Mutation-tested five ways, each failing a different leg; the matrix is in the probe's header.
+    The pre-card build (the override answering false) fails 12.
 
 ## LEVEL-3 WALLS -- derived scale, and the collision/draw coincidence (cards 4392bd30 / 80749dc4)
 

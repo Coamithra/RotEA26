@@ -236,6 +236,16 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   measured at 23px by `python tools/sim/net_puppet_drive_sim.py --hoststall`). **The deliberate
   bug reproduction** (the `?teampartner=pad` idiom), and IN `DebugFlags.Active` for that reason --
   it must never reach a public lobby. Screen SHAKE is unaffected either way. Details: net CLAUDE.md.
+- **`?netstaleguard=0`** (card f5cf7a5c): turn the world snapshot's staleness guard OFF, so a
+  reordered or late `MsgWorldSnapshot` entry drags a puppet BACKWARDS again. The packet now
+  carries a monotone seq and an entry older than the one already applied for that netId is
+  refused; this restores the pre-card behaviour. **The other deliberate bug reproduction** (the
+  `?nethitstop=1` idiom), and IN `DebugFlags.Active` for the same reason. It is the only boolean
+  in `DebugFlags` that DEFAULTS TRUE, so `Active` tests its negation. The `[net]` line's new
+  `snapStale=` counter reads the same either way -- the flag changes the drag, never the
+  measurement. Console `eaNetStale()` / `eval NetStale` is the suite (it drives the flag through
+  the injected host, so no reboot); protocol v19 also raised `NetBaseState.Scale` 1/256 -> 1/4096
+  with rounding. Details: net CLAUDE.md.
 - **Local co-op + online co-op together** (card 4d904410): `?netlocal=<1-3>` queues that many
   synthetic COUCH joins on this peer once the session is live — a real one is a gamepad Start
   press the rig can't produce. Pair with `?net=host`/`?net=join`; the `[net]` line's new

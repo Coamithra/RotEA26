@@ -163,11 +163,13 @@ namespace EvilAliensWeb.Compat.Net
                 NetProtocol.ReadBaseState(buf, ref off, ref back);
 
                 float pct = System.Math.Abs(back.Scale - exact) / exact * 100f;
+                float prePct = System.Math.Abs(PreCardWire(exact) - exact) / exact * 100f;
                 if (pct > worstPct) { worstPct = pct; }
-                if (pct > 1f) { anyBig = true; }
+                if (prePct > 1f) { anyBig = true; }
                 sb.Append(string.Format(CultureInfo.InvariantCulture,
-                    "       variation {0} (width {1}): scale {2:F6} -> wire {3:F6}, {4:F2}% out\n",
-                    v, VariationWidths[v], exact, back.Scale, pct));
+                    "       variation {0} (width {1}): scale {2:F6} -> wire {3:F6}, {4:F3}% out"
+                    + " (pre-f5cf7a5c u16@1/256: {5:F6}, {6:F2}% out)\n",
+                    v, VariationWidths[v], exact, back.Scale, pct, PreCardWire(exact), prePct));
             }
 
             check("offline, the drawn block size IS the old 800/width, bit for bit",
@@ -178,29 +180,43 @@ namespace EvilAliensWeb.Compat.Net
             // a non-square replacement fail loudly rather than mis-align every row.
             check("the wall sheet is SQUARE, which the single tile size assumes",
                 scratch[0].texture.LogicalWidth() == scratch[0].texture.LogicalHeight());
-            check("the wire ROUNDS every wall scale (u16 at 1/256 truncates)", worstPct > 0f);
-            check("...and by more than 1% on at least one shipped grid", anyBig);
+            check("the wire QUANTIZES every wall scale (it is a u16, at whatever quantum)",
+                worstPct > 0f);
+            // RESTATED FOR CARD f5cf7a5c, which raised the quantum 1/256 -> 1/4096 and made the
+            // cast ROUND. This leg used to read "...and by more than 1% on at least one shipped
+            // grid" off the LIVE encoder; at the new quantum the worst shipped grid is 0.09% out,
+            // so the same claim measured live would now be FALSE -- and deleting it would delete
+            // the negative control the rest of this suite depends on. So the >1% claim is made
+            // against a verbatim transcription of the pre-card encoder instead (PreCardWire),
+            // which is what the opt-out was actually built against, and the live figure is
+            // printed beside it. The opt-out STAYS either way: a wall derives its scale from the
+            // replicated grid variation, which is right at any precision.
+            check("the PRE-CARD u16-at-1/256 wire was >1% out on at least one shipped grid",
+                anyBig);
+            check("...and the raise to 1/4096 with rounding cut that below 0.5% everywhere",
+                worstPct < 0.5f);
 
             // The specific figure the card's screenshot is: variation 0 is the 12-wide, 122-row
             // Level-3 grid, and a 4.9% error on a 66.7px row is 3.3px, which ACCUMULATES down the
             // grid. This is what the two peers were looking at.
+            //
+            // Measured on the PRE-CARD encoder for the reason above -- 402px is the figure the
+            // report was about, and the live encoder can no longer produce it. The live drift is
+            // printed beside it so the improvement is visible rather than merely asserted.
             Wall v0 = NewHostWall(bin, game, 0, scratch);
             float rowExact = (float)v0.texture.LogicalHeight() * v0.scale;
-            NetBaseState s0 = default(NetBaseState);
-            s0.Scale = v0.scale;
-            byte[] b0 = new byte[NetProtocol.BaseStateBytes];
-            int o0 = 0;
-            NetProtocol.WriteBaseState(b0, ref o0, s0);
-            NetBaseState r0 = default(NetBaseState);
-            o0 = 0;
-            NetProtocol.ReadBaseState(b0, ref o0, ref r0);
-            float rowWire = (float)v0.texture.LogicalHeight() * r0.Scale;
-            float driftAtBottom = (rowExact - rowWire) * 122f;
+            float rowPreCard = (float)v0.texture.LogicalHeight() * PreCardWire(v0.scale);
+            float rowWire = (float)v0.texture.LogicalHeight() * ThroughWire(v0.scale);
+            float driftAtBottom = System.Math.Abs(rowExact - rowPreCard) * 122f;
             sb.Append(string.Format(CultureInfo.InvariantCulture,
-                "       variation 0 rows: {0:F2}px exact vs {1:F2}px off the wire"
-                + " -> {2:F0}px apart by row 122\n", rowExact, rowWire, driftAtBottom));
+                "       variation 0 rows: {0:F2}px exact vs {1:F2}px off the PRE-CARD wire"
+                + " -> {2:F0}px apart by row 122 (today's wire {3:F2}px -> {4:F1}px apart)\n",
+                rowExact, rowPreCard, driftAtBottom, rowWire,
+                System.Math.Abs(rowExact - rowWire) * 122f));
             check("the pre-card divergence down variation 0 exceeds half a screen (>300px)",
                 driftAtBottom > 300f);
+            check("...and today's wire would diverge by under 10px down the same grid",
+                System.Math.Abs(rowExact - rowWire) * 122f < 10f);
         }
 
         // ---- 2. the predicate ---------------------------------------------------------------
@@ -455,6 +471,16 @@ namespace EvilAliensWeb.Compat.Net
             off = 0;
             NetProtocol.ReadBaseState(buf, ref off, ref back);
             return back.Scale;
+        }
+
+        // The PRE-f5cf7a5c scale codec, transcribed verbatim: a u16 at 1/256 with a TRUNCATING
+        // cast. The negative control this whole suite rests on -- see the restated legs in
+        // section 1 for why it cannot be measured off the live encoder any more. It is a
+        // reference implementation, the eaNetScore.test / eaNetFire idiom, not dead production
+        // code: keep it here rather than reviving a flag on NetProtocol.
+        private static float PreCardWire(float scale)
+        {
+            return (ushort)System.Math.Clamp(scale * 256f, 0f, 65535f) / 256f;
         }
 
         private static bool Near(float a, float b, float tol)

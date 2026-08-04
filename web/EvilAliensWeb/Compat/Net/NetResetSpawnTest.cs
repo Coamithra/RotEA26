@@ -728,6 +728,8 @@ namespace EvilAliensWeb.Compat.Net
 
             public bool DebugActive => inner.DebugActive;
 
+            public bool SnapshotStaleGuard => inner.SnapshotStaleGuard;
+
             public bool NetJip => inner.NetJip;
             public bool NetAllowDebug => inner.NetAllowDebug;
 

@@ -4,8 +4,12 @@
 # PINS: cards 4392bd30 ("netplay: lvl3 walls go out of sync") + 80749dc4 ("netplay (p2): walls
 # syncing is odd..") -- Compat/Net/NetWallTest, driven by eaNetWalls() / `eval NetWalls`.
 #
-# WHAT BROKE. NetBaseState.Scale rides the wire as a u16 at 1/256 and the cast TRUNCATES, so the
-# absolute error is up to 1/256 whatever the value. A wall's scale is 800 / (1248 * gridWidth) --
+# WHAT BROKE. NetBaseState.Scale rode the wire as a u16 at 1/256 with a TRUNCATING cast, so the
+# absolute error was up to 1/256 whatever the value. (Card f5cf7a5c has since raised that quantum
+# to 1/4096 and made it round, which is why section 1's table now prints the live figure and the
+# pre-card one side by side, and its >1% claim is measured against a transcription of the old
+# encoder. The opt-out below STAYS regardless -- a wall derives its scale from the replicated
+# grid variation, which is the right answer at any precision.) A wall's scale is 800 / (1248 * gridWidth) --
 # tiny -- so that is a RELATIVE error of 4.94% on the 12-wide Level-3 grid (measured, and the
 # probe prints the table). Wall.Draw sizes every block as LogicalWidth/Height * scale, so the
 # joiner drew 63.38px rows against the host's 66.67px: 402px apart by the bottom of that 122-row
@@ -64,15 +68,16 @@ expect 1\. the wire's scale is LOSSY for a wall
 expect 2\. the opt-out predicate
 expect 3\. a real puppet keeps its DERIVED scale
 expect 4\. anchored motion
-# The measured defect, pinned as a number: if the wire ever stops being lossy here (a widened
-# Scale field) this line moves and the suite's controls need re-reading, not silencing.
-expect variation 0 \(width 12\): scale 0\.053419 -> wire 0\.050781, 4\.94% out
+# The measured defect, pinned as numbers: BOTH the live encoder's error and the pre-card one the
+# card was reported against. If the wire's scale encoding changes again this line moves and the
+# suite's controls need re-reading, not silencing.
+expect variation 0 \(width 12\): scale 0\.053419 -> wire 0\.053467, 0\.090% out \(pre-f5cf7a5c u16@1/256: 0\.050781, 4\.94% out\)
 expect 402px apart by row 122
 # The SKIP guard: a run that skipped prints no tally, so this is what tells "menu was busy" from
 # "the suite passed".
 expect-not SKIP \(run from the main menu
 # A TALLY, never `expect-not FAIL` on its own: an absence assertion passes on a run where the
 # eval never happened at all. Raise it when legs are added; never lower it to make a run green.
-expect \[netwalls\] 26 passed, 0 failed
+expect \[netwalls\] 28 passed, 0 failed
 expect-not FAIL
 quit

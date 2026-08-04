@@ -819,6 +819,17 @@
             catch (e) { console.warn('[debug] eaNetWalls failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: the world snapshot's staleness guard + the scale precision raise (card
+        // f5cf7a5c). The per-type scale census over the whole replicable set, the packet seq
+        // driven end to end through a real client session on an in-process wire, and the
+        // backward drag a reordered entry used to cause -- measured against ?netstaleguard=0.
+        // MENU-only, leave-no-trace. No frame can show any of it: the drag is far under
+        // SnapThresholdPx, so pupPops read a contented 0 the whole time.
+        window.eaNetStale = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetStaleTest')); }
+            catch (e) { console.warn('[debug] eaNetStale failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: the pinned many-puppet drive bench (card 25ad0659 step 2c-ii). Puts n real
         // puppets in the world through the real self-heal path and times NetPuppets.Drive,
         // reporting ABSOLUTE us/call, ns/puppet and the share of the 16.7ms frame budget.

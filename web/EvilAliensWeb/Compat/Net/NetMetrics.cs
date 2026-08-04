@@ -152,6 +152,16 @@ namespace EvilAliensWeb.Compat.Net
         public long ImpDropped;         // stream packets the impairment wrapper dropped
         public int ImpHeld;             // packets currently parked in its delay queues
         public float ImpLagMs;          // settings in force at report time
+        // Snapshot entries REFUSED as stale by the per-netId seq guard (card f5cf7a5c) -- an
+        // entry that decoded fine and named a puppet we hold, but was older than the sample
+        // already applied to it. NOT counted in snapUnk: nothing about the id was unknown.
+        //
+        // It is not a fault counter and not a 0 bar. It tracks the LINK's reorder rate, so an
+        // unimpaired BroadcastChannel or in-process run reads 0 while a real lossy WebRTC
+        // pairing reads whatever that connection is doing -- which is the point, since before
+        // the guard every one of those entries silently dragged a puppet backwards instead.
+        public long SnapStale;
+
         public float ImpLossPct;
         public float ImpJitterMs;
 
@@ -176,7 +186,7 @@ namespace EvilAliensWeb.Compat.Net
             // corrections. Printed because pupPops cannot be judged without it -- a big world
             // stretches the turn and pops follow, on a perfectly healthy link (card 48ab9b2f).
             return string.Format(CultureInfo.InvariantCulture,
-                "[net] role={0} peer={1} localShip={2} remoteShip={3} roster={38} txStream={4} rxStream={5} drop={6} sgap={7} buf={8:0}ms interp={9} extrap={10} pops={11} maxPop={12:0.0}px evTx={13} evRx={14} dup={15} dupLive={41} dupDecl={42} dupBad={43} ordViol={16} seqGap={17} liveIds={18} snapTurn={19}ms snapTx={20} snapRx={21} snapEnt={22} snapUnk={23} snapNew={24} snapDead={25} snapBad={26} pupPops={27} clTx={28} clRx={29} clKill={30} clPaid={31} beatTx={32} beatRx={33} resets={34} wins={35} pauses={36} tetherBrk={37} hudTx={39} hudRx={40} teleports={44} tpUnmarked={45}",
+                "[net] role={0} peer={1} localShip={2} remoteShip={3} roster={38} txStream={4} rxStream={5} drop={6} sgap={7} buf={8:0}ms interp={9} extrap={10} pops={11} maxPop={12:0.0}px evTx={13} evRx={14} dup={15} dupLive={41} dupDecl={42} dupBad={43} ordViol={16} seqGap={17} liveIds={18} snapTurn={19}ms snapTx={20} snapRx={21} snapEnt={22} snapUnk={23} snapNew={24} snapDead={25} snapBad={26} snapStale={46} pupPops={27} clTx={28} clRx={29} clKill={30} clPaid={31} beatTx={32} beatRx={33} resets={34} wins={35} pauses={36} tetherBrk={37} hudTx={39} hudRx={40} teleports={44} tpUnmarked={45}",
                 isHost ? "host" : "join", peerUp ? "up" : "down",
                 localShip ? 1 : 0, remoteShip ? 1 : 0,
                 StreamTx, StreamRx, StreamDropped, StreamSeqGaps,
@@ -185,7 +195,8 @@ namespace EvilAliensWeb.Compat.Net
                 SnapTx, SnapRx, SnapEntriesRx, SnapUnknownIds, SnapNew, SnapDead, SnapBad, PuppetPops,
                 ClaimsTx, ClaimsRx, ClaimsHonored, ClaimsPaidDead,
                 BeatsTx, BeatsRx, Resets, Victories, Pauses, TetherBreaks, roster,
-                HudTx, HudRx, DupLive, DupDeclined, DupBad, Teleports, UnmarkedTeleports) + sc + imp;
+                HudTx, HudRx, DupLive, DupDeclined, DupBad, Teleports, UnmarkedTeleports,
+                SnapStale) + sc + imp;
         }
     }
 }

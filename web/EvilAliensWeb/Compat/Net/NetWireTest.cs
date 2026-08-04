@@ -532,8 +532,6 @@ namespace EvilAliensWeb.Compat.Net
             // ref offset -- the one message whose decode is stateful across entries, so two
             // entries with DIFFERENT extra lengths is the case that finds a stride bug.
             byte[] snap = new byte[512];
-            snap[0] = NetProtocol.MsgWorldSnapshot;
-            snap[1] = 2;
             int wOff = NetProtocol.SnapshotHeaderBytes;
             //
             // The two entries also carry DIFFERENT per-sample flags (card e79bb994), which is
@@ -546,12 +544,30 @@ namespace EvilAliensWeb.Compat.Net
             second.Hp = 9;
             NetProtocol.WriteSnapshotEntry(snap, ref wOff, 202, 2,
                 NetProtocol.NetSnapshotFlags.Teleported, second, null, 0);
+            // The header is stamped LAST, as the sender does it -- the entry loop is what knows
+            // how many entries fit. The seq (card f5cf7a5c) is picked ABOVE the u8 count's range
+            // and with distinct high and low bytes, so a decoder reading it from the wrong offset
+            // or as one byte cannot pass.
+            const ushort SnapSeq = 0x2A07;
+            NetProtocol.WriteSnapshotHeader(snap, 2, SnapSeq);
             byte[] packed = new byte[wOff];
             Array.Copy(snap, packed, wOff);
             byte[] gotSnap = Round(packed, reliable: false);
             int rOff = NetProtocol.SnapshotHeaderBytes;
             byte f1 = 0xFF;
             byte f2 = 0xFF;
+            check("MsgWorldSnapshot's header round-trips its count AND its packet seq",
+                gotSnap != null
+                && NetProtocol.TryReadSnapshotHeader(gotSnap, out byte hdrCount, out ushort hdrSeq)
+                && hdrCount == 2 && hdrSeq == SnapSeq);
+            // The negatives beside it: the header decoder is what every entry walk is gated on,
+            // so a truncated or mistyped packet must be refused rather than read as count 0.
+            check("a snapshot packet shorter than its header is refused",
+                !NetProtocol.TryReadSnapshotHeader(new byte[] { NetProtocol.MsgWorldSnapshot, 1, 0 },
+                    out _, out _));
+            check("a packet whose type is not MsgWorldSnapshot is refused",
+                !NetProtocol.TryReadSnapshotHeader(new byte[] { NetProtocol.MsgShipState, 1, 0, 0 },
+                    out _, out _));
             bool snapOk = gotSnap != null && gotSnap[1] == 2
                 && NetProtocol.TryReadSnapshotEntry(gotSnap, ref rOff, out ushort id1, out byte t1,
                     out f1, out NetBaseState st1, out int e1Off, out int e1Len)

@@ -76,6 +76,9 @@ namespace EvilAliensWeb.Compat.Net
         float NetLagMs { get; }     // ?netlag
         float NetLossPct { get; }   // ?netloss
         float NetJitterMs { get; }  // ?netjitter
+        // ?netstaleguard=0 -- the ONE flag here whose default answer is TRUE, because it turns a
+        // fix OFF rather than a diagnostic on. Card f5cf7a5c; see NetPuppets.OnSnapshotEntry.
+        bool SnapshotStaleGuard { get; }
 
         // ---- step 2b: the four ServiceHelper services --------------------------------------
         //

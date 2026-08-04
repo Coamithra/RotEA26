@@ -41,6 +41,10 @@ namespace EvilAliensWeb.Compat
 	//                  (card 68f62e92 refuses every hit-stop there — one peer's world halting
 	//                  while the wire streams on is what rewound the other peer's enemies).
 	//                  THE DELIBERATE BUG REPRODUCTION, and IN `Active` for that reason.
+	//   ?netstaleguard=0  turn the world-snapshot staleness guard OFF, so a reordered or late
+	//                  snapshot entry drags a puppet backwards again (card f5cf7a5c). The other
+	//                  deliberate bug reproduction, and in `Active` for the same reason. ON by
+	//                  default, so `Active` tests its NEGATION.
 	//   ?metalscore    re-enable the chrome-sheen (metal.fx) on the in-game score + "Press Start"
 	//                  text (OFF by default since card 37c4ccca — the chrome's dark mid-band reads
 	//                  crunchy on the tiny HUD glyphs) to A/B against the plain flattened drop shadow
@@ -393,6 +397,18 @@ namespace EvilAliensWeb.Compat
 		// reintroducing a net-desync bug — it must never reach a public lobby or a listed
 		// game. Every legitimate use is a dev `?net=` boot, which is anything-goes.
 		public static bool NetHitstop { get; private set; }
+
+		// The world-snapshot staleness guard (card f5cf7a5c), ON by default -- `?netstaleguard=0`
+		// turns it OFF, restoring the pre-card behaviour where a reordered or late snapshot entry
+		// applies an older position than the one already on screen and drags the puppet backwards.
+		//
+		// DEFAULTS TRUE, which makes it the odd one out in this file: every other boolean here
+		// turns something ON, so `Active` asks "was it set". This one turns a FIX OFF, so `Active`
+		// asks the inverse (`!NetSnapshotStaleGuard`) -- and it is in `Active` for the
+		// `?nethitstop=1` reason, being a deliberate bug reproduction that must never reach a
+		// public lobby. A negative control you cannot run two months later is not a negative
+		// control, which is why it ships rather than living inside the test suite.
+		public static bool NetSnapshotStaleGuard { get; private set; } = true;
 
 		// Gates ONLY the automatic per-kill/boss-kill hit-stop freeze frame fired from
 		// Juice.KillPunch (KillableAlien.HitBy) — NOT player-death hit-stop (PlayerShip
@@ -1669,6 +1685,9 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "nethitstop":
 					NetHitstop = IsOn(val);
+					break;
+				case "netstaleguard":
+					NetSnapshotStaleGuard = IsOn(val);
 					break;
 				case "slowmotrail":
 					SlowmoTrail = IsOn(val);
@@ -3790,7 +3809,7 @@ namespace EvilAliensWeb.Compat
 					+ " -- the gameplay RNG (RandomHelper) is seeded, so two runs of this boot "
 					+ "reach the same world. Reload without the flag for normal random play.");
 			}
-			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || AiFastForward > 1;
+			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash

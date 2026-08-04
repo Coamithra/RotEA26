@@ -2286,8 +2286,8 @@ the rest are tier-independent.
 - **The top screen edge gets its own strong push** (`TopEdgeAvoidStrength`): it is where UFOs
   spawn, and the stock edge term caps at `maxSteerStrength` 4, which loses to a lane escape (18)
   and pins the ship on the ceiling to be exploded by something spawning on it. **A port addition,
-  and MEASURED (card 2248e5eb): removing it costs deaths on both rigs and takes `UFO` kills from
-  132 to 356 on the spider rig** -- see the audit table below. `?aitopedgestrength=0` is the
+  and MEASURED (card 2248e5eb): removing it costs deaths on both rigs and takes deaths BY `UFO`
+  from 132 to 356 on the spider rig** -- see the audit table below. `?aitopedgestrength=0` is the
   2008 arm; the generic 150px/strength-4 screen-bound push underneath it is untouched.
 - **Every avoidance field here shares the `(1-t)^p` falloff shape** (`ThreatFieldStrength`) -- a
   flat push across a band fights the screen bounds instead of easing off once the ship is clear.
@@ -2531,7 +2531,7 @@ refuted and reverted.** Positive = that arm is worse than the shipped build of t
 | **beam field + sidestep** (`260px` / `14` / `7`) | `?ailazerpx=150&ailazerstrength=4&ailazerdodge=0` | +0.98 +- 0.65 | **-4.55 +- 0.69** | **REVERTED to 150 / 4 / 0** |
 
 - **The top-edge term is confirmed by its own stated mechanism, not just by the deaths column.**
-  Removing it multiplies exactly the kill it was added to prevent: `UFO` deaths 132 -> 356 on
+  Removing it multiplies exactly the death it was added to prevent: deaths by `UFO` 132 -> 356 on
   the spider rig and 150 -> 212 on Level 1, because a ship pinned on the ceiling is exploded by
   whatever spawns on top of it. **The spider margin is thin** (+0.67 +- 0.64 barely excludes
   zero) and rests on Level 1 agreeing independently plus that histogram; do not quote it alone.
@@ -2547,10 +2547,13 @@ refuted and reverted.** Positive = that arm is worse than the shipped build of t
   globally and decisively. So the beam field at 150px now pushes *less* than the original did at
   the same range. The configuration that was measured is exactly the one that ships, so the
   number stands -- but it is not "the 2008 treatment restored".
-- **The sidestep is OFF, not deleted**: `DefaultLazerDodgeStrength` is 0 and `DoAIMove` skips the
-  term rather than summing a zero vector. `?ailazerdodge=7` brings it back. It also LEFT
-  `ProbeAiFieldComposition`'s weakest-repellent min for that reason -- that bound is about a
-  pushing repellent being eaten by a floor, and a term that is switched off pushes nothing.
+- **The sidestep is OFF, not deleted**: `DefaultLazerDodgeStrength` is 0 and `?ailazerdodge=7`
+  brings it back. `DoAIMove`'s `> 0` branch is an early-out, not a behaviour difference (the zero
+  vector would steer identically) -- it is there so the term reads as switched off at the point of
+  use. `ProbeAiFieldComposition` now folds that constant into its weakest-repellent min only WHEN
+  IT IS ON: that bound is about a pushing repellent being eaten by a floor, a term that is
+  switched off pushes nothing, and making it a condition means the bound re-arms itself if the
+  sidestep is ever baked back on.
 - **PICK THE RIG WITH `killers=`, NOT WITH INTUITION.** The card specified "Level 3 sections" for
   the laser arm; the pre-flight refuted it -- `?level=Level3&brainboss` lands **zero** `Lazer`
   deaths over seeds 1-3 despite spawning big UFOs, as does plain `?level=Level3`. **Level 1 is

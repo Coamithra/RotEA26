@@ -1520,7 +1520,7 @@ namespace EvilAliensWeb.Compat
 		// ?ailazerpx=<px>        how wide a berth a live beam gets,
 		// ?ailazerstrength=<f>   how hard it pushes at the beam, and
 		// ?ailazerdodge=<f>      the lateral sidestep during a big UFO's windup, which 2008 has no
-		//                        counterpart for at all.
+		//                        counterpart for at all and which bakes to 0 (off).
 		// **THE BAKED VALUES ARE NOW THE 2008 ONES** (150 / 4 / 0): the A/B went against the port
 		// here, so `?ailazerpx=260&ailazerstrength=14&ailazerdodge=7` is the NEGATIVE control --
 		// the refuted port configuration, kept reachable so the verdict can be reproduced.

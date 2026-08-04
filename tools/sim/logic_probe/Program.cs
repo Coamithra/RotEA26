@@ -607,16 +607,17 @@ internal static class Program
         return 0;
     }
 
-    // Card 48b7c6b1 -- the ?ai* TUNING knobs' REJECTION diagnostic. Fourteen flags parsed as
+    // Card 48b7c6b1 -- the ?ai* TUNING knobs' REJECTION diagnostic. They were parsed as
     // `TryParse` plus an optional range guard, with no else, so `?aireact=420x` left the baked
     // default in force and said nothing. That is the failure card 6eb8dc9e named for ?flyspider*:
     // a run that measures the DEFAULT path while carrying the label of the variant under test --
-    // and these fourteen are the ones whose readings get published as sweep rows, where a
+    // and these are the ones whose readings get published as sweep rows, where a
     // silently-ignored value reads as "the knob did nothing".
     //
     // NOT every flag whose name starts with "ai": `?aifriends=<0-3>` (a co-op soak seam, not a
     // tuning knob) is still silent, and so is the boolean `?aiplayer`/`?aibench` pair, which
-    // cannot have a bad value. Say "the 14 tuning knobs", never "the whole ?ai* family".
+    // cannot have a bad value. Say "the ?ai* tuning knobs (the `rows` table below)", never "the
+    // whole ?ai* family" -- and never a literal count, which has gone stale twice already.
     //
     // Silence is invisible in any frame or number, so the assertion has to be made about the
     // OUTPUT. Three legs per flag, driven through the real DebugFlags.Parse:
@@ -861,7 +862,7 @@ internal static class Program
             "DefaultPowerupReachPx", "DefaultRepulseCancelDelta", "DefaultSteerNoiseFloor",
             "DefaultSeekArriveDeadzonePx", "ShipMaxSpeed", "ShipDeceleration",
             "SweepLaneAvoidStrength",
-            "DefaultLazerAvoidStrength"
+            "DefaultLazerAvoidStrength", "DefaultLazerDodgeStrength"
         };
         var vals = new Dictionary<string, float>();
         foreach (string n in names)
@@ -912,14 +913,19 @@ internal static class Program
         // and so never passes through RepulseCancelDelta at all. Folding it in would mix the two
         // populations this card just separated, and it could not fail today (20 against a min of
         // 4), which is exactly how a wrong invariant gets copied.
-        // DefaultLazerDodgeStrength LEFT this min in card 2248e5eb, when the measurement took it
-        // to 0 and DoAIMove started skipping the term outright. This bound is about a repellent
-        // that PUSHES being silently eaten by a floor; a term that is switched off pushes nothing,
-        // so including it would assert 0 > 0.2 and fail on a configuration that is correct. It
-        // comes back into the min the moment the sidestep is ever baked back on.
+        // DefaultLazerDodgeStrength is folded in only WHEN IT IS ON: card 2248e5eb's measurement
+        // took it to 0 and DoAIMove now skips the term outright. This bound is about a repellent
+        // that PUSHES being silently eaten by a floor, and a term that is switched off pushes
+        // nothing, so including it unconditionally would assert 0 > 0.2 and fail a configuration
+        // that is correct. The condition is the contract rather than a comment promising someone
+        // will remember: bake the sidestep back on and the bound re-arms itself.
         const float MaxSteerStrength = 4f;
         float weakestRepellent = Math.Min(MaxSteerStrength,
             Math.Min(vals["SweepLaneAvoidStrength"], vals["DefaultLazerAvoidStrength"]));
+        if (vals["DefaultLazerDodgeStrength"] > 0f)
+        {
+            weakestRepellent = Math.Min(weakestRepellent, vals["DefaultLazerDodgeStrength"]);
+        }
         Check("every REPELLENT's full strength clears the repulsion cancellation delta",
             weakestRepellent > repelDelta,
             "weakest repellent " + weakestRepellent + " vs DefaultRepulseCancelDelta " + repelDelta

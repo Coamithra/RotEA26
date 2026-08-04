@@ -306,8 +306,8 @@ public class PlayerShip : AlienDrawableGameComponent
 	// Strong enough to stand up to a lane escape, so the ship settles below the spawn line
 	// instead of being held against it.
 	//
-	// A PORT ADDITION, and 2008 HAS NO COUNTERPART: the original's only top-edge term is the
-	// generic 150px/strength-4 screen-bound push, which this port still ships verbatim a few
+	// A PORT ADDITION with no DEDICATED counterpart in 2008: the original's only top-edge term is
+	// the generic 150px/strength-4 screen-bound push, which this port still ships verbatim a few
 	// lines above (`edgeMargin`/`maxSteerStrength` in DoAIMove). So `?aitopedgestrength=0` does
 	// not disable an edge push, it restores the 2008 treatment exactly -- which is what makes it
 	// the null arm rather than a mutilation. Card 2248e5eb; verdict recorded in
@@ -361,9 +361,8 @@ public class PlayerShip : AlienDrawableGameComponent
 	private static float LazerAvoidStrength => EvilAliensWeb.Compat.DebugFlags.AiLazerAvoidStrength ?? DefaultLazerAvoidStrength;
 
 	// Lateral push while a big UFO is winding up, to make its locked-at-fire aim stale. A port
-	// invention with no 2008 counterpart, OFF at the baked default per the verdict above -- the
-	// term is skipped entirely at 0 rather than summing a zero vector, and `?ailazerdodge=7`
-	// brings it back for anyone re-opening the question.
+	// invention with no 2008 counterpart, OFF at the baked default per the verdict above.
+	// `?ailazerdodge=7` brings it back for anyone re-opening the question.
 	public const float DefaultLazerDodgeStrength = 0f;
 
 	private static float LazerDodgeStrength => EvilAliensWeb.Compat.DebugFlags.AiLazerDodgeStrength ?? DefaultLazerDodgeStrength;
@@ -1875,8 +1874,10 @@ public class PlayerShip : AlienDrawableGameComponent
 			// moving ACROSS the UFO's line of sight during the windup makes the locked aim stale.
 			// Standing still and reacting to the beam afterwards cannot work: it appears along its
 			// whole length at once.
-			// OFF at the baked default (card 2248e5eb) -- `dodgeStrength > 0` is what makes that a
-			// skip rather than a zero vector added to the sum every frame.
+			// OFF at the baked default (card 2248e5eb). `dodgeStrength > 0` is an early-out and
+			// nothing more -- adding the zero vector would steer identically -- but it is what
+			// makes "this term is switched off" visible at the branch instead of only at the
+			// constant three hundred lines up.
 			float dodgeStrength = LazerDodgeStrength;
 			if (dodgeStrength > 0f && baddy is UFO && ((UFO)baddy).IsBig && ((UFO)baddy).AiChargingLazer)
 			{
@@ -2309,9 +2310,13 @@ public class PlayerShip : AlienDrawableGameComponent
 		// boss's own field, so fleeing upward parked the ship on the ceiling. This term is scaled
 		// to actually compete, and it ramps linearly rather than with the steep field falloff so
 		// it is already pushing well before the ship gets there.
-		if (base.Position.Y < TopEdgeDangerPx)
+		// `topEdgePx > 0` is the guarded divisor, mirroring the beam field above: ?aitopedgepx=0
+		// passes the flag's `>= 0` range check, and relying on the position clamp to keep Y
+		// positive is an invariant three hundred lines away.
+		float topEdgePx = TopEdgeDangerPx;
+		if (topEdgePx > 0f && base.Position.Y < topEdgePx)
 		{
-			direction += new Vector2(0f, TopEdgeAvoidStrength * (1f - base.Position.Y / TopEdgeDangerPx));
+			direction += new Vector2(0f, TopEdgeAvoidStrength * (1f - base.Position.Y / topEdgePx));
 		}
 		if (hasWall)
 		{

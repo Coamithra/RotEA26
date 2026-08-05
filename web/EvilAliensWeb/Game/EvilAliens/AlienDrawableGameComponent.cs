@@ -729,10 +729,21 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		if ((!awarded & (PointValue > 0f)) && other is IAlienKiller && ((IAlienKiller)other).Player() >= 0)
 		{
 			int slot = ((IAlienKiller)other).Player();
-			// Online co-op (card b0ab09ec): report the combo-modified figure we just credited.
-			// Host -> it rides the death event; client -> it becomes a provisional credit the
-			// host's figure later replaces. No-op offline.
-			EvilAliensWeb.Compat.Net.NetSession.NoteAward(this, slot, Score.AddScore(PointValue, combo, Position, slot));
+			// ONE WRITER PER SLOT (card af96bcc2): this peer credits only slots it OWNS, with
+			// its own combo, instantly and finally -- a kill attributed to the other peer's
+			// slot is credited over there, off their own observation, and reaches us as their
+			// declared total on MsgHudState. Offline and for couch slots OwnsSlot is
+			// unconditionally true, so single-player and local co-op are byte-identical.
+			// The awarded latch is set either way: this entity's points are spoken for.
+			//
+			// The SlotCount bound is NOT decoration: the net layer's scratch kill agent can
+			// carry KillerSelf/KillerNone (254/255) as its slot, and before this card those
+			// paths were award-suppressed before they got here -- now this test is what keeps a
+			// wire sentinel out of the 4-wide score list.
+			if (slot < ScoreVisualiser.SlotCount && EvilAliensWeb.Compat.Net.NetSession.OwnsSlot(slot))
+			{
+				Score.AddScore(PointValue, combo, Position, slot);
+			}
 			awarded = true;
 		}
 	}
@@ -745,32 +756,30 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		}
 		// Per SEATED slot, not 0..Players-1: online co-op's roster is host-allocated and sparse
 		// (card 4d904410), so indexing by loop counter would pay unseated slots and skip real
-		// ones. The first seated player WE OWN still gets the positional floating text.
+		// ones.
 		//
-		// Card 7a8ec0d3: "first seated" alone would offer the one floater to a slot the other
-		// peer holds, and ScoreVisualiser.AddScore now suppresses a floater for a slot we do not
-		// own -- so a boss kill would show this screen no figure at all whenever slot 0 belongs
-		// to the peer, which on a joiner is always. Asking OwnsSlot here hands it to a slot whose
-		// popup will actually be drawn, at that slot's own multiplier. Offline and in local
-		// co-op OwnsSlot is true for every seated slot, so this IS "the first seated player".
+		// ONE WRITER PER SLOT (card af96bcc2): only slots this peer OWNS are credited, each
+		// with its own local combo multiplier; the other peer pays its own slots off its own
+		// observation of the same kill (BOTH peers seeing a boss die and each paying their own
+		// side is the intended double credit). The first owned slot gets the one positional
+		// floating text (card 7a8ec0d3 -- a floater for a slot the peer holds would be
+		// suppressed anyway, so it must go to a slot whose popup is drawn). Offline and in
+		// local co-op OwnsSlot is true for every seated slot, so this is unchanged there.
 		bool first = true;
 		for (int i = 0; i < Oracle.MaxPlayers; i++)
 		{
-			if (!oracle.IsSeated(i))
+			if (!oracle.IsSeated(i) || !EvilAliensWeb.Compat.Net.NetSession.OwnsSlot(i))
 			{
 				continue;
 			}
-			// Each slot is credited with ITS OWN combo multiplier, so a boss pays four
-			// different figures -- which is why the wire carries a per-slot award array
-			// rather than one number (card b0ab09ec).
-			if (first && EvilAliensWeb.Compat.Net.NetSession.OwnsSlot(i))
+			if (first)
 			{
-				EvilAliensWeb.Compat.Net.NetSession.NoteAward(this, i, Score.AddScore(PointValue, combo, Position, i));
+				Score.AddScore(PointValue, combo, Position, i);
 				first = false;
 			}
 			else
 			{
-				EvilAliensWeb.Compat.Net.NetSession.NoteAward(this, i, Score.AddScore(PointValue, combo, i));
+				Score.AddScore(PointValue, combo, i);
 			}
 		}
 		awarded = true;
@@ -864,15 +873,6 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	}
 
 	internal float NetPointValue => PointValue;
-
-	// Online co-op (card b0ab09ec): claim the award slot BEFORE running the real death path,
-	// so its AwardScore/AwardScoreToAll no-ops. Used on a client applying a host EvDeath --
-	// the FX must play, but the score has to be the host's figure off the wire, never this
-	// peer's own combo multiplier. Idempotent; irrelevant offline.
-	internal void NetSuppressAward()
-	{
-		awarded = true;
-	}
 
 	// Online co-op (card e79bb994): "I was REPOSITIONED, not moved."
 	//
@@ -1205,11 +1205,6 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	void EvilAliensWeb.Compat.Net.INetEntity.NetDriveExtras(GameTime gameTime)
 	{
 		NetDriveExtras(gameTime);
-	}
-
-	void EvilAliensWeb.Compat.Net.INetEntity.NetSuppressAward()
-	{
-		NetSuppressAward();
 	}
 
 	void EvilAliensWeb.Compat.Net.INetEntity.NetPlayFx(EvilAliensWeb.Compat.Net.NetFxKind kind)

@@ -105,9 +105,6 @@ namespace EvilAliensWeb.Compat.Net
         void NetTickTimers(GameTime gameTime);
         void NetDriveExtras(GameTime gameTime);
 
-        // Claim the award slot before a client-side death path runs (card b0ab09ec).
-        void NetSuppressAward();
-
         // Read-and-CLEAR "this entity was repositioned since you last asked" (card e79bb994).
         //
         // The host sets the latch at the reposition itself (NetNoteTeleport, called from the

@@ -208,12 +208,12 @@ namespace EvilAliensWeb.Compat.Net
             // ...and through a REAL frame, which an encode/decode pair alone cannot prove: a
             // matching pair of wrong offsets passes one (the NetWireTest rule).
             byte[] frame = NetProtocol.EncodeDeathEvent(1, IdMine, NetProtocol.KillerSelf,
-                OnScreen, new float[NetProtocol.MaxSlots]);
+                OnScreen);
             Check("a real EvDeath frame carries KillerSelf at the killer offset",
                 frame.Length == NetProtocol.DeathEventBytes
                 && NetProtocol.ClampKillerSlot(frame[6]) == NetProtocol.KillerSelf);
             byte[] attributed = NetProtocol.EncodeDeathEvent(1, IdMine, PeerSlot,
-                OnScreen, new float[NetProtocol.MaxSlots]);
+                OnScreen);
             Check("...and an ATTRIBUTED one still carries its slot (control)",
                 NetProtocol.ClampKillerSlot(attributed[6]) == PeerSlot);
         }
@@ -282,15 +282,12 @@ namespace EvilAliensWeb.Compat.Net
                 // the host through it would let a collapsed clamp mask a real wire regression.
                 Check("...carrying KillerSelf, not KillerNone",
                     deaths.Count == 1 && deaths[0][6] == NetProtocol.KillerSelf);
-                // Nobody earned it. The award array is what the client pays from, so a
-                // KillerSelf death that carried a figure would credit a slot for a suicide.
-                float[] awards = new float[NetProtocol.MaxSlots];
-                if (deaths.Count == 1)
-                {
-                    NetProtocol.ReadDeathAwards(deaths[0], awards);
-                }
-                Check("...and an ALL-ZERO award array -- nobody is credited for a self-destruct",
-                    AllZero(awards));
+                // v20 (card af96bcc2): the event carries NO award payload at all -- each peer
+                // credits its own slots off its own observation -- so the frame width is the
+                // whole claim, and a build that grew it back would fail here first.
+                Check("...and the v20 frame carries no award payload (" +
+                    (deaths.Count == 1 ? deaths[0].Length : -1) + " bytes)",
+                    deaths.Count == 1 && deaths[0].Length == NetProtocol.DeathEventBytes);
 
                 // 2b. NEGATIVE -- the same self-destruct, off screen. This is the ruling's gate:
                 // the host itself showed nothing there, so the peer must not hear a bang at the
@@ -483,6 +480,14 @@ namespace EvilAliensWeb.Compat.Net
                 NetSession.Stop("death-FX harness finished");
                 bin.TopOfTickFlush();
                 Check("the host session was stopped and left nothing Active", !NetSession.Active);
+                // The scripted peer's granted seat is a TRACE, and since card af96bcc2 a live
+                // one: with the roster seat left behind, every later section's AwardScoreToAll
+                // credits it (offline OwnsSlot is true for every slot), which is exactly the
+                // phantom this suite's own leave-no-trace rule exists to prevent. In production
+                // GameScene.Terminate's ResetPlayers() does this on the way out of a scene.
+                NetHost.Current.Oracle.ResetPlayers();
+                Check("...and the scripted peer's seat was released (leave-no-trace)",
+                    !NetHost.Current.Oracle.IsSeated(PeerSlot));
             }
         }
 
@@ -537,8 +542,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            NetPuppets.OnRemoteDeath(IdMine, NetProtocol.KillerSelf, Nowhere,
-                new float[NetProtocol.MaxSlots]);
+            NetPuppets.OnRemoteDeath(IdMine, NetProtocol.KillerSelf, Nowhere);
             bin.Update();
             int made = CountType<Explosion>(game) - boom;
             // Asplode spawns TWO blue bursts; KilledBy would spawn one. Asserting ">= 2" is what
@@ -558,8 +562,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            NetPuppets.OnRemoteDeath(IdMine2, NetProtocol.KillerNone, Nowhere,
-                new float[NetProtocol.MaxSlots]);
+            NetPuppets.OnRemoteDeath(IdMine2, NetProtocol.KillerNone, Nowhere);
             bin.Update();
             Check("NEGATIVE KillerNone still despawns SILENTLY (+"
                 + (CountType<Explosion>(game) - boom) + " explosions)",
@@ -615,7 +618,8 @@ namespace EvilAliensWeb.Compat.Net
                 !((AlienDrawableGameComponent)(object)skull).Collides);
             Check("...and left the puppet registry (live " + liveBefore + " -> "
                 + NetPuppets.LiveCount + ")", NetPuppets.LiveCount == liveBefore - 1);
-            Check("nothing was credited yet -- the host's EvDeath is the authority",
+            Check("nothing was credited -- this peer landed no blow, and one writer per slot"
+                + " means nobody pays it a share it did not earn (card af96bcc2)",
                 SameScores(score, before));
 
             // THE MarkRemoved LEG. Without the by-hand MarkRemoved in ReleaseDyingPuppet the
@@ -628,16 +632,14 @@ namespace EvilAliensWeb.Compat.Net
             Check("...and builds no replacement", CountType<BattleSkull>(game) == worldBefore);
 
             // The host's EvDeath arrives seconds later, when ITS animation ends. The puppet is
-            // gone from the registry by then, so it settles as an ordinary award-only
-            // reconciliation -- and must not fire a second burst.
+            // gone from the registry by then, so it must settle as a no-op: no second burst,
+            // and since v20 no score either -- the event carries no award, and this peer's own
+            // credit (if any) happened at its own kill observation.
             boom = CountType<Explosion>(game);
             before = Scores(score);
-            float[] awards = new float[NetProtocol.MaxSlots];
-            awards[PeerSlot] = 250f;
-            NetPuppets.OnRemoteDeath(IdSkull, PeerSlot, Nowhere, awards);
-            Check("the host's late EvDeath pays its award (+"
-                + Round(score.PointScore(PeerSlot) - before[PeerSlot]) + ")",
-                Math.Abs(score.PointScore(PeerSlot) - before[PeerSlot] - 250f) < 0.01f);
+            NetPuppets.OnRemoteDeath(IdSkull, PeerSlot, Nowhere);
+            Check("the host's late EvDeath moves no score (v20 carries no award)",
+                SameScores(score, before));
             Check("...and fires NO second burst on a puppet already dying",
                 CountType<Explosion>(game) == boom);
 
@@ -709,19 +711,26 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            float[] awards = new float[NetProtocol.MaxSlots];
-            awards[PeerSlot] = 400f;
-            NetPuppets.OnRemoteDeath(IdSkull3, PeerSlot, Nowhere, awards);
+            // What the local death path should credit under one-writer (card af96bcc2): this
+            // suite runs OFFLINE, where OwnsSlot is true for every slot, so NetKill's KilledBy
+            // -> AwardScore credits the killer slot with THIS peer's own multiplier. In a real
+            // client session the same call credits nothing for a peer-owned slot -- the gate is
+            // the session, not the code path.
+            float expected = ((INetEntity)skull).NetPointValue
+                * (1f + score.Combo(PeerSlot) / 20f);
+            NetPuppets.OnRemoteDeath(IdSkull3, PeerSlot, Nowhere);
             Check("the death FX ran (+" + (CountType<Explosion>(game) - boom) + " explosions)",
                 CountType<Explosion>(game) > boom);
             Check("the puppet was RELEASED, not deleted mid-animation",
                 InWorld(game, (GameComponent)(object)skull) && skull.Enabled);
             // The POSITIVE CONTROL for every "no slot was credited" assertion above: the award
             // machinery is demonstrably still working, so those zeroes mean "nobody earned it"
-            // rather than "payment is broken".
-            Check("...and the killer slot WAS paid, verbatim off the wire (+"
-                + Round(score.PointScore(PeerSlot) - before[PeerSlot]) + ")",
-                Math.Abs(score.PointScore(PeerSlot) - before[PeerSlot] - 400f) < 0.01f);
+            // rather than "payment is broken". The figure is THIS peer's own derivation --
+            // PointValue at the slot's live combo -- never a number off the wire.
+            Check("...and the killer slot was credited by the LOCAL death path (+"
+                + Round(score.PointScore(PeerSlot) - before[PeerSlot]) + " vs own-combo "
+                + Round(expected) + ")",
+                Math.Abs(score.PointScore(PeerSlot) - before[PeerSlot] - expected) < 0.01f);
         }
 
         // ---- 6. the EvDying beat releases on the EVENT tick ----------------------------------
@@ -820,12 +829,12 @@ namespace EvilAliensWeb.Compat.Net
         // Die()s ON ITS OWN (an animation that never terminates leaves a corpse in every
         // client's world for the rest of the level).
         //
-        // AWARDS EXACTLY ONCE is the fourth, and the score panels DO discriminate it: each of
-        // these bosses ends its asplode in AwardScoreToAll, which a released puppet really does
-        // reach, so a lost NetSuppressAward would re-derive the figure from this peer's own
-        // combo on top of the host's. The host's late EvDeath paying its array is the positive
-        // control beside it -- without a leg where a score DOES move, "nothing moved" would pass
-        // just as well on a build where payment had stopped working altogether.
+        // NO PHANTOM SCORE is the fourth: each of these bosses ends its asplode in
+        // AwardScoreToAll, which a released puppet really does reach -- and under one writer per
+        // slot (card af96bcc2) that call credits only OWNED SEATED slots, of which a menu suite
+        // has none, so the whole choreography must move no score and the late v20 EvDeath none
+        // either. The leg where a score DOES move -- proving payment still works at all -- is
+        // section 5's local-death credit, not this section.
         private static void Section8BossChoreography(StringBuilder sb, Action<string, bool> Check,
             ComponentBin bin, Game game, ScoreVisualiser score, List<GameComponent> planted)
         {
@@ -833,19 +842,19 @@ namespace EvilAliensWeb.Compat.Net
                 + " released puppet (card ad9c8f8b)\n");
             // maxTicks is a generous CEILING, not the animation's length -- see TickUntilGone.
             BossLeg<BrainBoss>(sb, Check, bin, game, score, planted, "BrainBoss", IdBrainBoss,
-                TypeIdxOf(new BrainBoss(game)), midTicks: 300, maxTicks: 2000, award: 900f,
+                TypeIdxOf(new BrainBoss(game)), midTicks: 300, maxTicks: 2000,
                 opensWithFx: true);
             BossLeg<FakeBoss>(sb, Check, bin, game, score, planted, "FakeBoss", IdFakeBoss,
-                TypeIdxOf(new FakeBoss(game)), midTicks: 60, maxTicks: 900, award: 500f,
+                TypeIdxOf(new FakeBoss(game)), midTicks: 60, maxTicks: 900,
                 opensWithFx: true);
             BossLeg<JunkBoss>(sb, Check, bin, game, score, planted, "JunkBoss", IdJunkBoss,
-                TypeIdxOf(new JunkBoss(game)), midTicks: 60, maxTicks: 900, award: 700f,
+                TypeIdxOf(new JunkBoss(game)), midTicks: 60, maxTicks: 900,
                 opensWithFx: false);
         }
 
         private static void BossLeg<T>(StringBuilder sb, Action<string, bool> Check,
             ComponentBin bin, Game game, ScoreVisualiser score, List<GameComponent> planted,
-            string name, ushort netId, byte typeIdx, int midTicks, int maxTicks, float award,
+            string name, ushort netId, byte typeIdx, int midTicks, int maxTicks,
             bool opensWithFx)
             where T : AlienDrawableGameComponent
         {
@@ -876,16 +885,15 @@ namespace EvilAliensWeb.Compat.Net
                 && !boss.Collides && NetPuppets.LiveCount == liveBefore - 1);
 
             // The host's EvDeath arrives while the animation is still running -- it finished on
-            // the host seconds before it finishes here. The puppet has left the registry, so this
-            // settles as an award-only reconciliation and must fire no second burst.
+            // the host seconds before it finishes here. The puppet has left the registry, so it
+            // must settle as a no-op: no second burst, and since v20 no score (the event carries
+            // no award; each peer's own AwardScoreToAll at ITS death observation is the credit,
+            // and at the menu no slot is seated so nothing moves here either way).
             int beforeLate = DeathFxCount(game);
             float[] lateBefore = Scores(score);
-            float[] awards = new float[NetProtocol.MaxSlots];
-            awards[PeerSlot] = award;
-            NetPuppets.OnRemoteDeath(netId, PeerSlot, Nowhere, awards);
-            Check(name + ": the host's late EvDeath pays its award once (+"
-                + Round(score.PointScore(PeerSlot) - lateBefore[PeerSlot]) + ")",
-                Math.Abs(score.PointScore(PeerSlot) - lateBefore[PeerSlot] - award) < 0.01f);
+            NetPuppets.OnRemoteDeath(netId, PeerSlot, Nowhere);
+            Check(name + ": the host's late EvDeath moves no score (v20 carries no award)",
+                SameScores(score, lateBefore));
             Check(name + ": ...and fires NO second burst on a puppet already dying",
                 DeathFxCount(game) == beforeLate);
 
@@ -905,11 +913,11 @@ namespace EvilAliensWeb.Compat.Net
                 !InWorld(game, (GameComponent)(object)boss));
             Check(name + ": ...having spawned strictly more FX on the way out (+"
                 + (DeathFxCount(game) - midway) + ")", DeathFxCount(game) > midway);
-            // The finale calls AwardScoreToAll. Suppressed, so the ONLY movement across this
-            // whole leg is the host's figure above -- which is what "awards exactly once" means.
-            Check(name + ": nothing beyond the host's award ever moved a score panel",
-                Math.Abs(score.PointScore(PeerSlot) - before[PeerSlot] - award) < 0.01f
-                && SameScoresExcept(score, before, PeerSlot));
+            // The finale calls AwardScoreToAll, which under one writer per slot credits only
+            // OWNED SEATED slots -- and a menu suite seats none, so the whole choreography must
+            // move nothing (card af96bcc2). Section 5 is the leg proving payment still works.
+            Check(name + ": no score panel ever moved across the whole choreography",
+                SameScores(score, before));
         }
 
         // ---- 9. SpiderBoss -- the one that is NOT a KillableAlien ----------------------------
@@ -1071,7 +1079,7 @@ namespace EvilAliensWeb.Compat.Net
             bin.TopOfTickFlush();
             for (int i = 0; i < NetProtocol.MaxSlots; i++)
             {
-                score.NetSetScore(i, scoreBefore[i], 0f);
+                score.NetSetScore(i, scoreBefore[i]);
             }
             bool anyLeft = false;
             foreach (GameComponent comp in planted)
@@ -1257,35 +1265,11 @@ namespace EvilAliensWeb.Compat.Net
             return cap;
         }
 
-        private static bool SameScoresExcept(ScoreVisualiser score, float[] before, int skipSlot)
-        {
-            for (int i = 0; i < NetProtocol.MaxSlots; i++)
-            {
-                if (i != skipSlot && Math.Abs(score.PointScore(i) - before[i]) >= 0.01f)
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
-
         private static bool SameScores(ScoreVisualiser score, float[] before)
         {
             for (int i = 0; i < NetProtocol.MaxSlots; i++)
             {
                 if (Math.Abs(score.PointScore(i) - before[i]) >= 0.01f)
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        private static bool AllZero(float[] values)
-        {
-            foreach (float v in values)
-            {
-                if (v != 0f)
                 {
                     return false;
                 }

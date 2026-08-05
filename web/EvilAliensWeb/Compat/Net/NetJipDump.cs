@@ -58,7 +58,7 @@ namespace EvilAliensWeb.Compat.Net
     {
         // Bumped when a line's SHAPE changes, so the python differ can refuse a dump it does not
         // understand instead of silently comparing half a world.
-        internal const int FormatVersion = 4;
+        internal const int FormatVersion = 5;
 
         // Descriptor extras are small (the widest shipped block is a handful of bytes); this is
         // an order of magnitude over any of them and is asserted rather than assumed below.
@@ -292,14 +292,13 @@ namespace EvilAliensWeb.Compat.Net
                 var levels = new int[NetProtocol.HudLevelCount];
                 sb.Append(" | s").Append(slot)
                     .Append(" seat=").Append(oracle.IsSeated(slot) ? oracle.Controller(slot).ToString() : "-")
-                    .Append(" pts=").Append((int)score.PointScore(slot))
-                    // `pts` is what this peer DISPLAYS, and on a client that is the host's
-                    // authoritative figure PLUS its own still-unsettled provisional credits
-                    // (card b0ab09ec) -- so comparing two peers' `pts` compares two different
-                    // quantities. `uns` is the provisional part, so the differ can subtract it
-                    // and compare the AUTHORITATIVE figures, which is what the ledger's contract
-                    // is actually about (card 94001db7). Reads 0 on a host and offline.
-                    .Append(" uns=").Append((int)NetPuppets.UnsettledFor(slot));
+                    // `pts` is directly comparable across the two peers since card af96bcc2
+                    // (one writer per slot): the replica is a verbatim adoption of the owner's
+                    // declared total, so the two figures are the SAME quantity, at most one
+                    // MsgHudState packet apart. The `uns=` field the dump used to carry (the
+                    // provisional-ledger correction, cards b0ab09ec / 94001db7) is gone with
+                    // the ledger -- dump v5.
+                    .Append(" pts=").Append((int)score.PointScore(slot));
                 if (slot < ScoreVisualiser.SlotCount)
                 {
                     score.NetReadHudState(slot, levels, out int combo,

@@ -111,15 +111,14 @@
 #   * SpiderBoss stops announcing at its death entry                      -> 2  (section 2g)
 #   * ReplayLive back to the killable-only discriminant                   -> 1  (section 2h ONLY,
 #     i.e. the live beat stays green -- which is what proves the catch-up leg is its own path)
-#   * the null-killable branch skips NetSuppressAward                     -> 1  (section 9's score
-#     leg -- so those "nothing was credited" zeroes are discriminating, not vacuous)
 #   * SpiderBoss.NetBeginDeferredDeath loses its idempotence guard        -> 1  (section 9)
 #   * SpiderBoss.NetState stops refusing a wire state while dying          -> 2  (section 9's
 #     snapshot-clobber legs; the second reports +32, i.e. a whole second debris burst)
 #   * a killable deferred death deleted mid-animation (pre-PR#267)        -> 9  (sections 4, 6
 #     and all three of section 8's bosses)
-# Dropping NetSuppressAward on the KILLABLE branch is caught too, but LOUDLY rather than cleanly:
-# the suite aborts in section 4 with an ArgumentOutOfRangeException out of the award path.
+# (The two NetSuppressAward mutation rows retired with the member itself -- card af96bcc2
+# deleted award suppression outright; the "nothing was credited" zeroes now discriminate via
+# the empty menu roster + the released scripted-peer seat, asserted in section 2's teardown.)
 #
 # LEAVE-NO-TRACE is asserted by RUNNING IT THREE TIMES BELOW, which is the strongest evidence
 # available for it: the teardown sweeps Explosion, BloodExplosion and BrainAura, restores the
@@ -181,7 +180,7 @@ expect SpiderBoss: a snapshot turn does NOT un-do the local death
 expect SpiderBoss: \.\.\.so the host's beat after it fires NO second burst
 
 expect 10\. teardown
-expect \[netdeathfx\] 148 passed, 0 failed
+expect \[netdeathfx\] 149 passed, 0 failed
 
 # LEAVE-NO-TRACE: two more runs in the SAME process, which is what makes the teardown's own
 # claims mean something. A leaked Explosion, BloodExplosion or BrainAura, an unrestored score

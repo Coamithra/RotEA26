@@ -9,7 +9,7 @@ namespace EvilAliensWeb.Compat.Net
     //
     // WHY: every net verification before this either needed two Chrome windows (which cannot both
     // tick at a useful rate -- see the two-window GOTCHA in this directory's CLAUDE.md) or drove
-    // one internal policy through a synthetic input (NetImpairment.SelfTest, NetScoreLedger.
+    // one internal policy through a synthetic input (NetImpairment.SelfTest, NetScoreTest.
     // SelfTest). Neither can reach a real NetSession's own decisions off a real wire. A paired
     // in-memory transport can: NetSession's session entry points already take an arbitrary
     // INetTransport (StartMenuSession / StartListedSession are the public ones -- StartWith itself

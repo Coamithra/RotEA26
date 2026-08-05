@@ -478,7 +478,7 @@ namespace EvilAliensWeb.Compat.Net
             int[][] levelRows = { levels };
             int[][] optionRows = { new[] { options0, options1 } };
             peer.SendStream(NetProtocol.EncodeHudState(slots, combos, types, progressRow, levelRows,
-                optionRows, 1));
+                optionRows, new float[] { 0f }, 1));
             wire.Pump();
             NetSession.Update();
         }

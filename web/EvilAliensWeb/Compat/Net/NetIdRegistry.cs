@@ -49,11 +49,6 @@ namespace EvilAliensWeb.Compat.Net
             // (SendSnapshot writes a single buffer and hands it to transport.SendStream), so
             // there is no per-peer subset for this to be ambiguous about.
             public int LastSentHp = -1;
-            // What the per-type death path credited, per slot (card b0ab09ec). Lazily allocated
-            // -- most entities never award (they despawn) and this is per LIVE entity, so it
-            // must not cost an array each. Filled by NetSession.NoteAward during KilledBy, read
-            // one tick later by OnHostDeath at the removal seam.
-            public float[] Awards;
             // The claim ledger for the window BEFORE this entity has a death record (card
             // 1bfcd705). NetSession.recentDeaths is only written at the removal seam, one
             // ComponentBin flush after a claim settles the entity -- so in between there is
@@ -62,9 +57,8 @@ namespace EvilAliensWeb.Compat.Net
             // has already run (the ONLY signal for a Powerup or a plain non-killable, neither of
             // which flips IsDead), ClaimPaidMask is the paid-once bitmask per killer slot.
             // OnHostDeath folds the mask into the record it writes, so "paid at most once per
-            // (entity, slot)" holds across the flush. Same lifetime as Awards -- per LIVE entity,
-            // gone when the entity leaves the world, which is what stops a wrapped netId ever
-            // inheriting a stale mask.
+            // (entity, slot)" holds across the flush. Per LIVE entity, gone when the entity
+            // leaves the world, which is what stops a wrapped netId ever inheriting a stale mask.
             public byte ClaimPaidMask;
             public bool ClaimSettled;
         }

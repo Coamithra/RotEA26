@@ -181,21 +181,26 @@ namespace EvilAliensWeb.Compat.Net
 
             sb.Append(" 1. a floating score belongs to the killer's own screen (card 7a8ec0d3)\n");
 
-            // 1a. THE NEGATIVE, and it is a PAIR: the peer's kill must credit the peer's slot and
-            // still put no popup on our screen. Asserting the absence alone would pass on a gate
-            // that suppressed the whole payout, and on a rig whose claim never arrived.
+            // 1a. THE NEGATIVE, and it is a PAIR: since card af96bcc2 the peer's kill credits
+            // NOTHING here (one writer -- the claimant pays itself on its own screen), so both
+            // halves are absences and the settle metric is what proves the claim arrived at all
+            // (a rig whose claim never landed would pass the absences vacuously).
             UFO theirs = Plant(bin, game, planted);
             Check("PRECONDITION the planted UFO got a netId",
                 NetIdRegistry.TryGetByComp((GameComponent)(object)theirs, out NetIdRegistry.Entry theirEntry));
             bin.TopOfTickFlush();
             int floatersBefore = score.FloatingTextCount;
             float theirScoreBefore = score.PointScore(TheirSlot);
+            long honoredBefore = NetSession.Metrics.ClaimsHonored;
             peer.SendReliable(NetProtocol.EncodeClaimEvent(eventSeq++, theirEntry.Id, TheirSlot));
             wire.Pump();
             NetSession.Update();
             float theirGain = score.PointScore(TheirSlot) - theirScoreBefore;
-            Check("the peer's claim really paid its slot (+" + Fmt(theirGain)
-                + ") -- without this the leg below is vacuous", theirGain > 0f);
+            Check("the claim really arrived and settled the entity (honored +"
+                + (NetSession.Metrics.ClaimsHonored - honoredBefore) + ")",
+                NetSession.Metrics.ClaimsHonored == honoredBefore + 1);
+            Check("the peer's slot is untouched on our screen (one writer; +" + Fmt(theirGain)
+                + ")", Math.Abs(theirGain) < 0.01f);
             Check("...and spawned NO floating score on our screen (floaters "
                 + floatersBefore + " -> " + score.FloatingTextCount + ")",
                 score.FloatingTextCount == floatersBefore);
@@ -230,11 +235,11 @@ namespace EvilAliensWeb.Compat.Net
             theirScoreBefore = score.PointScore(TheirSlot);
             ourScoreBefore = score.PointScore(OurSlot);
             boss.AwardScoreToAll(combo: false);
-            Check("AwardScoreToAll still pays BOTH seated slots (ours +"
-                + Fmt(score.PointScore(OurSlot) - ourScoreBefore) + ", theirs +"
-                + Fmt(score.PointScore(TheirSlot) - theirScoreBefore) + ")",
+            Check("AwardScoreToAll pays the OWNED seated slot and leaves the peer's alone "
+                + "(ours +" + Fmt(score.PointScore(OurSlot) - ourScoreBefore) + ", theirs +"
+                + Fmt(score.PointScore(TheirSlot) - theirScoreBefore) + " -- one writer)",
                 score.PointScore(OurSlot) - ourScoreBefore > 0f
-                    && score.PointScore(TheirSlot) - theirScoreBefore > 0f);
+                    && Math.Abs(score.PointScore(TheirSlot) - theirScoreBefore) < 0.01f);
             Check("...and shows exactly ONE figure, on the slot we own rather than the first"
                 + " seated one (floaters " + floatersBefore + " -> " + score.FloatingTextCount + ")",
                 score.FloatingTextCount == floatersBefore + 1);
@@ -380,7 +385,7 @@ namespace EvilAliensWeb.Compat.Net
 
                 for (int slot = 0; slot < ScoreVisualiser.SlotCount; slot++)
                 {
-                    score.NetSetScore(slot, scoreBefore[slot], 0f);
+                    score.NetSetScore(slot, scoreBefore[slot]);
                 }
                 score.Lives = livesBefore;
                 bool restored = true;

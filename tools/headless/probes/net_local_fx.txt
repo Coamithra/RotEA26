@@ -75,6 +75,6 @@ eval NetLocalFx
 # The tally, not `expect-not FAIL`: an absence assertion passes on a run where the eval never
 # happened, and this suite reports a SKIP (which is not a pass) whenever a session, level or
 # attract demo is up. Raise the count when legs are added.
-expect \[netlocalfx\] 24 passed, 0 failed
+expect \[netlocalfx\] 25 passed, 0 failed
 expect-not SKIP
 quit

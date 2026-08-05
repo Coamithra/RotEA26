@@ -33,11 +33,13 @@ inputs; the other peer's ship is an interpolated puppet.
   self-reported peer-identity token (protocol v6). **The host's pause menu now reaches it
   deliberately** (`0d6ffe70`, closing `98217618`), alongside an open/close-room toggle -- no
   new protocol, both halves are second doors onto existing machinery.
-- **Score + per-slot HUD correctness:** the awarded AMOUNT is replicated, not the combo
-  (`b0ab09ec`, v7); a slot's combo and powerup progression belong to its OWNER (`1a3ad45a`, v9,
-  `MsgHudState`); a late powerup claim no longer strands a HUD icon (`a8c92fb9`); the OPTION SHIP
-  population is owner-authoritative too, per orbit layer (`c5228350`, v16) -- see the option-count
-  bullet under the remote pickup.
+- **Score + per-slot HUD correctness:** a slot's combo and powerup progression belong to its
+  OWNER (`1a3ad45a`, v9, `MsgHudState`); a late powerup claim no longer strands a HUD icon
+  (`a8c92fb9`); the OPTION SHIP population is owner-authoritative too, per orbit layer
+  (`c5228350`, v16); and since **`af96bcc2` (v20) the SCORE follows the same rule** -- one
+  writer per slot, the owner's declared total riding `MsgHudState`, with the whole
+  provisional-ledger reconciliation (`b0ab09ec`, v7) deleted. See the score bullet under
+  "Claims, score & per-slot HUD".
 - **Transient feedback -- the beats a frozen puppet could never reach** (`43e85936` / `57ea30cd` /
   `ee939dd1` / `8d063d33` / `c146422f`): boss + asteroid hit flashes, the Ball detach burst, enemy
   laser fire, the DANGER/WARNING arrows the bosses spawn, the big-UFO and JunkBoss charge glows,
@@ -769,6 +771,11 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   9ccfe295, see the unattributed-claim bullet under "Claims". Like v14 the block is
   APPEND-ONLY and LENGTH-GUARDED, so an older peer degrades to exactly the pre-card behaviour
   (an ownerless beam) rather than mis-parsing; the bump is the batch convention.
+  **v20** is the ONE-WRITER-PER-SLOT score redesign (card af96bcc2): `EvDeath` drops its
+  `f32 x MaxSlots` award array (the v7 widening, reversed), `MsgHudState` entries gain a
+  trailing `[score:f32]` (`HudSlotBytes` 12 -> 16) carrying the owner's declared TOTAL, and
+  `EvScoreSync` shrinks to `[lives:1]`. Three layouts moved at once, so a v19 peer would
+  mis-parse all of them: a forced bump, not a convention one.
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -1448,63 +1455,39 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     the reliable frame the attacker already sent, so it adds no amplification. Bounding a
     hostile peer's message RATE is card `2da92af9`'s surface, not this one's.
 
-- **Score/lives: the AWARDED AMOUNT is replicated, not the combo (card b0ab09ec).** `EvDeath`
-  carries what the host actually credited, per slot (`f32 x MaxSlots`), and that figure is
-  authoritative on the client in every branch. Lives stay verbatim off `EvScoreSync`.
-  - **Why: every kill is credited on BOTH peers, each with its own combo multiplier.**
-    `comboModify = amount * (1 + combo/20)`, and the combo counter is a purely local
-    simulation -- the only thing that raises it is a local bullet's first hit
-    (`Bullet.CollidesWith` -> `SustainCombo`), and on a client those bullets hit frozen
-    puppets interpolated ~100ms behind the host's real entities. So the same kill is worth a
-    different number on each screen.
-  - **`max(local, host)` adoption made that unbounded, and is GONE.** It kept every positive
-    excursion of the error and discarded every negative one, so even a perfectly *unbiased*
-    per-kill difference integrated into one-way drift (measured in the 11.5 playtest: a slot
-    the host had at 294 read 304 on the joiner, and climbing). The old note here claimed this
-    "self-corrects upward" -- it did not; it was a ratchet.
-  - **Replicating the COMBO COUNTER instead would not have worked**: combo changes up to
-    ~10x/second, so any replicated copy is stale by at least the latency and the credited
-    numbers would still differ. The award is the only thing that can be exact.
-  - **A client's own kill is credited instantly but PROVISIONALLY** (`NetScoreLedger`): the
-    amount is booked until the host's `EvDeath` for that netId replaces it with the
-    authoritative figure. `EvScoreSync` then adopts `host + unsettled`. Both ride the ORDERED
-    reliable lane, which is what makes that sum exact either way round -- an `EvDeath` seen
-    before a sync is inside that sync's number and off the books, one seen after is outside it
-    and still on them. Carrying `unsettled` is also what stops verbatim adoption from
-    sawtoothing: the host's 1Hz number never contains the client's in-flight claims, so
-    adopting it bare would erase the last second of their own kills once a second.
-  - Provisional entries EXPIRE after `AwardSettleWindowMs` (3s) because one path never echoes
-    a figure back: if the host's copy was already dead when our claim landed it pays us from
-    its recent-death record without re-broadcasting. Expiring lets the next sync land on the
-    host's exact number instead of staying inflated forever.
-  - The real death path still runs on the client for the FX, but `NetSuppressAward()` claims
-    the award slot FIRST so its `AwardScore`/`AwardScoreToAll` no-ops -- otherwise it would
-    re-derive the amount from this peer's combo. **Any new client-side death path must do the
-    same**, or it silently reintroduces the divergence.
-  - `AwardScoreToAll` (every boss) pays each seated slot with THAT slot's own multiplier,
-    which is why the wire carries a per-slot array rather than one number. Wire width: the
-    field went `u16` base-points -> `f32` per slot (protocol **v7**) because a combo-modified
-    award overflows a ushort -- a 10000-point boss at a routine 40x combo is 30000, and
-    `comboModify` has no ceiling.
-  - **The combo COUNTER is no longer local -- see the per-slot HUD state bullet below.** It was
-    left local by this card ("cosmetic, only the score is reconciled"); card `1a3ad45a` found
-    that framing was wrong and replicated it.
-  - **Verify with `eaNetScore.test()`, not two windows** (`NetScoreLedger.SelfTest` +
-    `NetPuppets.WireRoundTripTest`). It drives the real policy on a virtual clock, and runs
-    the OLD `max()` adoption over the identical kill stream first -- a green tick means
-    nothing unless the same input is shown to break the old policy, because the failure is a
-    slow drift no frame or screenshot can show. It also asserts the injected per-kill error is
-    UNBIASED, so the drift it demonstrates is the ratchet and not a stacked deck. The second
-    section round-trips a real `EncodeDeathEvent` through `ApplyAwards` against the live
-    `ScoreVisualiser` (wire offsets, fresh-pay vs settle, at-most-once).
-  - `eaScore()` dumps per-slot score/combo/unsettled -- the readable way to compare two peers.
-    The `[net]` line gains `scSkew`/`scSkewMax` on the JOIN side only (the host is the
-    authority and never adopts): displayed minus `host + unsettled` at each sync, worst ACROSS
-    the slots, which should sit at 0. (Recording it per slot instead would leave the LAST one
-    standing -- slot 3, unseated in any 2-peer session, so a hard-coded 0.0 that looks like
-    proof.) Measured over a two-peer run: `scSkew=0.0` steady state, and `scSkewMax` held at
-    10.0 while `clTx` grew 20 -> 67 -- i.e. the worst deviation is one kill's correction and
-    does NOT accumulate with kill count, which is exactly the property max() lacked.
+- **SCORE: ONE WRITER PER SLOT (card af96bcc2, protocol v20).** Each slot's score has exactly
+  one writer -- its owner. A kill is credited instantly and FINALLY by whoever observed it, on
+  their own slots, with their own combo multiplier (`AwardScore`/`AwardScoreToAll` gate on
+  `NetSession.OwnsSlot`, which is unconditionally true offline); the peer's copy of a slot is a
+  plain replica, adopting the owner's declared TOTAL off `MsgHudState` (~10 Hz, `[score:f32]`
+  per owned-slot entry) verbatim in `ScoreVisualiser.NetSetScore`. Nothing is arbitrated,
+  nothing settles, nothing is provisional -- and double credit for one kill (each peer paying
+  its own side, `AwardScoreToAll` bosses included) is intended, as are double powerup pickups.
+  - **A replica of one writer cannot drift, only be one packet (~100 ms) stale.** Drift needs a
+    second writer to disagree with; the whole machinery below existed to reconcile two.
+  - **What this DELETED, kept as one history bullet so nobody re-derives it:** every kill used
+    to be credited on BOTH peers, each recomputing the award with its own drifting combo, and
+    three generations of reconciliation patched the consequences -- the original `max(local,
+    host)` adoption (a ratchet: an unbiased per-kill error integrated into one-way drift), card
+    b0ab09ec's `NetScoreLedger` (provisional booking, settle-on-`EvDeath` via a per-slot award
+    array on the wire, 3 s `AwardSettleWindowMs` expiry, `host + unsettled` adoption at the
+    1 Hz sync), and card 94001db7's displayed-vs-authoritative oracle correction in the JIP
+    suite. All deleted: the ledger class, the `EvDeath` award array (v7's widening, reversed),
+    `NetSuppressAward`, the settle choreography in `NetPuppets`, and the score half of
+    `EvScoreSync` (now `[lives:1]` -- lives were never per-slot and stay host-authoritative).
+  - **The host does NOT credit a claimant's slot** (`HandleClaim` settles the entity, plays the
+    world FX and still `AddLife`s a claimed OneUp -- lives are the host's pool); the claimant
+    credited itself at its own kill observation. Kill/pickup FX, the claim ledgers'
+    at-most-once SETTLE bookkeeping and the re-announce path are all unchanged.
+  - **A JIP joiner adopts the running totals from its first `MsgHudState` packet** -- no award
+    history to replay, which is what made the old design's join-in-progress corrections
+    necessary in the first place.
+  - **Verify with `eaNetScore.test()`** (`Compat/Net/NetScoreTest.cs`, 11 checks): the policy
+    on a virtual clock against a synthetic two-peer kill stream, with BOTH superseded designs
+    run over the identical stream as negative controls (the max() ratchet must drift, the naive
+    two-writer must disagree), plus the v20 wire legs against the live `ScoreVisualiser` --
+    including verbatim adoption DOWNWARD, the move the ratchet refused. `eaScore()` still dumps
+    per-slot score/combo (`unsettled` is gone from it, with the ledger).
 - **A remote pickup runs the collector's SHIP effect too, not just its HUD icon (cards
   83271f3d / 10f9dba4 / d53431b4).** `ApplyRemotePowerup` used to be `score.SetPowerup` plus a
   sound cue, so the other player's ship -- a puppet on this screen -- got the readout and none of
@@ -3427,12 +3410,12 @@ broken CI -- and `prov=` / `owner=` remain exact, first-sample and never softene
 | `dead` / `dying` | the largest class -- 5 of 8 failing joins on the default soak | **not compared at all.** `dead` is on NO wire field: on the host it means "removal queued this tick", on the client "I killed it locally". `dying` does ride the wire but legitimately LEADS on whichever peer's bullet landed. An entity in transition on either end skips its SAMPLED keys too (hp mid-death reads 0 against full) -- `prov=`/`owner=` are not skipped, they are identity | `transit=` |
 | `is on the HOST and not on the joiner` | 14 in 188 | **evidence, not tolerance.** dump v4's client-side `gone` line is the joiner's own removal ledger -- "I had it and let it go", which `ReleaseDyingPuppet` produces constantly (it drops the puppet from every map while the host keeps the entity for the whole 2.5-5 s animation). A host-side death is the second form, for a release older than the ledger's cap. NEITHER -> still a hard failure, which is the defect class: a joiner that never got an entity | `released=` |
 | `hp` under fire | `Boss 210 vs 180`, then `211 vs 179`; worst 32 | **compared WIRE-TO-WIRE: the host's last SENT hp (`NetIdRegistry.Entry.LastSentHp`) against the joiner's last RECEIVED one (`PuppetInfo.LastAppliedHp`) -- both printed as `hpwire=` in the dump, one key because they are one quantity -- and NEITHER side's live `hp`.** The two live values are different quantities -- a client hit-tests puppets with its own bullets, and the host has moved on since that entity's round-robin turn. Only a tolerance near 40 covers the raw class, which is wide enough to pass a UFO at 2 against a host's 10 | **exact.** `--hp-tol` 5 -> **0**: over 227 joins the two wire values differed **0 times**, and the clamp invariant was violated 0 times |
-| `score` staleness | 5500, and 94001db7's "do not treat 4850 as a bound" | **the limit is KEYED TO THE AWARDS IN FLIGHT**: the joiner's outstanding `uns` is added to the base in the HOST-AHEAD direction only, because an award it still holds provisionally may already be settled authoritatively by the host. `comboModify` has no ceiling, but the term sits in `uns` while it is in flight, so the allowance grows with it and only with it. The other direction keeps the bare base -- a joiner reading high is invented points | `--score-tol` 250 -> **1000**, sized off the measured `uns`-0 tail (worst 625) |
+| `score` staleness | 5500, and 94001db7's "do not treat 4850 as a bound" | **SUPERSEDED by card af96bcc2 (one writer per slot)**: the `uns`-keyed limit and the pts-minus-uns oracle reconciled TWO writers, both deleted. The compare is DIRECTIONAL now, ownership read off the host dump's seat field: a replica ABOVE its owner fails with NO tolerance (totals only grow -- the hpwire clamp-invariant shape), a replica BEHIND its owner is staleness. Under continuous fire that lag STANDS (each sample is one ~100 ms packet behind a moving total), so the re-settle cannot clear it and the tolerance covers it | `--score-tol` **1500**, from a measured worst of 600 over 111 joins x2.5; the exceed side is exact |
 | vacuous join (`0 replicated entities`) | 7 in 188 | **the rig, as the card said.** A real level is empty between waves, so the join is SKIPPED and counted rather than failed -- with a per-level floor of real joins, or an all-skipped level would be the vacuous green again. (Waiting for a populated world BEFORE attaching was tried and DECLINED: the world at attach is not the world at the dump 10 s later, and the wait cost 24 of 39 joins per soak) | `skipped=` |
 | `pos` / `rot` | 17.0 px / 0.209 rad | **shrink the artifact first.** The interleave chunk dominates (one peer has always stepped last), so `--approach` steps the last 6 frames ONE AT A TIME: 17.0 -> **13.5 px**. Tolerances then set from that with margin | `--pos-tol` 12 -> **20**, `--rot-tol` 0.1 -> **0.3** (every one of the top ten a `Ball`) |
 | `lv` / `opt`, joiner-only ids, transient extras | 4 in 188, plus a class per soak | **the re-settle confirm** (below). They stay compared EXACTLY -- there is no sane tolerance on a ladder position or a count of Option ships | `converged=` |
 | scenery line | 1 in ~300 | compared FIELD BY FIELD, not as one string: the doodad carries a POSITION and got `-239.6` vs `-239.2` reported as a desync. Its name stays exact and so does everything discrete (which is what makes the missing-catch-up mutation unmistakable) | -- |
-| the `uns` run-level control itself | RED on 1 of 5 healthy soaks, and 0 vs 1000 on two runs of the SAME seed | **the rig again**: `uns` is non-zero only inside the 3 s `AwardSettleWindowMs` after a joiner's own kill, and it was sampled at ONE instant per join. Now sampled at every dump a join takes, settle included | 0 zeros in 10 seeds (peaks 390-4550) |
+| the `uns` run-level control itself | (history) | **RETIRED with the ledger (card af96bcc2)** -- there is no `uns` field to control any more (dump v5); the hp leg's `hpwire=` control carries the silent-deletion guard | -- |
 
 - **`NetApplyHp` ONLY EVER LOWERS, and that is why the hp compare reads the RECEIVED value rather
   than the entity.** `KillableAlien.NetApplyHp` refuses any value at or above the puppet's current
@@ -3451,19 +3434,12 @@ broken CI -- and `prov=` / `owner=` remain exact, first-sample and never softene
     drove a real snapshot entry into a real puppet. **`eaNetSnap` section 7 now does** (card
     d108c459; `net_selftests.txt` tally 40 -> 45), driving `NetPuppets.ApplySnapshotState` and
     reading the killable back, clamp included.
-- **MEASURED AND DECLINED: comparing score wire-to-wire.** The obvious next application of the
-  `hpwire` template -- have the host record the figure its `EvScoreSync` last carried and
-  compare the joiner's authoritative score against THAT -- was implemented and **reverted**, and
-  the reason is a mechanism worth knowing: **a joiner does not get its score from the sync.** It
-  books settled awards continuously as the host announces deaths, and `EvScoreSync` is a periodic
-  TRUE-UP, so comparing against the last sent sync compares a fresh figure against a stale one.
-  Measured: the wire-to-wire version went **RED on 7 of 10 seeds**, every failure of the form
-  "joiner holds exactly the host's live figure, `sent` is behind"; and over ~180 joins the
-  live-vs-live gap is **exactly 0 on ~85%**, while sent-vs-joiner was 0 on only 7 of those 26
-  nonzero cases. The 85% is also what refutes the reasoning that motivated it -- a systematic 1 Hz
-  cadence lag would be nonzero nearly always. **Do not "improve" the score compare back to
-  wire-to-wire.** `hp` is not the counterexample: hp really is replicated only by the snapshot,
-  which is exactly why the template fits there and not here.
+- **(HISTORY, superseded by card af96bcc2.) Comparing score wire-to-wire was measured and
+  declined under the ledger design** -- a joiner booked settled awards continuously and
+  `EvScoreSync` was only a true-up, so the wire-to-wire version went RED on 7 of 10 seeds.
+  Moot now: the sync IS the source of truth under one writer (the owner's declared total,
+  adopted verbatim), which is exactly the design the old measurement said could not work while
+  two writers existed.
 - **THE RE-SETTLE CONFIRM, and why it is not a way of hiding things.** A join that reports
   mismatches is stepped `--resettle` frames (default 300 = 5 s, past one 1 Hz score sync, several
   snapshot turns and the whole 3 s settle window -- the derivation is the sub-bullet below) and
@@ -3479,10 +3455,11 @@ broken CI -- and `prov=` / `owner=` remain exact, first-sample and never softene
   **What it does cost:** a first-sample mismatch on an entity that leaves the world within the
   window is unconfirmable and therefore dropped.
   - **`--resettle` is DERIVED FROM THE SLOWEST MECHANISM IT MUST OUTLAST, not picked: 300 frames
-    (5 s).** `NetScoreLedger.AwardSettleWindowMs` is 3 s, so a deferred-death award in flight
-    structurally cannot settle inside a shorter window -- at 2 s a score residual and an Option
-    count were still outstanding on 2 of 8 seeds, and both cleared at 5 s. Anything that needs a
-    LONGER confirm than this is not staleness and should fail.
+    (5 s).** Every remaining replication cadence -- the 1 Hz lives sync, a big world's ~1.2 s
+    snapshot turn, the ~100 ms HUD/score packet -- fits several times over. (The original anchor
+    was the ledger's 3 s `AwardSettleWindowMs`, under which a 2 s confirm left residuals on 2 of
+    8 seeds; card af96bcc2 deleted the ledger, and 5 s stays because everything left is faster.)
+    Anything that needs a LONGER confirm than this is not staleness and should fail.
 - **THE SUITE NEVER RESETS, SO NONE OF ITS RESIDUALS IS RESET-CAUSED (card d6372279).** The host
   boots `?invuln` and `LoseLife` is host-authoritative, so `AllShipsDead` never fires and neither
   peer ever enters `GameState.Resetting`: measured `resets=0` on **every** `[net]` line of a
@@ -3567,29 +3544,17 @@ broken CI -- and `prov=` / `owner=` remain exact, first-sample and never softene
   - **The HUD is compared per FIELD, and a seat is a MIRROR rather than a match** -- slots are
     identity-mapped, so "host slot 0 = Keyboard, joiner slot 0 = Remote" is the pairing being
     correct. Levels and option counts are discrete and owner-authoritative, so they must agree
-    EXACTLY (this is card c5228350's join-in-progress catch-up); score rides a 1 Hz reconcile
-    against a provisional ledger and gets a tolerance, since the failure that design exists to
-    stop is a one-way DRIFT, which a tolerance still catches.
-  - **SCORE IS COMPARED AS `pts - uns`, NOT `pts`, and dump v3 exists to carry that (card
-    94001db7).** A client's DISPLAYED score is the host's authoritative figure PLUS its own
-    unsettled provisional credits, by design (card b0ab09ec), while the host's display has no
-    such term -- so a raw `pts` compare is a category error, not a tolerance problem. It fired
-    hardest on DEFERRED-DEATH types: the joiner kills a `BattleSkull` on its lagged puppet and
-    books the award, while the host's copy is still `dying=1` two seconds into its animation and
-    has neither credited it nor sent the `EvDeath` that would settle it. Two classes, measured on
-    `--cadence 20 --cap 600 --seed 7`:
-    **joiner AHEAD, 2000-5550 points, NEVER converges** (a dense wave keeps the 3 s
-    `AwardSettleWindowMs` permanently occupied -- a re-dump loop read 3400/5200/5250/2400/5550/2800
-    over six further seconds), which the subtraction removes entirely; and
-    **host AHEAD, 250-4850, converges to 0 within one sync**, which is ordinary staleness and is
-    what the 250 limit now measures. **The attach is NOT implicated and that was checked first**:
-    the joiner's adopted host figure equals the host's `EvScoreSync` snapshot EXACTLY on every
-    failing join. `--score-tol` was NOT widened; sizing it for the residual class is card
-    d108c459's, and note `comboModify` has no ceiling, so a boss award group in flight can be far
-    larger than the measured 4850.
-    **The run-level `peak joiner unsettled` line is that leg's positive control and IS asserted**
-    -- a soak whose peak is 0 means the field stopped being reported, so the subtraction ran on
-    nothing and the compare silently reverted to the raw one.
+    EXACTLY (this is card c5228350's join-in-progress catch-up); score is owner-declared and
+    adopted verbatim (card af96bcc2), so the compare is DIRECTIONAL: a replica above its owner
+    is exact-fail (invented points), a replica behind it is one ~100 ms packet of staleness,
+    covered by `--score-tol` -- a lag that STANDS under continuous fire rather than converging,
+    which is why it is a tolerance and not a re-settle case.
+  - **(HISTORY, superseded by card af96bcc2.)** Under the two-writer ledger design the score
+    had to be compared as `pts - uns` (dump v3, card 94001db7 -- a client's display carried its
+    provisional credits by design, so raw `pts` was a category error), with an `uns`-keyed
+    limit and a run-level `peak joiner unsettled` control on top (card d108c459). One writer
+    per slot deleted the quantity those corrections existed for; dump v5 dropped `uns=` and the
+    control with it, and `pts` is compared directly above.
   - **A host whose level has ENDED reports `scene none`, and the loop stops there** rather than
     grinding out the remaining cadence against an empty world. The settle frames are charged to
     `--cap` too: a join steps the host through the joiner's whole level warm, so charging only
@@ -3647,14 +3612,15 @@ about the code, not a weak assertion, and re-deriving them is a waste of an afte
 | force `CreatePuppet`'s extras length to 0 (every puppet built on defaults) | **no change.** The differ dropped extras-CONTENT comparison for the drift reason above, and `prov=` reads the self-heal flag rather than the bytes -- so an artificially defaulted puppet built from a real `EvSpawn` is invisible. Closing it means caching the bytes that CROSSED THE WIRE on both ends |
 | revert `Wall.NetScaleLocal` to false (`--level Level3 --host-extra "&wallsonly"`) | **no change**, and the reason is that another card already fixed it: protocol v19 raised the wire scale to 1/4096 with rounding, so the error `NetScaleLocal` defends against is now **0.090%**, far under any sane scale tolerance. `eaNetWalls` remains the pin |
 | drop `ReplayLive`'s `EvDying` re-announce | **not reached.** It needs a join timed into a 2.5-5 s deferred-death window, which the orchestrator does not control. `eaNetDeathFx` pins that beat directly |
-| force `NetJipDump`'s `uns=` to a constant 0 | **RED, deterministically**, on the run-level `no joiner reported ANY unsettled provisional credit` control -- 2 of 2 soaks. The score compare itself only reverts to the raw one, which is a nondeterministic failure, so the control is what carries this leg (card 94001db7) |
+| ~~force `NetJipDump`'s `uns=` to a constant 0~~ | **RETIRED with the field (card af96bcc2)** -- dump v5 carries no `uns=` and the compare reads `pts` directly. Kept so its absence is not mistaken for an oversight; the score leg's live mutation is the row below |
+| stop writing the score into `MsgHudState` (`hudTxScores` left at 0) | **RED, 3/3 seeds** (card af96bcc2, `--level Level2 --cap 240`, every join with a nonzero host score): the joiner adopts 0 and the directional compare reads `replica N behind its owner=host` far past the limit. The verbatim-adoption policy's deterministic pin is `eaNetScore.test` |
 | drop the `gone` line (`NetPuppets.RemovedIds` returning empty) | **RED, 3/3 seeds** (card d108c459). It is the ONLY evidence that excuses a host-only id, which is why the host-side `dying` arm was dropped: with both in place this mutation did not even bring the class back |
 | halve the received hp before it is applied AND recorded (`state.Hp / 2` folded in at the top of the hp block) | **RED, 3/3 seeds** (re-confirmed in this exact form during review) -- the wire-to-wire compare catches a value that did not survive delivery, and the clamp invariant fires with it. Halving ONLY `NetApplyHp`'s argument would trip neither leg: `LastAppliedHp` records what was received, so both `hpwire` values still agree and the halved live hp sits safely BELOW them -- that is the wrong-but-lower APPLY this suite structurally cannot see (see the clamp bullet above); `eaNetSnap` section 7 owns it |
 | stop recording `hpwire` (`PuppetInfo.LastAppliedHp`) | **RED, 3/3 seeds**, on the run-level `no entity was compared on hpwire` control. Without it the field reads `-`, which SKIPS the hp comparison rather than failing it -- the same silent-deletion shape the `uns` control exists for |
 | ~~force `NetApplyHp` to assign a wrong-but-lower value~~ | **RETIRED, and here rather than deleted so its absence is not mistaken for an oversight.** Under the wire-to-wire compare it cannot bite: from the host's side a lower value is indistinguishable from the local damage a joiner deals with its own bullets. Replaced by `eaNetSnap` section 7, which asserts the assignment in-process |
 | `--resettle 0` (the confirm disabled) | **RED, 6/6 seeds** -- the confirm carries real weight, not decoration |
 | restore the card-9a7ee4c0 purge, re-run against the CONFIRM | **RED, 3/3 seeds, 23-29 `PROVISIONAL` lines.** The row above proves the confirm bites; this one proves it does not swallow a real defect on the second look |
-| revert `ScoreVisualiser.NetSetScore` to the pre-b0ab09ec `max(local, host)` ratchet | **RED**, but only 1 soak in 4 -- each joiner lives ~8 s, so a ratchet barely accumulates. Its signature is unmistakable when it does fire (`32737 vs 32737`, i.e. IDENTICAL displayed scores 3200 apart authoritative -- a case the raw compare was blind to). **`eaNetScore.test()` is the deterministic pin for that policy**; do not rely on this suite for it. **Re-run under card d108c459's rules (re-settle confirm, `uns`-keyed limit): RED on 1 of 3 seeds, i.e. unchanged** -- the confirm does not swallow it, the ratchet simply needs a joiner that lived long enough to accumulate |
+| revert `ScoreVisualiser.NetSetScore` to a `max(local, adopted)` ratchet | Under one writer the replica never credits anything locally, so max(0-or-stale, declared) == declared and the ratchet is a NO-OP here by construction -- **the suite cannot and need not see it**. `eaNetScore.test`'s ratchet control is the deterministic pin (it drives the ratchet over a genuinely two-writer stream, where it still drifts) |
 
 **WHAT IT DELIBERATELY DOES NOT COVER**, each because something else already pins it: the
 background APPLY path (`netbg_catchup.txt`), the slot-grant NEGOTIATION (`eaSlotTest`), the

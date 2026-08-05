@@ -477,8 +477,9 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `eaPreloadExport()`, `eaWallPerf(true)`+`eaWallStats()`,
   `eaFps()`+`eaFps.stats()`/`.test()`/`.uncap()`/`.gpu()`,
   `eaNetBg()`+`eaNetBgTest()` (the JIP scenery catch-up dump + its round-trip self-test),
-  `eaScore()`+`eaNetScore.test()` (per-slot score/combo dump + the co-op score-reconciliation
-  self-test),
+  `eaScore()`+`eaNetScore.test()` (per-slot score/combo dump + the one-writer-per-slot score
+  policy self-test, card af96bcc2 -- the superseded max() ratchet and two-writer settle run as
+  its negative controls),
   `eaNetCombo.test()` (the co-op per-slot combo + powerup self-test — card 1a3ad45a),
   `eaNetPickup()` (the remote-powerup-pickup suite — cards 83271f3d / 10f9dba4 / d53431b4 /
   c5228350: the "2"/Linker arm and the connector it unblocks, the option count (now owner-

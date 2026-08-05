@@ -46,7 +46,7 @@ EAHL = os.path.join(REPO, "tools", "headless", "bin", "Debug", "net8.0", "eahl.e
 # The dump's own format version. Bumped in NetJipDump.cs when a line's SHAPE changes, and
 # checked rather than assumed -- a differ silently comparing half a world is the failure this
 # tool exists to catch one layer down.
-FORMAT_VERSION = 4
+FORMAT_VERSION = 5
 
 # A port deliberately outside the range PortForRoom derives into (49152..61151), so --no-pair
 # dials somewhere nothing can be listening whatever room name is in play.
@@ -59,15 +59,12 @@ LEVEL_OVER = "level-over"
 # empty at the dump, so there was nothing to compare (card d108c459).
 VACUOUS = "vacuous"
 
-# Joins a soak needs before the `uns` control is asserted rather than skipped -- see main.
-# Well under the default three-level soak's ~30 and well over what a --cap 120 spot check runs.
-UnsettledControlMinJoins = 10
 
 
 def new_stats():
     """The per-run counters. ONE definition: run_join indexes every key, and a call site that
     built the dict by hand would KeyError the moment a counter was added."""
-    return {"owners": 0, "unsettled": 0.0, "joins": 0,
+    return {"owners": 0, "joins": 0,
             # Card d108c459's three calibration counters. All REPORTED at run level, because
             # each of them is a mismatch this tool decided not to fail on -- and a rule that
             # silently deletes a class is indistinguishable from a differ that stopped looking.
@@ -579,64 +576,39 @@ def diff_hud(hline, cline, tol):
             if h.get(key) != c.get(key):
                 bad.append(("%s-%s" % (key, slot),
                             "%s %s %s vs %s" % (slot, key, h.get(key), c.get(key))))
-        # CONTINUOUS, and COMPARED AFTER SUBTRACTING `uns` -- which is the difference between
-        # comparing what the two peers DISPLAY and comparing what they actually disagree about
-        # (card 94001db7). A client's displayed score is the host's authoritative figure PLUS its
-        # own unsettled provisional credits, by design (card b0ab09ec gives the player instant
-        # credit on their own kills); the host's display carries no such term. So a raw `pts`
-        # compare is a category error, and it fired hardest on DEFERRED-DEATH types: the joiner
-        # kills a `BattleSkull` on its lagged puppet and books the award, while the host's copy is
-        # still `dying=1` two seconds into its death animation and has neither credited it nor
-        # broadcast the `EvDeath` that would settle it. Measured: 2000-5550 points, permanently,
-        # because on a dense wave the 3 s AwardSettleWindowMs is never empty.
-        #
-        # Subtracting `uns` reduces that to the ordinary staleness case (host credited, our
-        # EvDeath not applied yet), which converges within a sync and is what the tolerance is
-        # for. The failure the ledger design exists to stop is a one-way DRIFT, and a tolerance on
-        # the AUTHORITATIVE figures still catches it -- more sharply than before, since the
-        # provisional term no longer masks it. The policy itself is eaNetScore.test's subject.
-        #
-        # `combo` and `pu=<type>@<progress>` are DUMP-ONLY, for reading by hand: both ride the
-        # ~10 Hz MsgHudState and are re-derived per peer, so any threshold tight enough to catch
-        # a real disagreement would flag ordinary staleness. eaNetCombo.test owns that policy.
-        #
-        # THE LIMIT IS KEYED TO THE AWARDS IN FLIGHT, NOT A BIGGER CONSTANT (card d108c459).
-        # Subtracting `uns` leaves one legitimate asymmetry: an award the joiner is still holding
-        # provisionally may ALREADY have been settled authoritatively by the host, whose EvDeath
-        # is what settles it -- so between the host crediting it and the 1 Hz EvScoreSync landing,
-        # that credit is counted on neither authoritative figure and the host reads high by up to
-        # the joiner's whole outstanding ledger. Measured: gap 2400 against `uns` 2250 on a dense
-        # Level-3 wave, and it does NOT converge, because a joiner that keeps killing keeps the
-        # ledger occupied (the mirror of card 94001db7's steady-state churn).
-        #
-        # So the allowance in the HOST-AHEAD direction is `uns` plus the ordinary staleness
-        # constant. That is unbounded-safe in the way a constant cannot be: `comboModify` has no
-        # ceiling, and a boss award group at a routine 40x combo dwarfs any number that could be
-        # written here -- but it also sits in `uns` while it is in flight, so the allowance grows
-        # with it and only with it.
-        #
-        # THE OTHER DIRECTION KEEPS THE BARE CONSTANT, and that is where the teeth are: a joiner
-        # reading HIGHER than the host authoritatively is points invented locally and never
-        # settled -- the one-way drift the ledger design exists to stop, and the shape a ratchet
-        # produces (eaNetScore.test is that policy's deterministic pin).
-        # Every name the report needs is bound BEFORE the try, so a token this tool cannot parse
-        # cannot leave one unbound on the failure path.
-        cuns = cauth = gap = 0.0
+        # CONTINUOUS AND DIRECTIONAL: since card af96bcc2 a slot's score has ONE writer (its
+        # owner) and the other end holds a verbatim replica off MsgHudState (~10 Hz). Totals
+        # only ever grow mid-level (the suite never resets), so the rule has teeth on one side
+        # and a measured allowance on the other:
+        #   * a replica ABOVE its owner is a state no path produces -- invented points, or a
+        #     stale adopt applied over a fresher one -- and fails with NO tolerance (the
+        #     hpwire clamp-invariant shape);
+        #   * a replica BEHIND its owner is staleness: everything the owner credited since the
+        #     packet the replica last applied. Under continuous fire that lag STANDS (each
+        #     sample is one packet behind a moving total), so the re-settle confirm cannot
+        #     clear it and the tolerance must cover it -- measured worst 600 over 111 joins
+        #     (a dense Level-1 wave at combo, seed 9).
+        # WHICH end owns the slot is read off the HOST dump's own seat field: the host's
+        # roster shows Remote/RemoteFriend for every joiner-owned seat, and seats are
+        # identity-mapped, so no new dump field is needed.
         try:
-            cuns = float(c.get("uns", 0))
-            hauth = float(h.get("pts", 0)) - float(h.get("uns", 0))
-            cauth = float(c.get("pts", 0)) - cuns
-            gap = hauth - cauth
+            hpts = float(h.get("pts", 0))
+            cpts = float(c.get("pts", 0))
         except ValueError:
-            cuns = cauth = gap = 0.0
-        limit = tol["score"] + (cuns if gap > 0 else 0.0)
-        gap = abs(gap)
-        if gap > limit:
+            hpts = cpts = 0.0
+        joiner_owned = h.get("seat", "-").startswith("Remote")
+        owner, replica = (cpts, hpts) if joiner_owned else (hpts, cpts)
+        who = "joiner" if joiner_owned else "host"
+        if replica > owner:
             bad.append(("score-%s" % slot,
-                        "%s score %s vs %s (%.0f apart authoritative, limit %.0f = %.0f + the "
-                        "joiner's %.0f in flight; unsettled %s / %s)"
-                        % (slot, h.get("pts"), c.get("pts"), gap, limit, tol["score"], cuns,
-                           h.get("uns"), c.get("uns"))))
+                        "%s score: the replica (%.0f) is ABOVE its owner (%.0f, owner=%s) -- "
+                        "totals only grow, so nothing should put a replica ahead"
+                        % (slot, replica, owner, who)))
+        elif owner - replica > tol["score"]:
+            bad.append(("score-%s" % slot,
+                        "%s score %s vs %s (replica %.0f behind its owner=%s, limit %.0f)"
+                        % (slot, h.get("pts"), c.get("pts"), owner - replica, who,
+                           tol["score"])))
     return bad
 
 
@@ -653,25 +625,6 @@ def max_pos_gap(host, client):
 
 
 # ---------------------------------------------------------------------------- the run
-
-
-def note_unsettled(stats, client_dump):
-    """Fold this dump's joiner-side `uns` into the run's peak.
-
-    CALLED AT EVERY DUMP A JOIN TAKES, not just the settle one (card d108c459). `uns` is
-    non-zero only while a joiner's own kill is inside the 3 s AwardSettleWindowMs, so sampling
-    one instant per join made the run-level control a coin flip -- measured RED on 1 of 5
-    healthy soaks, and 0 vs 1000 on two runs of the SAME seed. Every extra sample is free: the
-    dumps are taken anyway.
-
-    Parsed tolerantly and taken RAW rather than through abs(), for the reasons at the assertion.
-    """
-    _, slots = parse_hud(client_dump["hud"])
-    for kv in slots.values():
-        try:
-            stats["unsettled"] = max(stats["unsettled"], float(kv.get("uns", 0)))
-        except ValueError:
-            pass
 
 
 def approach(host, client, args):
@@ -693,7 +646,6 @@ def sample(host, client, args, stats):
     approach(host, client, args)
     hd = host.dump()
     cd = client.dump()
-    note_unsettled(stats, cd)
     return hd, cd
 
 
@@ -713,7 +665,6 @@ def run_join(host, room, port, args, index, stats):
             settled += args.chunk
             if not attached and settled % (args.chunk * 8) == 0:
                 d = client.dump()
-                note_unsettled(stats, d)
                 attached = d["meta"] is not None and d["meta"]["ids"] > 0
                 if attached:
                     # Once the world is up, keep stepping for the catch-up burst to be applied
@@ -722,19 +673,11 @@ def run_join(host, room, port, args, index, stats):
                     # help), and truncating would quietly settle for less than the figure
                     # net CLAUDE.md quotes whenever --chunk does not divide it.
                     #
-                    # DUMPED PERIODICALLY ON THE WAY, purely to sample `uns` (card d108c459).
-                    # The ledger is non-empty only for the 3 s AwardSettleWindowMs after a
-                    # joiner's own kill, so reading it at ONE instant per join makes the
-                    # run-level control a lottery -- measured 0 across 36 joins on a healthy
-                    # soak. Every dump taken here is another chance to catch a real ledger, and
-                    # the dumps are the cheap part of a join.
                     stepped = 0
                     while stepped < args.settle_after:
                         host.step(args.chunk)
                         client.step(args.chunk)
                         stepped += args.chunk
-                        if stepped % (args.chunk * 8) == 0:
-                            note_unsettled(stats, client.dump())
                     break
         hd, cd = sample(host, client, args, stats)
         problems = judge(hd, cd, host, client, args, index, stats)
@@ -802,26 +745,6 @@ def judge(hd, cd, host, client, args, index, stats):
                  or cd["ents"][i].get("owner", "-") != "-")
     stats["owners"] += owners
 
-    # HOW MUCH MATERIAL THE `uns` SUBTRACTION HAD, per join, for the same reason `owners` is
-    # reported: without it a run where every joiner happened to have an empty ledger would
-    # exercise the corrected compare vacuously and read exactly like a run where it worked.
-    # Unlike `owners` it IS asserted, but only over a soak long enough for a zero to be
-    # implausible -- see main.
-    #
-    # Parsed like every other HUD field, i.e. tolerantly: a token this tool cannot read is a
-    # dump-format problem for FORMAT_VERSION to catch, not a reason to kill the soak. The value
-    # is taken RAW rather than through abs() -- the ledger's total should never go negative, so
-    # letting one inflate the run's peak would hide exactly the defect worth seeing.
-    # `note_unsettled` has already folded this join's dumps into the run peak -- every one of
-    # them, not just this last dump (see its header). What is printed below is this JOIN's own
-    # figure, which is still the settle dump's.
-    _, cslots = parse_hud(cd["hud"])
-    unsettled = 0.0
-    for kv in cslots.values():
-        try:
-            unsettled = max(unsettled, float(kv.get("uns", 0)))
-        except ValueError:
-            pass
     stats["joins"] += 1
 
     tol = {"pos": args.pos_tol, "pos_path": args.pos_tol_path, "rot": args.rot_tol,
@@ -863,9 +786,9 @@ def judge(hd, cd, host, client, args, index, stats):
             stats["dropped"] += len(cleared)
             problems = confirmed
 
-    print("    join %d: host ids=%d joiner ids=%d maxpos=%.2fpx owners=%d uns=%.0f mismatches=%d"
+    print("    join %d: host ids=%d joiner ids=%d maxpos=%.2fpx owners=%d mismatches=%d"
           % (index, hd["meta"]["ids"], cd["meta"]["ids"], max_pos_gap(hd, cd), owners,
-             unsettled, len(problems)))
+             len(problems)))
     return [m for _, m in problems]
 
 
@@ -1011,18 +934,15 @@ def main():
                         "dominant term in the measured position gap: at 30 frames (500ms) a "
                         "0.16px/ms UFO reads 79px apart with nothing wrong. Must also stay well "
                         "under the 480-frame peer timeout (3s + 5s grace)")
-    p.add_argument("--score-tol", type=float, default=1000.0,
-                   help="points, per slot -- the BASE of the limit; the joiner's outstanding "
-                        "provisional ledger is added to it in the host-ahead direction (see "
-                        "diff_hud). Score is reconciled at 1 Hz against that ledger, so a "
-                        "fraction of a second of staleness is normal, and `uns` is sampled at "
-                        "the dump while the gap reflects awards settled a moment earlier -- that "
-                        "slop is what this covers. MEASURED over 223 joins: with `uns` at 0 the "
-                        "worst surviving gap is 625, and on a join whose award group is in "
-                        "flight the excess over the keyed allowance is 50 and 350 (gap 6325 "
-                        "against `uns` 6275, and gap 3250 against 2900) -- so 1000 is the worst "
-                        "measured slop plus ~1.6x. It is NOT sized to cover an award: "
-                        "comboModify has no ceiling and that term is keyed, not tolerated")
+    p.add_argument("--score-tol", type=float, default=1500.0,
+                   help="points, per slot, on the STALENESS side only (a replica above its "
+                        "owner fails with no tolerance -- see diff_hud). One writer per slot "
+                        "(card af96bcc2) makes the residual one ~100ms MsgHudState packet's "
+                        "worth of the owner's own kills, and under continuous fire that lag "
+                        "STANDS across the re-settle, so the tolerance must cover it: worst "
+                        "measured 600 over 111 joins (a dense Level-1 wave at combo), x2.5. "
+                        "comboModify has no ceiling, so a monster burst can still exceed this "
+                        "for one join -- re-run before believing a lone score failure")
     p.add_argument("--settle", type=int, default=3600,
                    help="frame budget for the joiner to warm its level and attach")
     p.add_argument("--settle-after", type=int, default=300,
@@ -1044,11 +964,12 @@ def main():
                         "A disagreement that has cleared by then was staleness, not a defect -- "
                         "the two ends are dumped at slightly different world instants. 300 (5 s) "
                         "is DERIVED FROM THE SLOWEST MECHANISM IT MUST OUTLAST, not picked: "
-                        "NetScoreLedger.AwardSettleWindowMs is 3 s, so a deferred-death award in "
-                        "flight cannot settle inside a shorter window -- at 2 s a score residual "
-                        "and an Option count were still outstanding on 2 of 8 seeds. Plus one "
-                        "1 Hz score sync and several snapshot turns on top. 0 disables the "
-                        "confirm, which is the mutation control for it")
+                        "the 1 Hz lives sync and a big world's ~1.2 s snapshot turn both fit "
+                        "several times over. (The original derivation anchor -- the ledger's 3 s "
+                        "AwardSettleWindowMs, under which 2 s left residuals on 2 of 8 seeds -- "
+                        "was deleted with card af96bcc2; 5 s stays because every remaining "
+                        "cadence is faster, so it can only be MORE generous now.) 0 disables "
+                        "the confirm, which is the mutation control for it")
     p.add_argument("--populate-wait", type=int, default=0,
                    help="frame budget for waiting out an EMPTY host world before attaching a "
                         "joiner. DEFAULT OFF, and that is measured, not lazy: the world seen at "
@@ -1119,32 +1040,7 @@ def main():
     for level in levels:
         failures.extend(run_level(level, args, stats))
 
-    # THE `uns` SUBTRACTION'S POSITIVE CONTROL. The score compare subtracts a client's
-    # provisional ledger before comparing, so a build where `uns` silently stopped being
-    # reported would read 0 everywhere and pass -- vacuously, and while quietly reverting to the
-    # raw-`pts` category error the subtraction exists to fix. A joiner books a provisional credit
-    # for every kill it observes locally, so a soak whose peak is 0 is that failure.
-    #
-    # ONLY OVER A LONG ENOUGH RUN, and the threshold is what keeps it honest rather than merely
-    # quiet: `uns` is non-zero only when a joiner scored inside the 3 s AwardSettleWindowMs
-    # before its dump, so a SHORT or KILL-FREE soak legitimately sees none -- `--cap 120` is ~2
-    # joins, `--host-extra "&wallsonly"` runs a section with nothing to kill, `--stop-on-first`
-    # truncates. Asserting there would fail a run that was fine and say the field had stopped
-    # being reported, which is worse than not checking. The default three-level soak clears the
-    # bar by a wide margin (~30 joins, peak measured 277-3900 over four runs). Under the bar it
-    # is REPORTED as skipped rather than passing silently -- the deterministic pin for the
-    # field's shape is tools/headless/probes/net_jip_dump.txt, which needs no soak at all.
     if not args.no_pair:
-        if stats["joins"] >= UnsettledControlMinJoins:
-            if stats["unsettled"] <= 0.0:
-                failures.append(("(run)", 0, [
-                    "no joiner reported ANY unsettled provisional credit across %d joins -- the "
-                    "score compare's `uns` subtraction ran on nothing, so it cannot have been "
-                    "tested (card 94001db7)" % stats["joins"]]))
-        else:
-            print("note: %d join(s) is under the %d needed for the `uns` control -- not asserted"
-                  % (stats["joins"], UnsettledControlMinJoins))
-
         # THE hp LEG'S POSITIVE CONTROL, and it needs no minimum-join caveat: a puppet reports
         # `hpwire` as soon as it has taken one snapshot with hp on it, so any soak that compared
         # a killable entity at all has material. A zero means the field stopped being recorded,
@@ -1158,10 +1054,9 @@ def main():
     # The `owner=` leg's material for the whole run, so a reader can see at a glance
     # whether this run exercised it. See run_join for why it is reported and not
     # asserted, and where that leg's positive control lives instead.
-    print("\n%d join(s) failed, %.0fs wall clock, owner= compared on %d entit%s, "
-          "peak joiner unsettled %.0f"
+    print("\n%d join(s) failed, %.0fs wall clock, owner= compared on %d entit%s"
           % (len(failures), time.time() - started, stats["owners"],
-             "y" if stats["owners"] == 1 else "ies", stats["unsettled"]))
+             "y" if stats["owners"] == 1 else "ies"))
     # WHAT THE RULES OF CARD d108c459 DECLINED TO FAIL ON, in one line, every run. Each of these
     # is a real disagreement that was explained rather than reported, so a reader can see at a
     # glance whether a green run was green because the game agrees or because the tool stopped

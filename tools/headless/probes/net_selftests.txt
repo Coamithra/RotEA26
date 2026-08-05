@@ -37,9 +37,9 @@
 # rather than passing faster. Raise them when checks are added.
 # ONE SUITE CANNOT BE ASSERTED THAT WAY, and it is called out rather than quietly weaker:
 # `eaNetSim.test` prints measurements rather than a verdict, so its line asserts the INVARIANT
-# instead (below). `NetScoreLedger.SelfTest` used to be a second exception -- a bare
-# `[netscore] PASS` ANDed out of five booleans, so a leg deleted from it passed faster and
-# silently; it now reports `(5/5)` and is pinned like the rest.
+# instead (below). (The old NetScoreLedger.SelfTest was once a second exception -- a bare PASS
+# ANDed out of booleans; its one-writer replacement, NetScoreTest, reports a tally like the
+# rest -- card af96bcc2.)
 #
 # MENU-ONLY, AND THAT IS LOAD-BEARING: eaBinTest and eaNetSnap both refuse to run near a live world
 # (their two SKIP messages are worded differently -- `SKIP (run from the main menu` vs
@@ -112,7 +112,7 @@ expect \[nethost\] 37 passed, 0 failed
 # the wrong member of the same type (two floats swap silently), and a subtype that stops answering
 # the NetKillable / NetPickup discriminant, which turns every remote powerup pickup into an
 # explosion. Not a logic_probe case set, unlike eaNetHost: constructing an entity needs a Game.
-expect \[netentity\] PASS \(47 passed, 0 failed\)
+expect \[netentity\] PASS \(46 passed, 0 failed\)
 # primary-slot negotiation + the v8 handshake codec (cards c0229c57 / ee96ea61)
 expect \[slottest\] PASS \(82/82 checks\)
 # the kick/block predicate + the v6 peer-identity codec (card 0b8a300b)
@@ -141,10 +141,10 @@ expect \[netsnap\] PASS \(45 passed, 0 failed\)
 # per-layer option counts v16 appended to that entry (card c5228350) and their decode-boundary
 # clamp -- asserted off a RAW packet, since the encoder clamps too and a value put through it can
 # never reach the decoder's guard.
-expect -> ALL PASS \(40 passed, 0 failed\)
-# the score-reconciliation policy, and the old max() ratchet as its control (card b0ab09ec)
-expect \[netscore\] PASS \(5/5\)
-expect \[netscore\] wire PASS \(9/9\)
+expect -> ALL PASS \(41 passed, 0 failed\)
+# the one-writer-per-slot score policy, with the max() ratchet AND the deleted two-writer
+# settle as its negative controls, plus the v20 wire legs (card af96bcc2)
+expect \[netscore\] PASS \(11/11\)
 # the decorative-swarm codec + the instance predicate (card 9a3175d0)
 expect \[cosmetictest\] PASS \(15/15 checks\)
 # the ComponentBin lifecycle contract incl. TryAdd + the puppet purge exemption (cards 02d9ad67 /

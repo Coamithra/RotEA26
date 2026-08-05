@@ -231,13 +231,13 @@ namespace EvilAliensWeb.Compat.Net
             bin.TopOfTickFlush();
             Check("the entity left the world", !InWorld(game, (GameComponent)(object)victim));
             Check("... and left the id registry", !NetIdRegistry.TryGetById(victimId, out _));
-            // The claimant is paid ONCE. PointValue is the base; the real death path runs
-            // AwardScore, which combo-modifies it, so the assertion is "credited, and by at
-            // least the base value" rather than an exact figure the combo state could move.
+            // ONE WRITER PER SLOT (card af96bcc2): the claimant's slot belongs to the PEER, so
+            // the host credits it NOTHING -- the claimant credited itself on its own screen the
+            // moment it observed the kill, and the host's job is the settle + the world FX.
             float paid1 = score.PointScore(PeerSlot) - scoreBefore[PeerSlot];
-            Check("the claimant slot was credited (+" + Round(paid1) + ", base " + Round(pointValue) + ")",
-                paid1 >= pointValue);
-            Check("no OTHER slot was credited",
+            Check("the claimant slot was NOT credited by the host (one writer; +" + Round(paid1) + ")",
+                Math.Abs(paid1) < 0.01f);
+            Check("no OTHER slot was credited either",
                 Math.Abs(score.PointScore(PeerSlot2) - scoreBefore[PeerSlot2]) < 0.01f);
             planted.Remove((GameComponent)(object)victim);
 
@@ -277,8 +277,12 @@ namespace EvilAliensWeb.Compat.Net
                 m.ClaimsPaidDead == paidDeadBefore + 1);
             float d1 = score.PointScore(PeerSlot) - s1Before;
             float d2 = score.PointScore(PeerSlot2) - s2Before;
-            Check("claimant A was paid (+" + Round(d1) + ")", d1 > 0f);
-            Check("claimant B was paid too (+" + Round(d2) + ")", d2 > 0f);
+            // Since v20 "generous" means both claims SETTLE (honored/paidDead move, the OneUp
+            // AddLife path stays reachable) -- score-wise the host credits neither peer slot,
+            // because each claimant is its own slot's one writer (card af96bcc2).
+            Check("claimant A's slot is untouched on the host (one writer; +" + Round(d1) + ")",
+                Math.Abs(d1) < 0.01f);
+            Check("claimant B's too (+" + Round(d2) + ")", Math.Abs(d2) < 0.01f);
             Check("the entity left the world exactly once",
                 !InWorld(game, (GameComponent)(object)shared) && !NetIdRegistry.TryGetById(sharedId, out _));
             planted.Remove((GameComponent)(object)shared);
@@ -323,11 +327,12 @@ namespace EvilAliensWeb.Compat.Net
             NetSession.Update();
             float sameTickPaidA = score.PointScore(PeerSlot) - s1Before;
             float sameTickPaidB = score.PointScore(PeerSlot2) - s2Before;
-            Check("the FIRST same-tick claimant was paid by the live kill (+"
-                + Round(sameTickPaidA) + ")", sameTickPaidA > 0f);
-            Check("the SECOND was paid from the Entry's ledger, before any flush (paidDead +1)",
+            Check("the FIRST same-tick claim settled without crediting the peer's slot (one "
+                + "writer; +" + Round(sameTickPaidA) + ")", Math.Abs(sameTickPaidA) < 0.01f);
+            Check("the SECOND was settled from the Entry's ledger, before any flush (paidDead +1)",
                 m.ClaimsPaidDead == paidDeadBefore + 1);
-            Check("... and its slot really moved (+" + Round(sameTickPaidB) + ")", sameTickPaidB > 0f);
+            Check("... with its slot untouched too (+" + Round(sameTickPaidB) + ")",
+                Math.Abs(sameTickPaidB) < 0.01f);
             Check("... and it settled as ONE live kill, not two (honored +1)",
                 m.ClaimsHonored == honoredBefore + 1);
             bin.TopOfTickFlush();
@@ -360,17 +365,18 @@ namespace EvilAliensWeb.Compat.Net
                 && Math.Abs(score.PointScore(PeerSlot2) - s2Before) < 0.01f);
             // The negative control, without which a fold of the WRONG mask passes everything
             // above: a record built with a blanket 0xFF (or the prepaid bits smeared) refuses
-            // both slots just as convincingly. A slot that was never paid for this entity must
-            // still be paid, i.e. the fold carried those two bits and no others.
+            // both slots just as convincingly. A slot that was never settled for this entity
+            // must still SETTLE (paidDead moves) -- i.e. the fold carried those two bits and no
+            // others. Score-wise nothing moves for anyone since v20 (one writer).
             paidDeadBefore = m.ClaimsPaidDead;
             float s3Before = score.PointScore(PeerSlot3);
             peer.SendReliable(NetProtocol.EncodeClaimEvent(eventSeq++, sameTickId, PeerSlot3));
             wire.Pump();
             NetSession.Update();
-            Check("... while a slot NEVER paid for that entity still IS (paidDead +1, +"
+            Check("... while a slot NEVER settled for that entity still settles (paidDead +1, +"
                 + Round(score.PointScore(PeerSlot3) - s3Before) + ")",
                 m.ClaimsPaidDead == paidDeadBefore + 1
-                && score.PointScore(PeerSlot3) - s3Before > 0f);
+                && Math.Abs(score.PointScore(PeerSlot3) - s3Before) < 0.01f);
 
             // ---- 3. LATE CLAIM -- the host reaped it first --------------------------------
             // Same ledger, reached from the other direction: here the HOST kills the entity
@@ -456,11 +462,11 @@ namespace EvilAliensWeb.Compat.Net
             NetSession.Update();
             Check("the same-tick claim did NOT run a second live kill (honored unchanged)",
                 m.ClaimsHonored == honoredBefore);
-            Check("the claimant was paid from the Entry's ledger (paidDead +1)",
+            Check("the claimant was settled from the Entry's ledger (paidDead +1)",
                 m.ClaimsPaidDead == paidDeadBefore + 1);
-            Check("... and its slot really moved (+"
+            Check("... with its slot untouched (one writer; +"
                 + Round(score.PointScore(PeerSlot) - s1Before) + ")",
-                score.PointScore(PeerSlot) - s1Before > 0f);
+                Math.Abs(score.PointScore(PeerSlot) - s1Before) < 0.01f);
             bin.TopOfTickFlush();
             Check("... and the host's own kill removed it exactly once",
                 !InWorld(game, (GameComponent)(object)hostKill)
@@ -644,7 +650,7 @@ namespace EvilAliensWeb.Compat.Net
             for (int i = 0; i < Churn; i++)
             {
                 peer.SendReliable(NetProtocol.EncodeDeathEvent(eventSeq++, (ushort)(9000 + i),
-                    NetProtocol.KillerNone, Nowhere, new float[NetProtocol.MaxSlots]));
+                    NetProtocol.KillerNone, Nowhere));
                 peer.SendReliable(NetProtocol.EncodeSpawnEvent(eventSeq++, (ushort)(9100 + i), ChurnTypeIdx,
                     state, noExtras, 0));
             }
@@ -984,7 +990,7 @@ namespace EvilAliensWeb.Compat.Net
 
                 for (int slot = 0; slot < ScoreVisualiser.SlotCount; slot++)
                 {
-                    score.NetSetScore(slot, scoreBefore[slot], 0f);
+                    score.NetSetScore(slot, scoreBefore[slot]);
                 }
                 score.Lives = livesBefore;
                 bool restored = true;

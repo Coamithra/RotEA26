@@ -452,7 +452,9 @@ namespace EvilAliensWeb.Compat.Net
                 new int[] { 4, 2 },
                 new int[] { 0, 1 },
             };
-            byte[] hud = Round(NetProtocol.EncodeHudState(slots, combos, types, progress, levels, optionCounts, 2), reliable: false);
+            // v20: the owner-declared totals, distinct per entry so a cross-entry swap cannot pass.
+            float[] scoreTotals = new float[] { 9001.5f, 17f };
+            byte[] hud = Round(NetProtocol.EncodeHudState(slots, combos, types, progress, levels, optionCounts, scoreTotals, 2), reliable: false);
             // One scratch array PER ENTRY. TryDecodeHudState writes the levels of whichever entry
             // it was asked for, so a shared buffer makes every later assertion depend on decode
             // ORDER -- which is the exact latent defect this commit fixes in NetComboTest. Cheap
@@ -464,8 +466,8 @@ namespace EvilAliensWeb.Compat.Net
             bool hudOk = hud != null
                 && NetProtocol.TryDecodeHudCount(hud, out int hudCount) && hudCount == 2
                 && NetProtocol.TryDecodeHudState(hud, 0, outLevels, outOptions, out byte hslot, out int hcombo,
-                    out EvilAliens.Powerup.PowerupType? hactive, out float hprog)
-                && hslot == 1 && hcombo == 400 && hactive.HasValue && (byte)hactive.Value == 2
+                    out EvilAliens.Powerup.PowerupType? hactive, out float hprog, out float hscore)
+                && hslot == 1 && hcombo == 400 && hscore == 9001.5f && hactive.HasValue && (byte)hactive.Value == 2
                 && Near(hprog, 0f)
                 && outLevels[0] == 1 && outLevels[1] == 2 && outLevels[2] == 3 && outLevels[3] == 4
                 && outLevels[4] == 0
@@ -473,8 +475,8 @@ namespace EvilAliensWeb.Compat.Net
             check("MsgHudState round-trips entry 0 (combo > 255 and the per-layer option counts survive)", hudOk);
             bool hud1Ok = hud != null
                 && NetProtocol.TryDecodeHudState(hud, 1, outLevels1, outOptions1, out byte h1slot, out int h1combo,
-                    out EvilAliens.Powerup.PowerupType? h1active, out float h1prog)
-                && h1slot == 2 && h1combo == 3 && !h1active.HasValue && Near(h1prog, 1f)
+                    out EvilAliens.Powerup.PowerupType? h1active, out float h1prog, out float h1score)
+                && h1slot == 2 && h1combo == 3 && h1score == 17f && !h1active.HasValue && Near(h1prog, 1f)
                 && outOptions1[0] == 0 && outOptions1[1] == 1;
             check("MsgHudState entry 1 decodes, and HudPowerupNone reads as no powerup", hud1Ok);
 
@@ -679,12 +681,9 @@ namespace EvilAliensWeb.Compat.Net
             // bare byte/empty events) are read straight out of the buffer in
             // NetSession.HandleEvent rather than through a Try* decoder, so what is pinned here
             // is the ENVELOPE -- type byte, seq and total length -- which is what a layout slip
-            // in one of them moves. EvDeath's award array is round-tripped against the real
-            // ScoreVisualiser by NetPuppets.WireRoundTripTest (eaNetScore.test()); this does not
-            // duplicate that.
-            float[] awards = new float[NetProtocol.MaxSlots];
-            awards[1] = 30000f;
-            byte[] death = Round(NetProtocol.EncodeDeathEvent(15, 700, 1, new Vector2(5f, 6f), awards), reliable: true);
+            // in one of them moves. Since v20 EvDeath carries no award payload (card af96bcc2);
+            // the score's own wire leg lives in NetScoreTest (eaNetScore.test), not here.
+            byte[] death = Round(NetProtocol.EncodeDeathEvent(15, 700, 1, new Vector2(5f, 6f)), reliable: true);
             check("EvDeath envelope: type, seq and DeathEventBytes",
                 death != null && death.Length == NetProtocol.DeathEventBytes
                 && death[0] == NetProtocol.MsgEvent && death[1] == NetProtocol.EvDeath
@@ -692,7 +691,7 @@ namespace EvilAliensWeb.Compat.Net
             byte[] claim = Round(NetProtocol.EncodeClaimEvent(16, 700, 2), reliable: true);
             check("EvClaim envelope", claim != null
                 && claim[0] == NetProtocol.MsgEvent && claim[1] == NetProtocol.EvClaim && claim[2] == 16);
-            byte[] sync = Round(NetProtocol.EncodeScoreSync(17, 3, new float[NetProtocol.MaxSlots]), reliable: true);
+            byte[] sync = Round(NetProtocol.EncodeScoreSync(17, 3), reliable: true);
             check("EvScoreSync envelope", sync != null
                 && sync[0] == NetProtocol.MsgEvent && sync[1] == NetProtocol.EvScoreSync && sync[2] == 17);
             byte[] blast = Round(NetProtocol.EncodeBlastEvent(18, 1, new Vector2(9f, 9f), 2), reliable: true);

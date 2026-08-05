@@ -541,7 +541,7 @@
         };
 
         // Debug: co-op score reconciliation self-test (card b0ab09ec). Runs the real
-        // NetScoreLedger policy on a virtual clock against a synthetic two-peer kill stream —
+        // one-writer-per-slot score policy on a virtual clock against a synthetic kill stream —
         // and the OLD max() adoption over the same stream, so the one-way drift it fixes is
         // demonstrated before the fix is asserted. Pure computation: no session, no second
         // tab, no scene; runnable straight from the main menu.

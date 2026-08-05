@@ -465,8 +465,12 @@ namespace EvilAliensWeb.Compat.Net
         // count cannot be flattened into: a total would let the observer hang the owner's outer
         // ring on the inner orbit.
         public const int HudOptionLayers = 2;
-        // slot+combo:2+activeType+progress+levels+optionCounts
-        public const int HudSlotBytes = 5 + HudLevelCount + HudOptionLayers;
+        // slot+combo:2+activeType+progress+levels+optionCounts+score:f32
+        // The trailing f32 is the slot's TOTAL SCORE, owner-declared (v20, card af96bcc2) --
+        // the one-writer model's true-up. f32 rather than a quantised int because the score is
+        // already an f32 in ScoreVisualiser and the replica adopts it VERBATIM; any narrowing
+        // here would make the two peers disagree by the quantum forever.
+        public const int HudSlotBytes = 5 + HudLevelCount + HudOptionLayers + 4;
         // Hostile-peer bound on a decoded option count. Real play sits far below it (a pickup
         // adds 1, 2 or 2x2 and options are shot off again), so this is only what stops a garbled
         // or malicious byte asking for 255 real components per layer. Clamped rather than
@@ -478,7 +482,7 @@ namespace EvilAliensWeb.Compat.Net
 
         // MsgHudState: [0x12][count:1] then `count` fixed-width HudSlotBytes entries:
         //   [slot:1][combo:2][activeType:1][progress:1][level x HudLevelCount]
-        //   [optionCount x HudOptionLayers]
+        //   [optionCount x HudOptionLayers][score:f32]
         //
         // The option counts (v16, card c5228350) make the owner AUTHORITATIVE over that slot's
         // Option ship population instead of every peer re-deriving it from events. The two
@@ -493,7 +497,7 @@ namespace EvilAliensWeb.Compat.Net
         // and combos well past 255 are expected (ScoreVisualiser precaches 1000 combo strings and
         // drawPlayerScore has an explicit >= 1000 fallback). Saturation at ushort is unreachable
         // in play. progress is the active bar's 0..1 fill quantised to a byte.
-        public static byte[] EncodeHudState(byte[] slots, int[] combos, byte[] activeTypes, float[] progress, int[][] levels, int[][] optionCounts, int count)
+        public static byte[] EncodeHudState(byte[] slots, int[] combos, byte[] activeTypes, float[] progress, int[][] levels, int[][] optionCounts, float[] scores, int count)
         {
             byte[] b = new byte[2 + HudSlotBytes * count];
             b[0] = MsgHudState;
@@ -514,6 +518,8 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     b[off++] = (byte)Math.Clamp(optionCounts[i][layer], 0, HudMaxOptionsPerLayer);
                 }
+                WriteF32(b, off, scores[i]);
+                off += 4;
             }
             return b;
         }
@@ -525,12 +531,13 @@ namespace EvilAliensWeb.Compat.Net
         // slot has no powerup active", which covers the explicit HudPowerupNone sentinel and any
         // value we do not recognise in one answer, so the consumer has one case to handle
         // instead of two tests it could get individually wrong.
-        internal static bool TryDecodeHudState(byte[] b, int index, int[] levels, int[] optionCounts, out byte slot, out int combo, out Powerup.PowerupType? activeType, out float progress)
+        internal static bool TryDecodeHudState(byte[] b, int index, int[] levels, int[] optionCounts, out byte slot, out int combo, out Powerup.PowerupType? activeType, out float progress, out float scoreTotal)
         {
             slot = 0;
             combo = 0;
             activeType = null;
             progress = 0f;
+            scoreTotal = 0f;
             if (!TryDecodeHudCount(b, out int count) || index < 0 || index >= count || levels == null || levels.Length < HudLevelCount
                 || optionCounts == null || optionCounts.Length < HudOptionLayers)
             {
@@ -551,6 +558,10 @@ namespace EvilAliensWeb.Compat.Net
             {
                 optionCounts[layer] = Math.Clamp((int)b[off + 5 + HudLevelCount + layer], 0, HudMaxOptionsPerLayer);
             }
+            // The owner's declared TOTAL for this slot (v20, one writer per slot), adopted
+            // verbatim by the replica. No range validation, per the CLIENT-TRUSTS-HOST ruling --
+            // a peer declaring nonsense is out of scope (card 2da92af9's surface).
+            scoreTotal = ReadF32(b, off + 5 + HudLevelCount + HudOptionLayers);
             return true;
         }
 
@@ -745,18 +756,15 @@ namespace EvilAliensWeb.Compat.Net
             return b.Length >= extraOff + extraLen;
         }
 
-        // EvDeath v7: [netId:2][killerSlot:1 (KillerSelf = unattributed real death,
-        // KillerNone = despawn/off-screen)][posX:4][posY:4]
-        // [award:f32 x MaxSlots] -- killer/pos let the receiver pay death FX even when its local
-        // copy is already gone; the award array is what it credits.
+        // EvDeath v20: [netId:2][killerSlot:1 (KillerSelf = unattributed real death,
+        // KillerNone = despawn/off-screen)][posX:4][posY:4] -- killer/pos let the receiver play
+        // the death FX even when its local copy is already gone.
         //
-        // v7 replaced a single [points:2] BASE point value (card b0ab09ec). Two reasons it had
-        // to widen, not just change meaning: a combo-modified award overflows a ushort (a 10000
-        // -point boss at a routine 40x combo is 30000, and comboModify has no ceiling), and a
-        // boss pays EVERY seated slot with that slot's own multiplier, so one number cannot
-        // describe the payout. Same fixed f32-per-slot shape as EvScoreSync, for the same
-        // reason -- most kills leave three of the four at zero, and 12 bytes per death is not
-        // worth a variable-length mask.
+        // THE AWARD ARRAY IS GONE (card af96bcc2, one writer per slot). v7's f32 x MaxSlots
+        // carried what the host credited so the client could adopt it; under the mutual-trust
+        // model each peer computes its own share of every kill it sees with its OWN combo
+        // (AwardScore writes only slots the peer owns), so there is no figure to carry and the
+        // wire shrinks back. The per-slot totals now ride MsgHudState, owner-sourced.
         public const byte KillerNone = 0xFF;
 
         // "It really DIED, and nobody earned it" (cards 4e406eba / 303bfb5b / 13aa596c).
@@ -778,28 +786,16 @@ namespace EvilAliensWeb.Compat.Net
         // two different binaries, so both ends of any session are the same build.
         public const byte KillerSelf = 0xFE;
 
-        public const int DeathEventBytes = 4 + 11 + 4 * MaxSlots;
+        public const int DeathEventBytes = 4 + 11;
 
-        public static byte[] EncodeDeathEvent(ushort eventSeq, ushort netId, byte killerSlot, Vector2 pos, float[] awards)
+        public static byte[] EncodeDeathEvent(ushort eventSeq, ushort netId, byte killerSlot, Vector2 pos)
         {
-            byte[] b = EventHeader(EvDeath, eventSeq, 11 + 4 * MaxSlots);
+            byte[] b = EventHeader(EvDeath, eventSeq, 11);
             WriteU16(b, 4, netId);
             b[6] = killerSlot;
             WriteF32(b, 7, pos.X);
             WriteF32(b, 11, pos.Y);
-            for (int i = 0; i < MaxSlots; i++)
-            {
-                WriteF32(b, 15 + 4 * i, (awards != null && i < awards.Length) ? awards[i] : 0f);
-            }
             return b;
-        }
-
-        public static void ReadDeathAwards(byte[] b, float[] into)
-        {
-            for (int i = 0; i < MaxSlots; i++)
-            {
-                into[i] = ReadF32(b, 15 + 4 * i);
-            }
         }
 
         // EvDying (host -> client, reliable): [netId:2]. See the EvDying constant for what it
@@ -835,24 +831,22 @@ namespace EvilAliensWeb.Compat.Net
             return b;
         }
 
-        // EvScoreSync (host -> client, authoritative): [lives:1 signed][score:f32 x MaxSlots].
-        // v5 widened this from 2 slots to the full roster -- couch players (card 4d904410) sit in
-        // the high slots and would otherwise never true up.
+        // EvScoreSync (host -> client, authoritative): [lives:1 signed]. LIVES ONLY since v20
+        // (card af96bcc2): the per-slot score array it used to carry was the host's copy of
+        // every slot, i.e. the second writer -- the totals now ride MsgHudState, each slot's
+        // figure sourced from its OWNER. Lives stay here because they were never per-slot and
+        // the host is their one writer.
         //
         // MUST EQUAL Oracle.MaxPlayers. It is duplicated rather than referenced on purpose: this
         // is a WIRE width, so it may only change with a protocol version bump, whereas the game
-        // constant is free to move. If they ever diverge, score sync silently truncates or
+        // constant is free to move. If they ever diverge, HUD state silently truncates or
         // over-reads -- so change both together, and bump ProtocolVersion when you do.
         public const int MaxSlots = 4;
 
-        public static byte[] EncodeScoreSync(ushort eventSeq, int lives, float[] scores)
+        public static byte[] EncodeScoreSync(ushort eventSeq, int lives)
         {
-            byte[] b = EventHeader(EvScoreSync, eventSeq, 1 + 4 * MaxSlots);
+            byte[] b = EventHeader(EvScoreSync, eventSeq, 1);
             b[4] = (byte)(sbyte)Math.Clamp(lives, -128, 127);
-            for (int i = 0; i < MaxSlots; i++)
-            {
-                WriteF32(b, 5 + 4 * i, i < scores.Length ? scores[i] : 0f);
-            }
             return b;
         }
 

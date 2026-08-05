@@ -131,23 +131,6 @@ namespace EvilAliensWeb.Compat.Net
         // beside `clKill`, which is the same claims that could be credited.
         public long ClaimsUnattributed;
 
-        // Score reconciliation (card b0ab09ec). Client-side only: how far the displayed score
-        // had drifted from (host authoritative + our un-settled local credits) at each sync.
-        // Under the old max() adoption this grew all level; it is now the direct read on
-        // whether the award replication is holding, and should sit at ~0.
-        public float ScoreSkewLast;
-        public float ScoreSkewMax;
-
-        public void NoteScoreSkew(float delta)
-        {
-            ScoreSkewLast = delta;
-            float mag = Math.Abs(delta);
-            if (mag > Math.Abs(ScoreSkewMax))
-            {
-                ScoreSkewMax = delta;
-            }
-        }
-
         // script beats + shared state machine (card 11.3)
         public long BeatsTx;            // host: script-beat events sent (message/unlock/bg/music/checkpoint)
         public long BeatsRx;            // client: script-beat events applied
@@ -174,10 +157,6 @@ namespace EvilAliensWeb.Compat.Net
                     " impLag={0:0}ms impLoss={1:0}% impJit={2:0}ms impDrop={3} impHeld={4}",
                     ImpLagMs, ImpLossPct, ImpJitterMs, ImpDropped, ImpHeld)
                 : "";
-            // Score skew is a CLIENT reading (the host is the authority and never adopts), so
-            // it would be a constant pair of zeroes on the host line.
-            string sc = isHost ? "" : string.Format(CultureInfo.InvariantCulture,
-                " scSkew={0:0.0} scSkewMax={1:0.0}", ScoreSkewLast, ScoreSkewMax);
             // roster= is the multi-local verification (card 4d904410): both peers must print the
             // SAME slot->owner map, since the host allocates every slot and the wire slot IS the
             // oracle slot. A disagreement here is the bug that used to cross-credit kills.
@@ -196,7 +175,7 @@ namespace EvilAliensWeb.Compat.Net
                 ClaimsTx, ClaimsRx, ClaimsHonored, ClaimsPaidDead,
                 BeatsTx, BeatsRx, Resets, Victories, Pauses, TetherBreaks, roster,
                 HudTx, HudRx, DupLive, DupDeclined, DupBad, Teleports, UnmarkedTeleports,
-                SnapStale) + sc + imp;
+                SnapStale) + imp;
         }
     }
 }

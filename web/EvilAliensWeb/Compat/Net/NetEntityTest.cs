@@ -155,14 +155,8 @@ namespace EvilAliensWeb.Compat.Net
             Check("NetDriveExtras reached the class's override", probe.DriveExtrasCalls == 1);
             Check("... and did NOT tick the timers", probe.ProbeTimerLeft == held);
 
-            // NetSuppressAward is a REACHABILITY check only, and deliberately says so rather
-            // than pretending to more: its effect is the private `awarded` flag, which has no
-            // non-destructive readback (observing it means driving AwardScore, i.e. really
-            // crediting the live ScoreVisualiser from a menu suite). It is also the interface's
-            // ONLY no-argument void member, so unlike the pair above it cannot be swapped with
-            // anything -- the sole failure mode left is a forward that never calls through.
-            e.NetSuppressAward();
-            Check("NetSuppressAward is reachable through the seam (reachability only)", true);
+            // (NetSuppressAward's reachability leg lived here until card af96bcc2 deleted the
+            // member outright -- one writer per slot needs no award suppression.)
 
             // ---- 4. the VIRTUAL forwards dispatch to the override, not to the base --------
             //

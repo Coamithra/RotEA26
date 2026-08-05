@@ -363,11 +363,6 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 	// Client-side mirror of the host's LoseLife branch (mode = NetSession.ResetMode*).
 	public void NetApplyReset(byte mode)
 	{
-		// Card b0ab09ec: drop any provisional score credits first. A reset reverts the score to
-		// the checkpoint baseline (score.Load), and the purge storm that follows removes the
-		// very entities those credits belong to -- carrying them across would add kills from
-		// before the revert on top of the restored baseline.
-		EvilAliensWeb.Compat.Net.NetPuppets.ResetScoreLedger();
 		Collection.Purge<PlayerShip>();
 		Collection.Purge<PlayerShipSummon>();
 		_timer = TimeSpan.Zero;

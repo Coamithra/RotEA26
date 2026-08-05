@@ -328,32 +328,30 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		scores[player].bombs = Math.Min(scores[player].bombs + 1, 3);
 	}
 
-	// Returns what was ACTUALLY credited (the combo-modified figure when isCombo) -- online
-	// co-op puts the host's credited number on the wire so both peers tally identically
-	// (card b0ab09ec). Every other caller ignores the value.
 	public float AddScore(float amount, bool isCombo, int player)
 	{
+		System.Console.WriteLine("[DBGADD] slot=" + player + " amt=" + amount + " at " + System.Environment.StackTrace);
 		float points = ((!isCombo) ? amount : comboModify(amount, player));
 		scores[player].SetScore(scores[player].score + points);
 		return points;
 	}
 
-	// Online co-op (card b0ab09ec): take the host's authoritative score for a slot VERBATIM,
-	// plus whatever local credit the host has not settled into it yet.
+	// Online co-op (card af96bcc2): adopt the OWNER's declared total for a slot this peer does
+	// not own, VERBATIM. One writer per slot -- this peer never credits a non-owned slot
+	// (AwardScore's OwnsSlot gate), so the local copy is a plain replica of a single writer:
+	// it cannot drift, only be one MsgHudState packet (~100 ms) stale.
 	//
-	// This replaced a max(local, host) adoption. max() looked safe -- a score can never
-	// visibly roll backwards -- but the client credits every kill with its OWN combo
-	// multiplier, so each peer's per-kill figure differs; max() then accumulated every
-	// positive excursion of that difference and discarded every negative one, turning an
-	// unbiased error into unbounded one-way drift (measured: 304 on the joiner for a slot the
-	// host had at 294, and growing). Verbatim adoption alone would sawtooth instead, because
-	// the host's 1Hz sync never contains the client's in-flight claims -- carrying `unsettled`
-	// is what makes the sum exact in both message orderings AND keeps it monotone in practice.
-	internal void NetSetScore(int player, float hostScore, float unsettled)
+	// The two designs this supersedes, kept as one line each so nobody re-derives them: the
+	// original max(local, host) adoption turned an unbiased per-kill combo difference into
+	// unbounded one-way drift (card b0ab09ec's ratchet); the provisional-ledger reconciliation
+	// that replaced it (NetScoreLedger, settle-on-EvDeath, host+unsettled adoption) existed
+	// solely to reconcile TWO writers per slot, and one writer makes all of it dead code.
+	// eaNetScore.test keeps both as its negative controls.
+	internal void NetSetScore(int player, float declaredTotal)
 	{
 		if (player >= 0 && player < scores.Count)
 		{
-			scores[player].SetScore(hostScore + unsettled);
+			scores[player].SetScore(declaredTotal);
 		}
 	}
 
@@ -388,12 +386,10 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 	// peer does NOT own (NetSession gates the call), replacing the local simulation increasecombo
 	// no longer runs for it.
 	//
-	// This peer does not re-derive its OWN awards from the adopted combo -- its score is
-	// reconciled by EvScoreSync plus the unsettled ledger (card b0ab09ec). The HOST does spend
-	// it, though: AwardScoreToAll pays each slot with THAT slot's own multiplier, so the figure
-	// adopted here becomes the client's real boss share. That is the intended correction (the
-	// host used to pay it from a combo the client never had) and it is why the wire field is a
-	// ushort rather than a byte.
+	// Nobody SPENDS the adopted combo any more (card af96bcc2): each peer pays only slots it
+	// owns, with its own local combo, so this figure is display-plus-bookkeeping -- the combo
+	// readout, its fade, and the powerup bar. The slot's SCORE arrives separately on the same
+	// packet and is adopted verbatim by NetSetScore.
 	internal void NetSetHudState(int player, int combo, Powerup.PowerupType? activeType, float progress, int[] levels)
 	{
 		if (player < 0 || player >= scores.Count || levels == null)
@@ -568,11 +564,11 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 	// credited either way; what is gated is the popup.
 	//
 	// Online co-op (card 7a8ec0d3): a floating score belongs to the player who earned it, and
-	// only their own screen shows it. Every net award path leads here -- the host locally
-	// re-fires a remote player's bullets (AlienDrawableGameComponent.AwardScore), the host pays
-	// an EvClaim (NetSession.HandleClaim / PayDeadClaim), and the client pays the host's EvDeath
-	// award array (NetPuppets.ApplyAwards) -- so ONE gate covers all four rather than four
-	// gates that can drift. OwnsSlot is unconditionally true offline and for couch slots, so
+	// only their own screen shows it. Since card af96bcc2 the CREDIT is gated one level up
+	// (AwardScore writes only owned slots), so in practice this fires for owned slots only --
+	// the gate stays here as well because this overload is also reachable directly (`?level=`
+	// debug paths, future callers) and a popup for a slot whose credit was refused would be a
+	// lie. OwnsSlot is unconditionally true offline and for couch slots, so
 	// single-player and local co-op are unchanged, and a couch partner sharing your screen
 	// still gets their own popups.
 	//

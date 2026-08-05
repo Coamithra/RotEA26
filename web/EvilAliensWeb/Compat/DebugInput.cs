@@ -578,11 +578,6 @@ namespace EvilAliensWeb.Compat
 			{
 				sb.Append(" | s").Append(i).Append(oracle.IsSeated(i) ? "=" : "(empty)=")
 					.Append((int)sv.PointScore(i)).Append(" combo=").Append(sv.Combo(i));
-				float pending = EvilAliensWeb.Compat.Net.NetPuppets.UnsettledFor(i);
-				if (pending != 0f)
-				{
-					sb.Append(" unsettled=").Append(pending.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture));
-				}
 				// Card 1a3ad45a: whose simulation the slot's combo and powerup levels come from,
 				// and what they are. `own` is the whole point of the two-window comparison -- the
 				// SAME slot must read own=1 on one console and own=0 on the other, and the combo
@@ -601,18 +596,17 @@ namespace EvilAliensWeb.Compat
 			return sb.ToString();
 		}
 
-		// JS bridge for the co-op score-reconciliation self-test (eaNetScore in
-		// wwwroot/index.html, card b0ab09ec). Drives NetScoreLedger -- the real policy -- on a
-		// VIRTUAL clock against a synthetic two-peer kill stream, running the old max() adoption
-		// over the identical stream first so the drift it fixes is demonstrated, not asserted;
-		// then round-trips a real EvDeath through ApplyAwards against the live ScoreVisualiser.
-		// Needs no session and no second tab: the failure is a slow tally drift, and a
-		// backgrounded peer tab throttles to ~1 tick/sec so two windows cannot show it anyway.
+		// JS bridge for the co-op score-policy self-test (eaNetScore in wwwroot/index.html,
+		// card af96bcc2). Drives the ONE-WRITER-PER-SLOT policy on a virtual clock against a
+		// synthetic two-peer kill stream, with the two designs it superseded run over the
+		// identical stream as negative controls -- the pre-b0ab09ec max() ratchet and the
+		// deleted two-writer settle -- then round-trips a real v20 MsgHudState score into the
+		// live ScoreVisualiser. Needs no session and no second tab: the failure is a slow
+		// tally drift, and a backgrounded peer tab throttles to ~1 tick/sec anyway.
 		[JSInvokable("debugNetScoreTest")]
 		public static string NetScoreTest(int kills, int comboSkew, int rttMs, int seed)
 		{
-			return EvilAliensWeb.Compat.Net.NetScoreLedger.SelfTest(kills, comboSkew, rttMs, seed)
-				+ "\n\n" + EvilAliensWeb.Compat.Net.NetPuppets.WireRoundTripTest();
+			return EvilAliensWeb.Compat.Net.NetScoreTest.SelfTest(kills, comboSkew, rttMs, seed);
 		}
 
 		// JS bridge for the world-snapshot unknown-id attribution (eaNetSnap in

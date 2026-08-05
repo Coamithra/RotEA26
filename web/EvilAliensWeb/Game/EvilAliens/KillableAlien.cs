@@ -297,8 +297,8 @@ public abstract class KillableAlien : AlienDrawableGameComponent, EvilAliensWeb.
 	// KilledBy is one small burst and "expl1".
 	//
 	// `agent` is NetPuppets' scratch Bullet carrying KillerSelf as its slot, so a KilledBy that
-	// casts `other` to Bullet still works; nothing is credited, because the caller has already
-	// claimed the award slot with NetSuppressAward().
+	// casts `other` to Bullet still works; nothing is credited, because KillerSelf is not a
+	// slot this peer owns and AwardScore only writes owned slots (card af96bcc2).
 	internal virtual void NetReplayUnattributedDeath(ICollidable agent)
 	{
 		NetKill(agent, isComboGenerator: false);

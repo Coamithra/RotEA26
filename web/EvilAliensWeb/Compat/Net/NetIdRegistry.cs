@@ -33,6 +33,22 @@ namespace EvilAliensWeb.Compat.Net
             public Vector2 LastPos;
             public long LastPosMs;
             public bool HasLastPos;
+            // THE hp THIS ENTITY WAS LAST BROADCAST WITH, or -1 if it has not been yet (card
+            // d108c459). Diagnostic only -- nothing in the session or the encoder reads it, and
+            // it is written at the one point the value leaves the host (the snapshot entry, and
+            // the catch-up spawn's base state).
+            //
+            // It is the HOST half of the client's PuppetInfo.LastAppliedHp, and the pair is what
+            // makes hp comparable across two peers at all: a live `hp` on each end is two
+            // different quantities (the client subtracts damage it has dealt locally; the host
+            // has moved on since this entity's snapshot turn), while these two are both "what
+            // crossed the wire" and must agree. Measured before the pair existed: a Boss read
+            // 211 against 179, and no tolerance narrow enough to be worth having covered it.
+            //
+            // WELL-DEFINED PER PEER because a snapshot is ONE packet broadcast to everyone
+            // (SendSnapshot writes a single buffer and hands it to transport.SendStream), so
+            // there is no per-peer subset for this to be ambiguous about.
+            public int LastSentHp = -1;
             // What the per-type death path credited, per slot (card b0ab09ec). Lazily allocated
             // -- most entities never award (they despawn) and this is per LIVE entity, so it
             // must not cost an array each. Filled by NetSession.NoteAward during KilledBy, read

@@ -927,10 +927,14 @@ level-select screenshot cropped from the meme splash). Don't hand-edit.
   python tools/sim/net_jip_sync.py                  # the three story levels
   python tools/sim/net_jip_sync.py --level Level2 --cap 120 --verbose
   ```
-  **It is RED on `main` on purpose** -- it found a real defect on its first soak and the assertion
-  was not softened. Read net CLAUDE.md's "THE AUTOMATED JOIN-IN-PROGRESS SUITE" before quoting a
-  number from it: the tolerances, the measured `--settle-after`, the interleave skew that dominates
-  the position figure, and the three mutations that deliberately do NOT discriminate are all there.
+  **It is GREEN on `main` since card d108c459** -- it was RED for two arcs, first on a real defect
+  (a joiner purging the host's catch-up burst) and then on measurement, and neither was fixed by
+  widening a tolerance. Read net CLAUDE.md's "THE AUTOMATED JOIN-IN-PROGRESS SUITE" before quoting
+  a number from it: the tolerances and where each was measured, the four residual classes and which
+  rule retired each, the measured `--settle-after`, the interleave skew that dominates the position
+  figure, and the mutations that deliberately do NOT discriminate are all there. **A green run
+  prints what it declined to fail on** (`converged= transit= released= skipped= hpwire=`); read
+  that line before trusting the exit code.
   It cannot live in `run_probes.py` (that runs ONE `eahl --script`); `probes/net_jip_dump.txt`
   covers the half that fits.
 - **`tools/xnb/unpack.py`**: unpacked the original content; emits decoded RGBA verbatim (straight

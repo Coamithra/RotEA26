@@ -58,7 +58,7 @@ namespace EvilAliensWeb.Compat.Net
     {
         // Bumped when a line's SHAPE changes, so the python differ can refuse a dump it does not
         // understand instead of silently comparing half a world.
-        internal const int FormatVersion = 3;
+        internal const int FormatVersion = 4;
 
         // Descriptor extras are small (the widest shipped block is a handful of bytes); this is
         // an order of magnitude over any of them and is asserted rather than assumed below.
@@ -105,7 +105,8 @@ namespace EvilAliensWeb.Compat.Net
             {
                 foreach (var p in NetPuppets.LiveEntries())
                 {
-                    AppendEntity(sb, p.Id, p.TypeIdx, p.Comp, p.Provisional, client: true, scratch);
+                    AppendEntity(sb, p.Id, p.TypeIdx, p.Comp, p.Provisional, client: true, scratch,
+                        p.LastAppliedHp);
                     n++;
                 }
             }
@@ -113,8 +114,11 @@ namespace EvilAliensWeb.Compat.Net
             {
                 foreach (NetIdRegistry.Entry e in NetIdRegistry.Live)
                 {
-                    // The host's own entities are never provisional -- it built the world.
-                    AppendEntity(sb, e.Id, e.TypeIdx, e.Comp, false, client: false, scratch);
+                    // The host's own entities are never provisional -- it built the world. What
+                    // it DOES have is the other half of the hp pair: the value it last put on
+                    // the wire for this entity, which is what the joiner's `hpwire` must equal.
+                    AppendEntity(sb, e.Id, e.TypeIdx, e.Comp, false, client: false, scratch,
+                        e.LastSentHp);
                     n++;
                 }
             }
@@ -122,7 +126,7 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         private static void AppendEntity(StringBuilder sb, ushort id, byte typeIdx, INetEntity comp,
-            bool provisional, bool client, byte[] scratch)
+            bool provisional, bool client, byte[] scratch, int lastAppliedHp)
         {
             // Safe by construction: NetTypeRegistry only ever matches AlienDrawableGameComponent
             // subclasses, and CreatePuppet returns one -- the same invariant the three production
@@ -142,6 +146,17 @@ namespace EvilAliensWeb.Compat.Net
                 // that has hit points" the same value on both ends and hide a real disagreement.
                 .Append(" hp=").Append(comp.NetKillable != null
                     ? comp.NetKillable.NetHitPoints.ToString(CultureInfo.InvariantCulture)
+                    : "-")
+                // WHAT CROSSED THE WIRE FOR THIS ENTITY (card d108c459) -- on a client the hp it
+                // last APPLIED, on a host the hp it last SENT, `-` on either end before there is
+                // one. Same key on both ends because it is the same quantity, which is the whole
+                // point: `hp` above is the LIVE value, and the two peers' live values are NOT the
+                // same quantity (a client's carries damage it has dealt locally since its last
+                // snapshot turn; a host's has moved on since that entity's turn came round), the
+                // same way their `pts` are not (card 94001db7). Measured on the live compare: a
+                // Boss read 211 against 179. These two must agree.
+                .Append(" hpwire=").Append(lastAppliedHp >= 0
+                    ? lastAppliedHp.ToString(CultureInfo.InvariantCulture)
                     : "-")
                 .Append(" dead=").Append(comp.IsDead ? 1 : 0)
                 .Append(" dying=").Append(comp.NetIsDying ? 1 : 0)
@@ -234,6 +249,26 @@ namespace EvilAliensWeb.Compat.Net
 
         private static void AppendExtras(StringBuilder sb)
         {
+            // THE REMOVAL LEDGER, so a host-only id can be EXPLAINED rather than tolerated (card
+            // d108c459). A client that released a puppet to its own death animation
+            // (ReleaseDyingPuppet) drops it from the map this dump walks, while the host keeps
+            // the entity for the whole 2.5-5 s animation -- so the id sets legitimately differ
+            // for seconds. This is the client saying "I had that one and let it go"; an id the
+            // host holds that appears in neither this line nor a host-side death is the real
+            // defect the diff exists to catch. Always emitted, `-` when empty and on a host, so
+            // the line's SHAPE is assertable off a peerless dump (net_jip_dump.txt).
+            sb.Append("[netjip] gone ");
+            if (NetSession.Active && NetSession.IsClient)
+            {
+                List<ushort> gone = NetPuppets.RemovedIds();
+                sb.Append(gone.Count == 0 ? "-" : string.Join(",", gone));
+            }
+            else
+            {
+                sb.Append('-');
+            }
+            sb.Append('\n');
+
             GameScene scene = GameScene.NetActiveScene;
             sb.Append("[netjip] scene ")
                 .Append(scene == null ? "none" : scene.NetCatchUpStateLine()).Append('\n');

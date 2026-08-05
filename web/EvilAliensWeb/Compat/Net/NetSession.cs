@@ -1889,6 +1889,10 @@ namespace EvilAliensWeb.Compat.Net
             // and is safe by construction -- see INetEntity's header for the argument.
             int extraLen = e.Descriptor.EncodeSpawnExtra((AlienDrawableGameComponent)e.Comp, extraScratch, 0);
             transport.SendReliable(NetProtocol.EncodeSpawnEvent(txEventSeq++, e.Id, e.TypeIdx, state, extraScratch, extraLen));
+            // The spawn's base state carries hp too, and for a catch-up spawn it is the FIRST hp
+            // the joiner ever applies -- so recording it here is what stops a freshly attached
+            // peer reading as "never sent any hp" (card d108c459).
+            e.LastSentHp = state.Hp;
             metrics.EventsTx++;
             if (NetHost.Current.NetLog)
             {
@@ -2057,6 +2061,9 @@ namespace EvilAliensWeb.Compat.Net
                 snapshotCursor = (snapshotCursor + 1) % live.Count;
                 NetBaseState state = CaptureBaseState(e, now, out byte entryFlags);
                 NetProtocol.WriteSnapshotEntry(snapshotScratch, ref off, e.Id, e.TypeIdx, entryFlags, state, extraScratch, extraLen);
+                // Recorded where the value LEAVES the host, after the fit check that can skip an
+                // entry -- so it always names hp a peer was really sent (card d108c459).
+                e.LastSentHp = state.Hp;
                 written++;
             }
             if (written == 0)

@@ -3400,19 +3400,89 @@ python tools/sim/net_jip_sync.py --level Level2 --cap 120 --verbose
 python tools/sim/net_jip_sync.py --selftest          # the tool's own vacuity control
 ```
 
-**IT IS STILL RED ON `main`, BUT NO LONGER FOR THE DEFECT IT WAS BUILT AROUND.** The provisional
-puppets it found are FIXED (card 9a7ee4c0, below); what is left is a handful of joins per soak
-failing on **measurement**, not on the attach: position skew above the 12 px tolerance (13-25 px
-measured, against a documented interleave skew that reaches 17.9 px), `hp` on an entity under fire
-(a client hit-tests puppets with its own bullets, so hp diverges between snapshot turns -- `Boss
-205 vs 179` against a tolerance of 5), `dead`/`dying`/`is on the HOST and not on the joiner` and
-residual `score` staleness, all of which come of the two ends being dumped at slightly different
-world instants, plus the occasional vacuous join (`0 replicated entities`). The set changes run
-to run. **Do not
-widen a tolerance to force green** -- that is suite CALIBRATION work with its own card, and the
-assertions this tool exists for (`prov=`, `owner=`) are exact and clean. It is a standalone tool,
-not a `run_probes.py` probe, so red is a finding rather than broken CI.
+**IT IS GREEN ON `main` (card d108c459), AND HOW IT GOT THERE IS THE POINT.** It was red twice:
+first on a real defect -- a joiner purging the host's catch-up burst, fixed by card 9a7ee4c0 below
+-- and then on **measurement**, a handful of joins per soak failing on classes where the two ends
+are dumped at slightly different world instants. **Not one of those was retired by widening a
+tolerance to fit.** Three were CATEGORY ERRORS in the oracle and were deleted outright; the two
+that were genuinely staleness got tolerances measured over 223 joins across 6 seeds. The
+calibration section below has each rule, its evidence and its mutation.
 
+**A GREEN RUN PRINTS WHAT IT DECLINED TO FAIL ON.** Every rule that explains a disagreement rather
+than reporting it is counted on the run's last line --
+`N join(s) compared; converged= transit= released= skipped= hpwire=` -- and every mismatch the
+re-settle clears is printed under its join. That is deliberate: a rule that quietly deletes a class
+is indistinguishable from a differ that stopped looking, so the numbers are on screen even at exit
+0. A `converged=` that jumps relative to `joins` is worth reading before believing the tick.
+It is a standalone tool, not a `run_probes.py` probe, so a red run is a finding rather than
+broken CI -- and `prov=` / `owner=` remain exact, first-sample and never softened.
+
+**THE CALIBRATION, CLASS BY CLASS (card d108c459).** Measured on `main` at `7018c62` over a
+6-seed zero-tolerance sweep (188 joins) plus a 110-join raw-dump capture that re-dumped each join
+2 s later, which is what separated "converges" from "persists". **Green is judged over 10 seeds
+(370 joins), not one run** -- the classes are seed-dependent and a single soak proves nothing.
+
+| residual | measured before | what retired it | after |
+|---|---|---|---|
+| `dead` / `dying` | the largest class -- 5 of 8 failing joins on the default soak | **not compared at all.** `dead` is on NO wire field: on the host it means "removal queued this tick", on the client "I killed it locally". `dying` does ride the wire but legitimately LEADS on whichever peer's bullet landed. An entity in transition on either end skips its SAMPLED keys too (hp mid-death reads 0 against full) -- `prov=`/`owner=` are not skipped, they are identity | `transit=` |
+| `is on the HOST and not on the joiner` | 14 in 188 | **evidence, not tolerance.** dump v4's client-side `gone` line is the joiner's own removal ledger -- "I had it and let it go", which `ReleaseDyingPuppet` produces constantly (it drops the puppet from every map while the host keeps the entity for the whole 2.5-5 s animation). A host-side death is the second form, for a release older than the ledger's cap. NEITHER -> still a hard failure, which is the defect class: a joiner that never got an entity | `released=` |
+| `hp` under fire | `Boss 210 vs 180`, then `211 vs 179`; worst 32 | **compared WIRE-TO-WIRE: the host's last SENT hp (`NetIdRegistry.Entry.LastSentHp`) against the joiner's last RECEIVED one (`PuppetInfo.LastAppliedHp`) -- both printed as `hpwire=` in the dump, one key because they are one quantity -- and NEITHER side's live `hp`.** The two live values are different quantities -- a client hit-tests puppets with its own bullets, and the host has moved on since that entity's round-robin turn. Only a tolerance near 40 covers the raw class, which is wide enough to pass a UFO at 2 against a host's 10 | **exact.** `--hp-tol` 5 -> **0**: over 227 joins the two wire values differed **0 times**, and the clamp invariant was violated 0 times |
+| `score` staleness | 5500, and 94001db7's "do not treat 4850 as a bound" | **the limit is KEYED TO THE AWARDS IN FLIGHT**: the joiner's outstanding `uns` is added to the base in the HOST-AHEAD direction only, because an award it still holds provisionally may already be settled authoritatively by the host. `comboModify` has no ceiling, but the term sits in `uns` while it is in flight, so the allowance grows with it and only with it. The other direction keeps the bare base -- a joiner reading high is invented points | `--score-tol` 250 -> **1000**, sized off the measured `uns`-0 tail (worst 625) |
+| vacuous join (`0 replicated entities`) | 7 in 188 | **the rig, as the card said.** A real level is empty between waves, so the join is SKIPPED and counted rather than failed -- with a per-level floor of real joins, or an all-skipped level would be the vacuous green again. (Waiting for a populated world BEFORE attaching was tried and DECLINED: the world at attach is not the world at the dump 10 s later, and the wait cost 24 of 39 joins per soak) | `skipped=` |
+| `pos` / `rot` | 17.0 px / 0.209 rad | **shrink the artifact first.** The interleave chunk dominates (one peer has always stepped last), so `--approach` steps the last 6 frames ONE AT A TIME: 17.0 -> **13.5 px**. Tolerances then set from that with margin | `--pos-tol` 12 -> **20**, `--rot-tol` 0.1 -> **0.3** (every one of the top ten a `Ball`) |
+| `lv` / `opt`, joiner-only ids, transient extras | 4 in 188, plus a class per soak | **the re-settle confirm** (below). They stay compared EXACTLY -- there is no sane tolerance on a ladder position or a count of Option ships | `converged=` |
+| scenery line | 1 in ~300 | compared FIELD BY FIELD, not as one string: the doodad carries a POSITION and got `-239.6` vs `-239.2` reported as a desync. Its name stays exact and so does everything discrete (which is what makes the missing-catch-up mutation unmistakable) | -- |
+| the `uns` run-level control itself | RED on 1 of 5 healthy soaks, and 0 vs 1000 on two runs of the SAME seed | **the rig again**: `uns` is non-zero only inside the 3 s `AwardSettleWindowMs` after a joiner's own kill, and it was sampled at ONE instant per join. Now sampled at every dump a join takes, settle included | 0 zeros in 10 seeds (peaks 390-4550) |
+
+- **`NetApplyHp` ONLY EVER LOWERS, and that is why the hp compare reads the RECEIVED value rather
+  than the entity.** `KillableAlien.NetApplyHp` refuses any value at or above the puppet's current
+  hit points (`if (hp >= hitpoints) return;`) so an older snapshot cannot resurrect hits this
+  client has already landed. A first implementation recorded `hpwire` by reading the killable back
+  AFTER the apply, which therefore reports the REFUSED figure whenever the joiner is ahead:
+  measured **132 gaps across 6 seeds, 132 client-lower, 0 higher, 0 equal** -- a one-directional
+  signature that is the clamp, not a replication fault. Recording what was received keeps the two
+  ends comparable; the clamp is then asserted SEPARATELY as an invariant with no tolerance at all
+  -- **a puppet's live hp may never EXCEED its `hpwire`**, since both the clamp and local damage
+  only lower, so an entity holding more than it was last told is a state no path produces.
+  - **COVERAGE BOUNDARY, stated because a tolerance would have hidden it:** a wrong-but-LOWER
+    apply is indistinguishable from ordinary local damage seen from the host's side, so this
+    suite does NOT prove `NetApplyHp` assigns the value it received. Nothing did -- `NetEntityTest`
+    calls the seam directly and `NetWireTest` round-trips the byte through a frame, but neither
+    drove a real snapshot entry into a real puppet. **`eaNetSnap` section 7 now does** (card
+    d108c459; `net_selftests.txt` tally 40 -> 45), driving `NetPuppets.ApplySnapshotState` and
+    reading the killable back, clamp included.
+- **MEASURED AND DECLINED: comparing score wire-to-wire.** The obvious next application of the
+  `hpwire` template -- have the host record the figure its `EvScoreSync` last carried and
+  compare the joiner's authoritative score against THAT -- was implemented and **reverted**, and
+  the reason is a mechanism worth knowing: **a joiner does not get its score from the sync.** It
+  books settled awards continuously as the host announces deaths, and `EvScoreSync` is a periodic
+  TRUE-UP, so comparing against the last sent sync compares a fresh figure against a stale one.
+  Measured: the wire-to-wire version went **RED on 7 of 10 seeds**, every failure of the form
+  "joiner holds exactly the host's live figure, `sent` is behind"; and over ~180 joins the
+  live-vs-live gap is **exactly 0 on ~85%**, while sent-vs-joiner was 0 on only 7 of those 26
+  nonzero cases. The 85% is also what refutes the reasoning that motivated it -- a systematic 1 Hz
+  cadence lag would be nonzero nearly always. **Do not "improve" the score compare back to
+  wire-to-wire.** `hp` is not the counterexample: hp really is replicated only by the snapshot,
+  which is exactly why the template fits there and not here.
+- **THE RE-SETTLE CONFIRM, and why it is not a way of hiding things.** A join that reports
+  mismatches is stepped `--resettle` frames (default 300 = 5 s, past one 1 Hz score sync, several
+  snapshot turns and the whole 3 s settle window -- the derivation is the sub-bullet below) and
+  diffed AGAIN; only a disagreement present in BOTH samples is a failure. It is
+  keyed by COMPARISON, not by message text, since a position or a score never repeats a value.
+  Evidence it is measuring staleness rather than muffling defects: in the capture, every score gap
+  over the limit (1900, 1550) read **exactly 0** after the re-settle, and every host-only id that
+  was not a deferred-death release had resolved. **`--resettle 0` is its own mutation control and
+  is RED on 6 of 6 seeds** -- so the confirm is doing real work, not decoration. Everything it clears
+  is PRINTED under its join and counted into `converged=`, deliberately: a class that always clears
+  on the second look is a finding about the game, not something to disappear into a green run.
+  It never applies to `prov=` / `owner=` / type / extras length, which fail on the first sample.
+  **What it does cost:** a first-sample mismatch on an entity that leaves the world within the
+  window is unconfirmable and therefore dropped.
+  - **`--resettle` is DERIVED FROM THE SLOWEST MECHANISM IT MUST OUTLAST, not picked: 300 frames
+    (5 s).** `NetScoreLedger.AwardSettleWindowMs` is 3 s, so a deferred-death award in flight
+    structurally cannot settle inside a shorter window -- at 2 s a score residual and an Option
+    count were still outstanding on 2 of 8 seeds, and both cleared at 5 s. Anything that needs a
+    LONGER confirm than this is not staleness and should fail.
 - **THE SUITE NEVER RESETS, SO NONE OF ITS RESIDUALS IS RESET-CAUSED (card d6372279).** The host
   boots `?invuln` and `LoseLife` is host-authoritative, so `AllShipsDead` never fires and neither
   peer ever enters `GameState.Resetting`: measured `resets=0` on **every** `[net]` line of a
@@ -3578,7 +3648,13 @@ about the code, not a weak assertion, and re-deriving them is a waste of an afte
 | revert `Wall.NetScaleLocal` to false (`--level Level3 --host-extra "&wallsonly"`) | **no change**, and the reason is that another card already fixed it: protocol v19 raised the wire scale to 1/4096 with rounding, so the error `NetScaleLocal` defends against is now **0.090%**, far under any sane scale tolerance. `eaNetWalls` remains the pin |
 | drop `ReplayLive`'s `EvDying` re-announce | **not reached.** It needs a join timed into a 2.5-5 s deferred-death window, which the orchestrator does not control. `eaNetDeathFx` pins that beat directly |
 | force `NetJipDump`'s `uns=` to a constant 0 | **RED, deterministically**, on the run-level `no joiner reported ANY unsettled provisional credit` control -- 2 of 2 soaks. The score compare itself only reverts to the raw one, which is a nondeterministic failure, so the control is what carries this leg (card 94001db7) |
-| revert `ScoreVisualiser.NetSetScore` to the pre-b0ab09ec `max(local, host)` ratchet | **RED**, but only 1 soak in 4 -- each joiner lives ~8 s, so a ratchet barely accumulates. Its signature is unmistakable when it does fire (`32737 vs 32737`, i.e. IDENTICAL displayed scores 3200 apart authoritative -- a case the raw compare was blind to). **`eaNetScore.test()` is the deterministic pin for that policy**; do not rely on this suite for it |
+| drop the `gone` line (`NetPuppets.RemovedIds` returning empty) | **RED, 3/3 seeds** (card d108c459). It is the ONLY evidence that excuses a host-only id, which is why the host-side `dying` arm was dropped: with both in place this mutation did not even bring the class back |
+| halve the received hp before it is applied AND recorded (`state.Hp / 2` folded in at the top of the hp block) | **RED, 3/3 seeds** (re-confirmed in this exact form during review) -- the wire-to-wire compare catches a value that did not survive delivery, and the clamp invariant fires with it. Halving ONLY `NetApplyHp`'s argument would trip neither leg: `LastAppliedHp` records what was received, so both `hpwire` values still agree and the halved live hp sits safely BELOW them -- that is the wrong-but-lower APPLY this suite structurally cannot see (see the clamp bullet above); `eaNetSnap` section 7 owns it |
+| stop recording `hpwire` (`PuppetInfo.LastAppliedHp`) | **RED, 3/3 seeds**, on the run-level `no entity was compared on hpwire` control. Without it the field reads `-`, which SKIPS the hp comparison rather than failing it -- the same silent-deletion shape the `uns` control exists for |
+| ~~force `NetApplyHp` to assign a wrong-but-lower value~~ | **RETIRED, and here rather than deleted so its absence is not mistaken for an oversight.** Under the wire-to-wire compare it cannot bite: from the host's side a lower value is indistinguishable from the local damage a joiner deals with its own bullets. Replaced by `eaNetSnap` section 7, which asserts the assignment in-process |
+| `--resettle 0` (the confirm disabled) | **RED, 6/6 seeds** -- the confirm carries real weight, not decoration |
+| restore the card-9a7ee4c0 purge, re-run against the CONFIRM | **RED, 3/3 seeds, 23-29 `PROVISIONAL` lines.** The row above proves the confirm bites; this one proves it does not swallow a real defect on the second look |
+| revert `ScoreVisualiser.NetSetScore` to the pre-b0ab09ec `max(local, host)` ratchet | **RED**, but only 1 soak in 4 -- each joiner lives ~8 s, so a ratchet barely accumulates. Its signature is unmistakable when it does fire (`32737 vs 32737`, i.e. IDENTICAL displayed scores 3200 apart authoritative -- a case the raw compare was blind to). **`eaNetScore.test()` is the deterministic pin for that policy**; do not rely on this suite for it. **Re-run under card d108c459's rules (re-settle confirm, `uns`-keyed limit): RED on 1 of 3 seeds, i.e. unchanged** -- the confirm does not swallow it, the ratchet simply needs a joiner that lived long enough to accumulate |
 
 **WHAT IT DELIBERATELY DOES NOT COVER**, each because something else already pins it: the
 background APPLY path (`netbg_catchup.txt`), the slot-grant NEGOTIATION (`eaSlotTest`), the

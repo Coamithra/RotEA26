@@ -278,9 +278,10 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   mirrors the host's `EvLaunch`, warms the level itself and sends its own `EvReady`. Headlessly the
   `eaNet` loopback is backed by a localhost socket, so the two roles are two **eahl PROCESSES** --
   driven, and their worlds diffed, by `python tools/sim/net_jip_sync.py`. It needs
-  `eahl --nettime game` (`--nodraw` is ~17x real time, which starves the wire); **the suite is RED
-  on `main` by design** -- see net CLAUDE.md for the defect it found. `eaNetJipDump()` /
-  `eval NetJipDump` is the world dump both ends are read with.
+  `eahl --nettime game` (`--nodraw` is ~17x real time, which starves the wire); **it is GREEN on
+  `main` since card d108c459** -- the defect it found is fixed and its residuals were calibrated
+  away with oracle corrections, not widened tolerances (net CLAUDE.md has both halves).
+  `eaNetJipDump()` / `eval NetJipDump` is the world dump both ends are read with (format v4).
 - **Local co-op + online co-op together** (card 4d904410): `?netlocal=<1-3>` queues that many
   synthetic COUCH joins on this peer once the session is live — a real one is a gamepad Start
   press the rig can't produce. Pair with `?net=host`/`?net=join`; the `[net]` line's new

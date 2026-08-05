@@ -38,6 +38,19 @@ namespace EvilAliensWeb.Compat.Net
         private const ushort IdPowerup = 60103;
         private const ushort IdUfo = 60104;
         private const ushort IdUnbuildable = 60105;
+        private const ushort IdHp = 60106;
+
+        // One snapshot entry carrying nothing but an hp, through the REAL entry path (card
+        // d108c459). Position and scale are filled so the entry is well-formed; the leg only
+        // ever reads hit points back.
+        private static void SnapshotHp(ushort netId, byte typeIdx, int hp)
+        {
+            NetBaseState state = default(NetBaseState);
+            state.Scale = 1f;
+            state.Hp = hp;
+            NetPuppets.OnSnapshotEntryNextSeq(netId, typeIdx, NetProtocol.NetSnapshotFlags.None,
+                state, new byte[1], 0, 0, out _, out _);
+        }
 
         // The two registry indices section 6 drives. The wire typeIdx IS the registry order
         // (NetTypeRegistry.BuildTable), so these are asserted against the live table rather than
@@ -290,6 +303,48 @@ namespace EvilAliensWeb.Compat.Net
                         rebuilt != null && rebuilt.NetBonusType == (byte)Powerup.PowerupType.OneUp);
                     Check("the rebuilt UFO is on the host's sheet", rebuilt != null && rebuilt.NetSmallUfoSheet);
                     Prune<UFO>(bin, game, ignore);
+                }
+
+                // ---- 7. A SNAPSHOT'S hp LANDS ON THE PUPPET (card d108c459) -----------------
+                // THE GAP THIS FILLS: NetEntityTest calls NetApplyHp directly through the
+                // INetKillable seam, and NetWireTest round-trips an Hp byte through a frame --
+                // but nothing drove a real snapshot entry into NetPuppets.ApplySnapshotState and
+                // then read the entity back, so "a replicated hp reaches the puppet" was
+                // UNCOVERED end to end. net_jip_sync cannot close it either: it compares what
+                // crossed the wire on both ends, and a wrong-but-LOWER apply is indistinguishable
+                // from the local damage a joiner deals with its own bullets.
+                //
+                // Values are taken RELATIVE to whatever the puppet built with, because
+                // NetApplyHp only ever LOWERS -- an absolute number picked here would be refused
+                // the day the type's own hit points change, and the leg would pass vacuously.
+                // A StarMine, not the UFO above: a UFO dies in one hit, so its puppet starts at
+                // 1 hit point and NetApplyHp's floor leaves NOTHING a snapshot could lower it to
+                // -- the leg would assert against the floor instead of against the apply.
+                sb.Append("[netsnap] a snapshot's hp reaches the puppet\n");
+                byte mineType = NetTypeRegistry.TryGet(new StarMine(game), out byte mineIdx, out _)
+                    ? mineIdx : (byte)0;
+                StarMine hpPuppet = mineType != 0
+                    ? (StarMine)BuildBySelfHeal<StarMine>(game, IdHp, mineType, state, noExtras, Check, ignore)
+                    : null;
+                INetKillable hpKill = hpPuppet != null ? ((INetEntity)hpPuppet).NetKillable : null;
+                Check("the puppet used for the hp leg is killable", hpKill != null);
+                if (hpKill != null)
+                {
+                    int start = hpKill.NetHitPoints;
+                    Check("it starts with hit points to spare (was " + start + ")", start > 1);
+                    SnapshotHp(IdHp, mineType, start - 1);
+                    Check("a snapshot LOWERING hp lands on the puppet (want " + (start - 1)
+                        + ", was " + hpKill.NetHitPoints + ")", hpKill.NetHitPoints == start - 1);
+                    // The clamp, through the SNAPSHOT path rather than the seam: an older entry
+                    // must not resurrect hits this client has already landed.
+                    SnapshotHp(IdHp, mineType, start + 100);
+                    Check("a snapshot RAISING hp is refused (still " + (start - 1) + ", was "
+                        + hpKill.NetHitPoints + ")", hpKill.NetHitPoints == start - 1);
+                }
+                if (hpPuppet != null)
+                {
+                    ignore.Add(hpPuppet);
+                    Prune<StarMine>(bin, game, ignore);
                 }
             }
             catch (Exception ex)

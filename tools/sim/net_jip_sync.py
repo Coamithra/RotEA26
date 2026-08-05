@@ -778,8 +778,9 @@ def judge(hd, cd, host, client, args, index, stats):
     # Reporting it RED said "the game is broken" about a sampling accident (measured 7 times in
     # 188 joins), and passing it silently would be the vacuous green this tool exists to refuse.
     # So it is neither: the join is SKIPPED, counted, and the run asserts that enough real joins
-    # happened -- see main. run_level also waits for a populated world before attaching at all,
-    # which is what makes this the rare leftover rather than the normal case.
+    # happened -- see main. (run_level CAN also wait for a populated world before attaching, but
+    # --populate-wait defaults to 0 -- measured and declined, see its help -- so this skip is the
+    # primary mechanism, not a rare leftover.)
     if hd["meta"]["ids"] < args.min_ids:
         return VACUOUS
 
@@ -1016,10 +1017,11 @@ def main():
                         "diff_hud). Score is reconciled at 1 Hz against that ledger, so a "
                         "fraction of a second of staleness is normal, and `uns` is sampled at "
                         "the dump while the gap reflects awards settled a moment earlier -- that "
-                        "slop is what this covers. MEASURED over 223 joins: on a join whose "
-                        "award group is in flight the excess over the keyed allowance is 50 and "
-                        "350 (gap 6325 against `uns` 6275, and gap 3250 against 2900), so 500 is "
-                        "the worst measured slop plus ~1.4x. It is NOT sized to cover an award: "
+                        "slop is what this covers. MEASURED over 223 joins: with `uns` at 0 the "
+                        "worst surviving gap is 625, and on a join whose award group is in "
+                        "flight the excess over the keyed allowance is 50 and 350 (gap 6325 "
+                        "against `uns` 6275, and gap 3250 against 2900) -- so 1000 is the worst "
+                        "measured slop plus ~1.6x. It is NOT sized to cover an award: "
                         "comboModify has no ceiling and that term is keyed, not tolerated")
     p.add_argument("--settle", type=int, default=3600,
                    help="frame budget for the joiner to warm its level and attach")

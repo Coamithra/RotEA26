@@ -25,7 +25,7 @@
 # MUTATIONS (all rebuild tools/headless first -- it source-links Game/ and Compat/):
 #   * delete the `case "jiphost"` from DebugFlags -> the arm line goes, red on line 1.
 #   * make NetJipDump.AppendExtras return before the scene line -> red on the `scene speed=`
-#     line, while the `dump v3 ... end` sentinel still passes -- which is the point of asserting
+#     line, while the `dump v4 ... end` sentinel still passes -- which is the point of asserting
 #     the sections separately from the sentinel.
 #   * bump NetJipDump.FormatVersion without touching the probe -> red on `dump v4`.
 #   * drop the `uns=` append from NetJipDump.AppendExtras -> red on the uns line alone (card

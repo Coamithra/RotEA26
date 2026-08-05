@@ -567,7 +567,7 @@ namespace EvilAliensWeb.Compat
 		// JS bridge for eaScore() -- the per-slot score/combo dump. Card b0ab09ec's two-window
 		// comparison is "do the peers agree on the tally", which reading HUD pixels answers
 		// badly (the panels are small, chrome-shaded and mid-animation); this prints the
-		// numbers, plus the provisional total still riding on top of the host's score.
+		// numbers. (The provisional-ledger fields left this dump with card af96bcc2.)
 		[JSInvokable("debugScoreDump")]
 		public static string ScoreDump()
 		{

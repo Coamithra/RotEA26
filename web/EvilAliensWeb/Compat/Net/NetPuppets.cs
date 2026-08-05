@@ -144,7 +144,7 @@ namespace EvilAliensWeb.Compat.Net
             // It exists because a puppet's LIVE hp and the host's hp are not the same quantity: a
             // client hit-tests puppets with its own bullets, so between two snapshot turns its
             // copy carries damage the host has not credited yet, exactly as a client's DISPLAYED
-            // score carries provisional credits the host has not settled (card 94001db7's `uns`).
+            // displayed score used to carry provisional credits (the pre-af96bcc2 ledger).
             // Comparing the live values is therefore a category error and only a tolerance wide
             // enough to be useless would hide it; comparing THIS against the host's hp asks the
             // question that actually has an answer -- did the client apply what the host sent --

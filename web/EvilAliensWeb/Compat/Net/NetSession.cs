@@ -3955,17 +3955,13 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 if (e.Comp.IsDead || e.ClaimSettled)
                 {
-                    // Settled, but the removal has not flushed, so there is no record yet. Pay
-                    // from the Entry, off the very fields OnHostDeath will read a flush later.
-                    //
-                    // It pays exactly what the RECORD branch below pays -- no NoteAward, and no
-                    // ApplyRemotePowerup even though the pickup is right here on e.Comp. Both
-                    // omissions are deliberate: the death record carries neither an award array
-                    // nor a pickup type, so doing either here would make a claim worth more on
-                    // one side of a ComponentBin flush than the other, for a difference the
-                    // claimant cannot observe (a zero in e.Awards reads as "no figure" to
-                    // NetPuppets.ApplyAwards, and EvScoreSync carries the host total that
-                    // already contains this payout).
+                    // Settled, but the removal has not flushed, so there is no record yet.
+                    // Settle from the Entry, off the very fields OnHostDeath will read a flush
+                    // later. No ApplyRemotePowerup even though the pickup is right here on
+                    // e.Comp -- the death record carries no pickup type, so doing it here would
+                    // make a claim behave differently on the two sides of a ComponentBin flush,
+                    // for a difference the claimant cannot observe. (Score never moves on any
+                    // claim branch since v20 -- one writer per slot, card af96bcc2.)
                     if (payable)
                     {
                         e.ClaimPaidMask |= (byte)(1 << killerSlot);

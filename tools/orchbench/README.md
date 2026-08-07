@@ -50,10 +50,11 @@ tokens — raw token counts are not comparable across tiers.
 
 ## Protocol
 
-1. **Tickets** live in `tickets/` — one markdown file each, stating the task
-   verbatim, the target metric, the objective gate, and what counts as a
-   regression. The batch is the full set of ticket files present when the
-   comparison starts; every strategy runs the same batch.
+1. **Tickets** are supplied at run time (they live on the project's Trello
+   board, not in the repo). Before the first strategy runs, fix the batch:
+   each ticket gets an id (T1, T2, …), its text verbatim, a target metric,
+   an objective gate, and a regression definition, all pinned to one base
+   commit — every strategy then runs that same frozen batch.
 2. **Paired design.** Compare strategies on the same batch; compare ticket
    quality *within* a ticket only — ticket difficulty varies far more than
    strategy quality.

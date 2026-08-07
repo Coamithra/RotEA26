@@ -1,1 +1,1 @@
-ticket,strategy,rep,started_at,wall_s,cost_usd,out_tok,cache_write_tok,cache_read_tok,in_tok,sweep_delta,probes_pass,rubric,branch,notes
+strategy,rep,tickets,started_at,wall_s,cost_usd,out_tok,cache_write_tok,cache_read_tok,in_tok,notes

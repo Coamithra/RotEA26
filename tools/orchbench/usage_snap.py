@@ -12,10 +12,11 @@ Usage:
   ... run the strategy ...
   python tools/orchbench/usage_snap.py diff start.json
   python tools/orchbench/usage_snap.py record start.json \
-      --ticket T1 --strategy solo --rep 1 --branch orchbench/T1-solo-1
+      --strategy fable-oracle --rep 1 --tickets T1,T2
 
-`diff` prints the delta; `record` appends a row to tools/orchbench/runs.csv
-(quality columns left blank -- they are filled by the scoring pass later).
+`diff` prints the delta; `record` appends one batch row to
+tools/orchbench/runs.csv. Per-ticket quality goes in scores.csv (scoring
+pass), keyed by the same (strategy, rep).
 
 Scope caveat: only transcripts on THIS machine under --claude-dir are seen.
 Run all strategies for a comparison from the same session/container. By
@@ -49,9 +50,11 @@ CACHE_WRITE_MULT = 1.25
 FIELDS = ("input_tokens", "output_tokens",
           "cache_creation_input_tokens", "cache_read_input_tokens")
 
-CSV_COLUMNS = ("ticket", "strategy", "rep", "started_at", "wall_s", "cost_usd",
-               "out_tok", "cache_write_tok", "cache_read_tok", "in_tok",
-               "sweep_delta", "probes_pass", "rubric", "branch", "notes")
+# One row per (strategy x rep) batch run. Per-ticket quality lives in
+# scores.csv, filled by the scoring pass -- see README -> Ledgers.
+CSV_COLUMNS = ("strategy", "rep", "tickets", "started_at", "wall_s",
+               "cost_usd", "out_tok", "cache_write_tok", "cache_read_tok",
+               "in_tok", "notes")
 
 
 def rates_for(model):
@@ -161,10 +164,10 @@ def main():
 
     p = sub.add_parser("record", help="diff vs SNAP and append a row to runs.csv")
     p.add_argument("snap")
-    p.add_argument("--ticket", required=True)
     p.add_argument("--strategy", required=True)
     p.add_argument("--rep", required=True)
-    p.add_argument("--branch", default="")
+    p.add_argument("--tickets", required=True,
+                   help="comma-separated ticket ids covered by this batch run")
     p.add_argument("--notes", default="")
     p.add_argument("--csv", default=str(Path(__file__).with_name("runs.csv")))
 
@@ -196,7 +199,7 @@ def main():
         for f in FIELDS:
             agg[f] += u[f]
     row = {
-        "ticket": args.ticket, "strategy": args.strategy, "rep": args.rep,
+        "strategy": args.strategy, "rep": args.rep, "tickets": args.tickets,
         "started_at": dt.datetime.fromtimestamp(then["ts"]).isoformat(timespec="seconds"),
         "wall_s": f"{wall_s:.0f}",
         "cost_usd": f"{cost_usd(delta):.4f}",
@@ -204,8 +207,7 @@ def main():
         "cache_write_tok": agg["cache_creation_input_tokens"],
         "cache_read_tok": agg["cache_read_input_tokens"],
         "in_tok": agg["input_tokens"],
-        "sweep_delta": "", "probes_pass": "", "rubric": "",
-        "branch": args.branch, "notes": args.notes,
+        "notes": args.notes,
     }
     csv_path = Path(args.csv)
     write_header = not csv_path.exists()

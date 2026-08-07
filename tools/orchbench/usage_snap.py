@@ -33,8 +33,11 @@ import time
 from pathlib import Path
 
 # List prices, $ per 1M tokens (input, output), matched by model-id prefix.
-# Cache read bills at 0.1x the input rate, cache write at 1.25x (5-minute TTL;
-# 1h-TTL writes are 2x but Claude Code uses the default TTL).
+# Cache read bills at 0.1x the input rate; cache WRITES depend on TTL --
+# 1.25x for 5-minute entries, 2x for 1-hour entries. The usage blocks carry
+# a per-TTL breakdown (usage.cache_creation.ephemeral_{5m,1h}_input_tokens),
+# so each bucket is priced at its own rate rather than assuming a TTL: this
+# root session demonstrably writes 1h entries, subagents may differ.
 PRICES = {
     "claude-fable-5": (10.0, 50.0),
     "claude-mythos-5": (10.0, 50.0),
@@ -45,16 +48,19 @@ PRICES = {
     "claude-haiku-4-5": (1.0, 5.0),
 }
 CACHE_READ_MULT = 0.1
-CACHE_WRITE_MULT = 1.25
+CACHE_WRITE_5M_MULT = 1.25
+CACHE_WRITE_1H_MULT = 2.0
 
-FIELDS = ("input_tokens", "output_tokens",
-          "cache_creation_input_tokens", "cache_read_input_tokens")
+# Internal accumulation fields. Cache writes are split by TTL; a record with
+# no cache_creation breakdown falls back to the 5m bucket (cheapest claim).
+FIELDS = ("input_tokens", "output_tokens", "cache_read_input_tokens",
+          "cache_write_5m", "cache_write_1h")
 
 # One row per (strategy x rep) batch run. Per-ticket quality lives in
 # scores.csv, filled by the scoring pass -- see README -> Ledgers.
 CSV_COLUMNS = ("strategy", "rep", "tickets", "started_at", "wall_s",
-               "cost_usd", "out_tok", "cache_write_tok", "cache_read_tok",
-               "in_tok", "notes")
+               "cost_usd", "out_tok", "cw_5m_tok", "cw_1h_tok",
+               "cache_read_tok", "in_tok", "notes")
 
 
 def rates_for(model):
@@ -97,11 +103,20 @@ def scan(claude_dir, project_filter):
                     seen.add(key)
                 model = msg.get("model") or "unknown"
                 bucket = totals.setdefault(model, dict.fromkeys(FIELDS, 0))
-                for f in FIELDS:
+                for f in ("input_tokens", "output_tokens",
+                          "cache_read_input_tokens"):
                     v = usage.get(f)
                     if isinstance(v, int):
                         bucket[f] += v
-    return {"ts": time.time(), "files": files, "models": totals}
+                cc = usage.get("cache_creation")
+                if isinstance(cc, dict):
+                    bucket["cache_write_5m"] += cc.get("ephemeral_5m_input_tokens", 0) or 0
+                    bucket["cache_write_1h"] += cc.get("ephemeral_1h_input_tokens", 0) or 0
+                else:
+                    v = usage.get("cache_creation_input_tokens")
+                    if isinstance(v, int):
+                        bucket["cache_write_5m"] += v
+    return {"v": 2, "ts": time.time(), "files": files, "models": totals}
 
 
 def cost_usd(models):
@@ -114,7 +129,8 @@ def cost_usd(models):
         inp, out = rates
         total += u["input_tokens"] / 1e6 * inp
         total += u["output_tokens"] / 1e6 * out
-        total += u["cache_creation_input_tokens"] / 1e6 * inp * CACHE_WRITE_MULT
+        total += u["cache_write_5m"] / 1e6 * inp * CACHE_WRITE_5M_MULT
+        total += u["cache_write_1h"] / 1e6 * inp * CACHE_WRITE_1H_MULT
         total += u["cache_read_input_tokens"] / 1e6 * inp * CACHE_READ_MULT
     return total
 
@@ -133,16 +149,17 @@ def print_delta(models, wall_s):
     if not models:
         print("no usage delta")
         return
-    hdr = f"{'model':30} {'in':>8} {'out':>10} {'cache_w':>10} {'cache_r':>12} {'$':>9}"
+    hdr = (f"{'model':30} {'in':>8} {'out':>10} {'cw_5m':>10} {'cw_1h':>10} "
+           f"{'cache_r':>12} {'$':>9}")
     print(hdr)
     for model, u in sorted(models.items()):
         c = cost_usd({model: u})
         tag = "" if rates_for(model) else "  (unpriced)"
         print(f"{model:30} {u['input_tokens']:>8} {u['output_tokens']:>10} "
-              f"{u['cache_creation_input_tokens']:>10} {u['cache_read_input_tokens']:>12} "
-              f"{c:>9.4f}{tag}")
-    print(f"{'TOTAL':30} {'':8} {'':10} {'':10} {'':12} {cost_usd(models):>9.4f}"
-          f"   wall {wall_s:.0f}s")
+              f"{u['cache_write_5m']:>10} {u['cache_write_1h']:>10} "
+              f"{u['cache_read_input_tokens']:>12} {c:>9.4f}{tag}")
+    print(f"{'TOTAL':30} {'':8} {'':10} {'':10} {'':10} {'':12} "
+          f"{cost_usd(models):>9.4f}   wall {wall_s:.0f}s")
 
 
 def main():
@@ -186,6 +203,11 @@ def main():
         now = json.loads(Path(args.snap2).read_text())
     else:
         now = scan(args.claude_dir, project_filter)
+    for name, s in ((args.snap, then), (args.snap2 or "<live>", now)):
+        if s.get("v") != 2:
+            sys.exit(f"{name}: snapshot schema v{s.get('v', 1)} != 2 -- "
+                     "re-take it with the current script (a stale snapshot "
+                     "would silently misprice the delta)")
     delta = subtract(now, then)
     wall_s = now["ts"] - then["ts"]
 
@@ -204,7 +226,8 @@ def main():
         "wall_s": f"{wall_s:.0f}",
         "cost_usd": f"{cost_usd(delta):.4f}",
         "out_tok": agg["output_tokens"],
-        "cache_write_tok": agg["cache_creation_input_tokens"],
+        "cw_5m_tok": agg["cache_write_5m"],
+        "cw_1h_tok": agg["cache_write_1h"],
         "cache_read_tok": agg["cache_read_input_tokens"],
         "in_tok": agg["input_tokens"],
         "notes": args.notes,

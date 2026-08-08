@@ -1436,6 +1436,13 @@ namespace EvilAliensWeb.Compat
 
 		public static float? AiSeekApproachWeight { get; private set; }
 
+		// ?aistandoff=<s>       a SCALE on the boss RANGE-KEEPING repellent (card bb949dd9), the
+		//                       push that stops the ship settling deep inside its own firing range
+		//                       when a corner squeeze walks it in there. 1 = as shipped, and
+		//                       **0 = off = the pre-card behaviour**, which is the A/B arm.
+		//                       See PlayerShip.BossStandoffPush.
+		public static float? AiBossStandoffScale { get; private set; }
+
 		public static float? AiPowerupReachPx { get; private set; }
 
 		public static float? AiThreatFieldPx { get; private set; }
@@ -3262,6 +3269,19 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(AiSeekApproachWeight ?? EvilAliens.PlayerShip.DefaultBossApproachScale));
+					}
+					break;
+				case "aistandoff":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aistd) && aistd >= 0f)
+					{
+						AiBossStandoffScale = MathHelper.Min(aistd, 20f);
+					}
+					else
+					{
+						// 0 is MEANINGFUL here (it is the pre-card arm), so the guard refuses only a
+						// negative -- the ?aitopedgestrength= / ?aisweptmax= shape.
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiBossStandoffScale ?? EvilAliens.PlayerShip.DefaultBossStandoffScale));
 					}
 					break;
 				case "aipowerupreach":

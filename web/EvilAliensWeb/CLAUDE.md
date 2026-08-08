@@ -2106,7 +2106,7 @@ the rest are tier-independent.
     the other.
   - Flags: `?airepeldelta= ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
     ?aiasteroidfall= ?aievade=`, the cone/wedge family above, plus
-    `?aiseekapproach= ?aiseekpowerup= ?aipowerupreach=`. Wiring that `logic_probe` cannot reach is
+    `?aiseekapproach= ?aistandoff= ?aiseekpowerup= ?aipowerupreach=`. Wiring that `logic_probe` cannot reach is
     covered by `tools/headless/probes/ai_boss_approach.txt`.
   - **THE BOSS APPROACH IS SOLVED AGAINST THE BOSS'S OWN REPELLENT, with an INVERTED falloff**
     (card b56633fb, `PlayerShip.BossApproachWeight`). `DefaultSeekApproachWeight` 1.1 was a
@@ -2154,9 +2154,56 @@ the rest are tier-independent.
       `logic_probe`'s **`ProbeAiBossApproach`** pins that plus the crossing, the band bound over
       every tier x weapon x boss hull, the self-limiting interior and the pre-card configuration as
       a negative control; `tools/headless/probes/ai_boss_approach.txt` pins the wiring.
+  - **A RANGE-KEEPING REPELLENT DEFENDS THE BAND FROM THE INSIDE** (card bb949dd9,
+    `PlayerShip.BossStandoffPush`). The attractor above quiets to ~0 inside r* by design -- that is
+    what makes the crossing a parked band -- but until this card nothing then HELD the ship out
+    there, and the only outward force inside the band was the boss's own field. Measured on
+    `?level=Level2&marsboss` at Very_Hard: that field reads **0.57 at the 157px** the ship had
+    settled at, against screen-edge pushes of up to 4, so a corner squeeze walked the bot deep
+    inside its own firing range, pinned it (`coast` 56%, `pos` ~111,340) and let the twin
+    motherships shoot it -- **7 deaths, ALL `Lazer`, five at the identical point (140,444)**. That
+    is the ticket's "goes way nearer bosses than he has to, given bullet range", exactly.
+    - **It is a REPELLENT, not a gate on anything** -- THE FIELD PRINCIPLE. It sums into `repel`,
+      rides the repulsion cancellation floor with every other push, and is emitted at the same
+      per-seat `dodgeAngle` as the radial field. Nothing is suppressed because a boss is near; the
+      mountain is simply steeper where the ship should not be.
+    - **Zero at and beyond the anchor, then `max * ((r* - d)/r*)^2` inward**, capping at
+      `maxSteerStrength` at the hull. Being exactly zero AT r* is the point: the crossing
+      `BossApproachWeight` solves for cannot move, so that method is byte-untouched and the band's
+      width bound is unaffected. It shares the attractor's CLAMPED anchor
+      (`BossApproachMinAnchorPx`) rather than re-deriving firing range -- two copies could disagree
+      about where the band is, which is the one way this term could push the ship out of its own
+      range.
+    - **It is a gentle term at the distances that matter, and the numbers say so.** At the 157px
+      pin it adds 0.26 to a 0.57 field (MarsBoss, base weapon, r* = 210px edge); it only reaches
+      full strength at the hull. So it moves an equilibrium rather than winning an argument --
+      expect a modest `boss=` shift, not a repositioning.
+    - **MEASURED, and read this as a direction rather than a verdict -- it is N=8** (seeds 1-4 x2,
+      Very_Hard, `ai_sweep.py`), against `?aistandoff=0`: marsboss `boss=` **157 -> 167px**, deaths
+      13.25 -> 13.50 (diff -0.25 +- 2.21, i.e. nothing), time-to-victory 161s -> 99s; brainboss
+      deaths 5.00 -> 3.50 and `boss=` 110 -> 122px **on an arm whose own captures disagreed on
+      every seed**, so that pair is not evidence; spider **byte-flat** (4.75 both sides,
+      `SpiderBoss(standing)` 2 both sides), which is the term correctly being INERT where
+      `IsAiPriorityTarget` excludes the boss. The N=60 gate is the real verdict.
+    - `?aistandoff=<scale>` (1 = shipped, **0 = off = the pre-card arm**). `logic_probe`'s
+      **`ProbeAiBossStandoff`** pins the shape at fixed points -- silent at and beyond r*, monotone
+      inward, capped at the hull, continuous at the anchor, the shared clamp, and that the shipped
+      scale is non-zero (a build that baked it back to 0 would pass every other check).
   - **Boss PROXIMITY is descriptive, never a gate.** `bossfar%` and `boss=<px>` describe where the
     ship is; the bot moving closer to a boss to dodge, collect or line up a shot is the field
     working. Gate boss work on OUTCOMES -- `SpiderBoss(standing)` deaths -- not on distance.
+    - **`bossprox=<px>` is the same observable for a boss the approach term never sees** (card
+      bb949dd9). `boss=`/`bossfar=` accrue only via `NoteBossApproach`, i.e. only for a level-
+      HALTING boss -- and `SpiderBoss` deliberately is not one, so the spider rig prints `boss=0px`
+      and answers nothing about proximity at all. `bossprox=` is the mean edge distance to the
+      nearest live BOSS-CLASS entity, `baddy is SpiderBoss || IsAiPriorityTarget(baddy)`, in both
+      `Line()` and `Row()`, reading **`none`** when no such entity was ever on screen (the
+      `killers=none` convention -- an absent key would read as an old build).
+      **It shares `boss=`'s VISIBILITY rule** (the same on-screen box), so on a halting-boss rig the
+      two agree tick for tick, and neither counts the spider parked off-screen through its
+      "Danger!" phases or BrainBoss still easing in from a negative Y -- ticks where the bot can
+      neither see nor react to the boss carry no signal about flying too close and would only
+      dilute the mean. Reference: spider rig 189px, marsboss 182px (== its `boss=`), Level 1 `none`.
 - **DIRECTIONAL REPELLENT SHAPES: every mover projects a MESA along its own velocity** (card
   e425781b). This is the fix the three failed radial campaigns above were pointing at, and it is
   the largest single win the bot has had: **SpaceDodge 2/16 -> 16/16 victories, 33.75 -> 3.25
@@ -2455,7 +2502,7 @@ the rest are tier-independent.
     `effective=Easy` to `effective=Hard` as `Demo1` starts.
 - Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aireact=
   ?aigapmargin= ?aiscanrows= ?aicrosspenalty= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx=
-  ?aifieldsize= ?aifieldfall= ?aiseekapproach= ?aiseekpowerup= ?aipowerupreach= ?airepeldelta=
+  ?aifieldsize= ?aifieldfall= ?aiseekapproach= ?aistandoff= ?aiseekpowerup= ?aipowerupreach= ?airepeldelta=
   ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
   ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge= ?ailaneescape= ?aiconelead= ?aiconemaxlen=
   ?aiconewidth= ?aiconetaper= ?aiconefallalong= ?aiconefallacross= ?aiconescale= ?aiconespread=

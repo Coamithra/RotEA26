@@ -89,6 +89,12 @@ internal static class AiBench
 		// the term is CALIBRATED -- a distance alone cannot tell "pulling hard and being out-voted"
 		// from "not pulling at all", which is exactly how the pre-card 1.1 hid for two cards.
 		public double BossWeightTotal;
+		// Proximity to ANY boss-class entity (card bb949dd9), which the three fields above cannot
+		// report: they accrue only for a level-HALTING boss, and SpiderBoss is deliberately not one
+		// (PlayerShip.IsAiPriorityTarget), so `boss=` reads nothing at all on the spider rig -- the
+		// very rig the "goes way nearer bosses than he has to" ticket names.
+		public long BossProxTicks;
+		public double BossProxTotal;
 		// What killed it, by type name (card b56633fb). `Deaths` alone cannot answer "does the
 		// bot still fly into the grounded spider boss" — a death to a stray bullet and a death
 		// to the boss are the same number, which is why that report was unverifiable.
@@ -344,6 +350,24 @@ internal static class AiBench
 		}
 	}
 
+	// DoAIMove, once per tick per AI ship that had a BOSS-CLASS entity on screen -- a SpiderBoss or
+	// anything `IsAiPriorityTarget` accepts (card bb949dd9). `dist` is the EDGE distance to the
+	// nearest of them, the same space `NoteBossApproach` measures in.
+	// It shares that method's VISIBILITY rule (the call site gates on the on-screen box), so the
+	// two keys describe the same ticks and `bossprox=` never counts a boss the bot cannot see.
+	// PROXIMITY IS DESCRIPTIVE, NEVER A GATE, exactly as above -- this is a number to read, and the
+	// boss work it informs is still gated on OUTCOMES.
+	internal static void NoteBossProximity(PlayerShip ship, float dist)
+	{
+		if (!Enabled)
+		{
+			return;
+		}
+		ShipRec rec = Rec(ship);
+		rec.BossProxTicks++;
+		rec.BossProxTotal += dist;
+	}
+
 	// PlayerShip.CollidesWith, the `other is Powerup` branch — the ship actually took one.
 	internal static void NotePickup(PlayerShip ship)
 	{
@@ -531,6 +555,12 @@ internal static class AiBench
 				// with `eaAiBench.matrix`'s contract for no gain (card b56633fb).
 				sb.Append(" bossw=").Append(Fmt(r.BossWeightTotal / r.BossTicks, 2));
 			}
+			// UNCONDITIONAL, unlike the block above (card bb949dd9): on the spider rig `boss=` never
+			// prints at all, and an absent key there reads as "old build" rather than as the answer.
+			// `none` is the `killers=` convention -- no boss-class entity was ever on screen.
+			sb.Append(" bossprox=").Append((r.BossProxTicks > 0L)
+				? Fmt(r.BossProxTotal / r.BossProxTicks, 0) + "px"
+				: "none");
 			if (r.Killers.Count > 0)
 			{
 				sb.Append(" killers=").Append(KillerHistogram(r));
@@ -711,6 +741,9 @@ internal static class AiBench
 		sb.Append(" poffered=").Append(powerupsSpawned);
 		sb.Append(" boss=").Append(Fmt((r.BossTicks > 0L) ? (r.BossDistTotal / r.BossTicks) : 0.0, 0));
 		sb.Append(" bossfar=").Append(Fmt((r.BossTicks > 0L) ? (100.0 * r.BossOutOfRangeTicks / r.BossTicks) : 0.0, 0));
+		// Card bb949dd9. Space-free and bracket-free like every other value here; `none` rather
+		// than a 0 that would read as "the bot was standing on the boss".
+		sb.Append(" bossprox=").Append((r.BossProxTicks > 0L) ? Fmt(r.BossProxTotal / r.BossProxTicks, 0) : "none");
 		sb.Append(" killers=").Append((r.Killers.Count > 0) ? KillerHistogram(r) : "none");
 		return sb.ToString();
 	}

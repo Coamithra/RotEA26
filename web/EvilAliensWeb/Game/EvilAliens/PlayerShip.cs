@@ -307,20 +307,30 @@ public class PlayerShip : AlienDrawableGameComponent
 	private const float BossApproachMaxWeight = 3.5f;
 
 	// How far down the screen the "UFOs spawn here" danger band reaches, and how hard it pushes.
-	// Strong enough to stand up to a lane escape, so the ship settles below the spawn line
-	// instead of being held against it.
 	//
 	// A PORT ADDITION with no DEDICATED counterpart in 2008: the original's only top-edge term is
 	// the generic 150px/strength-4 screen-bound push, which this port still ships verbatim a few
 	// lines above (`edgeMargin`/`maxSteerStrength` in DoAIMove). So `?aitopedgestrength=0` does
 	// not disable an edge push, it restores the 2008 treatment exactly -- which is what makes it
-	// the null arm rather than a mutilation. Card 2248e5eb; verdict recorded in
-	// web/EvilAliensWeb/CLAUDE.md.
-	public const float DefaultTopEdgeDangerPx = 170f;
+	// the null arm rather than a mutilation. Card 2248e5eb kept the TERM at N=60 (removing it
+	// takes deaths BY UFO from 132 to 356 on the spider rig); verdict in web/EvilAliensWeb/
+	// CLAUDE.md.
+	//
+	// 200px / 10 REPLACED THE ORIGINAL 170px / 20 (card 13960838). The 20-strength band was what
+	// suppressed powerup pickups: the strongest attraction a powerup can muster is the 0.8 seek
+	// plus the 4.0 reach pull, so at 20/170 the top ~129px of the screen were unreachable for a
+	// grab whatever the powerup was worth (?aitopedgestrength=0 alone buys +16pt of spider-rig
+	// pickup). Halving the strength lets a grab penetrate to y~104 while widening the band keeps
+	// the push starting EARLIER, which preserves the yield-to-spawns function; measured paired
+	// (N=32 per rig, seeds 1-16 x2): pickups +4.5pt spider / +1.2pt Level 1, deaths within 1 SEM
+	// on both rigs, jitter slightly down. The old "strong enough to stand up to a lane escape
+	// (18)" rationale did NOT survive measurement -- 10 loses to a lane escape at the ceiling,
+	// and the deaths/killer columns do not show the predicted pinning (UFO killer counts FELL).
+	public const float DefaultTopEdgeDangerPx = 200f;
 
 	private static float TopEdgeDangerPx => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeDangerPx ?? DefaultTopEdgeDangerPx;
 
-	public const float DefaultTopEdgeAvoidStrength = 20f;
+	public const float DefaultTopEdgeAvoidStrength = 10f;
 
 	private static float TopEdgeAvoidStrength => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeAvoidStrength ?? DefaultTopEdgeAvoidStrength;
 

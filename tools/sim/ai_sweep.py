@@ -55,6 +55,11 @@ RIGS = {
     # carries no signal at all. Deaths-only comparisons are still valid there.
     "level1": ("level=Level1", 600),
     "brainboss": ("level=Level3&brainboss", 300),
+    # The OTHER boss-approach rig (card bb949dd9). Level 2's twin motherships are ~8 sim-minutes
+    # into a plain Level 2 soak, so the fast-boot is the only way to bench them; 300s matches
+    # brainboss so the two boss rigs read side by side. NOTE the spider rig is NOT a third one --
+    # SpiderBoss is excluded from IsAiPriorityTarget, so `boss=` is structurally 0 there.
+    "marsboss": ("level=Level2&marsboss", 300),
     "level3": ("level=Level3", 300),
     "ownlevel": ("level=OwnLevel", 300),
 }

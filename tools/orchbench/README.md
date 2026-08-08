@@ -92,7 +92,10 @@ cycle against a temp repo.
    board, not in the repo). Before the first strategy runs, fix the batch:
    each ticket gets an id (T1, T2, …), its text verbatim, a target metric,
    an objective gate, and a regression definition, all pinned to one base
-   commit — every strategy then runs that same frozen batch.
+   commit — every strategy then runs that same frozen batch. The frozen
+   batch is itself a board card named `orchbench: frozen batch <X>` and
+   marked NOT a work card — **current: batch A, card `1d685a77`** (the four
+   AI-tuning tickets, base tag `orchbench-base-A`).
 2. **Paired design.** Compare strategies on the same batch; compare ticket
    quality *within* a ticket only — ticket difficulty varies far more than
    strategy quality.

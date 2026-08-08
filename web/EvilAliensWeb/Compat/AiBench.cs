@@ -570,12 +570,15 @@ internal static class AiBench
 				sb.Append(" killers=").Append(KillerHistogram(r));
 			}
 		}
-		// Run-wide, outside the per-ship block like the verdict. `none` rather than an omitted
-		// key (the Row() convention), so a consumer can tell "no boss died" from "old build" --
-		// and the MEAN rather than the sum, so a run with two boss deaths compares with one.
-		sb.Append(" bigufos=").Append((spiderBossDeaths > 0)
-			? Fmt(bigUfosAtBossDeathTotal / spiderBossDeaths, 2) : "none");
-		sb.Append(" bossdeaths=").Append(spiderBossDeaths);
+		// Run-wide, outside the per-ship block like the verdict, and OMITTED until a boss has
+		// died -- Line() is the human surface and elides irrelevant fields (the boss=/killers=
+		// convention); Row() below prints `none` unconditionally for the machine. The MEAN
+		// rather than the sum, so a run with two boss deaths compares with one.
+		if (spiderBossDeaths > 0)
+		{
+			sb.Append(" bigufos=").Append(Fmt(bigUfosAtBossDeathTotal / spiderBossDeaths, 2));
+			sb.Append(" bossdeaths=").Append(spiderBossDeaths);
+		}
 		return sb.ToString();
 	}
 

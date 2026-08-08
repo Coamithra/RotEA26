@@ -723,9 +723,10 @@ internal class SpiderBoss : AlienDrawableGameComponent
 	private void BeginDeathThroes()
 	{
 		// The bench's "big UFOs alive at the boss kill" census (card 2c74d5b7) -- counted where
-		// the death is DECIDED, before the state flip below, and only on the first entry (the
-		// deferred-death seam may call this again; see NetBeginDeferredDeathSelf's guard).
-		// No-op unless ?aibench.
+		// the death is DECIDED, before the state flip below. The state test is DEFENSIVE: every
+		// current caller already guards (NetBeginDeferredDeathSelf tests state, CollidesWith
+		// clears Collides), so today this never sees a re-entry -- it exists so a future caller
+		// cannot double-count. No-op unless ?aibench.
 		if (state != SpiderBossState.dead)
 		{
 			EvilAliensWeb.Compat.AiBench.NoteSpiderBossDeath();

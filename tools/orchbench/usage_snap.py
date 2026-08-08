@@ -53,6 +53,14 @@ CACHE_READ_MULT = 0.1
 CACHE_WRITE_5M_MULT = 1.25
 CACHE_WRITE_1H_MULT = 2.0
 
+# A prefix RE-WRITE is a turn whose cache read lands well below the previous
+# turn's cached prefix (read+writes) while its own writes cover the gap: the
+# entry expired (a subagent idling >5m past its TTL waiting on a review or a
+# SendMessage answer) or the context was rebuilt (compaction). Those tokens
+# were paid for twice; the detector prices the waste as (write - read) rate.
+# Threshold ignores harness prefix jitter; a real stall re-writes 50k+.
+REWRITE_MIN_TOKENS = 4096
+
 # Internal accumulation fields. Cache writes are split by TTL; a record with
 # no cache_creation breakdown falls back to the 5m bucket (cheapest claim).
 FIELDS = ("input_tokens", "output_tokens", "cache_read_input_tokens",
@@ -63,7 +71,7 @@ FIELDS = ("input_tokens", "output_tokens", "cache_read_input_tokens",
 CSV_COLUMNS: tuple[str, ...] = (
     "strategy", "rep", "tickets", "started_at", "wall_s",
     "cost_usd", "out_tok", "cw_5m_tok", "cw_1h_tok",
-    "cache_read_tok", "in_tok", "notes")
+    "cache_read_tok", "in_tok", "rw_events", "rw_tok", "notes")
 
 
 def rates_for(model):
@@ -122,6 +130,105 @@ def scan(claude_dir, project_filter):
     return {"v": 2, "ts": time.time(), "files": files, "models": totals}
 
 
+def parse_ts(s):
+    try:
+        return dt.datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
+    except (ValueError, AttributeError):
+        return None
+
+
+def usage_of(rec):
+    """(usage dict, dedupe key) or (None, None) for a non-usage record."""
+    msg = rec.get("message") or {}
+    usage = msg.get("usage")
+    if not isinstance(usage, dict):
+        return None, None
+    return usage, (rec.get("requestId") or msg.get("id"))
+
+
+def write_buckets(usage):
+    cc = usage.get("cache_creation")
+    if isinstance(cc, dict):
+        return (cc.get("ephemeral_5m_input_tokens", 0) or 0,
+                cc.get("ephemeral_1h_input_tokens", 0) or 0)
+    v = usage.get("cache_creation_input_tokens")
+    return (v if isinstance(v, int) else 0), 0
+
+
+def scan_rewrites(claude_dir, project_filter, t0, t1):
+    """Prefix re-write events in [t0, t1], across matching transcript files.
+
+    Each file is one conversation = one cache lineage, so the walk is
+    per-file: track the cached prefix (read+writes) turn over turn; a turn
+    that reads far less than the previous prefix while writing the gap back
+    re-paid for those tokens. Files are walked in full (the event just
+    before t0 needs the prefix history), but only events inside the window
+    are reported."""
+    root = Path(claude_dir).expanduser()
+    events = []
+    for proj in sorted(root.glob("*")) if root.is_dir() else []:
+        if not proj.is_dir():
+            continue
+        if project_filter and project_filter.lower() not in proj.name.lower():
+            continue
+        for path in proj.glob("**/*.jsonl"):
+            prev_prefix = 0
+            seen = set()
+            try:
+                lines = path.read_text(errors="replace").splitlines()
+            except OSError:
+                continue
+            for line in lines:
+                try:
+                    rec = json.loads(line)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                usage, key = usage_of(rec)
+                if usage is None:
+                    continue
+                if key is not None:
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                read = usage.get("cache_read_input_tokens", 0) or 0
+                w5, w1 = write_buckets(usage)
+                writes = w5 + w1
+                if prev_prefix and read + REWRITE_MIN_TOKENS < prev_prefix:
+                    rewritten = min(writes, prev_prefix - read)
+                    ts = parse_ts(rec.get("timestamp") or "")
+                    if rewritten >= REWRITE_MIN_TOKENS and (
+                            ts is None or t0 <= ts <= t1):
+                        model = (rec.get("message") or {}).get("model") or "unknown"
+                        rates = rates_for(model)
+                        mult = (CACHE_WRITE_1H_MULT if w1 > w5
+                                else CACHE_WRITE_5M_MULT)
+                        extra = (rewritten / 1e6 * rates[0]
+                                 * (mult - CACHE_READ_MULT)) if rates else 0.0
+                        events.append({"file": path.stem, "model": model,
+                                       "tokens": rewritten, "extra_usd": extra,
+                                       "ts": ts})
+                if read or writes:
+                    prev_prefix = read + writes
+    return events
+
+
+def print_rewrites(events):
+    if not events:
+        print("prefix re-writes: none")
+        return
+    total_tok = sum(e["tokens"] for e in events)
+    total_usd = sum(e["extra_usd"] for e in events)
+    print(f"prefix re-writes: {len(events)} event(s), {total_tok} tok, "
+          f"~${total_usd:.4f} extra vs cache hits")
+    by_file = {}
+    for e in events:
+        by_file.setdefault(e["file"], []).append(e)
+    for name, evs in sorted(by_file.items(),
+                            key=lambda kv: -sum(e["tokens"] for e in kv[1]))[:8]:
+        print(f"  {name}: {len(evs)} event(s), "
+              f"{sum(e['tokens'] for e in evs)} tok ({evs[0]['model']})")
+
+
 def cost_usd(models):
     """Dollar cost of a per-model usage dict at list prices (None-priced models cost 0)."""
     total = 0.0
@@ -165,6 +272,84 @@ def print_delta(models, wall_s):
           f"{cost_usd(models):>9.4f}   wall {wall_s:.0f}s")
 
 
+def selftest():
+    import tempfile
+    failures = []
+
+    def check(cond, msg):
+        print(("PASS  " if cond else "FAIL  ") + msg)
+        if not cond:
+            failures.append(msg)
+
+    def rec(model, read, w5, w1, ts, req):
+        return json.dumps({"requestId": req, "timestamp": ts,
+                           "message": {"model": model, "usage": {
+                               "input_tokens": 1, "output_tokens": 100,
+                               "cache_read_input_tokens": read,
+                               "cache_creation": {
+                                   "ephemeral_5m_input_tokens": w5,
+                                   "ephemeral_1h_input_tokens": w1}}}})
+
+    t0 = parse_ts("2026-01-01T12:00:00Z")
+    t1 = parse_ts("2026-01-01T13:00:00Z")
+    IN = "2026-01-01T12:30:00Z"
+    BEFORE = "2026-01-01T11:00:00Z"
+    with tempfile.TemporaryDirectory() as td:
+        proj = Path(td) / "C--Fake-RotEA26"
+        proj.mkdir()
+        # normal growth: never an event
+        (proj / "grow.jsonl").write_text("\n".join([
+            rec("claude-opus-5", 0, 60000, 0, IN, "g1"),
+            rec("claude-opus-5", 60000, 500, 0, IN, "g2")]))
+        # expiry: 60k 5m prefix read drops to 0, written back; the duplicate
+        # requestId line is the streamed rewrite of the same record
+        (proj / "expire.jsonl").write_text("\n".join([
+            rec("claude-opus-5", 0, 60000, 0, IN, "e1"),
+            rec("claude-opus-5", 0, 60000, 0, IN, "e2"),
+            rec("claude-opus-5", 0, 60000, 0, IN, "e2")]))
+        # same shape but before the window: excluded
+        (proj / "early.jsonl").write_text("\n".join([
+            rec("claude-opus-5", 0, 60000, 0, BEFORE, "y1"),
+            rec("claude-opus-5", 0, 60000, 0, BEFORE, "y2")]))
+        # sub-threshold dip: prefix jitter, not a stall
+        (proj / "jitter.jsonl").write_text("\n".join([
+            rec("claude-opus-5", 0, 60000, 0, IN, "j1"),
+            rec("claude-opus-5", 58000, 2000, 0, IN, "j2")]))
+        # 1h rebuild (root compaction shape): priced at the 2x mult
+        (proj / "root.jsonl").write_text("\n".join([
+            rec("claude-fable-5", 0, 0, 100000, IN, "r1"),
+            rec("claude-fable-5", 10000, 0, 90000, IN, "r2")]))
+        # a different project: filtered out
+        other = Path(td) / "C--Other-Proj"
+        other.mkdir()
+        (other / "x.jsonl").write_text("\n".join([
+            rec("claude-opus-5", 0, 60000, 0, IN, "o1"),
+            rec("claude-opus-5", 0, 60000, 0, IN, "o2")]))
+
+        evs = scan_rewrites(td, "rotea", t0, t1)
+        by_file = {e["file"]: e for e in evs}
+        check(len(evs) == 2, f"exactly the two real events fire (got {len(evs)})")
+        check("grow" not in by_file, "normal growth is not an event")
+        check("early" not in by_file, "event before the window excluded")
+        check("jitter" not in by_file, "sub-threshold dip ignored")
+        check("x" not in by_file, "other project filtered out")
+        e = by_file.get("expire")
+        check(e is not None and e["tokens"] == 60000,
+              "expiry rewrites the full 60k prefix once (duplicate deduped)")
+        check(e is not None and abs(e["extra_usd"] - 60000 / 1e6 * 5.0 * 1.15) < 1e-9,
+              "5m rewrite priced at (1.25-0.1)x opus input")
+        r = by_file.get("root")
+        check(r is not None and r["tokens"] == 90000
+              and abs(r["extra_usd"] - 90000 / 1e6 * 10.0 * 1.9) < 1e-9,
+              "1h rebuild priced at (2.0-0.1)x fable input")
+        # negative control: widen the window and the early event appears
+        evs_all = scan_rewrites(td, "rotea", 0, t1)
+        check(len(evs_all) == 3, "window is what excluded the early event")
+
+    print(f"\n{len(failures)} FAILURE(S)" if failures else "\nALL PASS")
+    return 1 if failures else 0
+
+
 def main():
     default_project = Path(__file__).resolve().parents[2].name  # repo dir name
     ap = argparse.ArgumentParser(description=__doc__,
@@ -173,7 +358,9 @@ def main():
     ap.add_argument("--project", default=default_project,
                     help="substring filter on project dir names (default: repo name)")
     ap.add_argument("--all", action="store_true", help="scan every project dir")
-    sub = ap.add_subparsers(dest="cmd", required=True)
+    ap.add_argument("--selftest", action="store_true",
+                    help="test the rewrite detector against synthetic transcripts")
+    sub = ap.add_subparsers(dest="cmd")
 
     p = sub.add_parser("snap", help="write a snapshot of current cumulative usage")
     p.add_argument("-o", "--out", required=True)
@@ -192,6 +379,10 @@ def main():
     p.add_argument("--csv", default=str(Path(__file__).with_name("runs.csv")))
 
     args = ap.parse_args()
+    if args.selftest:
+        return selftest()
+    if not args.cmd:
+        ap.error("a subcommand is required (snap/diff/record) unless --selftest")
     project_filter = None if args.all else args.project
 
     if args.cmd == "snap":
@@ -214,8 +405,12 @@ def main():
     delta = subtract(now, then)
     wall_s = now["ts"] - then["ts"]
 
+    rewrites = scan_rewrites(args.claude_dir, project_filter,
+                             then["ts"], now["ts"])
+
     if args.cmd == "diff":
         print_delta(delta, wall_s)
+        print_rewrites(rewrites)
         return
 
     # record
@@ -233,6 +428,8 @@ def main():
         "cw_1h_tok": agg["cache_write_1h"],
         "cache_read_tok": agg["cache_read_input_tokens"],
         "in_tok": agg["input_tokens"],
+        "rw_events": len(rewrites),
+        "rw_tok": sum(e["tokens"] for e in rewrites),
         "notes": args.notes,
     }
     csv_path = Path(args.csv)
@@ -243,6 +440,7 @@ def main():
             w.writeheader()
         w.writerow(row)
     print_delta(delta, wall_s)
+    print_rewrites(rewrites)
     print(f"recorded -> {csv_path}")
 
 

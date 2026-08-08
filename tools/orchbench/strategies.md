@@ -20,6 +20,14 @@ Constants for every strategy:
 - The strategy defines who is allowed to do what. Fable writing code in an
   Opus-implements strategy contaminates the cell — if it happens (e.g. an
   agent dies), note it in `notes` or discard the rep.
+- **Subagent caches live 5 minutes** (root: 1h — measured 2026-08-08). An
+  agent idling past that (waiting on a SendMessage answer, a review) pays a
+  full prefix re-write on resume: ~$0.58 extra per stall at 100k Opus
+  context. So the oracle answers agent questions PROMPTLY, and feedback
+  loops prefer a fresh reviewer reading the diff over an implementer idling
+  for verdicts. `usage_snap diff` reports `prefix re-writes` (and `record`
+  writes `rw_events`/`rw_tok`), so stall waste is visible per run rather
+  than masquerading as strategy cost.
 
 ## fable-solo
 

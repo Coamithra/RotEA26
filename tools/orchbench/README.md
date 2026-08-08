@@ -23,7 +23,13 @@ python tools/orchbench/usage_snap.py record start.json \
 
 `record` appends one batch row to `runs.csv` with wall seconds, per-class
 token counts, and a `$` figure at list prices (cache reads 0.1× input rate,
-cache writes 1.25×). The `$` is notional on a subscription, but it is the
+cache writes 1.25× for 5-minute entries / 2× for 1-hour, split per record).
+Both `diff` and `record` also report **prefix re-writes** — turns that
+re-paid for an already-cached prefix because it expired (subagent caches
+live 5 minutes; one that idles longer waiting on feedback re-writes its
+whole conversation on resume) or was rebuilt. That waste is real cost but
+not strategy intelligence — see `strategies.md` for how to avoid it.
+`--selftest` pins the detector. The `$` is notional on a subscription, but it is the
 right normalizer here, since the strategies deliberately mix Fable and Opus
 tokens — raw token counts are not comparable across tiers.
 

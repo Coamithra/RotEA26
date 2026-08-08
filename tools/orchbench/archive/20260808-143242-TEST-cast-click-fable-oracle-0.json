@@ -1,0 +1,22 @@
+{
+ "v": 1,
+ "ts": 1786192362.6781492,
+ "label": "TEST-cast-click-fable-oracle-0",
+ "board": "10989a3df6f36d59b01e6796",
+ "snapshot_ts": 1786191619.5577755,
+ "added": {},
+ "removed": {},
+ "changed": {
+  "cards/22e324d62de1735e2592e4e6.json": {
+   "before": "{\n  \"id\": \"22e324d62de1735e2592e4e6\",\n  \"idBoard\": \"10989a3df6f36d59b01e6796\",\n  \"idList\": \"7915899619e7d036fafab8ae\",\n  \"name\": \"In the cast display scene (after beating the game), mouse click doesnt progress anymore (ie explode the current enemy). Pretty sure that used to be the case!\",\n  \"desc\": \"\",\n  \"pos\": 196608.0,\n  \"due\": null,\n  \"dueComplete\": false,\n  \"idLabels\": [],\n  \"idMembers\": [],\n  \"checklists\": [],\n  \"attachments\": [],\n  \"comments\": [],\n  \"closed\": false,\n  \"shortUrl\": \"\",\n  \"shortLink\": \"\",\n  \"dateCreated\": \"2026-08-06T22:36:58.598457+00:00\",\n  \"dateLastActivity\": \"2026-08-06T22:36:58.598457+00:00\"\n}",
+   "after": "{\n  \"id\": \"22e324d62de1735e2592e4e6\",\n  \"idBoard\": \"10989a3df6f36d59b01e6796\",\n  \"idList\": \"3b43cba32da7e4ae279f55c2\",\n  \"name\": \"In the cast display scene (after beating the game), mouse click doesnt progress anymore (ie explode the current enemy). Pretty sure that used to be the case!\",\n  \"desc\": \"\",\n  \"pos\": 65536.0,\n  \"due\": null,\n  \"dueComplete\": false,\n  \"idLabels\": [],\n  \"idMembers\": [],\n  \"checklists\": [],\n  \"attachments\": [],\n  \"comments\": [],\n  \"closed\": false,\n  \"shortUrl\": \"\",\n  \"shortLink\": \"\",\n  \"dateCreated\": \"2026-08-06T22:36:58.598457+00:00\",\n  \"dateLastActivity\": \"2026-08-08T12:21:01.009137+00:00\"\n}"
+  }
+ },
+ "new_attachments": [],
+ "report": [
+  "CHANGED  cards/22e324d62de1735e2592e4e6.json  \"In the cast display scene (after beating the game), mouse click doesnt progress anymore (ie explode the current enemy). Pretty sure that used to be the case!\"  [dateLastActivity, idList, pos]",
+  "BRANCH   orchbench/TEST-cast-click-fable-oracle-0 @ 2d3f486fa  (kept -- scoring needs it)",
+  "WARNING  working tree is dirty -- reset does not touch git; clean it by hand before the next run",
+  "WARNING  HEAD moved orchbench -> orchbench-dev -- check out the orchestration branch before the next run"
+ ]
+}

@@ -393,11 +393,12 @@ def main():
         return
 
     then = json.loads(Path(args.snap).read_text())
-    if args.cmd == "diff" and args.snap2:
-        now = json.loads(Path(args.snap2).read_text())
+    snap2 = getattr(args, "snap2", None)  # only the diff subcommand has it
+    if snap2:
+        now = json.loads(Path(snap2).read_text())
     else:
         now = scan(args.claude_dir, project_filter)
-    for name, s in ((args.snap, then), (args.snap2 or "<live>", now)):
+    for name, s in ((args.snap, then), (snap2 or "<live>", now)):
         if s.get("v") != 2:
             sys.exit(f"{name}: snapshot schema v{s.get('v', 1)} != 2 -- "
                      "re-take it with the current script (a stale snapshot "

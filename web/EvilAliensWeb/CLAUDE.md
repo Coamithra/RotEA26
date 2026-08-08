@@ -2345,12 +2345,30 @@ the rest are tier-independent.
   it not at all (deaths 6.31 -> 5.88, standing 39 -> 39).
 - **The SpiderBoss fight is scripted, so its counters are too** (unashamedly special-cased -- it
   is a set-piece with fixed choreography). Only a `Lazer` hurts it and a big UFO fires one AT THE
-  PLAYER, so the AI spares the single big UFO furthest from every ship and lets the boss walk
-  into the beam -- but NOT during a fly-by, where dodging a sweep and a beam at once is what kills
-  it. Its three fixed lanes and its hard-coded X-600 landing column are avoided for the WHOLE
-  manoeuvre (the boss is parked off-screen and stationary during the "Danger!" arrow, so neither
-  the movement prediction nor the distance field can see it coming); escape is DOWNWARD out of a
-  lane (UFOs enter from the top) and LEFT out of a landing.
+  PLAYER, so the AI keeps beam platforms alive two ways (card 2c74d5b7): it spares the single big
+  UFO furthest from every ship, AND it leaves alone every big UFO farther than
+  `DefaultBigUfoEngagePx` (250) from the ship -- inside that radius a big UFO is engaged in
+  self-defense, since its beam is aimed at the ship. Neither applies during a fly-by, where
+  dodging a sweep and a beam at once is what kills it. The boss's three fixed lanes and its
+  hard-coded X-600 landing column are avoided for the WHOLE manoeuvre (the boss is parked
+  off-screen and stationary during the "Danger!" arrow, so neither the movement prediction nor
+  the distance field can see it coming); escape is DOWNWARD out of a lane (UFOs enter from the
+  top) and LEFT out of a landing. `?aibigufopx=<px>` overrides the radius
+  (`0` = the radius rule off, i.e. the pre-card spare-one-only arm; >= ~351px gun range = inert);
+  the decision is the pure `PlayerShip.AiSparesBigUfoAtRange`, pinned by `logic_probe`'s
+  `ProbeBigUfoSpare`. **Its outcome observable is the bench's `bigufos=<mean|none>
+  bossdeaths=<n>`** -- big UFOs alive at the instant each SpiderBoss dies, counted in
+  `SpiderBoss.BeginDeathThroes` behind `?aibench` (a spared UFO moves no other counter, so this
+  is the rule's only evidence); `ai_sweep.py` prints it per arm. Measured over 16 paired seeds x2
+  captures (spider rig, Very_Hard, steering-tier evidence -- below the N=60 floor): 250px vs the
+  rule off reads deaths FLAT (paired diff +0.75 +- 1.11 on seeds 1-8, -0.81 +- 1.23 on 9-16,
+  pooling to ~0), **victories 8/32 -> 14/32**, and the counter up in both halves (1.58 -> 1.75
+  and 1.83 -> 2.00 alive per boss death). The mean `win@` is NOISY here because the win count
+  nearly doubled (158s -> 225s on seeds 1-8, 273s -> 64s on 9-16 -- extra wins land late and
+  drag the conditional mean), so read "resolves the fight far more often" as the
+  time-to-victory story and let the N=60 pass settle it. 200px (+1.25 +- 0.70 deaths) and 300px
+  (fights mostly unresolved, 6/16 runs saw a boss death) both read worse than 250 at N=16, so
+  250 is an interior pick, not a gradient's edge.
 - **`SpiderBoss`'s landing now sweeps to the right screen edge -- a deliberate GAMEPLAY change,
   not a port artifact.** The descent is hard-coded to X 600, which left a safe pocket beside it
   that trivialised the landing; the AI found it instantly and parked there. Marked as such in
@@ -2478,7 +2496,7 @@ the rest are tier-independent.
   ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge= ?ailaneescape= ?aiconelead= ?aiconemaxlen=
   ?aiconewidth= ?aiconetaper= ?aiconefallalong= ?aiconefallacross= ?aiconescale= ?aiconespread=
   ?aiconewidthmin= ?aiwedgestrength= ?aiwedgefall= ?aitopedgepx= ?aitopedgestrength=
-  ?aitopedgeyield= ?ailazerpx= ?ailazerstrength= ?ailazerdodge=`
+  ?aitopedgeyield= ?ailazerpx= ?ailazerstrength= ?ailazerdodge= ?aibigufopx=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
   A malformed value on any of them is REPORTED and ignored, never swallowed, per the file-wide
   value-carrying-flag convention (see "Debug flags & tuning conventions" above; cards 48b7c6b1 +

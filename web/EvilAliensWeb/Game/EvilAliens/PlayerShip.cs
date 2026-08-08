@@ -350,8 +350,25 @@ public class PlayerShip : AlienDrawableGameComponent
 	// of the screen is off limits while the boss is in play, and being in it is simply a death.
 	private const float SweepLaneAvoidStrength = 18f;
 
-	// How many big UFOs to leave alive during the SpiderBoss fight -- see DoAIFire.
-	private const int SpiderBossLaserPlatforms = 2;
+	// The big-UFO ENGAGE RADIUS during the SpiderBoss fight (card 2c74d5b7) -- see DoAIFire.
+	// While the boss is alive and not sweeping, a big UFO farther than this from the ship is
+	// left alive and firing: it is a beam platform the boss walks into, and only a Lazer hurts
+	// that boss. Inside the radius the UFO is engaged -- self-defense, since its beam is aimed
+	// AT the ship. 0 = the rule off (the pre-card spare-one-only behaviour); values at or above
+	// gun range (~351px) are inert, so the working band is ~100..350. Override: ?aibigufopx=.
+	public const float DefaultBigUfoEngagePx = 250f;
+
+	private static float BigUfoEngagePx => EvilAliensWeb.Compat.DebugFlags.AiBigUfoEngagePx ?? DefaultBigUfoEngagePx;
+
+	// The radius decision as a PURE function, so logic_probe can verify it with no rig -- the
+	// same headless-oracle shape as IsAiPriorityTarget. The sweep gate is the caller's: during
+	// a fly-by NOTHING is spared, radius and spare-one alike. Takes a true DISTANCE (not the
+	// target loop's squared space): the probe asserts in px, and the cost is one sqrt per BIG
+	// UFO per tick -- a handful at most.
+	public static bool AiSparesBigUfoAtRange(float distPx, bool spiderBossAlive, bool bossSweeping, float engageRadiusPx)
+	{
+		return spiderBossAlive && !bossSweeping && engageRadiusPx > 0f && distPx > engageRadiusPx;
+	}
 
 	// THE 2008 MAGNITUDES, RESTORED ON MEASUREMENT (card 2248e5eb). The port had widened the beam
 	// field to 260px / strength 14 and added a 7-strength lateral sidestep, all three unmeasured.
@@ -1663,7 +1680,10 @@ public class PlayerShip : AlienDrawableGameComponent
 		// The SpiderBoss fight is won with the ENEMY's guns: only a Lazer can hurt the boss, and a
 		// big UFO fires one at the player, so the boss walks into any beam that crosses the
 		// screen. Killing every big UFO leaves nothing but the helper mothership's slow cycle, so
-		// a couple are deliberately spared -- the surplus is still cleared.
+		// a couple are deliberately spared -- the surplus is still cleared. TWO rules compose
+		// (card 2c74d5b7): the most-room UFO below is spared unconditionally (the guaranteed
+		// platform, even in close quarters), and the target loop additionally leaves alone every
+		// big UFO beyond BigUfoEngagePx -- see the radius test there.
 		// This only pays off together with the laser dodging below: the beams the AI is inviting
 		// are aimed AT IT. Sparing them without that measured 24 -> ~70 deaths.
 		bool spiderBossAlive = false;
@@ -1727,6 +1747,16 @@ public class PlayerShip : AlienDrawableGameComponent
 					break;
 				}
 				Vector2 toBaddy = baddy.Position - base.Position;
+				// The card's engage radius (2c74d5b7): beyond it a big UFO is a beam platform to
+				// keep, not a target -- on top of the spare-one rule above, and under the same
+				// sweep gate (spiderBossAlive/bossSweeping are the loop-scan results from above,
+				// so a fly-by spares nothing). Distance is from THIS ship: the rule is
+				// self-defense, so in co-op each seat decides off its own position.
+				if (baddy is UFO bigUfo && bigUfo.IsBig
+					&& AiSparesBigUfoAtRange((toBaddy).Length(), spiderBossAlive, bossSweeping, BigUfoEngagePx))
+				{
+					continue;
+				}
 				float scoreSq = (toBaddy).LengthSquared();
 				if (IsAiPriorityTarget(baddy))
 				{

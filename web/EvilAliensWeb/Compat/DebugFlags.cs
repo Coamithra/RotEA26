@@ -1563,6 +1563,14 @@ namespace EvilAliensWeb.Compat
 
 		public static float? AiLazerDodgeStrength { get; private set; }
 
+		// ?aibigufopx=<px> (card 2c74d5b7): the ENGAGEMENT RADIUS for big UFOs while the SpiderBoss
+		// is alive and grounded. Beyond it the AI leaves the UFO alone, so it stays alive as a beam
+		// platform -- only a Lazer hurts the boss, and a big UFO is what fires one. **0 is
+		// MEANINGFUL** (never engage a big UFO while the boss stands, the maximal-sparing arm) and
+		// a large value is the pre-card "shoot everything in range" arm, so like ?aitopedgestrength=
+		// the guard refuses only a negative. Null => PlayerShip.DefaultBigUfoEngagePx.
+		public static float? AiBigUfoEngagePx { get; private set; }
+
 		// ?aisweptmax=<px/ms>  the ceiling on a believable OBSERVED speed in the DEFAULT swept-path
 		//                      seam (card c1d783ad). Above it the path is refused, because a raw
 		//                      one-frame position delta reports an enormous velocity for anything
@@ -3386,6 +3394,21 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(AiLazerDodgeStrength ?? EvilAliens.PlayerShip.DefaultLazerDodgeStrength));
+					}
+					break;
+				case "aibigufopx":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aibup) && aibup >= 0f)
+					{
+						AiBigUfoEngagePx = MathHelper.Min(aibup, 10000f);
+					}
+					else
+					{
+						// 0 is MEANINGFUL here (never engage a big UFO while the boss stands), so the
+						// guard refuses only a negative -- the ?aitopedgestrength= / ?aisweptmax= shape.
+						// The ceiling is deliberately far past the screen diagonal: a big value IS the
+						// pre-card arm, so it must clamp to something that still spares nothing.
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiBigUfoEngagePx ?? EvilAliens.PlayerShip.DefaultBigUfoEngagePx));
 					}
 					break;
 				case "aibossbias":

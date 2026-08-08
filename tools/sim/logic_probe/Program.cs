@@ -707,7 +707,7 @@ internal static class Program
             // ?ailazerdodge= take 0 as a MEANINGFUL value (it is the 2008 arm), so like
             // ?aisweptmax= their guards refuse only a negative -- the shape this table's
             // negative leg already expects.
-            new { Flag = "aitopedgepx",    Prop = "AiTopEdgeDangerPx",     Good = "233", Want = (object)233f,  Baked = "170"  },
+            new { Flag = "aitopedgepx",    Prop = "AiTopEdgeDangerPx",     Good = "233", Want = (object)233f,  Baked = "100"  },
             new { Flag = "aitopedgestrength",Prop = "AiTopEdgeAvoidStrength",Good = "33",Want = (object)33f,   Baked = "20"   },
             new { Flag = "ailazerpx",      Prop = "AiLazerAvoidRangePx",   Good = "311", Want = (object)311f,  Baked = "150"  },
             // Baked "" on the last two: since card 2248e5eb's revert they bake 4 and 0, single
@@ -716,6 +716,10 @@ internal static class Program
             // aifieldfall/aiff already take below.
             new { Flag = "ailazerstrength",Prop = "AiLazerAvoidStrength",  Good = "23",  Want = (object)23f,   Baked = ""     },
             new { Flag = "ailazerdodge",   Prop = "AiLazerDodgeStrength",  Good = "29",  Want = (object)29f,   Baked = ""     },
+            // The big-UFO engagement radius (card 2c74d5b7). 0 is MEANINGFUL (never engage a big
+            // UFO while the SpiderBoss stands), so like ?aitopedgestrength= / ?aisweptmax= its
+            // guard refuses only a negative -- the shape this table's negative leg already expects.
+            new { Flag = "aibigufopx",     Prop = "AiBigUfoEngagePx",      Good = "333", Want = (object)333f,  Baked = "250"  },
         };
         // Baked "" = no default-absence check available for that row: aiscanrows/aicrosspenalty
         // bake 4, aifieldfall bakes 3 and aiff sits at 0, all single digits that occur inside the
@@ -736,7 +740,7 @@ internal static class Program
         }
 
         Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all " + rows.Length
-            + " knobs (cards 48b7c6b1 / 2248e5eb / bb949dd9)");
+            + " knobs (cards 48b7c6b1 / 2248e5eb / 2c74d5b7 / bb949dd9)");
 
         // One counter and its OWN first-problem detail per leg: a shared sink attaches the
         // diagnosis to whichever Check happens to print it, which in a mutation run put the only

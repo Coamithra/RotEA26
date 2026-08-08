@@ -368,7 +368,15 @@ public class PlayerShip : AlienDrawableGameComponent
 	// not disable an edge push, it restores the 2008 treatment exactly -- which is what makes it
 	// the null arm rather than a mutilation. Card 2248e5eb; verdict recorded in
 	// web/EvilAliensWeb/CLAUDE.md.
-	public const float DefaultTopEdgeDangerPx = 170f;
+	//
+	// The REACH was 170 until card 13960838 and is the reason the AI "won't pick up powerups":
+	// the push is LINEAR, so at 170 it still votes 8.2 at Y=100 and 2.35 at Y=150, both far over
+	// the 0.8 powerup seek -- every powerup in the upper quarter of the screen was unreachable by
+	// construction. Shrinking the reach rather than the strength is what keeps 2248e5eb's result:
+	// the ceiling authority is untouched (18.0 at Y=10 against the 18.8 it used to be, still
+	// out-voting a lane escape's 18), while everything from Y=100 downward -- the rest of the
+	// screen, Y grows down -- is now force-free.
+	public const float DefaultTopEdgeDangerPx = 100f;
 
 	private static float TopEdgeDangerPx => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeDangerPx ?? DefaultTopEdgeDangerPx;
 
@@ -387,8 +395,14 @@ public class PlayerShip : AlienDrawableGameComponent
 	// of the screen is off limits while the boss is in play, and being in it is simply a death.
 	private const float SweepLaneAvoidStrength = 18f;
 
-	// How many big UFOs to leave alive during the SpiderBoss fight -- see DoAIFire.
-	private const int SpiderBossLaserPlatforms = 2;
+	// How close a big UFO has to be before the AI will shoot it during the SpiderBoss fight -- the
+	// ENGAGEMENT RADIUS, see DoAIFire. Beyond it the UFO is spared, so it stays alive as a beam
+	// platform for the boss to walk into; inside it self-defense wins. `?aibigufopx=` overrides:
+	// **0 = never engage a big UFO while the boss stands** (maximal sparing), and a large value is
+	// the pre-card "shoot everything in range" arm.
+	public const float DefaultBigUfoEngagePx = 250f;
+
+	private static float BigUfoEngagePx => EvilAliensWeb.Compat.DebugFlags.AiBigUfoEngagePx ?? DefaultBigUfoEngagePx;
 
 	// THE 2008 MAGNITUDES, RESTORED ON MEASUREMENT (card 2248e5eb). The port had widened the beam
 	// field to 260px / strength 14 and added a 7-strength lateral sidestep, all three unmeasured.
@@ -1691,6 +1705,23 @@ public class PlayerShip : AlienDrawableGameComponent
 		aiGapColumn = -1;
 	}
 
+	// Is this baddy a big UFO the AI is deliberately leaving alive THIS TICK? Only while the
+	// SpiderBoss is alive and grounded, and only beyond `BigUfoEngagePx` -- a big UFO inside that
+	// radius is shot like anything else, because the beam it is about to fire is aimed at a ship
+	// standing right next to it.
+	// During a SWEEP nothing is spared: dodging a screen-wide fly-by and a beam at the same time
+	// is how the bot dies, and it is worst in the upper lane where the UFOs live. The boss spends
+	// most of the fight grounded, which is plenty of time to feed it beams.
+	private bool AiSparesBigUfo(AlienDrawableGameComponent baddy, bool spiderBossAlive, bool bossSweeping)
+	{
+		if (!spiderBossAlive || bossSweeping || !(baddy is UFO ufo) || !ufo.IsBig)
+		{
+			return false;
+		}
+		Vector2 toBaddy = baddy.Position - base.Position;
+		return (toBaddy).Length() > BigUfoEngagePx;
+	}
+
 	private void DoAIFire(GameTime gameTime, List<AlienDrawableGameComponent> baddies)
 	{
 		float aimSpread = AimSpread;
@@ -1700,13 +1731,14 @@ public class PlayerShip : AlienDrawableGameComponent
 		// The SpiderBoss fight is won with the ENEMY's guns: only a Lazer can hurt the boss, and a
 		// big UFO fires one at the player, so the boss walks into any beam that crosses the
 		// screen. Killing every big UFO leaves nothing but the helper mothership's slow cycle, so
-		// a couple are deliberately spared -- the surplus is still cleared.
+		// while the boss is alive a big UFO is a legitimate target only INSIDE `BigUfoEngagePx` --
+		// beyond that it is spared and left firing. So the rule is self-defense, not a headcount:
+		// whatever is close enough to be a threat dies, every distant beam platform lives, and the
+		// number spared is however many the fight leaves at arm's length.
 		// This only pays off together with the laser dodging below: the beams the AI is inviting
 		// are aimed AT IT. Sparing them without that measured 24 -> ~70 deaths.
 		bool spiderBossAlive = false;
 		bool bossSweeping = false;
-		UFO sparedUfo = null;
-		float sparedRoom = -1f;
 		foreach (AlienDrawableGameComponent scan in baddies)
 		{
 			if (scan is SpiderBoss && !scan.IsDead)
@@ -1714,32 +1746,6 @@ public class PlayerShip : AlienDrawableGameComponent
 				spiderBossAlive = true;
 				bossSweeping |= ((SpiderBoss)scan).AiSweepIncoming;
 			}
-			else if (scan is UFO && ((UFO)scan).IsBig && !scan.IsDead)
-			{
-				// Spare exactly ONE, and make it the one with the most room around it -- scored by
-				// its distance to the NEAREST ship, so in co-op it is far from everybody. Keeping
-				// the beam platform at arm's length is what makes this survivable: its beam still
-				// crosses the screen for the boss to walk into, but the AI is not standing next to
-				// the thing that is aiming at it.
-				float room = float.MaxValue;
-				foreach (PlayerShip ship in oracle.GetShips())
-				{
-					Vector2 toShip = scan.Position - ship.Position;
-					room = MathHelper.Min(room, (toShip).Length());
-				}
-				if (room > sparedRoom)
-				{
-					sparedRoom = room;
-					sparedUfo = (UFO)scan;
-				}
-			}
-		}
-		// ...but NOT during a fly-by. Dodging a screen-wide sweep and a big UFO's beam at the same
-		// time is how the bot dies, and it is worst in the upper lane where the UFOs live. The
-		// boss spends most of the fight grounded, which is plenty of time to feed it beams.
-		if (!spiderBossAlive || bossSweeping)
-		{
-			sparedUfo = null;
 		}
 		float nearestDist = float.MaxValue;
 		AlienDrawableGameComponent nearest = null;
@@ -1757,7 +1763,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		float priorityBiasSq = PriorityTargetBias * PriorityTargetBias;
 		foreach (AlienDrawableGameComponent baddy in baddies)
 		{
-			if (IsAiShootable(baddy) && !ReferenceEquals(baddy, sparedUfo))
+			if (IsAiShootable(baddy) && !AiSparesBigUfo(baddy, spiderBossAlive, bossSweeping))
 			{
 				if (isBlastable(baddy) && blast != null && blast.Collides)
 				{

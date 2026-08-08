@@ -2367,12 +2367,22 @@ the rest are tier-independent.
   not a port artifact.** The descent is hard-coded to X 600, which left a safe pocket beside it
   that trivialised the landing; the AI found it instantly and parked there. Marked as such in
   `SpiderBoss.cs`. It affects human players too.
-- **The top screen edge gets its own strong push** (`TopEdgeAvoidStrength`): it is where UFOs
-  spawn, and the stock edge term caps at `maxSteerStrength` 4, which loses to a lane escape (18)
-  and pins the ship on the ceiling to be exploded by something spawning on it. **A port addition,
-  and MEASURED (card 2248e5eb): removing it costs deaths on both rigs and takes deaths BY `UFO`
-  from 132 to 356 on the spider rig** -- see the audit table below. `?aitopedgestrength=0` is the
-  2008 arm; the generic 150px/strength-4 screen-bound push underneath it is untouched.
+- **The top screen edge gets its own push** (`TopEdgeAvoidStrength`): it is where UFOs spawn, and
+  the stock edge term caps at `maxSteerStrength` 4. **A port addition, and MEASURED (card
+  2248e5eb): removing it entirely costs deaths on both rigs and takes deaths BY `UFO` from 132 to
+  356 on the spider rig** -- see the audit table below. `?aitopedgestrength=0` is the 2008 arm;
+  the generic 150px/strength-4 screen-bound push underneath it is untouched.
+  **RETUNED 170px/20 -> 200px/10 (card 13960838): the 20-strength band was the pickup
+  suppressor.** The strongest pull a powerup can muster is the 0.8 seek + the 4.0 reach pull, so
+  at 20/170 the top ~129px were unreachable for a grab -- `?aitopedgestrength=0` alone buys
+  **+16pt of spider-rig pickup** (48.0 -> 64.1%, N=16), which confirms the card's suspicion while
+  2248e5eb's N=60 verdict forbids taking it all. The shipped compromise halves the strength (a
+  grab now penetrates to y~104) and widens the band so the push starts EARLIER: paired N=32/rig
+  (seeds 1-16 x2), pickups **+4.5pt spider / +1.2pt Level 1**, deaths within 1 SEM on both rigs,
+  jitter slightly down, UFO killer counts DOWN (the predicted ceiling-pinning did not appear;
+  narrowing the band instead -- 120px at full strength -- was refuted at +1.56 deaths spider).
+  The old "strong enough to stand up to a lane escape (18)" rationale did not survive
+  measurement. N=60 confirmation is the orchbench scoring gate for this card.
 - **Every avoidance field here shares the `(1-t)^p` falloff shape** (`ThreatFieldStrength`) -- a
   flat push across a band fights the screen bounds instead of easing off once the ship is clear.
 - **Per-tier skill (card c10e3e7f) is keyed off `Settings.EffectiveDifficulty`, NOT

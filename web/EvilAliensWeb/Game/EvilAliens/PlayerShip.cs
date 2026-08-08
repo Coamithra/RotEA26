@@ -230,6 +230,57 @@ public class PlayerShip : AlienDrawableGameComponent
 	// reaches this far" cannot drift apart.
 	private const float BulletRangePerMs = 0.78f;
 
+	// A bullet connects at the target's HULL, not its centre (card bb949dd9). The 2008 range test
+	// (and card b56633fb's anchor, derived from it) compared `bulletlifetime * BulletRangePerMs`
+	// against the CENTRE distance, so against a big boss the bot refused shots that would land and
+	// closed a large fraction of the hull nearer than its bullets required -- measured on the
+	// marsboss rig as a 171px-edge park exactly at the old anchor, where a shot from ~67px farther
+	// out still lands (MarsBoss's credit below), and on the brainboss rig as a 109px-mean park.
+	// ShotReachCredit is the guaranteed entry distance along ANY aim line through the aim point:
+	// the aim point is `baddy.Position` and the hull can be OFFSET from it (BrainBoss's box is
+	// centred 55*scale ABOVE Position, MarsBoss's 10*scale left), so the credit is the MIN of the
+	// box's four face distances measured from Position -- never Width/2, which over-claims by up
+	// to 69% on BrainBoss. Floored at 0 for an aim point outside its own hull.
+	// Scaled by ?aishotreach= (0 = the pre-card centre test, the A/B arm); used by
+	// BOTH DoAIFire's range gate and the boss-approach anchor so the standoff the ship holds and
+	// the range it will actually shoot from cannot drift apart (the ThreatBodyTerm rule).
+	// SCOPED TO LEVEL-HALTING BOSSES (IsAiPriorityTarget) at both sites, on measurement rather
+	// than principle: crediting EVERY target's hull was built first and read WORSE on both boss
+	// rigs (paired seeds 1-8 x2) -- earlier trash kills shift the whole powerup/kill economy
+	// (+27% powerup spawns on the spider rig, Lazer deaths 45 -> 81) while buying nothing the
+	// ticket asked for. A boss is also where the credit is material: a UFO's hull credit is a
+	// few px, a MarsBoss's is ~67 (box ~249x134 offset (-10,0): min face 134/2).
+	public const float DefaultShotReachHullScale = 1f;
+
+	private static float ShotReachHullScale => EvilAliensWeb.Compat.DebugFlags.AiShotReachScale ?? DefaultShotReachHullScale;
+
+	private static float ShotReachCredit(AlienDrawableGameComponent baddy)
+	{
+		float scale = ShotReachHullScale;
+		if (scale <= 0f)
+		{
+			return 0f;
+		}
+		ICollisionType type = baddy.GetCollisionType();
+		CollisionBox box = (type as CollisionBox)
+			?? ((type is CollisionMultibox) ? ((CollisionMultibox)type).Items[0] : null);
+		float entry = 0f;
+		if (box != null)
+		{
+			Vector2 p = baddy.Position;
+			entry = MathHelper.Min(
+				MathHelper.Min(p.X - box.Left, box.Right - p.X),
+				MathHelper.Min(p.Y - box.Top, box.Bottom - p.Y));
+		}
+		else if (type is CollisionSimpleCircle)
+		{
+			CollisionSimpleCircle circle = (CollisionSimpleCircle)type;
+			Vector2 toCentre = circle.Position - baddy.Position;
+			entry = circle.Radius - (toCentre).Length();
+		}
+		return MathHelper.Max(entry, 0f) * scale;
+	}
+
 	// ---- THE BOSS-APPROACH ATTRACTOR (card b56633fb) ----------------------------------------
 	//
 	// WHAT WAS WRONG. The approach used to fly at a geometric standoff point
@@ -324,6 +375,21 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private static float TopEdgeAvoidStrength => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeAvoidStrength ?? DefaultTopEdgeAvoidStrength;
 
+	// THE YIELD (card 13960838): while the bot's LIVE steer target is a powerup INSIDE the band,
+	// the push stands down and what remains is exactly the 2008 treatment (the generic
+	// 150px/strength-4 screen-bound push below). Without it a band powerup is mathematically
+	// unreachable -- the push (20) outguns the powerup pull (max 4) plus the seek (0.8) at every
+	// point in the band -- and that costs real pickups where powerups linger up top: spider rig
+	// 48.0% -> 63.6% pickup with the whole term off (seeds 1-8 x2). Removing the term outright is
+	// NOT the fix (card 2248e5eb: deaths worsen on both rigs; a ceiling-pinned ship is exploded
+	// by spawning UFOs), so the stand-down is scoped to the dash: the tick the powerup is
+	// collected or expires, `oracle.GetPowerups()` stops returning it, the detour ends and the
+	// push is back. A later steerTarget writer (the boss approach, a partner dock) ending the
+	// detour re-arms it the same tick.
+	// ?aitopedgeyield=0 restores the unconditional push -- the pre-card arm, and the A/B seam
+	// this was measured against.
+	private static bool TopEdgeYieldEnabled => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeYield ?? true;
+
 	// Same, for the descent/climb column (the boss's standing box is 240px wide).
 	private const float VerticalLaneClearancePx = 240f;
 
@@ -335,8 +401,25 @@ public class PlayerShip : AlienDrawableGameComponent
 	// of the screen is off limits while the boss is in play, and being in it is simply a death.
 	private const float SweepLaneAvoidStrength = 18f;
 
-	// How many big UFOs to leave alive during the SpiderBoss fight -- see DoAIFire.
-	private const int SpiderBossLaserPlatforms = 2;
+	// The big-UFO ENGAGE RADIUS during the SpiderBoss fight (card 2c74d5b7) -- see DoAIFire.
+	// While the boss is alive and not sweeping, a big UFO farther than this from the ship is
+	// left alive and firing: it is a beam platform the boss walks into, and only a Lazer hurts
+	// that boss. Inside the radius the UFO is engaged -- self-defense, since its beam is aimed
+	// AT the ship. 0 = the rule off (the pre-card spare-one-only behaviour); values at or above
+	// gun range (~351px) are inert, so the working band is ~100..350. Override: ?aibigufopx=.
+	public const float DefaultBigUfoEngagePx = 250f;
+
+	private static float BigUfoEngagePx => EvilAliensWeb.Compat.DebugFlags.AiBigUfoEngagePx ?? DefaultBigUfoEngagePx;
+
+	// The radius decision as a PURE function, so logic_probe can verify it with no rig -- the
+	// same headless-oracle shape as IsAiPriorityTarget. The sweep gate is the caller's: during
+	// a fly-by NOTHING is spared, radius and spare-one alike. Takes a true DISTANCE (not the
+	// target loop's squared space): the probe asserts in px, and the cost is one sqrt per BIG
+	// UFO per tick -- a handful at most.
+	public static bool AiSparesBigUfoAtRange(float distPx, bool spiderBossAlive, bool bossSweeping, float engageRadiusPx)
+	{
+		return spiderBossAlive && !bossSweeping && engageRadiusPx > 0f && distPx > engageRadiusPx;
+	}
 
 	// THE 2008 MAGNITUDES, RESTORED ON MEASUREMENT (card 2248e5eb). The port had widened the beam
 	// field to 260px / strength 14 and added a 7-strength lateral sidestep, all three unmeasured.
@@ -1713,7 +1796,10 @@ public class PlayerShip : AlienDrawableGameComponent
 		// The SpiderBoss fight is won with the ENEMY's guns: only a Lazer can hurt the boss, and a
 		// big UFO fires one at the player, so the boss walks into any beam that crosses the
 		// screen. Killing every big UFO leaves nothing but the helper mothership's slow cycle, so
-		// a couple are deliberately spared -- the surplus is still cleared.
+		// a couple are deliberately spared -- the surplus is still cleared. TWO rules compose
+		// (card 2c74d5b7): the most-room UFO below is spared unconditionally (the guaranteed
+		// platform, even in close quarters), and the target loop additionally leaves alone every
+		// big UFO beyond BigUfoEngagePx -- see the radius test there.
 		// This only pays off together with the laser dodging below: the beams the AI is inviting
 		// are aimed AT IT. Sparing them without that measured 24 -> ~70 deaths.
 		bool spiderBossAlive = false;
@@ -1763,7 +1849,13 @@ public class PlayerShip : AlienDrawableGameComponent
 		// reachable target alongside it.
 		float nearestInRangeSq = float.MaxValue;
 		AlienDrawableGameComponent inRangeTarget = null;
-		float gunRangeSq = (bulletlifetime * BulletRangePerMs) * (bulletlifetime * BulletRangePerMs);
+		// A CENTRE distance, extended per target by its hull-entry credit because a bullet
+		// connects at the hull -- see the const block at ShotReachCredit. ONE definition for
+		// every range test in this method (and the boss-approach anchor mirrors it), so the
+		// gate and the standoff cannot drift apart.
+		float gunRange = bulletlifetime * BulletRangePerMs;
+		float Reach(AlienDrawableGameComponent target)
+			=> gunRange + (IsAiPriorityTarget(target) ? ShotReachCredit(target) : 0f);
 		// A level-halting boss is worth reaching past a lot of trash, so it competes on a
 		// DISCOUNTED distance rather than by raw proximity. Scored in the same squared space the
 		// loop compares in, hence the squared factor.
@@ -1777,6 +1869,16 @@ public class PlayerShip : AlienDrawableGameComponent
 					break;
 				}
 				Vector2 toBaddy = baddy.Position - base.Position;
+				// The card's engage radius (2c74d5b7): beyond it a big UFO is a beam platform to
+				// keep, not a target -- on top of the spare-one rule above, and under the same
+				// sweep gate (spiderBossAlive/bossSweeping are the loop-scan results from above,
+				// so a fly-by spares nothing). Distance is from THIS ship: the rule is
+				// self-defense, so in co-op each seat decides off its own position.
+				if (baddy is UFO bigUfo && bigUfo.IsBig
+					&& AiSparesBigUfoAtRange((toBaddy).Length(), spiderBossAlive, bossSweeping, BigUfoEngagePx))
+				{
+					continue;
+				}
 				float scoreSq = (toBaddy).LengthSquared();
 				if (IsAiPriorityTarget(baddy))
 				{
@@ -1789,7 +1891,14 @@ public class PlayerShip : AlienDrawableGameComponent
 					nearest = baddy;
 				}
 				float trueDistSq = (toBaddy).LengthSquared();
-				if (onScreen && trueDistSq <= gunRangeSq && trueDistSq < nearestInRangeSq)
+				// Reach() credits level-HALTING bosses only -- see ShotReachCredit's const block.
+				// Extending every target's gate was built and MEASURED WORSE (card bb949dd9):
+				// the earlier trash kills shift the whole powerup/kill economy (+27% powerup
+				// spawns on the spider rig) and deaths rose on both boss rigs, while the ticket's
+				// complaint is the BOSS standoff. Scoped this way the spider rig -- no priority
+				// targets -- is untouched by construction.
+				float reach = Reach(baddy);
+				if (onScreen && trueDistSq <= reach * reach && trueDistSq < nearestInRangeSq)
 				{
 					nearestInRangeSq = trueDistSq;
 					inRangeTarget = baddy;
@@ -1798,14 +1907,17 @@ public class PlayerShip : AlienDrawableGameComponent
 		}
 		// Undo the bias before the range test: the discount decides WHICH target wins, never
 		// whether a bullet can actually reach it.
+		float chosenReach = gunRange;
 		if (nearest != null)
 		{
 			Vector2 toChosen = nearest.Position - base.Position;
 			nearestDist = (toChosen).Length();
-			if (nearestDist > bulletlifetime * BulletRangePerMs && inRangeTarget != null)
+			chosenReach = Reach(nearest);
+			if (nearestDist > chosenReach && inRangeTarget != null)
 			{
 				nearest = inRangeTarget;
 				nearestDist = (float)Math.Sqrt(nearestInRangeSq);
+				chosenReach = Reach(nearest);
 			}
 		}
 		else
@@ -1813,7 +1925,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			nearestDist = float.MaxValue;
 		}
 		bool fired = false;
-		if (nearestDist <= bulletlifetime * BulletRangePerMs)
+		if (nearestDist <= chosenReach)
 		{
 			fired = true;
 			if (nearest is JunkBoss)
@@ -1940,6 +2052,13 @@ public class PlayerShip : AlienDrawableGameComponent
 		// written a weight yet by then; the two station fallbacks are exempt because they run
 		// solely while steerTarget is still MaxValue.
 		float steerTargetWeight = SeekWeight;
+		// Y of the powerup the live detour targets, MaxValue while the target is anything else.
+		// Written by the powerup pass, CLEARED by every later steerTarget writer that can outrank
+		// it (boss approach, partner dock) -- it must track the LIVE target, or the top-edge
+		// yield below would stand the push down for a powerup the bot is no longer flying at.
+		// The two station fallbacks are exempt for steerTargetWeight's reason above: they run
+		// solely while steerTarget is still MaxValue, i.e. only when no powerup was chosen.
+		float powerupDetourY = float.MaxValue;
 		float dodgeAngle = 0f;
 		if (player == 0)
 		{
@@ -2207,6 +2326,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				steerTarget = powerup.Position;
 				steerTargetWeight = SeekPowerupWeight;
+				powerupDetourY = powerup.Position.Y;
 			}
 			// PowerupReachPx, not the 150px `steerRange` the 2008 code shared with the screen-edge
 			// margin -- see the const. Beyond this the powerup is still the steerTarget above, so
@@ -2244,9 +2364,13 @@ public class PlayerShip : AlienDrawableGameComponent
 		if (haltingBoss != null)
 		{
 			float bossEdgeDist = ThreatEdgeDistance(base.Position, haltingBoss);
-			// Gun range is a CENTRE distance (it is what DoAIFire range-tests), so the body term
-			// converts it into the edge space everything here is measured in.
-			float anchorPx = bulletlifetime * BulletRangePerMs - ThreatBodyTerm(haltingBoss);
+			// Gun range is a CENTRE distance, extended by the boss's hull-entry credit exactly as
+			// DoAIFire's own range gate is (card bb949dd9 -- a bullet connects at the hull, so the
+			// honest standoff is a hull half-extent farther out); the body term then converts it
+			// into the edge space everything here is measured in. Keep the two sides in lockstep:
+			// an anchor the fire gate does not honour parks the ship where it will not shoot.
+			float anchorPx = bulletlifetime * BulletRangePerMs + ShotReachCredit(haltingBoss)
+				- ThreatBodyTerm(haltingBoss);
 			float pull = BossApproachWeight(bossEdgeDist, anchorPx, ThreatFieldRange(haltingBoss),
 				ThreatTypeFalloff(haltingBoss), ThreatTypeClassicCurve(haltingBoss),
 				ThreatTypeScale(haltingBoss), maxSteerStrength, SteerNoiseFloor) * BossApproachScale;
@@ -2267,6 +2391,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				steerTarget = haltingBoss.Position;
 				steerTargetWeight = pull;
+				powerupDetourY = float.MaxValue;
 			}
 		}
 		foreach (PlayerShip ship in oracle.GetShips())
@@ -2279,6 +2404,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				// would fly the DETOUR at the approach's weight -- the one case where "leave it
 				// at the default" and "leave it at whatever the last writer set" differ.
 				steerTargetWeight = SeekWeight;
+				powerupDetourY = float.MaxValue;
 			}
 		}
 		if (steerTarget.X > 2000f && !collection.ContainsType<Floor>() && connectors.Count == 0)
@@ -2482,7 +2608,16 @@ public class PlayerShip : AlienDrawableGameComponent
 		float topEdgePx = TopEdgeDangerPx;
 		if (topEdgePx > 0f && base.Position.Y < topEdgePx)
 		{
-			direction += new Vector2(0f, TopEdgeAvoidStrength * (1f - base.Position.Y / topEdgePx));
+			if (TopEdgeYieldEnabled && powerupDetourY < topEdgePx)
+			{
+				// The bench note is the yield's ONLY observable -- a suppressed push changes no
+				// pixel -- and it is what the ai_topedge_yield probe pair asserts on.
+				EvilAliensWeb.Compat.AiBench.NoteTopEdgeYield(this);
+			}
+			else
+			{
+				direction += new Vector2(0f, TopEdgeAvoidStrength * (1f - base.Position.Y / topEdgePx));
+			}
 		}
 		if (hasWall)
 		{

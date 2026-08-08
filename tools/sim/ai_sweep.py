@@ -166,6 +166,15 @@ def report(rig, arms, seeds, results):
               "  revs %4.2f  coast %4.1f%%  pickups %d/%d"
               % ("", vstr, mean("idle"), mean("bossfar"), mean("boss"), mean("turn"),
                  mean("revs"), mean("coast"), got, offered))
+        # Big UFOs alive at each SpiderBoss death (card 2c74d5b7) -- the engage-radius rule's
+        # outcome observable, run-mean of per-run means. Suppressed on a rig where no boss died.
+        # Guarded on bu, not bossdeaths: they always move together today, but a row carrying
+        # bossdeaths without bigufos would otherwise ZeroDivisionError after every run finished.
+        bu = [float(r["bigufos"]) for r in allrows if r.get("bigufos", "none") != "none"]
+        bossdeaths = sum(int(r.get("bossdeaths", 0)) for r in allrows)
+        if bu:
+            print("%-12s   bigufos %.2f alive/bossdeath over %d boss deaths (%d/%d runs saw one)"
+                  % ("", sum(bu) / len(bu), bossdeaths, len(bu), len(allrows)))
     # PAIRED comparison against the first arm, seed as the unit of analysis.
     #
     # This is the part that stops a sweep lying to you. Per-seed deaths on these rigs

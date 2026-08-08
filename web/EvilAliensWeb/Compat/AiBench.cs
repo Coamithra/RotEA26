@@ -86,6 +86,12 @@ internal static class AiBench
 		// PowerupsSpawned below: a pickup COUNT alone cannot tell "the bot ignores powerups"
 		// from "this run dropped two".
 		public int Pickups;
+
+		// Ticks the top-edge push stood down for a live powerup dash into the band (card
+		// 13960838). The yield's ONLY observable: suppressing a push changes no pixel, so
+		// without this a yield that silently stopped (or never) firing is invisible until a
+		// full sweep notices the pickup rate moved.
+		public int TopEdgeYieldTicks;
 		// The boss-approach term (card 31ceb6ff), measured where it acts. `idle%` and `prog` are
 		// both too far downstream to see it: a boss fight has a dozen other things pushing, so
 		// the outcome moves for reasons that have nothing to do with whether the ship CLOSED.
@@ -121,6 +127,14 @@ internal static class AiBench
 	// two builds is not a comparison.
 	private static int powerupsSpawned;
 
+	// Big UFOs alive at the instant a SpiderBoss died, summed over the run's boss deaths (card
+	// 2c74d5b7). This is the engage-radius rule's ONLY outcome observable: a spared UFO fires
+	// whether or not the bot could see it and moves no other counter. Run-wide like
+	// powerupsSpawned -- a boss death belongs to no slot. Event-driven (SpiderBoss.
+	// BeginDeathThroes), so a no-flag run does no scan and no per-tick work.
+	private static int spiderBossDeaths;
+	private static double bigUfosAtBossDeathTotal;
+
 	private static GameScene lastScene;
 
 	internal static bool Enabled => DebugFlags.AiBench;
@@ -134,6 +148,8 @@ internal static class AiBench
 		verdictMs = 0.0;
 		peakEventPos = 0;
 		powerupsSpawned = 0;
+		spiderBossDeaths = 0;
+		bigUfosAtBossDeathTotal = 0.0;
 		headlessTotal = TimeSpan.Zero;
 		lastScene = null;
 	}
@@ -382,6 +398,41 @@ internal static class AiBench
 		Rec(ship).Pickups++;
 	}
 
+	// PlayerShip.DoAIMove, the top-edge band — the yield (card 13960838) suppressed the push
+	// this tick because the ship's live steer target is a powerup inside the band.
+	internal static void NoteTopEdgeYield(PlayerShip ship)
+	{
+		if (!Enabled)
+		{
+			return;
+		}
+		Rec(ship).TopEdgeYieldTicks++;
+	}
+
+	// SpiderBoss.BeginDeathThroes, once per boss death -- how many big UFOs (the boss's own
+	// killers: only a Lazer hurts it and a big UFO fires one) were still alive at that instant.
+	// The census runs HERE, behind the gate, so the scan costs nothing unless ?aibench is on --
+	// and it reads the oracle rather than taking a caller-supplied count, so the number cannot
+	// drift from the world model the AI itself sees.
+	internal static void NoteSpiderBossDeath()
+	{
+		if (!Enabled)
+		{
+			return;
+		}
+		int alive = 0;
+		Oracle oracle = ServiceHelper.Get<IOracleService>().Oracle;
+		foreach (AlienDrawableGameComponent baddy in oracle.GetBaddies())
+		{
+			if (baddy is UFO ufo && ufo.IsBig && !ufo.IsDead)
+			{
+				alive++;
+			}
+		}
+		spiderBossDeaths++;
+		bigUfosAtBossDeathTotal += alive;
+	}
+
 	// Powerup.Initialize — a pickup entered the world. Run-wide rather than per ship: nothing
 	// about a spawn belongs to a slot, and both ships compete for the same drop.
 	internal static void NotePowerupSpawned()
@@ -554,6 +605,9 @@ internal static class AiBench
 			// Both halves stay, because the rate alone hides "0 of 0".
 			sb.Append(" pickups=").Append(r.Pickups).Append('/').Append(powerupsSpawned)
 				.Append('(').Append(Fmt((powerupsSpawned > 0) ? (100.0 * r.Pickups / powerupsSpawned) : 0.0, 0)).Append("%)");
+			// Always printed too, and for the same reason as pickups: `topyield=0` under
+			// `?aitopedgeyield=0` is the negative control's whole assertion (card 13960838).
+			sb.Append(" topyield=").Append(r.TopEdgeYieldTicks);
 			if (r.BossTicks > 0)
 			{
 				sb.Append(" boss=").Append(Fmt(r.BossDistTotal / r.BossTicks, 0)).Append("px");
@@ -567,6 +621,15 @@ internal static class AiBench
 			{
 				sb.Append(" killers=").Append(KillerHistogram(r));
 			}
+		}
+		// Run-wide, outside the per-ship block like the verdict, and OMITTED until a boss has
+		// died -- Line() is the human surface and elides irrelevant fields (the boss=/killers=
+		// convention); Row() below prints `none` unconditionally for the machine. The MEAN
+		// rather than the sum, so a run with two boss deaths compares with one.
+		if (spiderBossDeaths > 0)
+		{
+			sb.Append(" bigufos=").Append(Fmt(bigUfosAtBossDeathTotal / spiderBossDeaths, 2));
+			sb.Append(" bossdeaths=").Append(spiderBossDeaths);
 		}
 		return sb.ToString();
 	}
@@ -743,9 +806,15 @@ internal static class AiBench
 		// omitted key, so a consumer never has to tell "no deaths" from "old build".
 		sb.Append(" pickups=").Append(r.Pickups);
 		sb.Append(" poffered=").Append(powerupsSpawned);
+		sb.Append(" topyield=").Append(r.TopEdgeYieldTicks);
 		sb.Append(" boss=").Append(Fmt((r.BossTicks > 0L) ? (r.BossDistTotal / r.BossTicks) : 0.0, 0));
 		sb.Append(" bossfar=").Append(Fmt((r.BossTicks > 0L) ? (100.0 * r.BossOutOfRangeTicks / r.BossTicks) : 0.0, 0));
 		sb.Append(" killers=").Append((r.Killers.Count > 0) ? KillerHistogram(r) : "none");
+		// APPEND-ONLY (see the parser note above). Mean big UFOs alive at each SpiderBoss death
+		// (card 2c74d5b7), `none` when no boss died in the window -- space-free either way.
+		sb.Append(" bigufos=").Append((spiderBossDeaths > 0)
+			? Fmt(bigUfosAtBossDeathTotal / spiderBossDeaths, 2) : "none");
+		sb.Append(" bossdeaths=").Append(spiderBossDeaths);
 		return sb.ToString();
 	}
 

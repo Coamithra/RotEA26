@@ -35,6 +35,16 @@
 # `boss=` IS AN EDGE DISTANCE since that card, not a centre distance, so the same rig reads
 # ~130-165px where it used to read ~390. Do not compare the two across the card.
 #
+# CARD bb949dd9 MOVED THE ANCHOR OUT AND `boss=` WITH IT: gun range is hull-CONTACT range now,
+# not centre range -- ShotReachCredit adds the boss's hull-entry distance (80px for BrainBoss:
+# the min face of its offset box) to r*, so this rig's r* is ~198px edge and `boss=` reads
+# ~181px where the pre-card build reads ~143. That is the new discriminating leg below:
+# measured on this exact rig, both arms twice, identical across reps -- baked 181px / 5%
+# bossfar / 3% idle, `&aishotreach=0` (the pre-card centre test) 143px / 11% / 9%. The 160px
+# bound sits 1.13x under the passing arm and 1.12x above the failing one. The idle/bossfar
+# bounds below were NOT retightened -- both arms pass them, which is exactly why the boss=
+# band exists (deleting the credit's call sites left every older leg green).
+#
 # `bossw=` is the SOLVED weight, averaged over the ticks the term ran. It reads 0.7-1.2 here. It
 # is asserted merely to be present and non-zero: a weight of zero is an inert term, which is the
 # whole failure class above, and its exact value is a function of the live weapon range (a Range
@@ -76,6 +86,11 @@ eval AiBench
 expect \[aibench\].*Level3
 expect \[aibench\].*ticks=[1-9][0-9][0-9][0-9]
 expect \[aibench\].*boss=[1-9][0-9]+px
+
+# CALIBRATED TO HULL-CONTACT RANGE (card bb949dd9): the ship stands off at the credited anchor,
+# so mean edge distance reads >= 160px. The `?aishotreach=0` arm (pre-card centre-range test)
+# reads 143px here and fails this leg -- see the header for the measurement.
+expect \[aibench\].*boss=(1[6-9][0-9]|[2-9][0-9][0-9])px
 
 # CALIBRATED, the discriminating leg: the bot is in range to FIGHT the boss, so it is not sitting
 # on a shootable target doing nothing. Under 25% -- see the header for how that bound was measured.

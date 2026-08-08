@@ -2106,7 +2106,7 @@ the rest are tier-independent.
     the other.
   - Flags: `?airepeldelta= ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
     ?aiasteroidfall= ?aievade=`, the cone/wedge family above, plus
-    `?aiseekapproach= ?aiseekpowerup= ?aipowerupreach=`. Wiring that `logic_probe` cannot reach is
+    `?aiseekapproach= ?aishotreach= ?aiseekpowerup= ?aipowerupreach=`. Wiring that `logic_probe` cannot reach is
     covered by `tools/headless/probes/ai_boss_approach.txt`.
   - **THE BOSS APPROACH IS SOLVED AGAINST THE BOSS'S OWN REPELLENT, with an INVERTED falloff**
     (card b56633fb, `PlayerShip.BossApproachWeight`). `DefaultSeekApproachWeight` 1.1 was a
@@ -2154,6 +2154,7 @@ the rest are tier-independent.
       `logic_probe`'s **`ProbeAiBossApproach`** pins that plus the crossing, the band bound over
       every tier x weapon x boss hull, the self-limiting interior and the pre-card configuration as
       a negative control; `tools/headless/probes/ai_boss_approach.txt` pins the wiring.
+    - **GUN RANGE IS HULL-CONTACT RANGE, NOT CENTRE RANGE (card bb949dd9, `?aishotreach=`).** A bullet dies after `bulletlifetime * 0.78px/ms` of travel but connects when it ENTERS the boss's collision box, so both the 2008 range test in `DoAIFire` and the anchor derived from it under-stated the honest standoff by the boss's hull half-extent -- on the marsboss rig the bot parked at 171px edge, exactly the old anchor, while a shot from ~300px still lands (MarsBoss box hw ~124px). `PlayerShip.ShotReachCredit` (the MIN half-extent, so the credit never claims a hit the geometry cannot deliver at some approach angle) now extends BOTH the fire gate and the anchor, kept in lockstep so the ship never parks where it will not shoot. **Scoped to `IsAiPriorityTarget` bosses at both sites, on measurement**: crediting every target's hull was built first and read WORSE on both boss rigs (earlier trash kills shift the whole powerup/kill economy -- +27% powerup spawns on the spider rig, Lazer deaths 45 -> 81); scoped, the spider rig is byte-identical by construction (measured: paired seeds 1-8 x2, diff +0.00 +- 0.00, identical killer histograms). On the marsboss rig (`?level=Level2&marsboss`, seeds 1-8 x2): `idle%` **17.2 -> 1.1**, `bossfar` **20.0 -> 1.2%**, `boss=` 161 -> 168px, deaths 12.00 -> 13.38 (**+1.38 +- 3.48 paired, within SEM**), victories 8/16 both arms. The mean distance moves little there because the standoff band is only one vote -- powerup detours and dodges still carry the ship inside, which is the field principle working. **The rig where it is dramatic is `?brainboss`** (its hull eats most of the weapon's reach, so the old anchor was a floor-hugging 118px): seeds 1-4 x2, `boss=` **109 -> 185px**, deaths **5.25 -> 3.00 (-2.25 +- 1.05 paired, outside 2 SEM)**, victories 0/8 -> 2/8, `PlasmaBall` deaths 15 -> 0, `idle%` 13.9 -> 1.0. All N=16/N=8 steering measurements -- the N=60 bar applies before quoting any of them as settled. `?aishotreach=<0..1>` scales the credit; `0` is the pre-card centre test and the A/B arm. `ProbeAiBossApproach` sweeps the whole anchor family at both credit extremes; `ProbeAiFlagRejection` carries the flag's row.
   - **Boss PROXIMITY is descriptive, never a gate.** `bossfar%` and `boss=<px>` describe where the
     ship is; the bot moving closer to a boss to dodge, collect or line up a shot is the field
     working. Gate boss work on OUTCOMES -- `SpiderBoss(standing)` deaths -- not on distance.
@@ -2455,7 +2456,7 @@ the rest are tier-independent.
     `effective=Easy` to `effective=Hard` as `Demo1` starts.
 - Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aireact=
   ?aigapmargin= ?aiscanrows= ?aicrosspenalty= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx=
-  ?aifieldsize= ?aifieldfall= ?aiseekapproach= ?aiseekpowerup= ?aipowerupreach= ?airepeldelta=
+  ?aifieldsize= ?aifieldfall= ?aiseekapproach= ?aishotreach= ?aiseekpowerup= ?aipowerupreach= ?airepeldelta=
   ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
   ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge= ?ailaneescape= ?aiconelead= ?aiconemaxlen=
   ?aiconewidth= ?aiconetaper= ?aiconefallalong= ?aiconefallacross= ?aiconescale= ?aiconespread=

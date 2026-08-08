@@ -671,6 +671,11 @@ internal static class Program
             new { Flag = "aiff",           Prop = "AiFastForward",         Good = "7",   Want = (object)7,     Baked = ""     },
             new { Flag = "aiseekpowerup",  Prop = "AiSeekPowerupWeight",  Good = "2.5", Want = (object)2.5f,  Baked = "0.8"  },
             new { Flag = "aiseekapproach", Prop = "AiSeekApproachWeight", Good = "2.6", Want = (object)2.6f,  Baked = "1.1"  },
+            // The hull-entry reach credit (card bb949dd9). 0 is a MEANINGFUL value (the pre-card
+            // centre-distance range test), so its guard refuses only a negative. Baked "" -- the
+            // default is 1, a digit that occurs inside the quoted-back "0.5" clause context too
+            // easily to make an absence check meaningful.
+            new { Flag = "aishotreach",    Prop = "AiShotReachScale",      Good = "0.5", Want = (object)0.5f, Baked = ""     },
             new { Flag = "aipowerupreach", Prop = "AiPowerupReachPx",      Good = "444", Want = (object)444f,  Baked = "150"  },
             // The directional repellent shapes (card e425781b). The three on/off members of the
             // family -- ?aicone= ?aiwedge= ?ailaneescape= -- are deliberately absent, following
@@ -724,7 +729,7 @@ internal static class Program
             return 2;
         }
 
-        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 36 knobs (cards 48b7c6b1 / 2248e5eb)");
+        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 37 knobs (cards 48b7c6b1 / 2248e5eb / bb949dd9)");
 
         // One counter and its OWN first-problem detail per leg: a shared sink attaches the
         // diagnosis to whichever Check happens to print it, which in a mutation run put the only
@@ -1072,11 +1077,19 @@ internal static class Program
             {
                 foreach ((float body, float radius) in hulls)
                 {
+                // The hull-entry reach credit (card bb949dd9): the live anchor is
+                // gunRange + ShotReachCredit(boss) - body, where the credit is the hull's MIN
+                // half-extent scaled by ?aishotreach=. Swept at both extremes -- 0 (the
+                // ?aishotreach=0 arm and the pre-card behaviour) and the full radius (a square
+                // hull at scale 1, the largest credit the geometry can produce) -- so every
+                // invariant below holds across the whole reachable anchor family.
+                foreach (float entry in new[] { 0f, radius })
+                {
                     float range = tierFieldPx[tier] + radius * sizeScale;
-                    float anchorRaw = life * bulletPerMs - body;
+                    float anchorRaw = life * bulletPerMs + entry - body;
                     float anchor = Math.Max(anchorRaw, minAnchor);
                     string where = (classic ? "classic curve, " : "") + "tier " + tier + " life " + life
-                        + "ms body " + body + "px"
+                        + "ms body " + body + "px entry " + entry.ToString("0") + "px"
                         + " (anchor " + anchor.ToString("0.0") + "px, field " + range.ToString("0") + "px)";
 
                     // 1. AT FIRING RANGE THE NET NEVER POINTS OUT. Where the repellent is still
@@ -1159,6 +1172,7 @@ internal static class Program
                         boundedDetail = where + ": " + A(1400f, anchor, range).ToString("0.00")
                             + " at 1400px reaches the threat field's " + MaxSteer;
                     }
+                }
                 }
             }
         }

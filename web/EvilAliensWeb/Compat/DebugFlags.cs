@@ -1436,6 +1436,12 @@ namespace EvilAliensWeb.Compat
 
 		public static float? AiSeekApproachWeight { get; private set; }
 
+		// ?aishotreach=<0..1>   scale on the hull-entry credit DoAIFire's range gate and the
+		//                       boss-approach anchor add to gun range (card bb949dd9 -- a bullet
+		//                       connects at the target's HULL, not its centre). 0 restores the
+		//                       pre-card centre-distance test, which is the A/B arm.
+		public static float? AiShotReachScale { get; private set; }
+
 		public static float? AiPowerupReachPx { get; private set; }
 
 		public static float? AiThreatFieldPx { get; private set; }
@@ -3262,6 +3268,17 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(AiSeekApproachWeight ?? EvilAliens.PlayerShip.DefaultBossApproachScale));
+					}
+					break;
+				case "aishotreach":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aisrc) && aisrc >= 0f)
+					{
+						AiShotReachScale = MathHelper.Min(aisrc, 1f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiShotReachScale ?? EvilAliens.PlayerShip.DefaultShotReachHullScale));
 					}
 					break;
 				case "aipowerupreach":

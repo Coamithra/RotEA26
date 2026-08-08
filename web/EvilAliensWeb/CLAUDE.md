@@ -2178,13 +2178,23 @@ the rest are tier-independent.
       pin it adds 0.26 to a 0.57 field (MarsBoss, base weapon, r* = 210px edge); it only reaches
       full strength at the hull. So it moves an equilibrium rather than winning an argument --
       expect a modest `boss=` shift, not a repositioning.
+    - **THE EXPONENT WAS SWEPT AND q=1 IS REFUTED -- IT DESTROYS THE FIRING BAND.** The exponent
+      sets the slope near the anchor, and that slope is the safety property: at q=1 the push just
+      inside r* is 1.01 against an attractor of ~0.68 there, so the term out-votes the pull at the
+      crossing and shoves the ship back out of its own range. The full table lives at
+      `BossStandoffExponent`; the two arms that move `boss=` MOST (q=1: 174-175px) are the two that
+      **never kill the boss at all** -- victories 2/8 -> 0/8, `bossfar` 18% -> 44%, `idle` 15.5% ->
+      38%, i.e. the ship spends half its time unable to shoot, which is the very stall the boss
+      approach exists to end. **So mean distance is a SYMPTOM here, not the thing to maximise**;
+      the ticket's own metric points at a configuration that loses the fight.
     - **MEASURED, and read this as a direction rather than a verdict -- it is N=8** (seeds 1-4 x2,
       Very_Hard, `ai_sweep.py`), against `?aistandoff=0`: marsboss `boss=` **157 -> 167px**, deaths
-      13.25 -> 13.50 (diff -0.25 +- 2.21, i.e. nothing), time-to-victory 161s -> 99s; brainboss
-      deaths 5.00 -> 3.50 and `boss=` 110 -> 122px **on an arm whose own captures disagreed on
-      every seed**, so that pair is not evidence; spider **byte-flat** (4.75 both sides,
-      `SpiderBoss(standing)` 2 both sides), which is the term correctly being INERT where
-      `IsAiPriorityTarget` excludes the boss. The N=60 gate is the real verdict.
+      13.25 -> 13.50 (diff -0.25 +- 2.21, i.e. nothing), time-to-victory **161s -> 99s**, victories
+      2/8 unchanged; brainboss deaths **4.88 -> 3.88** (paired -1.00 +- 0.00) with `boss=` 108 ->
+      116px; spider **byte-identical on every metric, at scale 1 AND scale 2** -- 4.50 deaths,
+      `SpiderBoss(standing)` 2, and the same `turn`/`revs`/`coast`/`pickups` to the digit, which is
+      the term correctly being INERT where `IsAiPriorityTarget` excludes the boss. The N=60 gate is
+      the real verdict.
     - `?aistandoff=<scale>` (1 = shipped, **0 = off = the pre-card arm**). `logic_probe`'s
       **`ProbeAiBossStandoff`** pins the shape at fixed points -- silent at and beyond r*, monotone
       inward, capped at the hull, continuous at the anchor, the shared clamp, and that the shipped

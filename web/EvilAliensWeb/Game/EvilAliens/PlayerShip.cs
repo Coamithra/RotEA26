@@ -329,6 +329,28 @@ public class PlayerShip : AlienDrawableGameComponent
 	// IT SHARES THE ATTRACTOR'S CLAMPED ANCHOR (BossApproachMinAnchorPx) and the same edge-distance
 	// space, deliberately: two copies of "firing range" would let the pull and the push disagree
 	// about where the band is, which is the one way this could push the ship out of its own range.
+	//
+	// q = 2 IS A MEASUREMENT, AND q = 1 IS REFUTED -- it destroys the firing band. The exponent is
+	// what sets the slope NEAR the anchor, and that slope is the whole safety property: at q=1 the
+	// push is already 1.01 just inside r* (MarsBoss, base weapon, r* = 210px edge) against an
+	// attractor of ~0.68 there, so the term wins at the crossing and drives the ship back OUT past
+	// its own firing range instead of holding it inside. q=2 is 0.26 at the same point -- it moves
+	// the equilibrium without ever out-voting the pull that put it there.
+	// eahl, Very_Hard, `?level=Level2&marsboss`, 300s, seeds 1-4 x2, paired (N=8 -- a direction,
+	// not the N=60 gate); `off` is ?aistandoff=0, i.e. the pre-card build:
+	//
+	//   arm            deaths  victories  ttv     boss=   idle%   bossfar%
+	//   off (pre-card)  13.25     2/8     161s    157px    15.5     18.0
+	//   q=2 scale 1     13.50     2/8      99s    167px    17.5     20.0
+	//   q=2 scale 2     10.50     2/8      71s    161px    20.0     24.0
+	//   q=1 scale 1     11.25     0/8      n/a    174px    38.0     44.2
+	//   q=1 scale 1.5   15.75     0/8      n/a    175px    41.2     45.0
+	//
+	// READ THE LAST THREE COLUMNS TOGETHER, and note what the ticket's own metric does: the two
+	// arms that move `boss=` MOST are the two that never kill the boss at all. `bossfar` 18% -> 44%
+	// and `idle` 15.5% -> 38% say why -- the ship spends nearly half its time unable to shoot,
+	// which is precisely the stall the boss-approach attractor exists to end. So mean distance is
+	// not the thing to maximise here; it is a symptom, and the outcome columns are the verdict.
 	private const float BossStandoffExponent = 2f;
 
 	// The scale on that push. 0 = OFF = the pre-card behaviour (the A/B arm), 1 = as shipped.

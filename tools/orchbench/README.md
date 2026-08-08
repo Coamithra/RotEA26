@@ -85,6 +85,10 @@ cycle against a temp repo.
 - **`scores.csv`** — one row per (ticket × strategy × rep), filled by the
   scoring pass: `sweep_delta`, `probes_pass`, rubric score, run branch,
   notes. Joined to `runs.csv` on (strategy, rep).
+- **`results.md`** — the running prose ledger: headline tables, per-model
+  splits (recomputed from transcripts — `runs.csv` stores only aggregates),
+  observations and what is still to run. Update it after each rep and after
+  the scoring pass.
 
 ## Protocol
 

@@ -1545,6 +1545,15 @@ namespace EvilAliensWeb.Compat
 		//                    the full-speed ~36px orbit around a station comes back.
 		public static float? AiOrbitBrakeGain { get; private set; }
 
+		// ?aibigufospare=<n>  how many big UFOs (ranked by room around them) the AI leaves alive
+		//                     as beam platforms during the SpiderBoss fight, and
+		// ?aibigufopx=<px>    the radius beyond which it leaves ANY big UFO alone there.
+		// **`?aibigufospare=1&aibigufopx=0` IS THE PRE-CARD CONFIGURATION** (card 2c74d5b7):
+		// one spared platform, no radius rule. 0 spares none; 0px turns the radius rule off.
+		public static int? AiBigUfoSpareCount { get; private set; }
+
+		public static float? AiBigUfoEngagePx { get; private set; }
+
 		// ?ailazerpx=<px>        how wide a berth a live beam gets,
 		// ?ailazerstrength=<f>   how hard it pushes at the beam, and
 		// ?ailazerdodge=<f>      the lateral sidestep during a big UFO's windup, which 2008 has no
@@ -3315,6 +3324,32 @@ namespace EvilAliensWeb.Compat
 						// here where it is a legitimate floor for most of the family.
 						RejectFlagValue(key, val, "a number > 0",
 							InForce(AiThreatFieldFalloff ?? EvilAliens.PlayerShip.DefaultThreatFieldFalloff));
+					}
+					break;
+				case "aibigufospare":
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var aibus) && aibus >= 0)
+					{
+						AiBigUfoSpareCount = Math.Min(aibus, 8);
+					}
+					else
+					{
+						// 0 is MEANINGFUL here (spare none), so the guard refuses only a negative
+						// or a non-integer -- the ?aiscanrows= shape.
+						RejectFlagValue(key, val, "an integer >= 0",
+							InForce(AiBigUfoSpareCount ?? EvilAliens.PlayerShip.DefaultBigUfoSpareCount));
+					}
+					break;
+				case "aibigufopx":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aibup) && aibup >= 0f)
+					{
+						AiBigUfoEngagePx = MathHelper.Min(aibup, 1000f);
+					}
+					else
+					{
+						// 0 is MEANINGFUL here (radius rule off), so the guard refuses only a
+						// negative -- the ?aitopedgestrength= shape.
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiBigUfoEngagePx ?? EvilAliens.PlayerShip.DefaultBigUfoEngageRadiusPx));
 					}
 					break;
 				case "aitopedgepx":

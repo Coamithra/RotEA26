@@ -701,6 +701,11 @@ internal static class Program
             // so its guard refuses only a negative, like ?aitopedgestrength= above. Baked "":
             // the default is 1, a single digit that occurs elsewhere in the captured output.
             new { Flag = "aiorbitbrake",   Prop = "AiOrbitBrakeGain",      Good = "2.5", Want = (object)2.5f,  Baked = ""     },
+            // The big-UFO sparing pair (card 2c74d5b7). 0 is MEANINGFUL on both (spare none /
+            // radius rule off), so the guards refuse only a negative or, on the count, a
+            // non-integer -- the ?aiscanrows= shape. Baked "" on the count (2, a single digit).
+            new { Flag = "aibigufospare",  Prop = "AiBigUfoSpareCount",    Good = "3",   Want = (object)3,     Baked = ""     },
+            new { Flag = "aibigufopx",     Prop = "AiBigUfoEngagePx",      Good = "333", Want = (object)333f,  Baked = "250"  },
             new { Flag = "aitopedgestrength",Prop = "AiTopEdgeAvoidStrength",Good = "33",Want = (object)33f,   Baked = "10"   },
             new { Flag = "ailazerpx",      Prop = "AiLazerAvoidRangePx",   Good = "311", Want = (object)311f,  Baked = "150"  },
             // Baked "" on the last two: since card 2248e5eb's revert they bake 4 and 0, single

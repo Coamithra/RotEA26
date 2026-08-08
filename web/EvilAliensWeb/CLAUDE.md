@@ -2357,12 +2357,22 @@ the rest are tier-independent.
   it not at all (deaths 6.31 -> 5.88, standing 39 -> 39).
 - **The SpiderBoss fight is scripted, so its counters are too** (unashamedly special-cased -- it
   is a set-piece with fixed choreography). Only a `Lazer` hurts it and a big UFO fires one AT THE
-  PLAYER, so the AI spares the single big UFO furthest from every ship and lets the boss walk
-  into the beam -- but NOT during a fly-by, where dodging a sweep and a beam at once is what kills
-  it. Its three fixed lanes and its hard-coded X-600 landing column are avoided for the WHOLE
-  manoeuvre (the boss is parked off-screen and stationary during the "Danger!" arrow, so neither
-  the movement prediction nor the distance field can see it coming); escape is DOWNWARD out of a
-  lane (UFOs enter from the top) and LEFT out of a landing.
+  PLAYER, so the AI spares beam platforms and lets the boss walk into the beams -- but NOT during
+  a fly-by, where dodging a sweep and a beam at once is what kills it. **Since card 2c74d5b7 the
+  sparing is TWO rules**: the `DefaultBigUfoSpareCount` (2) big UFOs with the most room around
+  them (distance to the nearest ship, so kept platforms stay at arm's length) are never shot, and
+  ANY big UFO beyond `DefaultBigUfoEngageRadiusPx` (250, inside the base gun range) is left alone
+  -- a distant platform is the boss's executioner, only a close one is self-defence. The pre-card
+  rule spared exactly ONE (the old `SpiderBossLaserPlatforms = 2` const SAID two and was
+  referenced by nothing); `?aibigufospare=1&aibigufopx=0` restores it verbatim. **The observable
+  is the bench's `bigufos=<sum> spiderkills=<n>` pair** (beam platforms alive at each boss death;
+  printed in `Line()` only once a boss has died, and appended to `Row()` per the parseRow
+  contract) -- a spared UFO moves no other counter. Measured on seed 6: pre-card 0 big UFOs alive
+  at the kill, new rules 3; sweep seeds 1-8 x2: victories 9 vs 6 of 16, win@145 vs 154s, deaths
+  -0.31 +- 1.35 (within SEM). Its three fixed lanes and its hard-coded X-600 landing column are
+  avoided for the WHOLE manoeuvre (the boss is parked off-screen and stationary during the
+  "Danger!" arrow, so neither the movement prediction nor the distance field can see it coming);
+  escape is DOWNWARD out of a lane (UFOs enter from the top) and LEFT out of a landing.
 - **`SpiderBoss`'s landing now sweeps to the right screen edge -- a deliberate GAMEPLAY change,
   not a port artifact.** The descent is hard-coded to X 600, which left a safe pocket beside it
   that trivialised the landing; the AI found it instantly and parked there. Marked as such in
@@ -2482,7 +2492,7 @@ the rest are tier-independent.
   ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge= ?ailaneescape= ?aiconelead= ?aiconemaxlen=
   ?aiconewidth= ?aiconetaper= ?aiconefallalong= ?aiconefallacross= ?aiconescale= ?aiconespread=
   ?aiconewidthmin= ?aiwedgestrength= ?aiwedgefall= ?aitopedgepx= ?aitopedgestrength= ?ailazerpx=
-  ?ailazerstrength= ?ailazerdodge=`
+  ?ailazerstrength= ?ailazerdodge= ?aibigufospare= ?aibigufopx=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
   A malformed value on any of them is REPORTED and ignored, never swallowed, per the file-wide
   value-carrying-flag convention (see "Debug flags & tuning conventions" above; cards 48b7c6b1 +

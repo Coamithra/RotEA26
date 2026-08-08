@@ -2038,6 +2038,46 @@ the rest are tier-independent.
     pull needs none (contact collects it, so the target stops existing) and the boss standoff's is
     its standoff radius. `logic_probe`'s **`ProbeAiFieldComposition`** derives the bound from the
     real motion constants and pins it, along with "no floor sits above the weakest force".
+  - **A DEADZONE ONLY COVERS A RADIAL ARRIVAL -- a sideways miss ORBITS, and that needs a
+    different mechanism** (card fd126847, the reported "the AI ship is spinning circles around its
+    target location"). `Move()` thrusts at full `ShipAcceleration` along the steer's ANGLE, so a
+    ship at `ShipMaxSpeed` cannot turn tighter than `r_t = v^2/a` = **36.3px**: a seek carrying
+    any tangential speed misses the 15px window and settles into a STABLE 36px circle about its
+    own steerTarget -- thrust exactly centripetal, the seek never disengaging, the deceleration
+    never engaging, ~1.4 revolutions a second. No deadzone smaller than the orbit radius can reach
+    it, and enlarging it to 36 is the trade card 05a2b818 already measured and rejected.
+    - **The fix corrects the AIM, never a magnitude**: the seek aims at
+      `steerTarget - tangentialVelocity * leadMs` (`PlayerShip.SeekAimPoint`), so the vote is
+      still exactly `steerTargetWeight` and the field composition above is untouched.
+      **THE LEAD IS DERIVED**: `ShipMaxSpeed / ShipAcceleration` = **110ms** is how long full
+      thrust needs to null full tangential speed, and its largest offset is therefore
+      `0.33 * 110` = 36.3px -- the orbit radius, i.e. exactly the distance it has to cut across.
+      Nothing here was swept.
+    - **The velocity is RELATIVE to the target and only its TANGENTIAL part is used, and both
+      halves are load-bearing.** Tangential-only is what keeps this from being the
+      velocity-damped arrive documented as REVERTED two bullets up -- that one contains the whole
+      `-SpeedVector` and so brakes every approach. Relative is what stops it fighting an
+      INTERCEPT: a ship pacing a drifting powerup is not orbiting it, and its absolute velocity
+      is tangential there only by coincidence. For a fixed station the two forms are identical.
+      Every `steerTarget` write in `DoAIMove` must set `steerTargetVelocity` beside it, off
+      `ObservedVelocity` -- the same invariant, and for the same reason, as its weight.
+    - **It is SCOPED by distance** (`PlayerShip.SeekOrbitLeadScale`): full inside `r_t`, fading to
+      zero at `2*r_t`. Derived the same way -- a ship engaging at `2*r_t` and closing at full
+      speed still has ~175ms of travel before the deadzone, more than the 110ms lead needs -- and
+      the scope is what makes the term safe. **Applied at every distance it brakes the lateral
+      DODGE instead**, measured on SpaceDodge at 2.25 -> 6.00 deaths and win@ 147s -> 242s
+      (seeds 1-4 x2). This is the attractor's own shape as a function of its own geometry, the
+      deadzone's precedent, not a gate on another force.
+    - **Measured, seeds 1-4 x2 (N=8), `on=` vs `off=aiorbitlead=0`** -- N=8, so read the jitter
+      pair and the direction, not the death magnitudes: Tutorial `turn` 65 -> 52 deg/s and
+      `revs/s` 1.13 -> 0.89 with `idle%` flat, CrazyGame deaths 4.00 -> 1.25 (victories 6/8 ->
+      8/8), SpaceDodge 2.25 -> 1.75, spider 4.50 -> 5.50 (n.s.). **Stated regression: on Tutorial
+      seed 2 the bot stalls at `prog=48/56`** -- the `PowerUpTrainingEvent`, the one lesson with
+      no timeout ceiling -- after dying twice to the `PunchingBag`, so that seed times out even
+      at a 600s cap while the off arm wins at ~143s. Reproducible, one seed of four.
+    - `?aiorbitlead=<ms>` scales the lead (**0 = off = the pre-card aim**, the A/B arm) and does
+      NOT move the scope. Pinned by `logic_probe`'s **`ProbeSeekAimPoint`**, whose radial-
+      invariance and co-drift legs each carry the superseded form beside them as the control.
   - **What this replaced, in one line:** the port ended `DoAIMove` with a 0.95 "park" where the
     2008 original had **0.2** -- above the 0.8 seek, so a lone seek produced no motion at all and
     every deliberate destination (station, powerup, boss standoff) was silently deleted. Restored
@@ -2104,7 +2144,7 @@ the rest are tier-independent.
     are slow enough that most of the belt never passes its speed gate. So a threat's SPEED decides
     which path protects the ship, and a repellent change measured on one rig says nothing about
     the other.
-  - Flags: `?airepeldelta= ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
+  - Flags: `?airepeldelta= ?ainoisefloor= ?aiseekdeadzone= ?aiorbitlead= ?aiasteroidscale= ?aiasteroidrange=
     ?aiasteroidfall= ?aievade=`, the cone/wedge family above, plus
     `?aiseekapproach= ?aistandoff= ?aiseekpowerup= ?aipowerupreach=`. Wiring that `logic_probe` cannot reach is
     covered by `tools/headless/probes/ai_boss_approach.txt`.
@@ -2553,7 +2593,7 @@ the rest are tier-independent.
 - Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aireact=
   ?aigapmargin= ?aiscanrows= ?aicrosspenalty= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx=
   ?aifieldsize= ?aifieldfall= ?aiseekapproach= ?aistandoff= ?aiseekpowerup= ?aipowerupreach= ?airepeldelta=
-  ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
+  ?ainoisefloor= ?aiseekdeadzone= ?aiorbitlead= ?aiasteroidscale= ?aiasteroidrange=
   ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge= ?ailaneescape= ?aiconelead= ?aiconemaxlen=
   ?aiconewidth= ?aiconetaper= ?aiconefallalong= ?aiconefallacross= ?aiconescale= ?aiconespread=
   ?aiconewidthmin= ?aiwedgestrength= ?aiwedgefall= ?aitopedgepx= ?aitopedgestrength= ?ailazerpx=

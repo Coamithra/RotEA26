@@ -312,6 +312,7 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   `?aismooth= ?aismoothurgent= ?aireact= ?aigapmargin= ?aiscanrows= ?aicrosspenalty=
   ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall= ?aiseekapproach=
   ?aiseekpowerup= ?aipowerupreach= ?aistandoff= ?airepeldelta= ?ainoisefloor= ?aiseekdeadzone=
+  ?aiorbitlead=
   ?aiasteroidscale= ?aiasteroidrange= ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge=
   ?ailaneescape= ?aiconelead= ?aiconemaxlen= ?aiconewidth= ?aiconetaper= ?aiconefallalong=
   ?aiconefallacross= ?aiconescale= ?aiconespread= ?aiconewidthmin= ?aiwedgestrength=

@@ -398,6 +398,26 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private static float SeekArriveDeadzonePx => EvilAliensWeb.Compat.DebugFlags.AiSeekDeadzonePx ?? DefaultSeekArriveDeadzonePx;
 
+	// THE ORBIT, and the aim-point correction that kills it (card fd126847). The deadzone above is
+	// the anti-pingpong mechanism for a RADIAL approach and covers nothing else: `Move()` discards
+	// the steer's magnitude and thrusts at full `ShipAcceleration` along its ANGLE, so a ship at
+	// `ShipMaxSpeed` cannot turn tighter than r = v^2/a = 36.3px. A seek whose approach carries any
+	// TANGENTIAL speed therefore misses the 15px window and settles into a stable ~36px circle
+	// around its own steerTarget -- thrust exactly centripetal, seek never disengaging, deceleration
+	// never engaging, ~1.4 revolutions a second. That is the reported "spinning circles around its
+	// target location", and no deadzone smaller than the orbit radius can reach it.
+	//
+	// The fix aims at `steerTarget - tangentialVelocity * this`, i.e. proportional navigation on the
+	// TANGENTIAL component of the ship's velocity RELATIVE TO THE TARGET alone (SeekAimPoint), and
+	// only while the ship is near enough for an orbit to exist at all (SeekOrbitLeadScale).
+	// THE LEAD IS DERIVED: `ShipMaxSpeed / ShipAcceleration` is exactly
+	// how long full thrust needs to null full tangential speed, so the largest offset it can ever
+	// produce is 0.33 * 110 = 36.3px -- the orbit radius, which is the distance the correction has
+	// to be able to cut across. Nothing here was swept.
+	public const float DefaultSeekOrbitLeadMs = ShipMaxSpeed / ShipAcceleration;
+
+	private static float SeekOrbitLeadMs => EvilAliensWeb.Compat.DebugFlags.AiSeekOrbitLeadMs ?? DefaultSeekOrbitLeadMs;
+
 	// Kept at the 2008 weight so the seek still loses to threat avoidance exactly as before.
 	private const float SeekWeight = 0.8f;
 
@@ -1859,6 +1879,14 @@ public class PlayerShip : AlienDrawableGameComponent
 		// written a weight yet by then; the two station fallbacks are exempt because they run
 		// solely while steerTarget is still MaxValue.
 		float steerTargetWeight = SeekWeight;
+		// THE SAME INVARIANT APPLIES TO THE TARGET'S OWN VELOCITY (card fd126847), and here EVERY
+		// write must set it -- including the station fallbacks, which are the ones that are zero.
+		// The anti-orbit aim correction measures the ship's motion RELATIVE to its destination
+		// (SeekAimPoint), so a stale velocity from a previous writer would have it lead against a
+		// drift the current target does not have. `ObservedVelocity`, never `SpeedVector`: the
+		// latter reads zero for every type that writes `Position` directly, which is the AI-side
+		// convention throughout this method.
+		Vector2 steerTargetVelocity = Vector2.Zero;
 		float dodgeAngle = 0f;
 		if (player == 0)
 		{
@@ -1889,12 +1917,14 @@ public class PlayerShip : AlienDrawableGameComponent
 				if (distSq < (toTarget).LengthSquared())
 				{
 					steerTarget = baddy.Position;
+					steerTargetVelocity = baddy.ObservedVelocity;
 				}
 				continue;
 			}
 			if (baddy is JunkBoss)
 			{
 				steerTarget = baddy.Position;
+				steerTargetVelocity = baddy.ObservedVelocity;
 			}
 			// Sidestep a charging beam. A big UFO winds up for 2500ms and locks its aim at the
 			// PLAYER only at the instant it fires, so the dodge is to be somewhere else by then --
@@ -2116,6 +2146,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				steerTarget = powerup.Position;
 				steerTargetWeight = SeekPowerupWeight;
+				steerTargetVelocity = powerup.ObservedVelocity;
 			}
 			// PowerupReachPx, not the 150px `steerRange` the 2008 code shared with the screen-edge
 			// margin -- see the const. Beyond this the powerup is still the steerTarget above, so
@@ -2176,6 +2207,11 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				steerTarget = haltingBoss.Position;
 				steerTargetWeight = pull;
+				// Set for the invariant, and effectively inert: the aim correction's scope reaches
+				// two turn radii (73px) from the target CENTRE, which for a boss is mostly inside
+				// its own hull. Written anyway rather than special-cased -- an exception here
+				// would be a second rule to remember at the next steerTarget write.
+				steerTargetVelocity = haltingBoss.ObservedVelocity;
 			}
 		}
 		foreach (PlayerShip ship in oracle.GetShips())
@@ -2188,10 +2224,14 @@ public class PlayerShip : AlienDrawableGameComponent
 				// would fly the DETOUR at the approach's weight -- the one case where "leave it
 				// at the default" and "leave it at whatever the last writer set" differ.
 				steerTargetWeight = SeekWeight;
+				steerTargetVelocity = ship.ObservedVelocity;
 			}
 		}
 		if (steerTarget.X > 2000f && !collection.ContainsType<Floor>() && connectors.Count == 0)
 		{
+			// A fixed point in design space, so the correction's relative velocity IS the ship's
+			// own -- the case it was derived for. Written rather than left to the sentinel.
+			steerTargetVelocity = Vector2.Zero;
 			if (oracle.LiveShips == 1)
 			{
 				if (collection.ContainsType<Wall>())
@@ -2218,6 +2258,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		}
 		if (steerTarget.X > 2000f && collection.ContainsType<Floor>() && connectors.Count == 0)
 		{
+			steerTargetVelocity = Vector2.Zero;
 			if (oracle.LiveShips == 1)
 			{
 				(steerTarget) = new Vector2(266f, 300f);
@@ -2248,8 +2289,27 @@ public class PlayerShip : AlienDrawableGameComponent
 				// -SpeedVector, so it brakes the ship whenever it is moving relative to its station,
 				// which is most of a boss fight. That measured coast 28% -> 59% and 24 -> 70 deaths:
 				// the bot was being held at a standstill and could not accelerate out of trouble.
+				//
+				// WHAT THE DEADZONE DOES NOT COVER, AND WHY THIS IS NOT THAT REVERT (card fd126847).
+				// The paragraph above is about a RADIAL entry; a ship that misses the window
+				// sideways orbits its target at ~36px forever (see DefaultSeekOrbitLeadMs). So the
+				// AIM is corrected toward where the tangential drift has to be cancelled, and the
+				// three things that made the reverted arrive a brake are all absent here:
+				// it subtracts only the TANGENTIAL component of the velocity RELATIVE to the
+				// target, so neither approach speed nor a shared drift is ever braked; it moves
+				// the aim POINT and never a magnitude, so this vote is still exactly
+				// `steerTargetWeight` and the field composition is unchanged; and it vanishes
+				// identically when that tangential component is zero. `?aiorbitlead=0` is the A/B
+				// arm, i.e. the pre-card behaviour.
+				//
+				// AND IT IS SCOPED TO THE ORBIT'S OWN GEOMETRY -- full strength within one turn
+				// radius of the target, nothing beyond two. Applied at every distance it also
+				// bends a long-range TRANSIT, where the tangential component is a lateral dodge
+				// rather than a circle; see SeekOrbitLeadScale for the derivation and the numbers.
+				Vector2 aimPoint = SeekAimPoint(steerTarget, base.Position, base.SpeedVector,
+					steerTargetVelocity, SeekOrbitLeadScale(distToTarget, SeekOrbitLeadMs));
 				direction += steerTargetWeight
-					* MyMath.AngleToVector(MyMath.VectorToAngle(steerTarget - base.Position));
+					* MyMath.AngleToVector(MyMath.VectorToAngle(aimPoint - base.Position));
 			}
 		}
 		float edgeMargin = steerRange;
@@ -2907,6 +2967,63 @@ public class PlayerShip : AlienDrawableGameComponent
 		// ?aifieldcurve=classic the repellent at r* can be 3.75 against the 3.5 cap (found by
 		// ProbeAiBossApproach sweeping both curve families, not by inspection).
 		return MathHelper.Clamp(pull, 0f, MathHelper.Max(BossApproachMaxWeight, w));
+	}
+
+	// The seek's aim-point correction (card fd126847). PURE -- vectors in, a point out, no ship and
+	// no component -- so logic_probe can pin its legs with no game running. See
+	// DefaultSeekOrbitLeadMs for the orbit it exists to cut, and the seek site in DoAIMove for why
+	// this is NOT the velocity-damped arrive that was tried there and reverted.
+	//
+	// The velocity is taken RELATIVE TO THE TARGET and then projected onto the line to it; only the
+	// leftover TANGENTIAL part is led against. Both steps are the mechanism, not optimisations:
+	//   * relative, because orbiting is a fact about the ship's motion AROUND the target, so a
+	//     drifting powerup the ship is pacing is not orbiting it at all -- absolute velocity there
+	//     is tangential by coincidence, and leading against it fights the intercept. For a fixed
+	//     station (`targetVelocity` zero) this is exactly the absolute form;
+	//   * tangential, because subtracting the whole relative velocity would brake the approach
+	//     itself, which is precisely what the reverted arrive did.
+	public static Vector2 SeekAimPoint(Vector2 target, Vector2 pos, Vector2 speedVector,
+		Vector2 targetVelocity, float leadMs)
+	{
+		Vector2 toTarget = target - pos;
+		float dist = (toTarget).Length();
+		// Degenerate only when the ship is ON the target -- there is no line to project onto, and
+		// the caller's deadzone means the seek is not pulling there anyway. Returning the target
+		// keeps the helper total rather than handing back a NaN direction.
+		if (dist <= 0f)
+		{
+			return target;
+		}
+		Vector2 unit = toTarget / dist;
+		Vector2 relative = speedVector - targetVelocity;
+		Vector2 tangential = relative - unit * Vector2.Dot(relative, unit);
+		return target - tangential * leadMs;
+	}
+
+	// THE SCOPE the correction above is only correct INSIDE (card fd126847), and it is the same
+	// geometry that derived the lead. The orbit lives at r_t = ShipMaxSpeed * DefaultSeekOrbitLeadMs
+	// = 36.3px by construction -- that is the tightest circle the ship can fly at full speed -- so
+	// the correction is full strength within r_t and fades linearly to nothing at 2*r_t.
+	//
+	// WHY 2*r_t IS ENOUGH, derived rather than swept: a ship at 2*r_t closing at full speed still
+	// has (2*r_t - deadzone) / ShipMaxSpeed = ~175ms of travel before it reaches the deadzone,
+	// which is more than the 110ms of thrust needed to null full tangential momentum. So engaging
+	// at 2*r_t is sufficient to arrive straight, and everything beyond it is TRANSIT -- where the
+	// tangential component is usually a lateral dodge rather than a circle, and bending the aim
+	// brakes that dodge. Measured, with the correction applied at every distance: SpaceDodge
+	// deaths 2.25 -> 6.00 and time-to-victory 147s -> 242s (seeds 1-4 x2).
+	//
+	// This is the ATTRACTOR'S OWN shape as a function of its own geometry -- the deadzone's
+	// precedent -- not a gate on any other force.
+	//
+	// `leadMsBase` scales, the scope does not: r_t stays the DERIVED radius, so `?aiorbitlead=`
+	// dials the correction's strength (0 = off) without moving the distance at which it applies.
+	// PURE, so logic_probe pins the bounds against the motion constants with no game running.
+	public static float SeekOrbitLeadScale(float distToTarget, float leadMsBase)
+	{
+		const float turnRadiusPx = ShipMaxSpeed * DefaultSeekOrbitLeadMs;
+		float scale = MathHelper.Clamp((2f * turnRadiusPx - distToTarget) / turnRadiusPx, 0f, 1f);
+		return leadMsBase * scale;
 	}
 
 	// Centre-to-EDGE offset of a threat's hull -- what `dist` subtracts from a centre distance to

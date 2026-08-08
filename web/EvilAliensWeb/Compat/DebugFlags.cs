@@ -1422,6 +1422,18 @@ namespace EvilAliensWeb.Compat
 		//                       distance (PlayerShip.DefaultSeekArriveDeadzonePx).
 		public static float? AiSeekDeadzonePx { get; private set; }
 
+		// ?aiorbitlead=<ms>     how far AHEAD of a seek target the bot aims to cancel the
+		//                       TANGENTIAL part of its velocity RELATIVE to that target -- the
+		//                       anti-ORBIT mechanism, which the deadzone above cannot be (a ship
+		//                       cannot turn tighter than 36.3px at full speed, so a sideways miss
+		//                       circles forever). Scaled by distance (full inside one turn radius,
+		//                       nothing past two), so this dials strength, not reach.
+		//                       **0 = correction off = the pre-card behaviour**, i.e. the A/B arm,
+		//                       so the guard refuses only a negative.
+		//                       Card fd126847; PlayerShip.DefaultSeekOrbitLeadMs is DERIVED as
+		//                       ShipMaxSpeed / ShipAcceleration = 110ms.
+		public static float? AiSeekOrbitLeadMs { get; private set; }
+
 		// ?aiseekpowerup=<w>    the pull toward a POWERUP the bot has chosen to fetch, and
 		// ?aiseekapproach=<s>   REDEFINED BY CARD b56633fb: a SCALE on the boss approach's own
 		//                       SOLVED weight (1 = as shipped), not a weight any more. The boss
@@ -3240,6 +3252,17 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(AiSeekDeadzonePx ?? EvilAliens.PlayerShip.DefaultSeekArriveDeadzonePx));
+					}
+					break;
+				case "aiorbitlead":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiorb) && aiorb >= 0f)
+					{
+						AiSeekOrbitLeadMs = MathHelper.Min(aiorb, 2000f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiSeekOrbitLeadMs ?? EvilAliens.PlayerShip.DefaultSeekOrbitLeadMs));
 					}
 					break;
 				case "aiseekpowerup":

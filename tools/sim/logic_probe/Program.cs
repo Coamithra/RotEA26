@@ -125,6 +125,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeSeekAimPoint(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         rc = ProbeAiConeShape(asm);
         if (rc != 0)
         {
@@ -658,6 +664,11 @@ internal static class Program
             new { Flag = "airepeldelta",   Prop = "AiRepelCancelDelta",    Good = "3",   Want = (object)3f,    Baked = "0.2"  },
             new { Flag = "ainoisefloor",   Prop = "AiSteerNoiseFloor",     Good = "4",   Want = (object)4f,    Baked = "0.2"  },
             new { Flag = "aiseekdeadzone", Prop = "AiSeekDeadzonePx",      Good = "77",  Want = (object)77f,   Baked = "30"   },
+            // The seek's anti-orbit aim lead (card fd126847). 0 is a MEANINGFUL value (correction
+            // off, the A/B arm), so its guard refuses only a negative -- the shape this table's
+            // negative leg already expects. Good carries no "110" so the Baked-absence check below
+            // cannot be satisfied by the value being quoted back at us.
+            new { Flag = "aiorbitlead",    Prop = "AiSeekOrbitLeadMs",     Good = "37",  Want = (object)37f,   Baked = "110"  },
             new { Flag = "aireact",        Prop = "AiWallReactionMs",      Good = "333", Want = (object)333f,  Baked = "420"  },
             new { Flag = "aigapmargin",    Prop = "AiGapSwitchMargin",     Good = "7",   Want = (object)7f,    Baked = "1.5"  },
             new { Flag = "aiscanrows",     Prop = "AiWallScanRows",        Good = "9",   Want = (object)9,     Baked = ""     },
@@ -724,7 +735,7 @@ internal static class Program
             return 2;
         }
 
-        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 36 knobs (cards 48b7c6b1 / 2248e5eb)");
+        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 37 knobs (cards 48b7c6b1 / 2248e5eb / fd126847)");
 
         // One counter and its OWN first-problem detail per leg: a shared sink attaches the
         // diagnosis to whichever Check happens to print it, which in a mutation run put the only
@@ -1337,6 +1348,207 @@ internal static class Program
 
     // ---- the directional repellent shapes (card e425781b) ----------------------------------
     //
+    // The seek's anti-ORBIT aim correction (card fd126847). It is a pure function of two points, a
+    // velocity and a time, so it is checkable here with no game and no rig -- which matters,
+    // because its failure mode cannot be seen in a frame: a bot orbiting its target at ~36px looks
+    // exactly like a bot flying.
+    //
+    // SECTION 2 IS THE LEG THAT CARRIES THIS SET. Subtracting the FULL velocity rather than its
+    // tangential part is the obvious "simplification", it satisfies every other leg here, and it
+    // is precisely the velocity-damped arrive this project already tried and reverted (it brakes
+    // every real approach: coast 28% -> 59%, spider deaths 24 -> 70). So that leg runs the
+    // full-velocity form beside the real one over the same inputs and requires them to DISAGREE.
+    private static int ProbeSeekAimPoint(Assembly asm)
+    {
+        Type ship = asm.GetType("EvilAliens.PlayerShip", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo aimFn = ship.GetMethod("SeekAimPoint", anyStatic);
+        if (aimFn == null)
+        {
+            Console.WriteLine("FAIL: could not reflect PlayerShip.SeekAimPoint -- renamed or no longer static?");
+            return 2;
+        }
+        // Off the method signature, not by name -- Vector2 lives in the KNI assembly, not the one
+        // being probed, so a name lookup here always misses. (ProbeAiConeShape's precedent.)
+        Type vec2 = aimFn.GetParameters()[0].ParameterType;
+        object V(float x, float y) => Activator.CreateInstance(vec2, x, y);
+        float VX(object v) => (float)vec2.GetField("X").GetValue(v);
+        float VY(object v) => (float)vec2.GetField("Y").GetValue(v);
+        object AimRel(object target, object pos, object vel, object targetVel, float leadMs) =>
+            aimFn.Invoke(null, new object[] { target, pos, vel, targetVel, leadMs });
+        // The overwhelmingly common case: a FIXED station, i.e. a zero target velocity.
+        object Aim(object target, object pos, object vel, float leadMs) =>
+            AimRel(target, pos, vel, V(0f, 0f), leadMs);
+
+        float maxSpeed = (float)ship.GetField("ShipMaxSpeed", anyStatic).GetRawConstantValue();
+        float accel = (float)ship.GetField("ShipAcceleration", anyStatic).GetRawConstantValue();
+        float decel = (float)ship.GetField("ShipDeceleration", anyStatic).GetRawConstantValue();
+        float lead = (float)ship.GetField("DefaultSeekOrbitLeadMs", anyStatic).GetRawConstantValue();
+        float deadzone = (float)ship.GetField("DefaultSeekArriveDeadzonePx", anyStatic).GetRawConstantValue();
+
+        Console.WriteLine("[logic_probe] AI seek aim-point correction (card fd126847)");
+
+        // ONE geometry throughout, chosen so a reader can check every row by hand: the target is
+        // 100px straight UP from the ship, so the line to it is -Y and TANGENTIAL is exactly X.
+        object target = V(400f, 300f);
+        object pos = V(400f, 400f);
+
+        // 0. THE LEAD IS DERIVED FROM THE MOTION CONSTANTS, not chosen -- and the bound it has to
+        // clear is the one the deadzone CANNOT. A ship at full speed turns no tighter than
+        // v^2/a, so a tangential miss settles into a circle of that radius around its target;
+        // the largest offset this correction can produce is v * lead, and it must reach it.
+        float turnRadius = maxSpeed * maxSpeed / accel;
+        Check("the lead IS ShipMaxSpeed / ShipAcceleration (derived, not tuned)",
+            Math.Abs(lead - maxSpeed / accel) < 1e-4f,
+            "lead " + lead.ToString("0.###") + "ms vs " + (maxSpeed / accel).ToString("0.###"));
+        Check("its maximum offset reaches the ORBIT RADIUS the deadzone cannot cover",
+            Math.Abs(maxSpeed * lead - turnRadius) < 0.01f && turnRadius > deadzone,
+            "max offset " + (maxSpeed * lead).ToString("0.0") + "px, turn radius "
+            + turnRadius.ToString("0.0") + "px, deadzone " + deadzone.ToString("0.0")
+            + "px, stopping distance " + (0.5f * maxSpeed * maxSpeed / decel).ToString("0.0") + "px");
+
+        // 1. NO TANGENTIAL VELOCITY, NO CORRECTION -- both signs, because a ship RETREATING from
+        // its target is as radial as one closing on it and neither is orbiting.
+        object closing = Aim(target, pos, V(0f, -maxSpeed), lead);
+        object receding = Aim(target, pos, V(0f, maxSpeed), lead);
+        Check("a purely RADIAL velocity leaves the aim on the target (both directions)",
+            Math.Abs(VX(closing) - 400f) < 1e-3f && Math.Abs(VY(closing) - 300f) < 1e-3f
+                && Math.Abs(VX(receding) - 400f) < 1e-3f && Math.Abs(VY(receding) - 300f) < 1e-3f,
+            "closing (" + VX(closing).ToString("0.00") + "," + VY(closing).ToString("0.00")
+            + ") receding (" + VX(receding).ToString("0.00") + "," + VY(receding).ToString("0.00") + ")");
+
+        // 2. A PURELY TANGENTIAL velocity leads by exactly v*lead, AGAINST the drift. This is the
+        // positive control for the whole set -- a stub returning `target` passes every other leg.
+        object tangentialOnly = Aim(target, pos, V(maxSpeed, 0f), lead);
+        float offX = VX(tangentialOnly) - 400f;
+        float offY = VY(tangentialOnly) - 300f;
+        Check("a purely TANGENTIAL velocity offsets the aim by v*lead, opposite the drift",
+            Math.Abs(offX + maxSpeed * lead) < 0.01f && Math.Abs(offY) < 1e-3f,
+            "offset (" + offX.ToString("0.00") + "," + offY.ToString("0.00") + ") against an expected ("
+            + (-maxSpeed * lead).ToString("0.00") + ",0.00)");
+
+        // 3. THE PROJECTION ITSELF. Adding a RADIAL component must change nothing -- and the
+        // full-velocity form, which is the reverted arrive, must disagree here. Without the
+        // control this leg is satisfied by any build that happens to be radial-invariant.
+        object mixed = Aim(target, pos, V(maxSpeed, -maxSpeed), lead);
+        float dx = VX(mixed) - VX(tangentialOnly);
+        float dy = VY(mixed) - VY(tangentialOnly);
+        Check("adding a RADIAL component to the same tangential drift changes nothing",
+            Math.Abs(dx) < 1e-3f && Math.Abs(dy) < 1e-3f,
+            "moved by (" + dx.ToString("0.000") + "," + dy.ToString("0.000") + ")");
+        // The pre-simplification form, run over the same input: target - fullVelocity * lead.
+        float fullY = 300f - (-maxSpeed) * lead;
+        Check("NEGATIVE CONTROL: subtracting the FULL velocity gives a different answer",
+            Math.Abs(fullY - VY(mixed)) > 1f,
+            "full-velocity Y " + fullY.ToString("0.0") + " vs the tangential-only "
+            + VY(mixed).ToString("0.0"));
+
+        // 4. leadMs = 0 IS the A/B arm (`?aiorbitlead=0`), so it must be the identity exactly.
+        object off = Aim(target, pos, V(maxSpeed, -maxSpeed), 0f);
+        Check("leadMs = 0 is the identity -- the shipped A/B arm really is the pre-card aim",
+            Math.Abs(VX(off) - 400f) < 1e-4f && Math.Abs(VY(off) - 300f) < 1e-4f,
+            "(" + VX(off).ToString("0.000") + "," + VY(off).ToString("0.000") + ")");
+
+        // 5. THE DEGENERATE CASE. The caller's deadzone means the seek is not pulling with the
+        // ship on its target, but a helper that returns NaN there would poison a direction
+        // silently, so it is asserted rather than argued.
+        object onTop = Aim(target, target, V(maxSpeed, maxSpeed), lead);
+        Check("target == position returns the target, never a NaN",
+            !float.IsNaN(VX(onTop)) && !float.IsNaN(VY(onTop))
+                && Math.Abs(VX(onTop) - 400f) < 1e-4f && Math.Abs(VY(onTop) - 300f) < 1e-4f,
+            "(" + VX(onTop).ToString("0.000") + "," + VY(onTop).ToString("0.000") + ")");
+
+        // 5b. CO-DRIFT INVARIANCE. Orbiting is a fact about the ship's motion AROUND the target,
+        // so a ship PACING a drifting powerup is not orbiting it at all -- its absolute velocity
+        // is tangential only by coincidence, and leading against it fights the intercept. The
+        // magnitudes are swept because the absolute-velocity form is invariant at zero and
+        // nowhere else. (The station case is `targetVelocity` zero, i.e. every other leg here.)
+        int coDrift = 0;
+        string badDrift = null;
+        foreach (float mag in new[] { 0.05f, maxSpeed, 3f * maxSpeed })
+        {
+            object shared = V(mag, 0.5f * mag);
+            object paced = AimRel(target, pos, shared, shared, lead);
+            if (Math.Abs(VX(paced) - 400f) < 1e-3f && Math.Abs(VY(paced) - 300f) < 1e-3f) { coDrift++; }
+            else
+            {
+                badDrift ??= "at " + mag.ToString("0.###") + "px/ms the aim moved to ("
+                    + VX(paced).ToString("0.00") + "," + VY(paced).ToString("0.00") + ")";
+            }
+        }
+        Check("a ship PACING a drifting target is not corrected at all, at any speed",
+            coDrift == 3, coDrift + "/3" + (badDrift != null ? "; " + badDrift : ""));
+        // Without the control this is satisfied by a build that ignores the ship's velocity too.
+        object drifting = V(maxSpeed, 0f);
+        object chased = AimRel(target, pos, V(0f, 0f), drifting, lead);
+        Check("CONTROL: a STATIONARY ship at a drifting target IS corrected",
+            Math.Abs(VX(chased) - 400f - maxSpeed * lead) < 0.01f,
+            "aim X " + VX(chased).ToString("0.00") + " against an expected "
+            + (400f + maxSpeed * lead).ToString("0.00"));
+
+        // 6. THE SCOPE. The correction is only correct near its own target: the orbit lives at
+        // r_t by construction, so a ship further out is in TRANSIT and its tangential velocity is
+        // a lateral DODGE rather than a circle. Bending the aim out there brakes the dodge --
+        // measured, before this was scoped, as SpaceDodge deaths 2.25 -> 6.00 and win@ 147s ->
+        // 242s. Both bounds are multiples of the derived radius, so they are asserted against the
+        // MOTION CONSTANTS rather than against 36 and 73.
+        MethodInfo scaleFn = ship.GetMethod("SeekOrbitLeadScale", anyStatic);
+        if (scaleFn == null)
+        {
+            Console.WriteLine("FAIL: could not reflect PlayerShip.SeekOrbitLeadScale -- renamed or no longer static?");
+            return 2;
+        }
+        float Scale(float dist, float baseMs) => (float)scaleFn.Invoke(null, new object[] { dist, baseMs });
+        float inner = turnRadius;
+        float outer = 2f * turnRadius;
+        Check("full lead anywhere inside ONE turn radius of the target",
+            Math.Abs(Scale(0f, lead) - lead) < 1e-3f
+                && Math.Abs(Scale(deadzone + 0.1f, lead) - lead) < 1e-3f
+                && Math.Abs(Scale(inner, lead) - lead) < 1e-3f,
+            "at 0px " + Scale(0f, lead).ToString("0.00") + ", at the deadzone edge "
+            + Scale(deadzone + 0.1f, lead).ToString("0.00") + ", at " + inner.ToString("0.0") + "px "
+            + Scale(inner, lead).ToString("0.00") + " of a base " + lead.ToString("0.0"));
+        Check("ZERO at and beyond TWO turn radii -- a transiting ship is not steered at all",
+            Scale(outer, lead) == 0f && Scale(outer + 1f, lead) == 0f && Scale(4000f, lead) == 0f,
+            "at " + outer.ToString("0.0") + "px " + Scale(outer, lead).ToString("0.000")
+            + ", at 4000px " + Scale(4000f, lead).ToString("0.000"));
+        // The OUTER bound is sufficient, and that is derived rather than chosen: a ship engaging
+        // at 2*r_t and closing at full speed still has (2*r_t - deadzone)/v of travel before it
+        // reaches the deadzone, which must exceed the leadMs needed to null full tangential
+        // momentum. A future edit that pulls the bound inward fails HERE rather than quietly
+        // arriving sideways.
+        float travelMs = (outer - deadzone) / maxSpeed;
+        Check("engaging at the OUTER bound still leaves more travel than the lead needs",
+            travelMs > lead,
+            travelMs.ToString("0") + "ms of travel from " + outer.ToString("0.0")
+            + "px against a " + lead.ToString("0") + "ms lead");
+        // Monotone across the whole range, not just at the two ends: a sign slip inside the fade
+        // would leave both bounds correct and hand the transit MORE correction than the arrival.
+        bool monotone = true;
+        float prev = float.MaxValue;
+        float midStrict = 0f;
+        for (float d = 0f; d <= 400f; d += 1f)
+        {
+            float s = Scale(d, lead);
+            if (s > prev + 1e-4f) { monotone = false; }
+            if (d > inner && d < outer && s < prev - 1e-4f) { midStrict = s; }
+            prev = s;
+        }
+        Check("monotone non-increasing in distance, and strictly falling across the fade",
+            monotone && midStrict > 0f,
+            "midpoint lead " + Scale(1.5f * turnRadius, lead).ToString("0.0") + "ms, half the base "
+            + (lead / 2f).ToString("0.0") + "ms");
+        Check("CONTROL: the scope really scopes -- the fade midpoint is neither 0 nor the base",
+            Math.Abs(Scale(1.5f * turnRadius, lead) - lead / 2f) < 0.01f,
+            "at 1.5*r_t the lead is " + Scale(1.5f * turnRadius, lead).ToString("0.000")
+            + "ms against a base " + lead.ToString("0.0") + "ms");
+        Check("?aiorbitlead=0 is off at EVERY distance, scope or no scope",
+            Scale(0f, 0f) == 0f && Scale(inner, 0f) == 0f && Scale(outer, 0f) == 0f,
+            "0/" + inner.ToString("0") + "/" + outer.ToString("0") + "px all "
+            + Scale(inner, 0f).ToString("0.000"));
+        return 0;
+    }
+
     // PlayerShip.EvaluateSweptShape is a pure function of geometry, so the whole design is
     // checkable here with no game, no browser and no rig -- and it MUST be checked at FIXED
     // POINTS rather than by any aggregate. The card's own readout trap says why: a field's mean

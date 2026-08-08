@@ -36,7 +36,8 @@ The `noyield` arm reproduces the pre-change baseline digit for digit on the same
 ## Verification
 
 - `ai_sweep.py` paired runs (N stated in the PR; full N=60 gate is the scoring pass's).
-- `run_probes.py` green; clean Debug build; eahl smoke.
+- The yield's observable is AiBench's `topyield=` counter (a suppressed push changes no pixel), pinned by the probe pair `tools/headless/probes/ai_topedge_yield.txt` + `ai_topedge_yield_absent.txt` (seed 3 on the spider rig fires it 18 ticks inside 60 sim-s, 5/5 runs). Mutation-tested both ways: dropping the `NoteTopEdgeYield` call turns the positive probe red with the absent one green; hard-wiring `TopEdgeYieldEnabled` to true turns the absent probe red with the positive green.
+- `run_probes.py` green (60/60); logic_probe ALL PASS; clean Debug build; eahl smoke.
 
 ## Out of scope
 

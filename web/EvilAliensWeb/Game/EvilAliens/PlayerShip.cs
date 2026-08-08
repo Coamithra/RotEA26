@@ -1875,9 +1875,11 @@ public class PlayerShip : AlienDrawableGameComponent
 		// solely while steerTarget is still MaxValue.
 		float steerTargetWeight = SeekWeight;
 		// Y of the powerup the live detour targets, MaxValue while the target is anything else.
-		// Written by the powerup pass, CLEARED by every later steerTarget writer (boss approach,
-		// partner dock) -- it must track the LIVE target, or the top-edge yield below would stand
-		// the push down for a powerup the bot is no longer flying at.
+		// Written by the powerup pass, CLEARED by every later steerTarget writer that can outrank
+		// it (boss approach, partner dock) -- it must track the LIVE target, or the top-edge
+		// yield below would stand the push down for a powerup the bot is no longer flying at.
+		// The two station fallbacks are exempt for steerTargetWeight's reason above: they run
+		// solely while steerTarget is still MaxValue, i.e. only when no powerup was chosen.
 		float powerupDetourY = float.MaxValue;
 		float dodgeAngle = 0f;
 		if (player == 0)
@@ -2371,10 +2373,18 @@ public class PlayerShip : AlienDrawableGameComponent
 		// passes the flag's `>= 0` range check, and relying on the position clamp to keep Y
 		// positive is an invariant three hundred lines away.
 		float topEdgePx = TopEdgeDangerPx;
-		if (topEdgePx > 0f && base.Position.Y < topEdgePx
-			&& !(TopEdgeYieldEnabled && powerupDetourY < topEdgePx))
+		if (topEdgePx > 0f && base.Position.Y < topEdgePx)
 		{
-			direction += new Vector2(0f, TopEdgeAvoidStrength * (1f - base.Position.Y / topEdgePx));
+			if (TopEdgeYieldEnabled && powerupDetourY < topEdgePx)
+			{
+				// The bench note is the yield's ONLY observable -- a suppressed push changes no
+				// pixel -- and it is what the ai_topedge_yield probe pair asserts on.
+				EvilAliensWeb.Compat.AiBench.NoteTopEdgeYield(this);
+			}
+			else
+			{
+				direction += new Vector2(0f, TopEdgeAvoidStrength * (1f - base.Position.Y / topEdgePx));
+			}
 		}
 		if (hasWall)
 		{

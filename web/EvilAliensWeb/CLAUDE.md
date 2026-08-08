@@ -2374,8 +2374,11 @@ the rest are tier-independent.
   win@147s vs 153s); level1 pickups flat (85.5% -> 85.4%) with deaths 7.75 vs 8.50 (within
   SEM). The `?aitopedgeyield=0` arm reproduces the pre-card baseline digit for digit on the
   same seeds (129/269, 8.50 deaths), so the seam is a faithful negative control.
-  `?aitopedgeyield=0` is the pre-card unconditional push -- the A/B arm, the
-  `?netstaleguard=0` idiom, out of `Active` like the rest of the `?ai*` family.
+  `?aitopedgeyield=0` is the pre-card unconditional push -- the A/B arm, out of `Active` like
+  the rest of the `?ai*` steering knobs (unlike `?aiwallnav2008=1` it cannot reach a peer's
+  world: the AI steers only locally-owned ships). The bench row's `topyield=` counter is the
+  yield's only observable (a suppressed push changes no pixel); pinned by the probe pair
+  `tools/headless/probes/ai_topedge_yield.txt` + `ai_topedge_yield_absent.txt`.
 - **Every avoidance field here shares the `(1-t)^p` falloff shape** (`ThreatFieldStrength`) -- a
   flat push across a band fights the screen bounds instead of easing off once the ship is clear.
 - **Per-tier skill (card c10e3e7f) is keyed off `Settings.EffectiveDifficulty`, NOT

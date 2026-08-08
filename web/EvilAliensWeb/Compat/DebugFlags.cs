@@ -1541,8 +1541,10 @@ namespace EvilAliensWeb.Compat
 
 		// ?aitopedgeyield=0|1  whether the top-edge push STANDS DOWN while the bot's live steer
 		// target is a powerup inside the band (card 13960838). Defaults ON (null => true); 0 is
-		// the pre-card unconditional push and the A/B arm the yield was measured against, the
-		// ?netstaleguard=0 idiom. The on/off spelling follows ?aievade=/?ailaneescape=.
+		// the pre-card unconditional push and the A/B arm the yield was measured against. Out of
+		// `Active` like the rest of the `?ai*` steering knobs -- unlike `?aiwallnav2008=1` it
+		// cannot reach a peer's world, since the AI steers only locally-owned ships. The on/off
+		// spelling follows ?aievade=/?ailaneescape=.
 		public static bool? AiTopEdgeYield { get; private set; }
 
 		// ?ailazerpx=<px>        how wide a berth a live beam gets,

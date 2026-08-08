@@ -688,6 +688,10 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		if (hp <= 0 && !base.IsDead)
 		{
 			BeginDeathThroes();
+			// AI bench (card 2c74d5b7): how many big UFOs -- the only enemy that reliably fires
+			// the Lazer that just killed this boss -- were still alive when it went down. No-op
+			// unless ?aibench.
+			EvilAliensWeb.Compat.AiBench.NoteSpiderBossDeath();
 			// Online co-op (card ad9c8f8b): this death is DEFERRED -- the debris fall for 5s
 			// before Die() -- but it never runs through KillableAlien.HitBy, so nothing else
 			// announces it. Without this the join peer sees an intact boss for five seconds and

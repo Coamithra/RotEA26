@@ -112,6 +112,32 @@ internal static class AiBench
 	// two builds is not a comparison.
 	private static int powerupsSpawned;
 
+	// BIG UFOs ALIVE DURING THE SPIDER BOSS FIGHT (card 2c74d5b7). Run-wide, like powerupsSpawned:
+	// nothing about the enemy population belongs to a slot, and in co-op both ships share one
+	// screen of them.
+	//
+	// TWO NUMBERS, and the mean is the one to compare builds on. `bigalive` -- the count at the
+	// instant the boss's HP hits zero -- is the card's literal question, but it is ONE sample of a
+	// population that spawns every ~5s and is shot down continuously, so its run-to-run spread is
+	// large and it does not exist at all on a run that never killed the boss (hence -1, not 0).
+	// The per-tick MEAN over the fight is the same quantity integrated, and it moves when the
+	// sparing rule does.
+	private static long bigUfoSampleTicks;
+	private static long bigUfoAliveTotal;
+	// How many of them the sparing rule deliberately left alone, summed over the same ticks. It
+	// is the GATE's own observable: `bigufo` is an outcome the spawner and the bot's aim both move,
+	// this is the decision itself, so a run where the gate silently stopped engaging is legible
+	// here and nowhere else.
+	private static long bigUfoSparedTotal;
+	private static int lastBigUfoAlive;
+	// Initialised here as well as in Reset(): the default(int)/default(double) of 0 would read as
+	// "the boss died with no big UFOs left" and "sample already taken this tick" on a process
+	// whose first run never goes through Reset().
+	private static int bigUfoAliveAtBossDeath = -1;
+	// The tick stamp of the last sample. DoAIFire calls the hook once per AI SHIP, and this is a
+	// run-wide census, so a co-op pair would otherwise count the same screen twice per tick.
+	private static double lastBigUfoSampleMs = -1.0;
+
 	private static GameScene lastScene;
 
 	internal static bool Enabled => DebugFlags.AiBench;
@@ -125,6 +151,12 @@ internal static class AiBench
 		verdictMs = 0.0;
 		peakEventPos = 0;
 		powerupsSpawned = 0;
+		bigUfoSampleTicks = 0L;
+		bigUfoAliveTotal = 0L;
+		bigUfoSparedTotal = 0L;
+		lastBigUfoAlive = 0;
+		bigUfoAliveAtBossDeath = -1;
+		lastBigUfoSampleMs = -1.0;
 		headlessTotal = TimeSpan.Zero;
 		lastScene = null;
 	}
@@ -365,6 +397,42 @@ internal static class AiBench
 		powerupsSpawned++;
 	}
 
+	// DoAIFire's own baddy scan (card 2c74d5b7), once per tick per AI ship. `spiderBossAlive` is
+	// that loop's finding; the census is only meaningful while the fight is on, so a run with no
+	// spider boss contributes nothing and reports a mean of 0 over 0 ticks.
+	internal static void NoteBigUfos(bool spiderBossAlive, int bigUfosAlive, int spared)
+	{
+		if (!Enabled || !spiderBossAlive)
+		{
+			return;
+		}
+		// One sample per TICK, not per ship. runMs advances once per tick in Update(), so two
+		// co-op ships scanning the same screen in the same tick share a stamp.
+		if (runMs == lastBigUfoSampleMs)
+		{
+			return;
+		}
+		lastBigUfoSampleMs = runMs;
+		bigUfoSampleTicks++;
+		bigUfoAliveTotal += bigUfosAlive;
+		bigUfoSparedTotal += spared;
+		lastBigUfoAlive = bigUfosAlive;
+	}
+
+	// SpiderBoss.BeginDeathThroes -- the boss's HP has just hit zero. Latches THIS tick's census,
+	// which DoAIFire took earlier in the same tick (ship Updates run before the collision pass
+	// that reaches CollidesWith), rather than scanning the world a second time. FIRST death only:
+	// the value is "how many executioners were still alive when it went down", and a rig that
+	// somehow staged two fights must not overwrite the answer with the second one.
+	internal static void NoteSpiderBossDeath()
+	{
+		if (!Enabled || bigUfoAliveAtBossDeath >= 0)
+		{
+			return;
+		}
+		bigUfoAliveAtBossDeath = lastBigUfoAlive;
+	}
+
 	// DoAIFire, once per tick per AI ship: did it have something worth shooting, and did it shoot?
 	internal static void NoteFireDecision(PlayerShip ship, bool hadTarget, bool fired)
 	{
@@ -535,6 +603,17 @@ internal static class AiBench
 			{
 				sb.Append(" killers=").Append(KillerHistogram(r));
 			}
+		}
+		// Run-wide, so OUTSIDE the per-ship loop -- and appended, never inserted, because probes
+		// and eaAiBench.matrix key on `<name>=` and a reordered field would break neither of them
+		// but a reordered one WOULD break a reader diffing two transcripts. Printed only when a
+		// spider boss actually lived, following the `boss=`/`bossfar=` precedent: on the other six
+		// rigs it would be a constant `0.00 / -1` on every line.
+		if (bigUfoSampleTicks > 0)
+		{
+			sb.Append(" bigufo=").Append(Fmt((double)bigUfoAliveTotal / bigUfoSampleTicks, 2));
+			sb.Append(" bigspared=").Append(Fmt((double)bigUfoSparedTotal / bigUfoSampleTicks, 2));
+			sb.Append(" bigalive=").Append(bigUfoAliveAtBossDeath);
 		}
 		return sb.ToString();
 	}
@@ -712,6 +791,12 @@ internal static class AiBench
 		sb.Append(" boss=").Append(Fmt((r.BossTicks > 0L) ? (r.BossDistTotal / r.BossTicks) : 0.0, 0));
 		sb.Append(" bossfar=").Append(Fmt((r.BossTicks > 0L) ? (100.0 * r.BossOutOfRangeTicks / r.BossTicks) : 0.0, 0));
 		sb.Append(" killers=").Append((r.Killers.Count > 0) ? KillerHistogram(r) : "none");
+		// Card 2c74d5b7, append-only like the block above. UNCONDITIONAL here, unlike Line(): a
+		// sweep's parser wants the key on every row (`0.00` / `-1` says "no spider boss on this
+		// rig", which is a different statement from "old build, key absent").
+		sb.Append(" bigufo=").Append(Fmt((bigUfoSampleTicks > 0L) ? ((double)bigUfoAliveTotal / bigUfoSampleTicks) : 0.0, 2));
+		sb.Append(" bigspared=").Append(Fmt((bigUfoSampleTicks > 0L) ? ((double)bigUfoSparedTotal / bigUfoSampleTicks) : 0.0, 2));
+		sb.Append(" bigalive=").Append(bigUfoAliveAtBossDeath);
 		return sb.ToString();
 	}
 

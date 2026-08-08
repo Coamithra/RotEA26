@@ -537,6 +537,61 @@ namespace EvilAliensWeb.Compat
 			return "[aibench] counters reset";
 		}
 
+		// eaBigUfoEngage(px) / eaBigUfoEngageClear() -- set or clear the spider-boss big-UFO
+		// engage radius at runtime (card 2c74d5b7). It bakes to 0 (off), so the only way to see
+		// the arm engage is to turn it on; doing that through a reboot would put each arm in its
+		// own PROCESS, and what is compared here is a per-tick mean over a seeded world -- which
+		// is exactly the comparison a second boot makes unsafe (see the ?seed= near-determinism
+		// caveat). Same reasoning as eaNetStale()'s live flag drive.
+		//
+		// TWO METHODS rather than one nullable: `eval` binds by ARG COUNT and its Coerce has no
+		// Nullable<T> case, so a `double?` would be unreachable headlessly -- which is the only
+		// place this is used.
+		[JSInvokable("debugBigUfoEngage")]
+		public static string BigUfoEngage(double px)
+		{
+			if (px < 0.0)
+			{
+				// Refused, not clamped -- the ?aibigufopx= parse guard's shape.
+				return "[ai] refused: the big-UFO engage radius must be >= 0 (0 turns the gate off)";
+			}
+			DebugFlags.SetBigUfoEngageOverride((float)px);
+			return "[ai] big-UFO engage radius = " + Fmt0(px) + "px"
+				+ ((px <= 0.0) ? " (gate OFF -- spare-one rule only)" : "")
+				+ ((px >= 351.0) ? " (at or above base gun range -- INERT, nothing is shot that far)" : "");
+		}
+
+		// Drop the override, so the SHIPPED default is readable back in the same process. That is
+		// the one assertion a two-file probe pair cannot make: "no flag" and "=0" agreeing is
+		// what says the bake is still 0.
+		[JSInvokable("debugBigUfoEngageClear")]
+		public static string BigUfoEngageClear()
+		{
+			DebugFlags.SetBigUfoEngageOverride(null);
+			return "[ai] big-UFO engage radius override cleared -- back to the baked "
+				+ Fmt0(EvilAliens.PlayerShip.DefaultBigUfoEngagePx) + "px (0 = gate off)";
+		}
+
+		private static string Fmt0(double v)
+		{
+			return v.ToString("F0", System.Globalization.CultureInfo.InvariantCulture);
+		}
+
+		// eaBigUfoSpare(px) -- the sparing DECISION over the live world, at `px` and at 0, in the
+		// same tick. This is the honest A/B: running one arm then the other inside a fight
+		// compares two different screens, and measured during card 2c74d5b7 it inverted the true
+		// result on one seed. Needs a live level with a SpiderBoss; `boss=none` says so.
+		[JSInvokable("debugBigUfoSpare")]
+		public static string BigUfoSpare(double px)
+		{
+			EvilAliens.Oracle oracle = EvilAliens.ServiceHelper.Get<EvilAliens.IOracleService>().Oracle;
+			foreach (EvilAliens.PlayerShip ship in oracle.GetShips())
+			{
+				return ship.AiBigUfoSpareReadout((float)px);
+			}
+			return "[ai] no ship alive -- boot a level (?level=Level2&spiderboss&aiplayer) first";
+		}
+
 		// eaAiBench.world() -- census of the live components vs what the AI's world model
 		// (Oracle.GetBaddies) actually contains. The answer to "the level is stalled and the bot
 		// is shooting something -- what is it blind to?".

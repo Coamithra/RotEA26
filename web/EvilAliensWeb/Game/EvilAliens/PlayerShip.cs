@@ -230,6 +230,61 @@ public class PlayerShip : AlienDrawableGameComponent
 	// reaches this far" cannot drift apart.
 	private const float BulletRangePerMs = 0.78f;
 
+	// ---- SPARING THE SPIDER BOSS'S EXECUTIONERS (card 2c74d5b7) ------------------------------
+	//
+	// Only a Lazer hurts the SpiderBoss (SpiderBoss.CollidesWith), and a BIG UFO fires one six
+	// times as often as a small one (UFO.Update: 0.0009/ms against 0.00015). The boss's whole HP
+	// pool is `5 * DifficultyFactorized(0.75)`, so the fight's LENGTH is very nearly "how many big
+	// UFOs got to fire" -- every one the bot clears is a gun it took away from itself, and killing
+	// one mid-windup (the 2500ms UFOState.lazor charge) deletes the beam outright.
+	//
+	// DoAIFire already spares exactly ONE, the one furthest from every ship. The card asked for
+	// "some" -- i.e. more than one -- and proposed a reduced engage radius to get there. That
+	// mechanism is BUILT and reachable (`?aibigufopx=<px>`), and it **BAKES TO 0, i.e. OFF**,
+	// because across its whole usable band it measured as a net loss. Read the next two bullets
+	// before re-enabling it.
+	//
+	// **THE BAND IS BOUNDED ABOVE BY GUN RANGE, which is the durable answer to the card's
+	// question.** The AI never fires past `bulletlifetime * BulletRangePerMs` = 351px at the base
+	// weapon, so a radius at or above that is INERT -- `?aibigufopx=400` is byte-identical to
+	// `=0`. "Reduce the radius" therefore has ~100..350px to work in, not an open range.
+	//
+	// **AND EVERY VALUE IN THAT BAND LOSES.** eahl, Very_Hard, `?invuln` off, seeds 1-8 x2 (N=16,
+	// small -- these are directional, and the sign was consistent across both variants):
+	//
+	//   arm                       deaths (paired)   victories   win@    Lazer kills   mean alive
+	//   off (=0)                  3.81              6/16        158s    49            1.32
+	//   capped at 250             +0.94 +- 1.09     7/16        219s    68            1.36
+	//   capped at 300             +1.19 +- 1.23     4/16        112s    68            1.40
+	//   UNCAPPED at 250           +1.50 +- 0.89     6/16        241s    72            1.46
+	//
+	// The counter moves exactly as designed and the fight does not follow. The mechanism is that
+	// the beams the bot is inviting are aimed AT IT and it was already dying to them (`Lazer` is
+	// ~90% of deaths on this rig), so each extra platform costs more dodging than it buys boss
+	// damage. Neither deaths diff clears 2 SEM, so this is "not better", not "significantly
+	// worse" -- but nothing here is an improvement to ship.
+	//
+	// WHY A RADIUS AND NOT "SPARE N". Distance is what makes sparing survivable at all: the beam
+	// is aimed AT THE PLAYER at fire time and stays put for >=3250ms, so a far platform's beam
+	// crosses most of the screen for the boss to walk into while a near one's is a point-blank
+	// shot the bot has no room to leave. A count would spare the nearest as readily as the far.
+	//
+	// IF YOU RE-OPEN THIS, the untried directions are the ones that change WHERE the bot stands
+	// rather than how many guns it leaves alive -- the beam-avoidance magnitudes (card 2248e5eb
+	// re-measured those and they are not obviously final on this rig) or a positional term that
+	// keeps the ship off the invited beam's line. Raising the radius is not one of them.
+	public const float DefaultBigUfoEngagePx = 0f;
+
+	private static float BigUfoEngagePx => EvilAliensWeb.Compat.DebugFlags.AiBigUfoEngagePx ?? DefaultBigUfoEngagePx;
+
+	// How many big UFOs the radius gate may leave alive at once, the spare-one rule INCLUDED --
+	// so with `?aibigufopx=` on, at most this many. Deliberately NOT a flag: `?aibigufopx=` is
+	// the one seam here, and a second knob would let a sweep wander back to the uncapped
+	// configuration the table above records as the worst arm of the four. It is a name for the
+	// two slots (`sparedUfo` + `sparedFarUfo`) in DoAIFire rather than a loop bound -- at 2 an
+	// explicit pair is cheaper and clearer than a top-N scan, so raising it means writing one.
+	public const int BigUfoSpareCap = 2;
+
 	// ---- THE BOSS-APPROACH ATTRACTOR (card b56633fb) ----------------------------------------
 	//
 	// WHAT WAS WRONG. The approach used to fly at a geometric standoff point
@@ -1639,6 +1694,110 @@ public class PlayerShip : AlienDrawableGameComponent
 		aiGapColumn = -1;
 	}
 
+	// WHICH big UFOs the AI deliberately leaves alive during a SpiderBoss fight, and the boss
+	// facts the caller needs from the same scan (cards f4d1721f / 2c74d5b7).
+	//
+	// The SpiderBoss fight is won with the ENEMY's guns: only a Lazer can hurt the boss, and a big
+	// UFO fires one AT THE PLAYER, so the boss walks into any beam that crosses the screen. Killing
+	// every big UFO leaves nothing but the helper mothership's slow cycle. So:
+	//   * ONE is always spared -- the one with the most ROOM, scored by its distance to the NEAREST
+	//     ship so that in co-op it is far from everybody. Keeping the beam platform at arm's length
+	//     is what makes this survivable: its beam still crosses the screen for the boss to walk
+	//     into, but the AI is not standing next to the thing that is aiming at it. This only pays
+	//     off together with the beam dodging in DoAIMove; sparing without it measured 24 -> ~70
+	//     deaths.
+	//   * ONE MORE is spared if it is further than `engagePx` from every ship -- the radius gate,
+	//     capped at BigUfoSpareCap in total. `engagePx <= 0` is the gate OFF, i.e. the pre-card
+	//     build exactly. See DefaultBigUfoEngagePx for why that is what ships.
+	//   * NEITHER is spared during a fly-by. Dodging a screen-wide sweep and a big UFO's beam at
+	//     the same time is how the bot dies, and it is worst in the upper lane where the UFOs live.
+	//     The boss spends most of the fight grounded, which is plenty of time to feed it beams.
+	//
+	// SEPARATE FROM DoAIFire, AND STATIC, so the decision can be read as DATA at one instant over
+	// one world (`eaBigUfoSpare()`), which is the only honest way to A/B the gate: the population
+	// evolves, so running one arm and then the other inside a single fight compares two different
+	// screens and can invert the true result (measured -- it did, during this card). It takes
+	// `engagePx` as a PARAMETER rather than reading the flag for the same reason.
+	// `oracle` is instance state, so this is static-in-spirit rather than static.
+	private void SelectSparedBigUfos(List<AlienDrawableGameComponent> baddies, float engagePx,
+		out UFO sparedUfo, out UFO sparedFarUfo, out int bigUfosAlive,
+		out bool spiderBossAlive, out bool bossSweeping)
+	{
+		spiderBossAlive = false;
+		bossSweeping = false;
+		sparedUfo = null;
+		sparedFarUfo = null;
+		bigUfosAlive = 0;
+		float sparedRoom = -1f;
+		// The radius gate's slot is the SECOND-most-roomy big UFO, because the most-roomy one is
+		// already `sparedUfo` -- "spare the furthest one beyond the radius" and the spare-one rule
+		// would otherwise name the same UFO and the gate would do nothing at all.
+		float sparedFarRoom = -1f;
+		foreach (AlienDrawableGameComponent scan in baddies)
+		{
+			if (scan is SpiderBoss && !scan.IsDead)
+			{
+				spiderBossAlive = true;
+				bossSweeping |= ((SpiderBoss)scan).AiSweepIncoming;
+			}
+			else if (scan is UFO && ((UFO)scan).IsBig && !scan.IsDead)
+			{
+				bigUfosAlive++;
+				float room = float.MaxValue;
+				foreach (PlayerShip ship in oracle.GetShips())
+				{
+					Vector2 toShip = scan.Position - ship.Position;
+					room = MathHelper.Min(room, (toShip).Length());
+				}
+				// Top TWO by room, most first. The `>` (not `>=`) on the first slot preserves the
+				// pre-card tie-break exactly -- first seen wins -- so gate-off is the OLD build
+				// and not merely a similar one.
+				if (room > sparedRoom)
+				{
+					sparedFarRoom = sparedRoom;
+					sparedFarUfo = sparedUfo;
+					sparedRoom = room;
+					sparedUfo = (UFO)scan;
+				}
+				else if (room > sparedFarRoom)
+				{
+					sparedFarRoom = room;
+					sparedFarUfo = (UFO)scan;
+				}
+			}
+		}
+		if (!spiderBossAlive || bossSweeping)
+		{
+			sparedUfo = null;
+			sparedFarUfo = null;
+		}
+		else if (engagePx <= 0f || sparedFarRoom <= engagePx)
+		{
+			// The `engagePx <= 0f` half is tested EXPLICITLY rather than left to fall out of the
+			// comparison: `room` is a length, so `room > 0` holds for every UFO and a bare
+			// `sparedFarRoom > engagePx` would spare one at every radius INCLUDING zero -- the
+			// exact opposite of the pre-card build a zero is supposed to restore.
+			sparedFarUfo = null;
+		}
+	}
+
+	// eaBigUfoSpare() -- the decision above, evaluated over the LIVE world at two radii at once.
+	// Same-instant, same-screen, so it says what the rule does rather than what a 45-second slice
+	// of a stochastic fight happened to contain.
+	internal string AiBigUfoSpareReadout(float engagePx)
+	{
+		List<AlienDrawableGameComponent> baddies = oracle.GetBaddies();
+		SelectSparedBigUfos(baddies, engagePx, out UFO on1, out UFO on2, out int alive,
+			out bool bossAlive, out bool sweeping);
+		SelectSparedBigUfos(baddies, 0f, out UFO off1, out UFO off2, out int _, out bool _, out bool _);
+		int sparedOn = (on1 != null ? 1 : 0) + (on2 != null ? 1 : 0);
+		int sparedOff = (off1 != null ? 1 : 0) + (off2 != null ? 1 : 0);
+		return "[ai] bigufo alive=" + alive + " boss=" + (bossAlive ? "alive" : "none")
+			+ " sweeping=" + (sweeping ? "yes" : "no")
+			+ " engage=" + engagePx.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + "px"
+			+ " spared=" + sparedOn + " sparedAtZero=" + sparedOff + " cap=" + BigUfoSpareCap;
+	}
+
 	private void DoAIFire(GameTime gameTime, List<AlienDrawableGameComponent> baddies)
 	{
 		float aimSpread = AimSpread;
@@ -1651,44 +1810,11 @@ public class PlayerShip : AlienDrawableGameComponent
 		// a couple are deliberately spared -- the surplus is still cleared.
 		// This only pays off together with the laser dodging below: the beams the AI is inviting
 		// are aimed AT IT. Sparing them without that measured 24 -> ~70 deaths.
-		bool spiderBossAlive = false;
-		bool bossSweeping = false;
-		UFO sparedUfo = null;
-		float sparedRoom = -1f;
-		foreach (AlienDrawableGameComponent scan in baddies)
-		{
-			if (scan is SpiderBoss && !scan.IsDead)
-			{
-				spiderBossAlive = true;
-				bossSweeping |= ((SpiderBoss)scan).AiSweepIncoming;
-			}
-			else if (scan is UFO && ((UFO)scan).IsBig && !scan.IsDead)
-			{
-				// Spare exactly ONE, and make it the one with the most room around it -- scored by
-				// its distance to the NEAREST ship, so in co-op it is far from everybody. Keeping
-				// the beam platform at arm's length is what makes this survivable: its beam still
-				// crosses the screen for the boss to walk into, but the AI is not standing next to
-				// the thing that is aiming at it.
-				float room = float.MaxValue;
-				foreach (PlayerShip ship in oracle.GetShips())
-				{
-					Vector2 toShip = scan.Position - ship.Position;
-					room = MathHelper.Min(room, (toShip).Length());
-				}
-				if (room > sparedRoom)
-				{
-					sparedRoom = room;
-					sparedUfo = (UFO)scan;
-				}
-			}
-		}
-		// ...but NOT during a fly-by. Dodging a screen-wide sweep and a big UFO's beam at the same
-		// time is how the bot dies, and it is worst in the upper lane where the UFOs live. The
-		// boss spends most of the fight grounded, which is plenty of time to feed it beams.
-		if (!spiderBossAlive || bossSweeping)
-		{
-			sparedUfo = null;
-		}
+		SelectSparedBigUfos(baddies, BigUfoEngagePx, out UFO sparedUfo, out UFO sparedFarUfo,
+			out int bigUfosAlive, out bool spiderBossAlive, out bool _);
+		// The bench's own view of this (card 2c74d5b7). No-op unless ?aibench.
+		EvilAliensWeb.Compat.AiBench.NoteBigUfos(spiderBossAlive, bigUfosAlive,
+			(sparedUfo != null ? 1 : 0) + (sparedFarUfo != null ? 1 : 0));
 		float nearestDist = float.MaxValue;
 		AlienDrawableGameComponent nearest = null;
 		// The priority bias decides WHICH target wins, but a discounted boss can win from well
@@ -1705,7 +1831,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		float priorityBiasSq = PriorityTargetBias * PriorityTargetBias;
 		foreach (AlienDrawableGameComponent baddy in baddies)
 		{
-			if (IsAiShootable(baddy) && !ReferenceEquals(baddy, sparedUfo))
+			if (IsAiShootable(baddy) && !ReferenceEquals(baddy, sparedUfo) && !ReferenceEquals(baddy, sparedFarUfo))
 			{
 				if (isBlastable(baddy) && blast != null && blast.Collides)
 				{

@@ -166,6 +166,26 @@ def report(rig, arms, seeds, results):
               "  revs %4.2f  coast %4.1f%%  pickups %d/%d"
               % ("", vstr, mean("idle"), mean("bossfar"), mean("boss"), mean("turn"),
                  mean("revs"), mean("coast"), got, offered))
+        # SPIDER RIG ONLY (card 2c74d5b7). Big UFOs are the boss's executioners -- only a Lazer
+        # hurts it and a big UFO fires one 6x as often as a small one -- so the bot clearing them
+        # lengthens its own fight.
+        #   bigufo   mean alive per tick over the fight -- the OUTCOME. Noisy: it swings by more
+        #            than the sparing rule's whole effect between seeds, because the spawner's
+        #            rolls and the bot's aim both move it. Read it paired, never as one figure.
+        #   spared   mean deliberately left alone per tick -- the DECISION, and the one that
+        #            actually separates two arms of ?aibigufopx=.
+        #   @death   big UFOs alive when the boss died, averaged over the runs that KILLED it,
+        #            which is not every run -- hence the count beside it.
+        # Suppressed where no boss lived, so it never appears as zeroes on the other six rigs.
+        fought = [r for r in allrows if float(r.get("bigufo", 0)) > 0]
+        killed = [int(r["bigalive"]) for r in allrows if int(r.get("bigalive", -1)) >= 0]
+        if fought:
+            bstr = ("%.2f" % (sum(killed) / float(len(killed)))) if killed else "n/a"
+            print("%-12s   bigufo %4.2f alive/tick  spared %4.2f/tick  (%d run(s))"
+                  "   @death %s (%d run(s))"
+                  % ("", sum(float(r["bigufo"]) for r in fought) / len(fought),
+                     sum(float(r.get("bigspared", 0)) for r in fought) / len(fought),
+                     len(fought), bstr, len(killed)))
     # PAIRED comparison against the first arm, seed as the unit of analysis.
     #
     # This is the part that stops a sweep lying to you. Per-seed deaths on these rigs

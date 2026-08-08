@@ -1,0 +1,63 @@
+# PROBE: `bigalive=` reports a real count when the spider boss actually dies.
+#
+# PINS: card 2c74d5b7 -- the card's literal question, "how many big UFOs were left alive when the
+# boss went down". It is latched in SpiderBoss.BeginDeathThroes off the census DoAIFire already
+# took earlier in the same tick (ship Updates run before the collision pass that reaches
+# CollidesWith), so it costs no second scan and is a no-op without ?aibench.
+#
+# WHY A THIRD FILE. Its two siblings (ai_bigufo_gate.txt / ai_bigufo_gate_off.txt) run with
+# ?spiderbosshp=99 so the fight survives the whole soak -- which is exactly what makes them
+# unable to test this: with the boss immortal, `bigalive` is legitimately -1 and they can only
+# assert the key's PRESENCE. This file runs at STOCK HP and asserts the VALUE, so between them
+# both branches of the latch are covered.
+#
+# WHY -1 AND NOT 0. "The boss never died" and "the boss died with none left" are different
+# statements and the sweep has to tell them apart -- ai_sweep.py averages bigalive over the runs
+# that reached a death, so a 0 sentinel would silently drag that mean toward zero with runs that
+# never got there. Hence the latch initialises to -1, in Reset() AND at the field, since a
+# process whose first run never goes through Reset() would otherwise start at default(int).
+#
+# WHY THIS SEED. ?seed=2 kills the boss inside 180 sim-seconds and leaves 5 big UFOs alive at
+# that instant. Unseeded, whether the boss dies at all in the budget is a coin flip -- the bot
+# wins this rig roughly 12 runs in 16 at 300s -- so the precondition is PINNED, not waited out
+# (card af4c3694). ?invuln keeps a death from eating the ticks; it does not affect the boss's HP.
+#
+# THE FIRST-DEATH-ONLY RULE is deliberate and asserted by construction here: the latch refuses to
+# overwrite once set, because the number means "how many executioners were still alive when it
+# went down" and a rig that somehow staged two fights must not answer with the second one.
+#
+# FAILURE MEANS:
+#   * bigalive=-1  -> the boss did not die within the budget (check the verdict on the same line
+#     first -- a VICTORY with -1 is a broken latch, a still-running run is a slow seed), or
+#     SpiderBoss.BeginDeathThroes no longer calls AiBench.NoteSpiderBossDeath.
+#   * bigalive=0 while bigufo is high -> the latch is reading a stale or unset census. Look at
+#     lastBigUfoAlive and the per-tick de-dup stamp in NoteBigUfos.
+#
+# MUTATION-TESTED: removing the NoteSpiderBossDeath call leaves bigalive at -1 and turns the leg
+# red; initialising the latch to 0 instead of -1 makes it read 0 and also turns it red.
+#
+# eahl: --flags "?level=Level2&spiderboss&aiplayer&aibench&invuln&difficulty=Very_Hard&seed=2&noattract"
+
+step 150 nodraw
+mark
+
+# 180 sim-seconds -- comfortably past this seed's boss kill.
+eval AiBenchReset
+eval AiBenchRun 60
+eval AiBenchRun 60
+eval AiBenchRun 60
+eval AiBench
+
+# 1. the run reached a real fight.
+expect bigufo=[1-9][0-9]*\.[0-9]+
+
+# 2. THE LEG. The boss died and the latch carries a real, non-negative count.
+#
+#    NOTE THERE IS NO `expect-not bigalive=-1` HERE, and adding one back would be wrong.
+#    `expect` scans every line printed since the mark, and AiBench prints a summary every 10
+#    sim-seconds -- so the whole stretch BEFORE the boss dies legitimately carries -1, as does
+#    anything after the post-victory scene change rearms the counters. The claim is "a real
+#    count was reached", which is an existence claim, and the regex below is already exact about
+#    it: `[0-9]+` cannot match `-1`, because the minus sits between the `=` and the digit. A
+#    negation would assert the sentinel never appeared, which is a different and false claim.
+expect bigalive=[0-9]+

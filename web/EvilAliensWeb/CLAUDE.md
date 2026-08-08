@@ -613,6 +613,11 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   screen with `?cast`),
   `eaTeamSeat()` (TeamChallenge's partner-seat resolver over every pad-connection mask -- pure,
   so it needs neither a level nor a gamepad),
+  `eaBigUfoSpare(px)` + `eaBigUfoEngage(px)`/`eaBigUfoEngageClear()` (which big UFOs the AI is
+  leaving alive for the spider boss, evaluated at `px` AND at 0 in the SAME tick, plus the live
+  radius drive -- card 2c74d5b7. The same-instant pair is the whole point: the population evolves,
+  so running one arm then the other inside a fight compares two different screens and was measured
+  inverting the true result. Needs a live spider-boss level; `boss=none` says so),
   `eaBossTrain()` (the Boss Train's checkpoint/section oracle -- **destructive**, so run it in a
   throwaway `?level=InsaneBossI` boot; see "Audio runtime"),
   `eaFlySpiders()` (the live flying-spider population split background/foreground plus the
@@ -2338,6 +2343,17 @@ the rest are tier-independent.
   first two differently** -- `pickups=<n> poffered=<spawned>` and no percentage -- because its
   parser is `split(. .)` then the first `=`, so a value carrying a bracket or a space is what
   breaks `eaAiBench.matrix`; the percentage exists in `Line()` only, for probes to regex.
+  **Three more fields answer "is the AI wasting the spider boss's executioners"** (card
+  2c74d5b7), all run-wide like `poffered` and all appended, never inserted:
+  `bigufo=` (mean big UFOs alive per tick while a spider boss lives -- the OUTCOME),
+  `bigspared=` (mean deliberately spared per tick -- the DECISION) and `bigalive=` (the count at
+  the instant the boss died, **-1** if it never did, so "never finished" and "finished with none
+  left" stay distinguishable in a sweep's mean). Sampled inside `DoAIFire`'s existing baddy scan,
+  so the bench adds no second pass. **Compare arms on `bigspared`, not `bigufo`** -- the outcome
+  swings 1.24..1.95 across seeds on ONE arm, which straddles the whole effect, while the decision
+  separates cleanly (0.45 against 0.67-0.86). `Line()` prints them only when a boss actually
+  lived (the `boss=`/`bossfar=` precedent); `Row()` always does, so `ai_sweep.py` never has to
+  tell an absent key from an old build.
   **Standing result worth knowing: on `?level=Level2&spiderboss` (Very_Hard, no `?invuln`, 180
   sim-s, N=16) `SpiderBoss(standing)` is 39 of 101 deaths -- the largest single killer, and more
   than double the moving boss's 25.** So "the AI happily runs into the spider boss when it is
@@ -2351,6 +2367,40 @@ the rest are tier-independent.
   manoeuvre (the boss is parked off-screen and stationary during the "Danger!" arrow, so neither
   the movement prediction nor the distance field can see it coming); escape is DOWNWARD out of a
   lane (UFOs enter from the top) and LEFT out of a landing.
+  - **SPARING MORE THAN ONE WAS BUILT, MEASURED ACROSS ITS WHOLE BAND, AND DECLINED** (card
+    2c74d5b7). The report was "leave some big UFOs alive to shoot lasers at the spider boss,
+    perhaps reduce the radius where it shoots at big UFOs". The premise is sound -- only a
+    `Lazer` hurts the boss, a big UFO fires one 6x as often as a small one (`UFO.Update`,
+    0.0009/ms against 0.00015) and the boss's whole pool is `5 * DifficultyFactorized(0.75)`, so
+    the surviving big-UFO population really is the fight's clock. The mechanism still lost.
+    - **`?aibigufopx=<px>` is the seam and it BAKES TO 0 (off).** Above it, one more big UFO is
+      spared if it is further than that from every ship, capped at `PlayerShip.BigUfoSpareCap`
+      (2, spare-one included). `PlayerShip.SelectSparedBigUfos` is the whole rule, factored out
+      of `DoAIFire` so it can be read as data.
+    - **THE BAND IS BOUNDED ABOVE BY GUN RANGE -- this is the durable answer to the card's
+      question.** The bot never fires past `bulletlifetime * BulletRangePerMs` = **351px** at the
+      base weapon, so any radius at or above that is INERT: `?aibigufopx=400` is byte-identical
+      to `=0`. "Reduce the radius" has ~100..350px to work in, not an open range.
+    - **AND EVERY VALUE IN IT LOSES.** eahl, Very_Hard, `?invuln` off, spider rig, seeds 1-8 x2
+      (**N=16 -- directional, below this file's N=60 floor**, but the sign was consistent across
+      both variants and all three radii):
+
+      | arm | deaths (paired) | victories | win@ | `Lazer` kills | mean alive |
+      |---|---|---|---|---|---|
+      | off (`=0`, shipped) | 3.81 | 6/16 | 158s | 49 | 1.32 |
+      | capped at 250 | +0.94 +- 1.09 | 7/16 | 219s | 68 | 1.36 |
+      | capped at 300 | +1.19 +- 1.23 | 4/16 | 112s | 68 | 1.40 |
+      | UNCAPPED at 250 | +1.50 +- 0.89 | 6/16 | 241s | 72 | 1.46 |
+
+      The counter moves exactly as designed and the fight does not follow. Neither diff clears
+      2 SEM, so read this as **"not better"**, not "significantly worse" -- but nothing here is
+      an improvement to ship. The mechanism is that **the beams the bot is inviting are aimed AT
+      IT and it was already dying to them**: `Lazer` is ~90% of deaths on this rig (16 of 18 in
+      the first baseline), so each extra platform costs more dodging than it buys boss damage.
+    - **IF YOU RE-OPEN IT**, the untried directions change WHERE the bot stands rather than how
+      many guns it leaves alive -- the beam-avoidance magnitudes (card 2248e5eb re-measured
+      those and they are not obviously final on this rig) or a positional term keeping the ship
+      off the invited beam's line. Raising the radius is not one of them.
 - **`SpiderBoss`'s landing now sweeps to the right screen edge -- a deliberate GAMEPLAY change,
   not a port artifact.** The descent is hard-coded to X 600, which left a safe pocket beside it
   that trivialised the landing; the AI found it instantly and parked there. Marked as such in
@@ -2460,7 +2510,7 @@ the rest are tier-independent.
   ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge= ?ailaneescape= ?aiconelead= ?aiconemaxlen=
   ?aiconewidth= ?aiconetaper= ?aiconefallalong= ?aiconefallacross= ?aiconescale= ?aiconespread=
   ?aiconewidthmin= ?aiwedgestrength= ?aiwedgefall= ?aitopedgepx= ?aitopedgestrength= ?ailazerpx=
-  ?ailazerstrength= ?ailazerdodge=`
+  ?ailazerstrength= ?ailazerdodge= ?aibigufopx=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
   A malformed value on any of them is REPORTED and ignored, never swallowed, per the file-wide
   value-carrying-flag convention (see "Debug flags & tuning conventions" above; cards 48b7c6b1 +

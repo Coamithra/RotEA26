@@ -78,6 +78,7 @@ def git_state(repo):
         branches[name] = sha
     return {"head": run("rev-parse", "HEAD"),
             "branch": run("rev-parse", "--abbrev-ref", "HEAD"),
+            "main": run("rev-parse", "main"),
             "dirty": bool(run("status", "--porcelain")),
             "orchbench_branches": branches}
 
@@ -131,11 +132,16 @@ def describe(diff, snap):
     return lines
 
 
-def git_report(snap, repo):
+def git_report(snap, repo, label="<label>"):
     if not snap.get("git") or not repo:
         return []
     now = git_state(repo)
     lines = []
+    base = snap["git"].get("main")
+    if base and now["main"] != base:
+        lines.append(f"MAIN     {base[:9]} -> {now['main'][:9]}  (run merges; "
+                     f"`reset --git` archives the tip as orchbench/run-{label} "
+                     "and moves main back)")
     for name, sha in sorted(now["orchbench_branches"].items()):
         if name not in snap["git"]["orchbench_branches"]:
             lines.append(f"BRANCH   {name} @ {sha[:9]}  (kept -- scoring needs it)")
@@ -148,13 +154,60 @@ def git_report(snap, repo):
     return lines
 
 
+def do_git_reset(snap, repo, label, dry_run):
+    """Archive the run's main tip as a keeper branch, move main back to the
+    snapshot baseline. The run's PR merges stay reachable forever through
+    orchbench/run-<label>; main returns to the frozen state, force-pushed
+    with --force-with-lease so a concurrent push fails loudly."""
+    g = snap.get("git") or {}
+    base = g.get("main")
+    if not base:
+        sys.exit("git: snapshot records no main commit -- retake it with the "
+                 "current script before using --git")
+    now = git_state(repo)
+    if now["main"] == base:
+        print("git: main already at the snapshot baseline")
+        return
+    if now["dirty"]:
+        sys.exit("git: working tree dirty -- commit or stash before --git reset")
+    keeper = f"orchbench/run-{label}"
+    if keeper in now["orchbench_branches"]:
+        sys.exit(f"git: {keeper} already exists -- pick a fresh label")
+    if dry_run:
+        print(f"[dry-run] git: would branch {keeper} @ {now['main'][:9]}, "
+              f"move main back to {base[:9]}, push both")
+        return
+
+    def run(*args):
+        r = subprocess.run(["git", "-C", str(repo), *args],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            sys.exit(f"git {' '.join(args)}: {r.stderr.strip()}")
+        return r.stdout.strip()
+
+    run("branch", keeper, now["main"])
+    if now["branch"] == "main":
+        run("reset", "--hard", base)
+    else:
+        run("branch", "-f", "main", base)
+    remotes = run("remote").split()
+    if "origin" in remotes:
+        run("push", "origin", keeper)
+        run("push", "--force-with-lease", "origin", "main")
+        pushed = ", pushed"
+    else:
+        pushed = ", no origin remote -- not pushed"
+    print(f"git: {keeper} @ {now['main'][:9]} kept; main {now['main'][:9]} -> "
+          f"{base[:9]}{pushed}")
+
+
 def do_reset(snap, board_dir, archive_dir, label, dry_run, repo):
     diff = compute_diff(snap, board_dir)
-    report = describe(diff, snap) + git_report(snap, repo)
+    report = describe(diff, snap) + git_report(snap, repo, label)
     if not any((diff["added"], diff["removed"], diff["changed"],
                 diff["new_attachments"])):
         print("board matches the snapshot -- nothing to reset")
-        for line in git_report(snap, repo):
+        for line in git_report(snap, repo, label):
             print(line)
         return None
 
@@ -270,6 +323,51 @@ def selftest():
         # board-id mismatch refusal is main()'s guard; pin the predicate here
         check(BOARD_ID != "wrong", "board-id guard predicate sane")
 
+        # --- git leg: keeper branch + main moved back, in a real temp repo
+        repo = Path(td) / "repo"
+        repo.mkdir()
+
+        def g(*args):
+            r = subprocess.run(["git", "-C", str(repo), *args],
+                               capture_output=True, text=True)
+            if r.returncode != 0:
+                raise RuntimeError(r.stderr)
+            return r.stdout.strip()
+
+        g("init", "-b", "main")
+        g("config", "user.email", "t@t")
+        g("config", "user.name", "t")
+        (repo / "f.txt").write_text("base", encoding="utf-8")
+        g("add", "."); g("commit", "-m", "base")
+        gsnap = {"git": git_state(repo)}
+        (repo / "f.txt").write_text("run merge", encoding="utf-8")
+        g("add", "."); g("commit", "-m", "run merge")
+        tip = g("rev-parse", "HEAD")
+
+        do_git_reset(gsnap, repo, "t1", dry_run=True)
+        check(g("rev-parse", "HEAD") == tip, "git dry-run moves nothing")
+        do_git_reset(gsnap, repo, "t1", dry_run=False)
+        check(g("rev-parse", "main") == gsnap["git"]["main"],
+              "main moved back to the snapshot baseline")
+        check(g("rev-parse", "orchbench/run-t1") == tip,
+              "run tip kept as the keeper branch")
+        try:
+            do_git_reset(gsnap, repo, "t1", dry_run=False)
+            refused = True   # main already at baseline -> benign no-op
+        except SystemExit:
+            refused = False
+        check(refused, "reset at baseline is a no-op, not an error")
+        # a second run under a reused label must refuse, not clobber the keeper
+        (repo / "f.txt").write_text("second run", encoding="utf-8")
+        g("add", "."); g("commit", "-m", "second run")
+        try:
+            do_git_reset(gsnap, repo, "t1", dry_run=False)
+            refused = False
+        except SystemExit:
+            refused = True
+        check(refused and g("rev-parse", "orchbench/run-t1") == tip,
+              "reused label refused; keeper branch not clobbered")
+
     print(f"\n{len(failures)} FAILURE(S)" if failures else "\nALL PASS")
     return 1 if failures else 0
 
@@ -296,6 +394,9 @@ def main():
                    help="archive name tag, e.g. fable-oracle-rep1")
     p.add_argument("--archive-dir",
                    default=str(Path(__file__).with_name("archive")))
+    p.add_argument("--git", action="store_true",
+                   help="also archive the run's main tip as orchbench/run-"
+                        "<label> and move main back to the snapshot baseline")
     p.add_argument("--dry-run", action="store_true")
 
     args = ap.parse_args()
@@ -332,6 +433,8 @@ def main():
 
     do_reset(snap, board_dir, Path(args.archive_dir), args.label,
              args.dry_run, repo)
+    if args.git:
+        do_git_reset(snap, repo, args.label, args.dry_run)
     return 0
 
 

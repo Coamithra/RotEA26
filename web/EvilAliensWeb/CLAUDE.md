@@ -2154,6 +2154,26 @@ the rest are tier-independent.
       `logic_probe`'s **`ProbeAiBossApproach`** pins that plus the crossing, the band bound over
       every tier x weapon x boss hull, the self-limiting interior and the pre-card configuration as
       a negative control; `tools/headless/probes/ai_boss_approach.txt` pins the wiring.
+  - **"THE BOT FIGHTS FROM TOO CLOSE" WAS AUDITED AND EVERY DISTANCE-RAISING MECHANISM WAS
+    REFUTED -- nothing shipped, and here is the evidence so it is not re-derived** (card
+    bb949dd9; ai_sweep, Very_Hard, seeds 1-8 x2, `marsboss` = `?level=Level2&marsboss` 300s).
+    The mean boss edge distance (`boss=` 123-166px against a ~215-300px base-weapon r*) is
+    dominated by the BOSSES CHASING THE SHIP, not by the approach term over-closing -- which is
+    why the standing "proximity is descriptive, never a gate" ruling above exists. Two
+    mechanisms were built/swept and both lost:
+    - **A standoff-retreat repellent** (linear outward ramp on the halting boss, zero at
+      0.9 * r*, strength 2, into the repel accumulator): boss= UNMOVED (marsboss 166 vs 164;
+      level1 even read lower, 133 vs 146), marsboss victories 4 vs 10 of 16 and `turn` 222 vs
+      137 deg/s -- the ramp fights the approach attractor around its own anchor instead of
+      parking the ship farther out. Deleted, not seamed.
+    - **Scaling the approach weight down** (`?aiseekapproach=` 0.6 / 0.3, the existing seam,
+      which moves the solved crossing outward by shape): boss= +16px (146 -> 162) while
+      marsboss `idle%` DOUBLES (19.4 -> 33-37%), victories 10 -> 4-5 of 16, and s06 deaths
+      +3.62 +- 3.40 -- the ship hovers at the crossing unable to shoot, which is the exact
+      never-shoots failure the solved anchor exists to prevent.
+    So the distance the bot fights at is the distance the design already chose, and both knobs
+    that could raise it pay immediately in idle%/victories. A genuine improvement here needs a
+    RETREAT-CAPABLE dodge (moving away from an advancing boss), not a standoff constant.
   - **Boss PROXIMITY is descriptive, never a gate.** `bossfar%` and `boss=<px>` describe where the
     ship is; the bot moving closer to a boss to dodge, collect or line up a shot is the field
     working. Gate boss work on OUTCOMES -- `SpiderBoss(standing)` deaths -- not on distance.

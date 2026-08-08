@@ -341,6 +341,14 @@ namespace EvilAliensWeb.Compat
 		// ?rippletune): overrides the knobs in real time. BombRipple resolves ALL of them in
 		// PackedRings rather than baking them in at Fire, so a slider drag retunes the very
 		// next frame -- rings already travelling, and the parked screenshot ring, included.
+		// Card 2c74d5b7 -- eaBigUfoEngage()/eaBigUfoEngageClear(). Null restores the baked
+		// PlayerShip.DefaultBigUfoEngagePx (0, gate off), which is what makes "the bake has not
+		// silently moved" assertable inside one process.
+		internal static void SetBigUfoEngageOverride(float? px)
+		{
+			AiBigUfoEngagePx = px;
+		}
+
 		internal static void SetRippleOverride(float? master, float? amp, float? radius,
 			float? duration, float? width, float? falloff, float? rim, float? phase)
 		{
@@ -1579,6 +1587,21 @@ namespace EvilAliensWeb.Compat
 		public static float? AiLazerAvoidStrength { get; private set; }
 
 		public static float? AiLazerDodgeStrength { get; private set; }
+
+		// ?aibigufopx=<px>     how close a BIG UFO has to be before the AI will shoot it, but ONLY
+		//                      while a spider boss is alive (card 2c74d5b7). A big UFO's Lazer is
+		//                      the only thing that hurts that boss, so every one the bot clears is
+		//                      a gun it took away from itself; beyond this radius ONE more is left
+		//                      alone to fire (PlayerShip.BigUfoSpareCap -- two spared in total,
+		//                      counting the pre-existing spare-one rule).
+		//                      **IT BAKES TO 0, i.e. OFF**, and that is a measured verdict rather
+		//                      than a placeholder -- every value in its usable band lost on the
+		//                      spider rig, and above ~351px (base gun range) it is inert. The
+		//                      table and the reasoning are at PlayerShip.DefaultBigUfoEngagePx;
+		//                      this flag is what makes the arm reachable again.
+		//                      The single-spare rule underneath is unaffected either way, so at 0
+		//                      the furthest big UFO is still spared exactly as before.
+		public static float? AiBigUfoEngagePx { get; private set; }
 
 		// ?aisweptmax=<px/ms>  the ceiling on a believable OBSERVED speed in the DEFAULT swept-path
 		//                      seam (card c1d783ad). Above it the path is refused, because a raw
@@ -3386,6 +3409,19 @@ namespace EvilAliensWeb.Compat
 						Console.WriteLine("[debug] unknown ?" + key + "= value '" + val
 							+ "' (expected 0/off to disable) -- ignored, the top-edge band stays "
 							+ (AiTopEdgeCompose ? "COMPOSED" : "POST-SMOOTHING"));
+					}
+					break;
+				case "aibigufopx":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aibup) && aibup >= 0f)
+					{
+						AiBigUfoEngagePx = MathHelper.Min(aibup, 2000f);
+					}
+					else
+					{
+						// 0 is MEANINGFUL here (gate off = pre-card behaviour), so the guard refuses
+						// only a negative -- the ?aisweptmax= shape.
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiBigUfoEngagePx ?? EvilAliens.PlayerShip.DefaultBigUfoEngagePx));
 					}
 					break;
 				case "ailazerpx":

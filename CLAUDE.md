@@ -316,7 +316,7 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   ?ailaneescape= ?aiconelead= ?aiconemaxlen= ?aiconewidth= ?aiconetaper= ?aiconefallalong=
   ?aiconefallacross= ?aiconescale= ?aiconespread= ?aiconewidthmin= ?aiwedgestrength=
   ?aiwedgefall= ?aisweptmax= ?aitopedgepx= ?aitopedgestrength= ?ailazerpx= ?ailazerstrength=
-  ?ailazerdodge=`. Pair with `?aiplayer`.
+  ?ailazerdodge= ?aibigufopx=`. Pair with `?aiplayer`.
   **`?aiwallnav2008=1` is NOT one of those knobs -- it swaps the wall-steering ALGORITHM** (card
   d79b7ea7): `findNextTileOnMap`'s per-tick left-vs-right re-decision and its ~6.6px probe,
   transcribed verbatim from `src_decompiled/`, in place of the port's committed-gap column search.
@@ -358,6 +358,16 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   reset the observed-velocity history per life, so every POOL-RECYCLED entity reported a phantom
   teleport on its first tick (`EvilBullet` at 14.9 px/ms against a declared 0.24). Details: web
   CLAUDE.md.
+  **`?aibigufopx=<px>` is a REFUTED arm kept reachable, not a tuning knob** (card 2c74d5b7): it
+  lets the AI spare a SECOND big UFO during the spider-boss fight (the ones that fire the only
+  thing that hurts that boss), capped at two total, and it **bakes to 0 = OFF** because every
+  value in its usable band measured worse. Two findings worth not re-deriving: the radius is
+  **inert at or above ~400px** -- base gun range 351px PLUS the target's own hull credit
+  (card bb949dd9), since the bot never shoots past its reach; runs at 400/420/450 are the same
+  world -- and sparing more raises `Lazer` deaths faster than it shortens the fight. The bench gained `bigufo=`/`bigspared=`/`bigalive=` for it; **compare arms on
+  `bigspared`** (the decision), not `bigufo` (the outcome, which is noisier than the effect).
+  Pinned by `tools/headless/probes/ai_bigufo_gate.txt` + `ai_bigufo_gate_off.txt` +
+  `ai_bigufo_death.txt`. Details + the table: web CLAUDE.md.
   **The bench also reports `killers=<Type>:<n>` (with `SpiderBoss(standing)` split out),
   `pickups=<n>/<spawned>(<pct>%)` and `boss=<px> bossfar=<pct>`** (cards 31ceb6ff / ada9e839) --
   which is what turned "the AI runs into the stationary spider boss" and "the AI ignores

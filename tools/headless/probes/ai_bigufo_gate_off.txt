@@ -1,0 +1,61 @@
+# PROBE: the SHIPPED build spares exactly one big UFO -- i.e. the engage-radius gate bakes OFF.
+#
+# PINS: card 2c74d5b7. The CONTROL half of the pair; read it with ai_bigufo_gate.txt, which is
+# the positive leg and runs first. Identical rig, identical seed, ONE difference: no
+# `?aibigufopx=` at all, so this is the shipped configuration.
+#
+# THIS IS NOT A REDUNDANT NEGATIVE. It asserts something the positive file cannot: that
+# PlayerShip.DefaultBigUfoEngagePx is still 0. The gate was built, measured across its usable
+# band and DECLINED on the numbers (deaths and time-to-victory both worse in every arm, the
+# table is at the constant), so "off" here is a verdict, not an unfinished state. Someone baking
+# a radius back in would silently ship the refuted configuration; a build that merely agreed
+# with its own explicit `=0` control would not catch that, which is why the assertion is on the
+# BARE boot with no override.
+#
+# `bigspared` reads 0.45 on this rig on every repetition -- the mean is over ticks, and with one
+# UFO always spared while the boss is grounded and none spared during a fly-by, the value is
+# essentially the grounded share of the fight. The gate-on arm reads 0.67..0.86 on the same
+# seed. Band boundary 0.60.
+#
+# Rig notes are in the positive file and apply verbatim, ?spiderbosshp=99 above all: at stock HP
+# the boss dies partway through and the fields are suppressed for the rest of the run, so the
+# probe would then be asserting about whichever seeds happened not to win.
+#
+# FAILURE MEANS:
+#   * bigspared in the ON band (>= 0.60) -> the gate is engaging with no flag set. Either
+#     DefaultBigUfoEngagePx is no longer 0, or the `engagePx <= 0f` half of the guard in
+#     SelectSparedBigUfos was dropped -- `room` is a length, so a bare `sparedFarRoom > engagePx`
+#     spares at EVERY radius including zero. That inverted form was written once during the card
+#     and is the specific regression this leg exists for.
+#   * the fields missing / bigufo 0      -> see the positive file.
+#
+# MUTATION-TESTED: setting DefaultBigUfoEngagePx to 250 turns leg 3 red here while
+# ai_bigufo_gate.txt stays green; removing the `engagePx <= 0f` guard does the same.
+#
+# eahl: --flags "?level=Level2&spiderboss&aiplayer&aibench&invuln&difficulty=Very_Hard&spiderbosshp=99&seed=5&noattract"
+
+step 150 nodraw
+mark
+
+# 120 sim-seconds of real fight.
+eval AiBenchReset
+eval AiBenchRun 60
+eval AiBenchRun 60
+
+# The value legs below must see the FINAL report and nothing else. AiBench prints a summary every
+# 10 sim-seconds, so a window covering the whole soak would let `expect` match a passing early
+# transient -- the run opens with almost no big UFOs on screen, so a low `bigspared` line always
+# exists and an unscoped assertion passes on BOTH arms. Measured: with this second mark removed,
+# re-baking DefaultBigUfoEngagePx to 250 leaves this probe GREEN. Do not widen the window.
+mark
+eval AiBench
+
+# 1. all three fields are emitted.
+expect bigufo=[0-9]+\.[0-9]+ bigspared=[0-9]+\.[0-9]+ bigalive=-?[0-9]+
+
+# 2. the fight really happened -- big UFOs were alive. Without this the leg below could be
+#    satisfied by a run that spared nothing because there was nothing to spare.
+expect bigufo=[1-9][0-9]*\.[0-9]+
+
+# 3. THE LEG (gate off).
+expect bigspared=0\.[0-5][0-9]

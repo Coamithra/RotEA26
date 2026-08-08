@@ -711,6 +711,12 @@ internal static class Program
             // ?ailazerdodge= take 0 as a MEANINGFUL value (it is the 2008 arm), so like
             // ?aisweptmax= their guards refuse only a negative -- the shape this table's
             // negative leg already expects.
+            // The spider-boss big-UFO engage radius (card 2c74d5b7). 0 is MEANINGFUL (gate off),
+            // so like ?aisweptmax= / ?aitopedgestrength= its guard refuses only a negative -- the
+            // shape this table's negative leg already expects. Baked "" for the ?ailazerdodge=
+            // reason directly below: it BAKES to 0, a single digit that occurs elsewhere in the
+            // captured output, so the absence check would fire on text that is not the default.
+            new { Flag = "aibigufopx",     Prop = "AiBigUfoEngagePx",      Good = "137", Want = (object)137f,  Baked = ""     },
             new { Flag = "aitopedgepx",    Prop = "AiTopEdgeDangerPx",     Good = "233", Want = (object)233f,  Baked = "170"  },
             new { Flag = "aitopedgestrength",Prop = "AiTopEdgeAvoidStrength",Good = "33",Want = (object)33f,   Baked = "20"   },
             new { Flag = "ailazerpx",      Prop = "AiLazerAvoidRangePx",   Good = "311", Want = (object)311f,  Baked = "150"  },
@@ -739,9 +745,11 @@ internal static class Program
             return 2;
         }
 
-        // Count off `rows` rather than a literal -- the header said 36 while the table ran 37.
+        // Count DERIVED from the table rather than a literal -- the header said 36 while the
+        // table already ran 37, and two cards then added a knob each in parallel. A header that
+        // can quietly disagree with the rows beneath it is worse than no header.
         Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all " + rows.Length
-            + " knobs (cards 48b7c6b1 / 2248e5eb / bb949dd9)");
+            + " knobs (cards 48b7c6b1 / 2248e5eb / bb949dd9 / 2c74d5b7)");
 
         // One counter and its OWN first-problem detail per leg: a shared sink attaches the
         // diagnosis to whichever Check happens to print it, which in a mutation run put the only

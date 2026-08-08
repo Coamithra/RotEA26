@@ -59,6 +59,15 @@ internal static class AiBench
 		// standstill", and an empty field arguing with nothing is not that.
 		public long RepelTicks;
 		public long RepelZeroedTicks;
+		// The seek arrival's calm hysteresis and velocity lead (card fd126847) -- both otherwise
+		// unobservable: the lead changes no pixel and moves no other counter, so a build where
+		// the calm clock never banks and one where the lead fires on every quiet arrival look
+		// identical without these. CalmBankedTicks is ticks with >= DefaultSeekArriveCalmMs of
+		// nothing pushing (the gate open); SeekLeadHits is ticks the widened cutoff actually
+		// SUPPRESSED a pull the bare deadzone would have issued -- the discriminating count,
+		// since ?aiseeklead=0 pins it to exactly 0 while the calm share stays untouched.
+		public long CalmBankedTicks;
+		public long SeekLeadHits;
 		public readonly Dictionary<string, ThreatTermRec> ThreatTerms = new Dictionary<string, ThreatTermRec>();
 		public Vector2 LastPos;
 		public Vector2 LastSteer;
@@ -217,6 +226,25 @@ internal static class AiBench
 	// both Vector2.Zero AFTERWARDS, and only the second is this mechanism doing its job. Ticks
 	// where nothing pushed at all are counted in NEITHER total -- folding them in would turn the
 	// rate into a measure of how empty the screen was.
+	// DoAIMove's seek arrival (card fd126847): once per tick with the calm-clock verdict, and
+	// whether the velocity lead suppressed a pull the bare deadzone would have issued this tick.
+	internal static void NoteSeekArrive(PlayerShip ship, bool calmBanked, bool leadSuppressed)
+	{
+		if (!Enabled)
+		{
+			return;
+		}
+		ShipRec rec = Rec(ship);
+		if (calmBanked)
+		{
+			rec.CalmBankedTicks++;
+		}
+		if (leadSuppressed)
+		{
+			rec.SeekLeadHits++;
+		}
+	}
+
 	internal static void NoteRepel(PlayerShip ship, Vector2 preFloor, bool zeroed)
 	{
 		if (!Enabled || preFloor == Vector2.Zero)
@@ -522,6 +550,10 @@ internal static class AiBench
 			// other counter, so a build where it never fires and one where it fires constantly
 			// look identical without this.
 			sb.Append(" repelzero=").Append(Fmt((r.RepelTicks > 0L) ? (100.0 * (double)r.RepelZeroedTicks / (double)r.RepelTicks) : 0.0, 0)).Append('%');
+			// The seek arrival's calm share and lead-suppression count (card fd126847) -- the
+			// wiring's only observables; see the ShipRec fields.
+			sb.Append(" calm=").Append(Fmt((r.SteerTicks > 0L) ? (100.0 * (double)r.CalmBankedTicks / (double)r.SteerTicks) : 0.0, 0)).Append('%');
+			sb.Append(" seeklead=").Append(r.SeekLeadHits);
 			// Death POSITIONS, design space, semicolon-separated. Space-free and bracket-free so
 			// eaAiBench.matrix's `split(' ')` parser is unaffected. Read by
 			// tools/sim/ai_death_heatmap.py straight off the eahl transcript.
@@ -764,6 +796,8 @@ internal static class AiBench
 		sb.Append(" turn=").Append(Fmt((sec > 0.0) ? (MathHelper.ToDegrees(r.TurnRadTotal) / sec) : 0.0, 0));
 		sb.Append(" coast=").Append(Fmt((r.SteerTicks > 0L) ? (100.0 * (double)r.CoastTicks / (double)r.SteerTicks) : 0.0, 0));
 		sb.Append(" repelzero=").Append(Fmt((r.RepelTicks > 0L) ? (100.0 * (double)r.RepelZeroedTicks / (double)r.RepelTicks) : 0.0, 0));
+		sb.Append(" calm=").Append(Fmt((r.SteerTicks > 0L) ? (100.0 * (double)r.CalmBankedTicks / (double)r.SteerTicks) : 0.0, 0));
+		sb.Append(" seeklead=").Append(r.SeekLeadHits);
 		sb.Append(" idle=").Append(Fmt((r.TicksWithTarget > 0L)
 			? (100.0 * (double)r.IdleWithTargetTicks / (double)r.TicksWithTarget)
 			: 0.0, 0));

@@ -481,6 +481,65 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private static float SeekArriveDeadzonePx => EvilAliensWeb.Compat.DebugFlags.AiSeekDeadzonePx ?? DefaultSeekArriveDeadzonePx;
 
+	// THE DEADZONE'S COASTING ASSUMPTION WAS FALSE, and this is the missing half (card fd126847).
+	// The stopping-distance argument above assumes a ship crossing the deadzone edge COASTS --
+	// but the seek does not stop pushing when the pull is switched off. The steer is low-passed
+	// (DefaultSteerSmoothMs), so at the moment the pull cuts, aiSteer still holds the converged
+	// 0.8 seek and decays exponentially; Move() discards magnitude and thrusts at FULL
+	// acceleration along that stale residual until it falls under DefaultSteerNoiseFloor --
+	// which takes SteerSmoothMs * ln(SeekWeight / SteerNoiseFloor) = 90 * ln(4) = ~125ms. At
+	// ShipMaxSpeed that is ~41px of full-throttle travel THROUGH a 15px deadzone, so the ship
+	// blows out the far side, re-triggers the pull, and the same lag rounds each reversal into a
+	// curve: the reported "spinning circles around its target location". Measured in the
+	// isolation sim of this exact pipeline: every arrival at the station orbits it 0.5-2 full
+	// times before settling (~1s of visible loop-de-loop per arrival, re-done every time play
+	// knocks the ship off station).
+	//
+	// The fix keeps the doctrine -- an attractor's anti-pingpong mechanism is its own DEADZONE
+	// (card ada9e839) -- and makes the deadzone velocity-aware instead of adding any force: the
+	// pull switches off at deadzone + speed * lead, so the residual's thrust-through distance is
+	// spent BEFORE the target rather than past it, and the ship arrives dead and parks. It can
+	// never brake a manoeuvre (nothing is ever pushed), which is what refutes the reverted
+	// velocity-damped arrive documented at the call site; at rest the cutoff IS the plain
+	// deadzone, so station-keeping is untouched. IT APPLIES ONLY WHILE NOTHING IS PUSHING --
+	// see `threatPressure` at the call site for the measured combat regression that scoped it.
+	// 125 is derived, not tuned:
+	// DefaultSteerSmoothMs * ln(SeekWeight / DefaultSteerNoiseFloor) = 124.8ms, the time the
+	// residual stays above the noise floor. logic_probe's ProbeAiSeekArrive pins the derivation
+	// AND the closed loop (lead 0 must reproduce the orbit; the shipped lead must not).
+	// ?aiseeklead= overrides; 0 restores the pre-card fixed-radius deadzone (the A/B seam).
+	public const float DefaultSeekArriveLeadMs = 125f;
+
+	private static float SeekArriveLeadMs => EvilAliensWeb.Compat.DebugFlags.AiSeekLeadMs ?? DefaultSeekArriveLeadMs;
+
+	// HOW LONG THE WORLD MUST HAVE BEEN QUIET before the lead applies (card fd126847). Both
+	// eager variants were built and MEASURED WORSE, which is why this hysteresis exists:
+	// unconditional, and gated on this tick's threatPressure alone, the lead parks the ship
+	// during sub-second combat lulls -- and a parked ship is what the pre-card orbit was
+	// accidentally protecting. A converging bullet shell cancels to sub-floor repulsion, so
+	// nothing ever wakes a parked ship inside one (ai_sweep seeds 1-8 x2: CrazyGame deaths
+	// 2.62 -> 6.00 unconditional, -> 5.25 same-tick-gated; EvilBullet kills roughly doubled,
+	// coast up on all three rigs both times). The value is the pre-card orbit's own settle time
+	// (~1-1.5s measured in the isolation sim): a calm shorter than that is one the old
+	// behaviour would have spent still orbiting anyway, so requiring it makes combat identical
+	// to pre-card BY CONSTRUCTION (re-perturbation faster than the hold keeps the lead off
+	// forever) while a genuinely idle ship -- the reported case -- still gets the clean arrival.
+	public const float DefaultSeekArriveCalmMs = 1500f;
+
+	private static float SeekArriveCalmMs => EvilAliensWeb.Compat.DebugFlags.AiSeekCalmMs ?? DefaultSeekArriveCalmMs;
+
+	// Pure so logic_probe can drive the closed loop with the real decision (the EvaluateSweptShape
+	// precedent): the seek pull is live iff distToTarget exceeds this.
+	// `speedPxPerMs` is the ship's SCALAR speed, deliberately not the closing component: in the
+	// orbit this exists to break, the velocity is TANGENTIAL and the closing speed reads ~0, so a
+	// Dot()-projected lead would never fire on exactly the reported circling. The residual budget
+	// applies to any heading -- an outbound ship must equally not be pulled into a turnaround it
+	// will overshoot (ProbeAiSeekArrive's outbound entry pins that case).
+	public static float SeekArriveCutoffPx(float deadzonePx, float leadMs, float speedPxPerMs)
+	{
+		return deadzonePx + MathHelper.Max(speedPxPerMs, 0f) * leadMs;
+	}
+
 	// Kept at the 2008 weight so the seek still loses to threat avoidance exactly as before.
 	private const float SeekWeight = 0.8f;
 
@@ -950,6 +1009,11 @@ public class PlayerShip : AlienDrawableGameComponent
 	private Vector2 aiSteer = Vector2.Zero;
 
 	private int aiGapColumn = -1;
+
+	// How long nothing has PUSHED this ship (threatPressure at or under the repulse floor),
+	// accumulated per tick in DoAIMove. Consumed only by the seek arrival's calm hysteresis
+	// (card fd126847) -- see DefaultSeekArriveCalmMs.
+	private float aiCalmMs;
 
 	// Process-wide one-shot for the `[aiwallnav] steering:` line. Static rather than per-ship so
 	// four co-op ships announce once between them; it is a diagnostic, not state, and nothing
@@ -1720,6 +1784,7 @@ public class PlayerShip : AlienDrawableGameComponent
 	{
 		aiSteer = Vector2.Zero;
 		aiGapColumn = -1;
+		aiCalmMs = 0f;
 	}
 
 	private void DoAIFire(GameTime gameTime, List<AlienDrawableGameComponent> baddies)
@@ -1958,6 +2023,22 @@ public class PlayerShip : AlienDrawableGameComponent
 		// AFTER the low-pass on purpose -- moving either across that boundary would change wall
 		// and ceiling behaviour this card has no business touching.
 		Vector2 repel = Vector2.Zero;
+		// THREAT PRESSURE -- the sum of the magnitudes of every threat's RESULTANT contribution
+		// to `repel` (card fd126847; per THREAT, not per term -- one baddy's cone, evade and
+		// field are folded into a single before/after magnitude, which slightly under-reads a
+		// broadside pass but can never zero out, since a lone threat's terms broadly agree). It
+		// exists because `repel` itself cannot answer "is anything pushing me": two THREATS
+		// shoving from opposite sides cancel to a near-zero VECTOR (that is what
+		// DefaultRepulseCancelDelta is for), while this scalar reads their full combined
+		// pressure -- inter-threat cancellation, the lethal case, cannot touch it. Its one consumer is the seek arrival below -- the velocity lead on the
+		// deadzone applies only while nothing is pushing, because the measured alternative (the
+		// lead unconditional, ai_sweep seeds 1-8 x2) parks the ship cleanly in COMBAT too, where
+		// the pre-card arrival transient was incidental evasion: CrazyGame deaths 2.62 -> 6.00,
+		// EvilBullet kills 42 -> 96, coast up on all three rigs. A converging bullet shell is
+		// exactly the cancelled-to-noise case, so gating on |repel| would park the ship inside
+		// one. Screen edges and walls are deliberately NOT in it -- they push the ship AWAY from
+		// places, not because something is hunting it, and the station is central anyway.
+		float threatPressure = 0f;
 		Vector2 steerTarget = new Vector2(float.MaxValue, float.MaxValue);
 		// How hard to pull toward whatever steerTarget ends up being. It carries the WEIGHT rather
 		// than a flag because the answer is not two-valued: the idle station and every DETOUR park
@@ -2039,6 +2120,7 @@ public class PlayerShip : AlienDrawableGameComponent
 						across = -across;
 					}
 					repel += dodgeStrength * across;
+					threatPressure += dodgeStrength;
 				}
 			}
 			// The vertical strips: the fixed X-600 landing column, and the climb that opens the
@@ -2071,6 +2153,7 @@ public class PlayerShip : AlienDrawableGameComponent
 					// the ship is clearly out of the way.
 					float urge = ThreatFieldStrength(Math.Abs(offLane) / VerticalLaneClearancePx, SweepLaneAvoidStrength);
 					repel += new Vector2(away * urge, 0f);
+					threatPressure += urge;
 				}
 			}
 			// Act on the boss's own telegraph. During the "Danger!" arrow the spider boss sits
@@ -2095,6 +2178,7 @@ public class PlayerShip : AlienDrawableGameComponent
 					// screen-edge terms instead of shoving all the way into them.
 					float urge = ThreatFieldStrength(Math.Abs(offLane) / SweepLaneClearancePx, SweepLaneAvoidStrength);
 					repel += new Vector2(0f, away * urge);
+					threatPressure += urge;
 				}
 			}
 			// Card f4d1721f: track the nearest level-HALTING boss so the ship can close on it if
@@ -2148,6 +2232,7 @@ public class PlayerShip : AlienDrawableGameComponent
 						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, d / lazerRange);
 					}
 					repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - shortestpoint) + dodgeAngle);
+					threatPressure += strength;
 				}
 			}
 			else
@@ -2175,10 +2260,15 @@ public class PlayerShip : AlienDrawableGameComponent
 				// the radial field below rather than replacing it -- the shipped shape is a circle
 				// with a velocity-aligned hat on it, so both halves are real. Placed before the
 				// evade so a mover contributes its cone even on the ticks the evade takes over.
+				// The swept shape, the evade and the radial field report their pressure as the
+				// MAGNITUDE of what they actually added (before/after difference -- both helpers
+				// take `ref repel`), so the scalar cannot drift from the vector it describes.
+				Vector2 repelBefore = repel;
 				AddSweptRepellent(ref repel, baddy, dodgeAngle, maxSteerStrength);
 				if (EvilAliensWeb.Compat.DebugFlags.AiEvadeMovers != false
 					&& EvadeMovingThreat(ref repel, baddy, dodgeAngle, minSteerStrength, maxSteerStrength))
 				{
+					threatPressure += (repel - repelBefore).Length();
 					continue;
 				}
 				float dist = ThreatEdgeDistance(base.Position, baddy);
@@ -2199,6 +2289,7 @@ public class PlayerShip : AlienDrawableGameComponent
 					EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy, EvilAliensWeb.Compat.AiBench.ThreatPath.Field, strength, field, dist);
 					repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - baddy.Position) + dodgeAngle);
 				}
+				threatPressure += (repel - repelBefore).Length();
 			}
 		}
 		foreach (Powerup powerup in oracle.GetPowerups())
@@ -2353,23 +2444,64 @@ public class PlayerShip : AlienDrawableGameComponent
 				(steerTarget) = new Vector2(266f, 600f / (float)(oracle.Players + 1) * (float)oracle.SeatOrdinal(player));
 			}
 		}
+		// The calm clock (card fd126847): every threat contribution has been summed by now, so
+		// this tick either extends the quiet stretch or ends it. Runs whether or not anything
+		// chose a steerTarget -- a calm banked while idling must survive into the arrival that
+		// needs it.
+		if (threatPressure <= RepulseCancelDelta)
+		{
+			aiCalmMs += (float)gameTime.ElapsedGameTime.TotalMilliseconds;
+		}
+		else
+		{
+			aiCalmMs = 0f;
+		}
+		EvilAliensWeb.Compat.AiBench.NoteSeekArrive(this, aiCalmMs >= SeekArriveCalmMs, leadSuppressed: false);
 		if (steerTarget.X < 2000f)
 		{
 			delta = base.Position - steerTarget;
 			float distToTarget = (delta).Length();
-			if (distToTarget > SeekArriveDeadzonePx)
+			// Velocity-aware cutoff, not the bare radius (card fd126847): the low-passed steer
+			// keeps Move() at full thrust for ~125ms after the pull cuts, so a fixed-radius
+			// deadzone is entered at full speed and blown straight through -- the ship then
+			// orbits its own station (see DefaultSeekArriveLeadMs for the mechanism and the
+			// derivation). At rest this IS SeekArriveDeadzonePx, so parking is unchanged.
+			//
+			// SUSTAINED CALM ONLY -- see DefaultSeekArriveCalmMs for the two measured failures
+			// this hysteresis buries: with anything pushing recently, the lead is off and
+			// arrival is exactly pre-card, because the orbit it removes was doing unpaid work in
+			// combat (a cleanly parked ship is a sitting target, and a converging shell cancels
+			// to sub-floor repulsion so nothing wakes it). `threatPressure` (sum of magnitudes,
+			// see its declaration) feeds the calm clock precisely because |repel| cannot see
+			// that shell; the per-tick threshold reuses RepulseCancelDelta -- less total
+			// pressure than one surviving repellent could exert. This gates the attractor's own
+			// anti-pingpong mechanism, never the force: the seek still pulls identically under
+			// fire (the field principle, card ada9e839).
+			float arriveLeadMs = (aiCalmMs >= SeekArriveCalmMs) ? SeekArriveLeadMs : 0f;
+			float arriveCutoffPx = SeekArriveCutoffPx(SeekArriveDeadzonePx, arriveLeadMs, (SpeedVector).Length());
+			if (distToTarget > SeekArriveDeadzonePx && distToTarget <= arriveCutoffPx)
+			{
+				// The lead just suppressed a pull the bare deadzone would have issued -- the
+				// wiring's only observable (calm banks and cutoffs move no other counter), and
+				// what tools/headless/probes/ai_seek_arrive.txt asserts; ?aiseeklead=0 pins it
+				// to exactly 0, which is that probe's companion control.
+				EvilAliensWeb.Compat.AiBench.NoteSeekArrive(this, calmBanked: false, leadSuppressed: true);
+			}
+			if (distToTarget > arriveCutoffPx)
 			{
 				// Plain positional pull, as in 2008. THE deliberate-destination attractor: it goes
 				// into `direction` and is never floored (card ada9e839), because its anti-pingpong
 				// mechanism is the deadzone above -- switched off inside it, full strength outside,
-				// a hard edge. That is sound here precisely BECAUSE the deadzone covers the ship's
-				// stopping distance: a ship crossing the edge at full speed coasts 11.3px and
-				// halts inside the zone, so it cannot cross back out under its own momentum and
-				// re-trigger. **The margin is 3.7px at the shipped 15px radius**, not the
-				// comfortable one it was at 30 -- which is exactly why card 05a2b818 stopped at
-				// 15 rather than taking the 2008 value of 10 that measured better. Anything at or
-				// below 11.3 breaks this paragraph; ProbeAiFieldComposition derives that bound
-				// from the motion constants and fails on it. See DefaultSeekArriveDeadzonePx.
+				// a hard edge. Sound needs TWO bounds, one per way the ship can carry momentum
+				// across it: the RADIUS covers the coast (a ship entering at full speed with the
+				// steer already quiet coasts 11.3px and halts inside -- margin 3.7px at the
+				// shipped 15, which is exactly why card 05a2b818 stopped at 15 rather than taking
+				// the 2008 value of 10 that measured better; anything at or below 11.3 breaks
+				// this clause and ProbeAiFieldComposition derives that bound from the motion
+				// constants and fails on it), and the velocity LEAD in the cutoff covers the
+				// smoothing residual (the low-pass keeps Move() at full thrust for ~125ms after
+				// the pull cuts, which a fixed radius cannot absorb at speed -- the orbit of card
+				// fd126847; see DefaultSeekArriveLeadMs, pinned by ProbeAiSeekArrive).
 				// A velocity-damped ARRIVE was tried here instead and reverted -- it contains
 				// -SpeedVector, so it brakes the ship whenever it is moving relative to its station,
 				// which is most of a boss fight. That measured coast 28% -> 59% and 24 -> 70 deaths:

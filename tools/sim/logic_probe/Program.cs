@@ -131,6 +131,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeAiSeekArrive(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         rc = ProbeAiConeShape(asm);
         if (rc != 0)
         {
@@ -670,6 +676,11 @@ internal static class Program
             new { Flag = "airepeldelta",   Prop = "AiRepelCancelDelta",    Good = "3",   Want = (object)3f,    Baked = "0.2"  },
             new { Flag = "ainoisefloor",   Prop = "AiSteerNoiseFloor",     Good = "4",   Want = (object)4f,    Baked = "0.2"  },
             new { Flag = "aiseekdeadzone", Prop = "AiSeekDeadzonePx",      Good = "77",  Want = (object)77f,   Baked = "30"   },
+            // The deadzone's velocity lead (card fd126847). 0 is a MEANINGFUL value (the pre-card
+            // fixed-radius deadzone), so its guard refuses only a negative -- the ?aisweptmax=
+            // shape this table's negative leg already expects.
+            new { Flag = "aiseeklead",     Prop = "AiSeekLeadMs",          Good = "222", Want = (object)222f,  Baked = "125"  },
+            new { Flag = "aiseekcalm",     Prop = "AiSeekCalmMs",          Good = "2500",Want = (object)2500f, Baked = "1500" },
             new { Flag = "aireact",        Prop = "AiWallReactionMs",      Good = "333", Want = (object)333f,  Baked = "420"  },
             new { Flag = "aigapmargin",    Prop = "AiGapSwitchMargin",     Good = "7",   Want = (object)7f,    Baked = "1.5"  },
             new { Flag = "aiscanrows",     Prop = "AiWallScanRows",        Good = "9",   Want = (object)9,     Baked = ""     },
@@ -747,7 +758,7 @@ internal static class Program
 
         // The count is DERIVED from the table -- a literal here drifted once already.
         Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all " + rows.Length
-            + " knobs (cards 48b7c6b1 / 2248e5eb / 2c74d5b7 / bb949dd9)");
+            + " knobs (cards 48b7c6b1 / 2248e5eb / 2c74d5b7 / bb949dd9 / fd126847)");
 
         // One counter and its OWN first-problem detail per leg: a shared sink attaches the
         // diagnosis to whichever Check happens to print it, which in a mutation run put the only
@@ -1034,6 +1045,189 @@ internal static class Program
             "weakest attractor " + weakestAttractor + " is at or below the pre-card park "
             + PreCardParkDemand + " (so that build zeroed it) and above the shipped floor "
             + noiseFloor + " (so this build does not) -- that gap is the whole fix");
+        return 0;
+    }
+
+    // ---- the seek arrival's velocity lead (card fd126847) ----------------------------------
+    //
+    // The seek deadzone's stopping-distance bound (asserted above) only covers a ship whose
+    // steer is already quiet: the low-pass keeps Move() at FULL thrust along the stale seek for
+    // SteerSmoothMs * ln(SeekWeight / SteerNoiseFloor) = ~125ms after the pull cuts, so a
+    // fixed-radius deadzone entered at speed is blown straight through and the ship orbits its
+    // own station -- the card's "spinning circles around its target location".
+    // PlayerShip.SeekArriveCutoffPx is the pure decision (pull live iff dist > cutoff); this set
+    // pins its shape, the derivation of DefaultSeekArriveLeadMs, and the CLOSED LOOP: the
+    // steering skeleton (seek -> low-pass -> noise floor -> Move) is replicated here from the
+    // reflected motion/steering constants, with the REAL cutoff function making the decision.
+    // The negative control is lead 0 -- the pre-card build -- which must ORBIT on the same
+    // entry, so a cutoff that stopped consuming its speed argument fails loudly rather than
+    // passing on a loop that was never at risk.
+    //
+    // The loop models a ship whose calm is already BANKED (DoAIMove's aiCalmMs hysteresis is
+    // satisfied) -- the genuinely idle case the card reported. The hysteresis itself is pinned
+    // by the DefaultSeekArriveCalmMs bound below: the hold must cover the pre-card orbit's own
+    // settle time, measured off the control arm of this very loop, because that is the property
+    // that makes combat identical to pre-card by construction (a calm shorter than the old
+    // orbit's duration is one the old behaviour would have spent still orbiting anyway).
+    private static int ProbeAiSeekArrive(Assembly asm)
+    {
+        Type ship = asm.GetType("EvilAliens.PlayerShip", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        string[] names =
+        {
+            "DefaultSeekArriveLeadMs", "DefaultSeekArriveCalmMs", "DefaultSeekArriveDeadzonePx", "DefaultSteerSmoothMs",
+            "DefaultSteerSmoothUrgentMs", "SteerCalmDemand", "SteerUrgentDemand",
+            "DefaultSteerNoiseFloor", "SeekWeight", "ShipMaxSpeed", "ShipAcceleration",
+            "ShipDeceleration"
+        };
+        var vals = new Dictionary<string, float>();
+        foreach (string n in names)
+        {
+            FieldInfo f = ship.GetField(n, anyStatic);
+            if (f == null || !f.IsLiteral)
+            {
+                Console.WriteLine("FAIL: could not reflect PlayerShip." + n + " as a const -- renamed, moved, or no longer const?");
+                return 2;
+            }
+            vals[n] = (float)f.GetRawConstantValue();
+        }
+        MethodInfo cutoffM = ship.GetMethod("SeekArriveCutoffPx", anyStatic);
+        if (cutoffM == null)
+        {
+            Console.WriteLine("FAIL: could not reflect PlayerShip.SeekArriveCutoffPx -- renamed or moved?");
+            return 2;
+        }
+        float deadzone = vals["DefaultSeekArriveDeadzonePx"], lead = vals["DefaultSeekArriveLeadMs"];
+        float smoothMs = vals["DefaultSteerSmoothMs"], urgentMs = vals["DefaultSteerSmoothUrgentMs"];
+        float calm = vals["SteerCalmDemand"], urgent = vals["SteerUrgentDemand"];
+        float noiseFloor = vals["DefaultSteerNoiseFloor"], seekW = vals["SeekWeight"];
+        float maxSpeed = vals["ShipMaxSpeed"], accel = vals["ShipAcceleration"], decel = vals["ShipDeceleration"];
+        Func<float, float, float> cutoff = (leadMs, speed) =>
+            (float)cutoffM.Invoke(null, new object[] { deadzone, leadMs, speed });
+
+        Console.WriteLine("[logic_probe] AI seek arrival velocity lead (card fd126847)");
+
+        // 1. AT REST THE CUTOFF IS THE PLAIN DEADZONE -- station-keeping is untouched, and the
+        // stopping-distance invariant ProbeAiFieldComposition pins still describes the shipped
+        // parking radius exactly.
+        Check("the cutoff at rest IS the deadzone",
+            cutoff(lead, 0f) == deadzone,
+            "SeekArriveCutoffPx(deadzone, lead, 0) = " + cutoff(lead, 0f) + " vs " + deadzone);
+
+        // 2. THE LEAD COVERS THE SMOOTHING RESIDUAL. After the pull cuts, aiSteer decays from the
+        // converged SeekWeight and Move() thrusts full-tilt along it until it falls under the
+        // noise floor -- SteerSmoothMs * ln(SeekWeight / SteerNoiseFloor) of travel the deadzone's
+        // coast bound cannot absorb. Derived from the live constants, so retuning the smoother,
+        // the seek weight or the floor re-derives the bound instead of silently invalidating it.
+        float residualMs = smoothMs * (float)Math.Log(seekW / noiseFloor);
+        Check("the lead covers the low-pass residual's full-thrust window",
+            lead >= residualMs,
+            "DefaultSeekArriveLeadMs " + lead + " vs a residual window of " + residualMs.ToString("0.0")
+            + "ms (SteerSmoothMs " + smoothMs + " * ln(SeekWeight " + seekW + " / SteerNoiseFloor "
+            + noiseFloor + ")) -- below it the ship still thrusts through the deadzone at speed");
+
+        // 3. THE CLOSED LOOP. One ship, one stationary target, the real decision function, the
+        // steering skeleton from the constants above. Winding is the position's summed signed
+        // angle about the target (2pi = one full circle); "settled" is at rest with the pull
+        // silent. Entries: a full-speed radial approach and a full-speed oblique pass -- the two
+        // ways play delivers a ship to its station.
+        var entries = new[]
+        {
+            new { Label = "radial approach from 300px", X = 300f, Y = 0f, VelAngle = (float)Math.PI },
+            new { Label = "oblique pass at 80px", X = 80f, Y = 0f, VelAngle = 2.36f },
+            // Outbound: the cutoff consumes SCALAR speed on purpose (see SeekArriveCutoffPx), so
+            // a ship RECEDING at full speed inside the widened band must also arrive cleanly --
+            // the pull stays silent, it decelerates on its own, and the resumed pull walks it
+            // back with no turnaround overshoot.
+            new { Label = "outbound at 40px", X = 40f, Y = 0f, VelAngle = 0f },
+        };
+        Func<float, float, float, float, (float winding, float dist, float speed, float settleMs)> runLoop =
+            (startX, startY, velAngle, leadMs) =>
+        {
+            const float dt = 1000f / 60f;
+            double px = startX, py = startY, spd = maxSpeed, dirn = velAngle;
+            double aiX = 0, aiY = 0, winding = 0, lastAng = Math.Atan2(py, px);
+            double settleMs = 0;
+            for (int tick = 0; tick < (int)(20000 / dt); tick++)
+            {
+                double dist = Math.Sqrt(px * px + py * py);
+                double dx = 0, dy = 0;
+                if (dist > cutoff(leadMs, (float)spd) && dist > 1e-6)
+                {
+                    dx = seekW * (-px / dist);
+                    dy = seekW * (-py / dist);
+                }
+                double demand = Math.Sqrt(dx * dx + dy * dy);
+                double t = Math.Min(Math.Max((demand - calm) / Math.Max(urgent - calm, 0.001f), 0.0), 1.0);
+                double sm = smoothMs + (urgentMs - smoothMs) * t;
+                double blend = 1.0 - Math.Exp(-dt / sm);
+                aiX += (dx - aiX) * blend;
+                aiY += (dy - aiY) * blend;
+                double steerX = aiX, steerY = aiY;
+                if (Math.Sqrt(steerX * steerX + steerY * steerY) <= noiseFloor) { steerX = 0; steerY = 0; }
+                // Move(direction): decelerate along the current heading, thrust full along the
+                // steer's ANGLE (magnitude discarded), clamp the speed.
+                double dec = Math.Min(decel * dt, spd);
+                double nvx = Math.Cos(dirn) * (spd - dec), nvy = Math.Sin(dirn) * (spd - dec);
+                if (steerX != 0 || steerY != 0)
+                {
+                    double a = Math.Atan2(steerY, steerX);
+                    nvx += Math.Cos(a) * (accel + decel) * dt;
+                    nvy += Math.Sin(a) * (accel + decel) * dt;
+                }
+                dirn = Math.Atan2(nvy, nvx);
+                spd = Math.Min(Math.Sqrt(nvx * nvx + nvy * nvy), maxSpeed);
+                px += Math.Cos(dirn) * spd * dt;
+                py += Math.Sin(dirn) * spd * dt;
+                double ang = Math.Atan2(py, px);
+                double d = ang - lastAng;
+                while (d > Math.PI) { d -= 2 * Math.PI; }
+                while (d < -Math.PI) { d += 2 * Math.PI; }
+                winding += d;
+                lastAng = ang;
+                if (spd > 0.01 || Math.Sqrt(px * px + py * py) > deadzone)
+                {
+                    settleMs = (tick + 1) * dt;
+                }
+            }
+            return ((float)(winding / (2 * Math.PI)), (float)Math.Sqrt(px * px + py * py), (float)spd, (float)settleMs);
+        };
+
+        foreach (var e in entries)
+        {
+            var shipped = runLoop(e.X, e.Y, e.VelAngle, lead);
+            Check("shipped lead: " + e.Label + " arrives without orbiting",
+                Math.Abs(shipped.winding) <= 0.15f,
+                "winding " + shipped.winding.ToString("0.00") + " loops (bound 0.15)");
+            Check("shipped lead: " + e.Label + " comes to REST at its station",
+                shipped.speed < 0.01f && shipped.dist <= deadzone + 1f,
+                "final speed " + shipped.speed.ToString("0.000") + " at " + shipped.dist.ToString("0.0")
+                + "px (deadzone " + deadzone + ")");
+        }
+
+        // NEGATIVE CONTROL: lead 0 is the pre-card fixed-radius deadzone, and it must ORBIT on
+        // the oblique entry -- measured at ~2 full loops. A cutoff that stopped consuming its
+        // speed argument makes the two arms identical and fails here, not in a green tick.
+        var preCard = runLoop(80f, 0f, 2.36f, 0f);
+        Check("control: the pre-card fixed-radius deadzone ORBITS the station on the same entry",
+            Math.Abs(preCard.winding) >= 0.5f,
+            "winding " + preCard.winding.ToString("0.00") + " loops without the lead (bound 0.5) -- "
+            + "the reported 'spinning circles around its target location'");
+
+        // 4. THE CALM HOLD COVERS THE PRE-CARD ORBIT'S OWN SETTLE TIME, measured off the control
+        // arm just run (both entries). This is what makes the hysteresis leave combat identical
+        // to pre-card by construction: re-perturbation faster than the hold keeps the lead off,
+        // and a calm shorter than the old orbit's duration is one the old behaviour would have
+        // spent still orbiting anyway. Both eager variants (no hold / same-tick pressure gate)
+        // were measured worse -- CrazyGame deaths 2.62 -> 6.00 / 5.25, ai_sweep seeds 1-8 x2 --
+        // so a shrunk hold is asking for that regression back.
+        var preCardRadial = runLoop(300f, 0f, (float)Math.PI, 0f);
+        float calmMs = vals["DefaultSeekArriveCalmMs"];
+        float worstSettle = Math.Max(preCard.settleMs, preCardRadial.settleMs);
+        Check("the calm hold covers the pre-card orbit's settle time",
+            calmMs >= worstSettle,
+            "DefaultSeekArriveCalmMs " + calmMs + " vs a measured pre-card settle of "
+            + worstSettle.ToString("0") + "ms (worst of the control entries)");
         return 0;
     }
 

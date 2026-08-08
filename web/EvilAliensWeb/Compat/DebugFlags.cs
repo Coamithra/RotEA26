@@ -1422,6 +1422,27 @@ namespace EvilAliensWeb.Compat
 		//                       distance (PlayerShip.DefaultSeekArriveDeadzonePx).
 		public static float? AiSeekDeadzonePx { get; private set; }
 
+		// ?aiseeklead=<ms>      the velocity lead on that deadzone (card fd126847): after a
+		//                       sustained calm (DefaultSeekArriveCalmMs with nothing pushing),
+		//                       the pull cuts at deadzone + speed * lead, so the low-passed
+		//                       steer's ~125ms of full-thrust residual is spent BEFORE the
+		//                       target instead of carrying the ship through it and into an
+		//                       orbit. Under fire arrival is pre-card by construction -- the
+		//                       orbit was incidental evasion, measured twice. 0 = the pre-card
+		//                       fixed-radius deadzone everywhere (the A/B seam). Out of `Active`
+		//                       like every ?ai* knob, on the ?aisweptmax=0 precedent -- a numeric
+		//                       tuning seam that can restore a pre-fix behaviour is still a
+		//                       tuning seam, and the AI never flies in a shared online run.
+		//                       PlayerShip.DefaultSeekArriveLeadMs has the derivation.
+		public static float? AiSeekLeadMs { get; private set; }
+
+		// ?aiseekcalm=<ms>      how long nothing may have pushed before that lead applies (the
+		//                       hysteresis, PlayerShip.DefaultSeekArriveCalmMs). 0 = lead always
+		//                       -- the eager variant that was built and MEASURED WORSE (CrazyGame
+		//                       deaths 2.62 -> 5.25/6.00), kept reachable so that measurement can
+		//                       be re-run rather than trusted.
+		public static float? AiSeekCalmMs { get; private set; }
+
 		// ?aiseekpowerup=<w>    the pull toward a POWERUP the bot has chosen to fetch, and
 		// ?aiseekapproach=<s>   REDEFINED BY CARD b56633fb: a SCALE on the boss approach's own
 		//                       SOLVED weight (1 = as shipped), not a weight any more. The boss
@@ -3277,6 +3298,28 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(AiSeekDeadzonePx ?? EvilAliens.PlayerShip.DefaultSeekArriveDeadzonePx));
+					}
+					break;
+				case "aiseeklead":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aisl) && aisl >= 0f)
+					{
+						AiSeekLeadMs = MathHelper.Min(aisl, 2000f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiSeekLeadMs ?? EvilAliens.PlayerShip.DefaultSeekArriveLeadMs));
+					}
+					break;
+				case "aiseekcalm":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aisc) && aisc >= 0f)
+					{
+						AiSeekCalmMs = MathHelper.Min(aisc, 60000f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiSeekCalmMs ?? EvilAliens.PlayerShip.DefaultSeekArriveCalmMs));
 					}
 					break;
 				case "aiseekpowerup":

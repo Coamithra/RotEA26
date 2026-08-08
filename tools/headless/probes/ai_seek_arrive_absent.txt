@@ -1,0 +1,33 @@
+# PROBE: ?aiseeklead=0 restores the pre-card fixed-radius deadzone (the negative control)
+#
+# PINS:   card fd126847, the other half of ai_seek_arrive.txt -- read the two as one probe.
+#         `?aiseeklead=0` is the A/B seam every measurement of this card rests on (the arms of
+#         the ai_sweep runs that scoped the lead to sustained calm), so a seam that stopped
+#         reaching the cutoff would relabel the shipped behaviour as the control and every later
+#         re-measurement would compare the fix against itself. With the lead zeroed the widened
+#         cutoff IS the bare deadzone, so `seeklead=` -- pulls suppressed BY the widening -- must
+#         read exactly 0, while `calm=` keeps banking (the clock is upstream of the lead and the
+#         flag must not touch it).
+#
+# FAILURE MEANS: read WHICH line went red.
+#         calm=0 or calm= missing -> same precondition/row-shape causes as the paired probe; the
+#                                seeklead verdict below is vacuous.
+#         seeklead nonzero -> THE REGRESSION: the flag parsed but the cutoff ignored it, so the
+#                                "pre-card" arm of every sweep is silently running the fix.
+#
+# NOTES:  Identical boot to the paired probe except the flag itself, so the two differ in one
+#         variable. Measured at seed 1: calm=81, seeklead=0.
+#
+# eahl: --flags "?level=Tutorial&aiplayer&aibench&noattract&seed=1&difficulty=Very_Hard&aiseeklead=0"
+
+mark
+step 5400 nodraw
+eval AiBenchRow
+
+# The calm clock still banks (the flag must not reach it) -- which is also what keeps the
+# seeklead assertion below from passing vacuously on a run that never got quiet...
+expect      calm=[1-9]
+# ...and with the lead zeroed, the widening suppresses nothing, exactly.
+expect      seeklead=0
+expect-not  seeklead=[1-9]
+quit

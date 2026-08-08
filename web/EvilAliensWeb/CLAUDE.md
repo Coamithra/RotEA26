@@ -2038,6 +2038,40 @@ the rest are tier-independent.
     pull needs none (contact collects it, so the target stops existing) and the boss standoff's is
     its standoff radius. `logic_probe`'s **`ProbeAiFieldComposition`** derives the bound from the
     real motion constants and pins it, along with "no floor sits above the weakest force".
+    **The stopping-distance bound only covers a ship whose steer is already QUIET, and that was
+    the residual pingpong** (card fd126847, "spinning circles around its target location"). The
+    low-pass keeps `Move()` at FULL thrust along the stale seek for
+    `SteerSmoothMs * ln(SeekWeight/SteerNoiseFloor)` = ~125ms after the pull cuts (magnitude is
+    discarded), i.e. ~41px through a 15px deadzone at full speed -- measured in the pipeline's
+    isolation sim, every arrival orbited the station 0.5-2 full loops before settling. So the
+    cutoff is VELOCITY-AWARE **after a sustained calm**: the pull cuts at
+    `deadzone + speed * DefaultSeekArriveLeadMs` (125, derived from that residual-decay time,
+    `PlayerShip.SeekArriveCutoffPx`) once nothing has pushed the ship for
+    `DefaultSeekArriveCalmMs` (1500ms). No force is added (nothing can brake a manoeuvre -- the
+    reverted `-SpeedVector` arrive stays reverted) and at rest the cutoff IS the plain
+    deadzone, so station-keeping is untouched.
+    **THE HYSTERESIS IS A MEASURED RESULT, NOT CAUTION -- both eager variants were built and
+    were WORSE** (ai_sweep seeds 1-8 x2): unconditional, CrazyGame deaths 2.62 -> 6.00
+    (EvilBullet kills 42 -> 96); gated on the same tick's threat pressure alone, still 5.25 --
+    the pre-card arrival orbit was incidental EVASION, a ship parked cleanly at its station is
+    a sitting target during sub-second combat lulls, and a converging bullet shell (cancelled
+    to sub-floor repulsion) never wakes it. The calm clock (`aiCalmMs`) runs off
+    `threatPressure`, the sum of MAGNITUDES of every threat contribution to `repel` (|repel|
+    cannot see that shell -- cancellation is exactly what the repulse floor exists for),
+    thresholded per tick at `RepulseCancelDelta`. The 1500ms hold covers the pre-card orbit's
+    own measured settle time (~1333ms), so combat is pre-card BY CONSTRUCTION: re-perturbation
+    faster than the hold keeps the lead off, and a shorter calm is one the old behaviour would
+    have spent still orbiting anyway. `?aiseeklead=` overrides the lead, `0` = the pre-card
+    fixed radius everywhere (the A/B seam); `?aiseekcalm=` overrides the hold, `0` = the
+    measured-worse eager variant, kept reachable so that measurement can be re-run.
+    **Observables: the bench row's `calm=` (share of ticks with the gate open) and `seeklead=`
+    (pulls the bare deadzone would have issued that the lead suppressed)** -- the wiring's only
+    trace, since the mechanism changes no pixel and moves no other counter. Tutorial seed 1
+    reads calm=84 seeklead=82; CrazyGame reads calm=0 seeklead=0 (combat never banks the hold).
+    `logic_probe`'s **`ProbeAiSeekArrive`** pins the derivation, the calm-banked closed loop
+    (radial, oblique and outbound entries), the hold-vs-settle bound, and the lead-0 orbit as
+    its negative control; `tools/headless/probes/ai_seek_arrive.txt` +
+    `ai_seek_arrive_absent.txt` pin the live wiring and the A/B seam.
   - **What this replaced, in one line:** the port ended `DoAIMove` with a 0.95 "park" where the
     2008 original had **0.2** -- above the 0.8 seek, so a lone seek produced no motion at all and
     every deliberate destination (station, powerup, boss standoff) was silently deleted. Restored
@@ -2104,7 +2138,7 @@ the rest are tier-independent.
     are slow enough that most of the belt never passes its speed gate. So a threat's SPEED decides
     which path protects the ship, and a repellent change measured on one rig says nothing about
     the other.
-  - Flags: `?airepeldelta= ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
+  - Flags: `?airepeldelta= ?ainoisefloor= ?aiseekdeadzone= ?aiseeklead= ?aiseekcalm= ?aiasteroidscale= ?aiasteroidrange=
     ?aiasteroidfall= ?aievade=`, the cone/wedge family above, plus
     `?aiseekapproach= ?aishotreach= ?aiseekpowerup= ?aipowerupreach=`. Wiring that `logic_probe` cannot reach is
     covered by `tools/headless/probes/ai_boss_approach.txt`.
@@ -2492,8 +2526,9 @@ the rest are tier-independent.
     `effective=Easy` to `effective=Hard` as `Demo1` starts.
 - Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aireact=
   ?aigapmargin= ?aiscanrows= ?aicrosspenalty= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx=
-  ?aifieldsize= ?aifieldfall= ?aiseekapproach= ?aishotreach= ?aiseekpowerup= ?aipowerupreach= ?airepeldelta=
-  ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
+  ?aifieldsize= ?aifieldfall= ?aiseekapproach= ?aishotreach= ?aiseekpowerup= ?aipowerupreach=
+  ?airepeldelta= ?ainoisefloor= ?aiseekdeadzone= ?aiseeklead= ?aiseekcalm= ?aiasteroidscale=
+  ?aiasteroidrange=
   ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge= ?ailaneescape= ?aiconelead= ?aiconemaxlen=
   ?aiconewidth= ?aiconetaper= ?aiconefallalong= ?aiconefallacross= ?aiconescale= ?aiconespread=
   ?aiconewidthmin= ?aiwedgestrength= ?aiwedgefall= ?aitopedgepx= ?aitopedgestrength=

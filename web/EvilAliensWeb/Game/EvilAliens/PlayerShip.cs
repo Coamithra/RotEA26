@@ -316,7 +316,15 @@ public class PlayerShip : AlienDrawableGameComponent
 	// not disable an edge push, it restores the 2008 treatment exactly -- which is what makes it
 	// the null arm rather than a mutilation. Card 2248e5eb; verdict recorded in
 	// web/EvilAliensWeb/CLAUDE.md.
-	public const float DefaultTopEdgeDangerPx = 170f;
+	//
+	// The REACH was 170 until card 13960838 and is the reason the AI "won't pick up powerups":
+	// the push is LINEAR, so at 170 it still votes 8.2 at Y=100 and 2.35 at Y=150, both far over
+	// the 0.8 powerup seek -- every powerup in the upper quarter of the screen was unreachable by
+	// construction. Shrinking the reach rather than the strength is what keeps 2248e5eb's result:
+	// the ceiling authority is untouched (18.0 at Y=10 against the 18.8 it used to be, still
+	// out-voting a lane escape's 18), while everything from Y=100 downward -- the rest of the
+	// screen, Y grows down -- is now force-free.
+	public const float DefaultTopEdgeDangerPx = 100f;
 
 	private static float TopEdgeDangerPx => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeDangerPx ?? DefaultTopEdgeDangerPx;
 

@@ -2346,12 +2346,30 @@ the rest are tier-independent.
   it not at all (deaths 6.31 -> 5.88, standing 39 -> 39).
 - **The SpiderBoss fight is scripted, so its counters are too** (unashamedly special-cased -- it
   is a set-piece with fixed choreography). Only a `Lazer` hurts it and a big UFO fires one AT THE
-  PLAYER, so the AI spares the single big UFO furthest from every ship and lets the boss walk
-  into the beam -- but NOT during a fly-by, where dodging a sweep and a beam at once is what kills
-  it. Its three fixed lanes and its hard-coded X-600 landing column are avoided for the WHOLE
-  manoeuvre (the boss is parked off-screen and stationary during the "Danger!" arrow, so neither
-  the movement prediction nor the distance field can see it coming); escape is DOWNWARD out of a
-  lane (UFOs enter from the top) and LEFT out of a landing.
+  PLAYER, so the AI keeps beam platforms alive two ways (card 2c74d5b7): it spares the single big
+  UFO furthest from every ship, AND it leaves alone every big UFO farther than
+  `DefaultBigUfoEngagePx` (250) from the ship -- inside that radius a big UFO is engaged in
+  self-defense, since its beam is aimed at the ship. Neither applies during a fly-by, where
+  dodging a sweep and a beam at once is what kills it. The boss's three fixed lanes and its
+  hard-coded X-600 landing column are avoided for the WHOLE manoeuvre (the boss is parked
+  off-screen and stationary during the "Danger!" arrow, so neither the movement prediction nor
+  the distance field can see it coming); escape is DOWNWARD out of a lane (UFOs enter from the
+  top) and LEFT out of a landing. `?aibigufopx=<px>` overrides the radius
+  (`0` = the radius rule off, i.e. the pre-card spare-one-only arm; >= ~351px gun range = inert);
+  the decision is the pure `PlayerShip.AiSparesBigUfoAtRange`, pinned by `logic_probe`'s
+  `ProbeBigUfoSpare`. **Its outcome observable is the bench's `bigufos=<mean|none>
+  bossdeaths=<n>`** -- big UFOs alive at the instant each SpiderBoss dies, counted in
+  `SpiderBoss.BeginDeathThroes` behind `?aibench` (a spared UFO moves no other counter, so this
+  is the rule's only evidence); `ai_sweep.py` prints it per arm. Measured over 16 paired seeds x2
+  captures (spider rig, Very_Hard, steering-tier evidence -- below the N=60 floor): 250px vs the
+  rule off reads deaths FLAT (paired diff +0.75 +- 1.11 on seeds 1-8, -0.81 +- 1.23 on 9-16,
+  pooling to ~0), **victories 8/32 -> 14/32**, and the counter up in both halves (1.58 -> 1.75
+  and 1.83 -> 2.00 alive per boss death). The mean `win@` is NOISY here because the win count
+  nearly doubled (158s -> 225s on seeds 1-8, 273s -> 64s on 9-16 -- extra wins land late and
+  drag the conditional mean), so read "resolves the fight far more often" as the
+  time-to-victory story and let the N=60 pass settle it. 200px (+1.25 +- 0.70 deaths) and 300px
+  (fights mostly unresolved, 6/16 runs saw a boss death) both read worse than 250 at N=16, so
+  250 is an interior pick, not a gradient's edge.
 - **`SpiderBoss`'s landing now sweeps to the right screen edge -- a deliberate GAMEPLAY change,
   not a port artifact.** The descent is hard-coded to X 600, which left a safe pocket beside it
   that trivialised the landing; the AI found it instantly and parked there. Marked as such in
@@ -2362,6 +2380,24 @@ the rest are tier-independent.
   and MEASURED (card 2248e5eb): removing it costs deaths on both rigs and takes deaths BY `UFO`
   from 132 to 356 on the spider rig** -- see the audit table below. `?aitopedgestrength=0` is the
   2008 arm; the generic 150px/strength-4 screen-bound push underneath it is untouched.
+  **Since card 13960838 it YIELDS while the bot's live steer target is a powerup inside the
+  band** -- the push (20) outguns the powerup pull (max 4) + seek (0.8) at every point in the
+  band, so a band powerup was mathematically unreachable, and that is measurable: spider-rig
+  pickups 48.0% with the term on vs 63.6% with it off (seeds 1-8 x2). The stand-down is scoped
+  to the dash (the tick the powerup is collected or expires the detour ends and the push is
+  back; a boss-approach or partner-dock steerTarget write re-arms it the same tick), which is
+  what keeps card 2248e5eb's deaths verdict intact. Measured, seeds 1-8 x2 paired (N=16 --
+  steering runs; the N=60 protocol run is outstanding): spider pickups **48.0% -> 66.8%**
+  (129/269 -> 173/259; MORE than the term fully off, 63.6%, because the push still herds the
+  ship down the rest of the time) with deaths flat (3.50 vs 3.56, paired diff 0.06 +- 0.97,
+  win@147s vs 153s); level1 pickups flat (85.5% -> 85.4%) with deaths 7.75 vs 8.50 (within
+  SEM). The `?aitopedgeyield=0` arm reproduces the pre-card baseline digit for digit on the
+  same seeds (129/269, 8.50 deaths), so the seam is a faithful negative control.
+  `?aitopedgeyield=0` is the pre-card unconditional push -- the A/B arm, out of `Active` like
+  the rest of the `?ai*` steering knobs (unlike `?aiwallnav2008=1` it cannot reach a peer's
+  world: the AI steers only locally-owned ships). The bench row's `topyield=` counter is the
+  yield's only observable (a suppressed push changes no pixel); pinned by the probe pair
+  `tools/headless/probes/ai_topedge_yield.txt` + `ai_topedge_yield_absent.txt`.
 - **Every avoidance field here shares the `(1-t)^p` falloff shape** (`ThreatFieldStrength`) -- a
   flat push across a band fights the screen bounds instead of easing off once the ship is clear.
 - **Per-tier skill (card c10e3e7f) is keyed off `Settings.EffectiveDifficulty`, NOT
@@ -2460,8 +2496,8 @@ the rest are tier-independent.
   ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
   ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge= ?ailaneescape= ?aiconelead= ?aiconemaxlen=
   ?aiconewidth= ?aiconetaper= ?aiconefallalong= ?aiconefallacross= ?aiconescale= ?aiconespread=
-  ?aiconewidthmin= ?aiwedgestrength= ?aiwedgefall= ?aitopedgepx= ?aitopedgestrength= ?ailazerpx=
-  ?ailazerstrength= ?ailazerdodge=`
+  ?aiconewidthmin= ?aiwedgestrength= ?aiwedgefall= ?aitopedgepx= ?aitopedgestrength=
+  ?aitopedgeyield= ?ailazerpx= ?ailazerstrength= ?ailazerdodge= ?aibigufopx=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
   A malformed value on any of them is REPORTED and ignored, never swallowed, per the file-wide
   value-carrying-flag convention (see "Debug flags & tuning conventions" above; cards 48b7c6b1 +
@@ -2603,6 +2639,9 @@ refuted and reverted.** Positive = that arm is worse than the shipped build of t
 | **top-edge push** (`170px` / strength `20`) | `?aitopedgestrength=0` | **+0.88 +- 0.52** | **+0.67 +- 0.64** | **KEPT** |
 | **beam field + sidestep** (`260px` / `14` / `7`) | `?ailazerpx=150&ailazerstrength=4&ailazerdodge=0` | +0.98 +- 0.65 | **-4.55 +- 0.69** | **REVERTED to 150 / 4 / 0** |
 
+- **The top-edge term now YIELDS during a live powerup dash into the band** (card 13960838) --
+  see the top-edge bullet above for the mechanism and numbers; `?aitopedgestrength=0` remains
+  the whole-term 2008 arm and this A/B's verdict stands.
 - **The top-edge term is confirmed by its own stated mechanism, not just by the deaths column.**
   Removing it multiplies exactly the death it was added to prevent: deaths by `UFO` 132 -> 356 on
   the spider rig and 150 -> 212 on Level 1, because a ship pinned on the ceiling is exploded by

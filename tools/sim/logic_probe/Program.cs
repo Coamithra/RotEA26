@@ -119,6 +119,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeBigUfoSpare(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         rc = ProbeAiFieldComposition(asm);
         if (rc != 0)
         {
@@ -711,6 +717,9 @@ internal static class Program
             new { Flag = "aitopedgepx",    Prop = "AiTopEdgeDangerPx",     Good = "233", Want = (object)233f,  Baked = "170"  },
             new { Flag = "aitopedgestrength",Prop = "AiTopEdgeAvoidStrength",Good = "33",Want = (object)33f,   Baked = "20"   },
             new { Flag = "ailazerpx",      Prop = "AiLazerAvoidRangePx",   Good = "311", Want = (object)311f,  Baked = "150"  },
+            // The big-UFO engage radius (card 2c74d5b7). 0 is MEANINGFUL (the rule off), so its
+            // guard refuses only a negative -- the ?aisweptmax= shape again.
+            new { Flag = "aibigufopx",     Prop = "AiBigUfoEngagePx",      Good = "222", Want = (object)222f,  Baked = "250"  },
             // Baked "" on the last two: since card 2248e5eb's revert they bake 4 and 0, single
             // digits that occur elsewhere in the captured output, so the absence check would fire
             // on text that is not the default -- the same escape aiscanrows/aicrosspenalty/
@@ -736,7 +745,9 @@ internal static class Program
             return 2;
         }
 
-        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 37 knobs (cards 48b7c6b1 / 2248e5eb / bb949dd9)");
+        // The count is DERIVED from the table -- a literal here drifted once already.
+        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all " + rows.Length
+            + " knobs (cards 48b7c6b1 / 2248e5eb / 2c74d5b7 / bb949dd9)");
 
         // One counter and its OWN first-problem detail per leg: a shared sink attaches the
         // diagnosis to whichever Check happens to print it, which in a mutation run put the only
@@ -860,6 +871,62 @@ internal static class Program
     // floor back above the weakest attractor would reintroduce that exactly: no error, no visual
     // difference, no console line, and the only symptom a bot that quietly stops going places.
     // Assertion 2 is the guard for it.
+    // The big-UFO engage-radius decision (card 2c74d5b7): PlayerShip.AiSparesBigUfoAtRange, the
+    // pure predicate DoAIFire consults for every big UFO while a SpiderBoss stands. The
+    // expectations are stated independently of the implementation (fixed points either side of
+    // the boundary, the sweep and boss-alive gates, the 0-off arm); the negative control is the
+    // pre-card policy -- radius sparing simply not existing, i.e. "engage whatever is in range"
+    // -- restated beside it, which must DISAGREE with the shipped default at long range or the
+    // whole rule is a no-op.
+    private static int ProbeBigUfoSpare(Assembly asm)
+    {
+        Type ship = asm.GetType("EvilAliens.PlayerShip", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo spares = ship.GetMethod("AiSparesBigUfoAtRange", anyStatic);
+        FieldInfo defaultPx = ship.GetField("DefaultBigUfoEngagePx", anyStatic);
+        PropertyInfo livePx = ship.GetProperty("BigUfoEngagePx", anyStatic);
+        Type flags = asm.GetType("EvilAliensWeb.Compat.DebugFlags", true);
+        MethodInfo parse = flags.GetMethod("Parse", anyStatic);
+        PropertyInfo over = flags.GetProperty("AiBigUfoEngagePx", anyStatic);
+        if (spares == null || defaultPx == null || livePx == null || parse == null || over == null)
+        {
+            Console.WriteLine("FAIL: could not reflect the big-UFO spare surface -- renamed or moved?");
+            return 2;
+        }
+        Func<float, bool, bool, float, bool> call = (dist, alive, sweeping, radius) =>
+            (bool)spares.Invoke(null, new object[] { dist, alive, sweeping, radius });
+        float baked = (float)defaultPx.GetValue(null);
+
+        Console.WriteLine("[logic_probe] big-UFO engage radius (card 2c74d5b7)");
+
+        // 1. The rule itself, at fixed points either side of the boundary.
+        Check("beyond the radius is SPARED (300px at r=250)", call(300f, true, false, 250f), null);
+        Check("inside the radius is ENGAGED (200px at r=250)", !call(200f, true, false, 250f), null);
+        Check("the boundary itself is ENGAGED (strict >)", !call(250f, true, false, 250f), null);
+        // 2. The gates: a fly-by spares nothing, and with no boss there is no rule at all.
+        Check("a SWEEP spares nothing, whatever the range", !call(700f, true, true, 250f), null);
+        Check("no live boss, no rule", !call(700f, false, false, 250f), null);
+        // 3. The off arm: radius 0 is the pre-card configuration and never spares.
+        Check("r=0 is the rule OFF (the pre-card arm)", !call(700f, true, false, 0f), null);
+        // 4. The negative control: the pre-card policy (no radius sparing exists) must DISAGREE
+        //    with the shipped default somewhere, or the card shipped a no-op. At long range the
+        //    pre-card answer is "engage" and the shipped answer must be "spare".
+        bool preCard = false; // radius sparing did not exist: nothing is ever range-spared
+        Check("control: the shipped default disagrees with the pre-card policy at 340px",
+            call(340f, true, false, baked) != preCard,
+            "baked=" + baked + "px -- if this fails the baked radius no longer bites inside gun range");
+        // 5. The wiring: the ?aibigufopx= override reaches the resolving property, and clearing
+        //    it restores the baked default (assert the restore took -- the ordering lesson).
+        RunParse(parse, "?aibigufopx=120");
+        bool overrode = Equals(livePx.GetValue(null), 120f);
+        over.SetValue(null, null);
+        Check("?aibigufopx=120 reaches PlayerShip.BigUfoEngagePx", overrode, null);
+        Check("cleared, the property resolves the baked default",
+            Equals(livePx.GetValue(null), baked) && over.GetValue(null) == null, null);
+
+        return 0;
+    }
+
     private static int ProbeAiFieldComposition(Assembly asm)
     {
         Type ship = asm.GetType("EvilAliens.PlayerShip", true);

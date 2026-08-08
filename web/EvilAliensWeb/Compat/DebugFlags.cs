@@ -1422,6 +1422,17 @@ namespace EvilAliensWeb.Compat
 		//                       distance (PlayerShip.DefaultSeekArriveDeadzonePx).
 		public static float? AiSeekDeadzonePx { get; private set; }
 
+		// ?aiseeklead=<ms>      the velocity lead on that deadzone (card fd126847): after a
+		//                       sustained calm (DefaultSeekArriveCalmMs with nothing pushing),
+		//                       the pull cuts at deadzone + speed * lead, so the low-passed
+		//                       steer's ~125ms of full-thrust residual is spent BEFORE the
+		//                       target instead of carrying the ship through it and into an
+		//                       orbit. Under fire arrival is pre-card by construction -- the
+		//                       orbit was incidental evasion, measured twice. 0 = the pre-card
+		//                       fixed-radius deadzone everywhere (the A/B seam);
+		//                       PlayerShip.DefaultSeekArriveLeadMs has the derivation.
+		public static float? AiSeekLeadMs { get; private set; }
+
 		// ?aiseekpowerup=<w>    the pull toward a POWERUP the bot has chosen to fetch, and
 		// ?aiseekapproach=<s>   REDEFINED BY CARD b56633fb: a SCALE on the boss approach's own
 		//                       SOLVED weight (1 = as shipped), not a weight any more. The boss
@@ -3240,6 +3251,17 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(AiSeekDeadzonePx ?? EvilAliens.PlayerShip.DefaultSeekArriveDeadzonePx));
+					}
+					break;
+				case "aiseeklead":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aisl) && aisl >= 0f)
+					{
+						AiSeekLeadMs = MathHelper.Min(aisl, 2000f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiSeekLeadMs ?? EvilAliens.PlayerShip.DefaultSeekArriveLeadMs));
 					}
 					break;
 				case "aiseekpowerup":

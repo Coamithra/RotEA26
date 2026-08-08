@@ -398,6 +398,33 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private static float SeekArriveDeadzonePx => EvilAliensWeb.Compat.DebugFlags.AiSeekDeadzonePx ?? DefaultSeekArriveDeadzonePx;
 
+	// THE ORBIT BRAKE (card fd126847). The deadzone above only stops a ship that actually ENTERS
+	// it, and a ship that arrives with sideways speed never does: Move() thrusts at full
+	// acceleration along the steer's ANGLE, so a full-speed ship pulled at a point it is passing
+	// settles into a circular orbit of radius ShipMaxSpeed^2 / ShipAcceleration = 36.3px --
+	// OUTSIDE any legal deadzone (the deadzone is bounded below by the 11.3px stopping distance,
+	// not above by the orbit radius) -- and spins circles around its own station forever, which is
+	// the card's "pingpong". Neither documented revert covers this case: the velocity-damped
+	// arrive braked RADIAL motion everywhere (it contains -SpeedVector, so it slowed every real
+	// manoeuvre), and a wider deadzone was refuted by card 05a2b818's monotone CrazyGame result.
+	//
+	// The brake bends the seek's DIRECTION only, and only near the target: inside the radius the
+	// seek vector gains a retro-TANGENTIAL term proportional to the sideways velocity, so a
+	// fly-past is steered back onto the radial line, sheds its orbital speed, and falls into the
+	// deadzone. A straight radial approach has no tangential component and is untouched; the
+	// term never brakes motion toward or away from the target, which is what got the arrive
+	// reverted. Repellents are untouched entirely -- this modifies the one seek write, so a dodge
+	// still out-votes the seek exactly as before.
+	public const float DefaultSeekOrbitBrakeGain = 1f;
+
+	private static float SeekOrbitBrakeGain => EvilAliensWeb.Compat.DebugFlags.AiOrbitBrakeGain ?? DefaultSeekOrbitBrakeGain;
+
+	// DERIVED, not tuned: twice the full-speed orbit radius (ShipMaxSpeed^2 / ShipAcceleration =
+	// 36.3px), so every orbit the ship's dynamics can sustain lies inside it with 2x margin.
+	// Outside it, tangential velocity is ordinary transit curvature and damping it would fight
+	// the dodges the seek composes with.
+	public const float SeekOrbitBrakeRadiusPx = 2f * ShipMaxSpeed * ShipMaxSpeed / ShipAcceleration;
+
 	// Kept at the 2008 weight so the seek still loses to threat avoidance exactly as before.
 	private const float SeekWeight = 0.8f;
 
@@ -2248,8 +2275,19 @@ public class PlayerShip : AlienDrawableGameComponent
 				// -SpeedVector, so it brakes the ship whenever it is moving relative to its station,
 				// which is most of a boss fight. That measured coast 28% -> 59% and 24 -> 70 deaths:
 				// the bot was being held at a standstill and could not accelerate out of trouble.
-				direction += steerTargetWeight
-					* MyMath.AngleToVector(MyMath.VectorToAngle(steerTarget - base.Position));
+				Vector2 seekDir = MyMath.AngleToVector(MyMath.VectorToAngle(steerTarget - base.Position));
+				// THE ORBIT BRAKE (see DefaultSeekOrbitBrakeGain): near the target, tilt the seek
+				// against the TANGENTIAL velocity so a fly-past spirals into the deadzone instead
+				// of orbiting it at full thrust. `> 0` is an early-out like the lazer dodge's --
+				// it makes "switched off" visible at the point of use, and ?aiorbitbrake=0 is the
+				// pre-card arm.
+				float orbitBrake = SeekOrbitBrakeGain;
+				if (orbitBrake > 0f && distToTarget < SeekOrbitBrakeRadiusPx)
+				{
+					Vector2 tangentialVel = SpeedVector - Vector2.Dot(SpeedVector, seekDir) * seekDir;
+					seekDir -= orbitBrake / ShipMaxSpeed * tangentialVel;
+				}
+				direction += steerTargetWeight * seekDir;
 			}
 		}
 		float edgeMargin = steerRange;

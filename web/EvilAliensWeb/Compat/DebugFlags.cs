@@ -1539,6 +1539,12 @@ namespace EvilAliensWeb.Compat
 
 		public static float? AiTopEdgeAvoidStrength { get; private set; }
 
+		// ?aiorbitbrake=<f>  gain on the seek's retro-tangential orbit brake near its target
+		//                    (card fd126847; PlayerShip.DefaultSeekOrbitBrakeGain). **0 IS THE
+		//                    PRE-CARD ARM** -- the seek reverts to the bare positional pull, so
+		//                    the full-speed ~36px orbit around a station comes back.
+		public static float? AiOrbitBrakeGain { get; private set; }
+
 		// ?ailazerpx=<px>        how wide a berth a live beam gets,
 		// ?ailazerstrength=<f>   how hard it pushes at the beam, and
 		// ?ailazerdodge=<f>      the lateral sidestep during a big UFO's windup, which 2008 has no
@@ -3320,6 +3326,19 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(AiTopEdgeDangerPx ?? EvilAliens.PlayerShip.DefaultTopEdgeDangerPx));
+					}
+					break;
+				case "aiorbitbrake":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiob) && aiob >= 0f)
+					{
+						AiOrbitBrakeGain = MathHelper.Min(aiob, 10f);
+					}
+					else
+					{
+						// 0 is MEANINGFUL here (the pre-card arm), so the guard refuses only a
+						// negative -- the ?aitopedgestrength= shape.
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiOrbitBrakeGain ?? EvilAliens.PlayerShip.DefaultSeekOrbitBrakeGain));
 					}
 					break;
 				case "aitopedgestrength":

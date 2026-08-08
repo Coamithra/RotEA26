@@ -2038,6 +2038,18 @@ the rest are tier-independent.
     pull needs none (contact collects it, so the target stops existing) and the boss standoff's is
     its standoff radius. `logic_probe`'s **`ProbeAiFieldComposition`** derives the bound from the
     real motion constants and pins it, along with "no floor sits above the weakest force".
+  - **The deadzone only stops a ship that ENTERS it -- a fly-past ORBITS instead, and the ORBIT
+    BRAKE is what breaks that** (card fd126847, `DefaultSeekOrbitBrakeGain`). Move() thrusts at
+    full acceleration along the steer's angle, so a full-speed ship pulled at a point beside its
+    track settles into a circular orbit of radius `ShipMaxSpeed^2 / ShipAcceleration` = 36.3px --
+    outside any legal deadzone (bounded below by the 11.3px stopping distance, not above by the
+    orbit radius) -- and spins circles around its own station at full thrust, which is the
+    "pingpong" the card reports. Within `SeekOrbitBrakeRadiusPx` (2x that orbit radius, DERIVED
+    from the motion constants rather than tuned) the seek's direction gains a retro-TANGENTIAL
+    term scaled by the sideways speed, so a fly-past sheds its orbital velocity and falls into
+    the deadzone; radial approach/escape and every repellent are untouched, which is what
+    separates it from the reverted velocity-damped arrive (that one braked radial motion too).
+    `?aiorbitbrake=` scales it; **0 is the pre-card arm** (the A/B seam).
   - **What this replaced, in one line:** the port ended `DoAIMove` with a 0.95 "park" where the
     2008 original had **0.2** -- above the 0.8 seek, so a lone seek produced no motion at all and
     every deliberate destination (station, powerup, boss standoff) was silently deleted. Restored
@@ -2456,7 +2468,7 @@ the rest are tier-independent.
 - Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aireact=
   ?aigapmargin= ?aiscanrows= ?aicrosspenalty= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx=
   ?aifieldsize= ?aifieldfall= ?aiseekapproach= ?aiseekpowerup= ?aipowerupreach= ?airepeldelta=
-  ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
+  ?ainoisefloor= ?aiseekdeadzone= ?aiorbitbrake= ?aiasteroidscale= ?aiasteroidrange=
   ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge= ?ailaneescape= ?aiconelead= ?aiconemaxlen=
   ?aiconewidth= ?aiconetaper= ?aiconefallalong= ?aiconefallacross= ?aiconescale= ?aiconespread=
   ?aiconewidthmin= ?aiwedgestrength= ?aiwedgefall= ?aitopedgepx= ?aitopedgestrength= ?ailazerpx=

@@ -1,0 +1,77 @@
+# PROBE: the top-edge danger band is COMPOSED with the other repellents (the shipped placement)
+#
+# PINS:   card 13960838, BOTH halves of it -- the placement and the magnitude.
+#         `maxSteerStrength` (4) is the ceiling of the powerup approach pull, so a band several
+#         times that size decides whether a pickup near the top of the screen is reachable at all,
+#         and where the band lands in DoAIMove decides whether it can be argued with. It used to
+#         be strength 20 added to `direction` AFTER the steering low-pass -- neither damped nor
+#         eligible for the repulsion-cancel floor, and unbeatable at any strength above 4. It now
+#         sums into `repel` with every other repellent at strength 12.
+#
+#         THE VALUES IN THE `expect` BELOW ARE 170/12 -- 170px is card 2248e5eb's measured depth,
+#         12 is card 13960838's measured strength. **20 was 2248e5eb's** and is what this probe
+#         asserted until the magnitude was re-measured; do not "restore" it. 12 was chosen as the
+#         highest strength recovering most of the pickup gap (spider 45.4% -> 55.7%, brainboss
+#         52.4% -> 57.4%, deaths -1.00 +- 0.84 / -0.19 +- 0.66) at N=16 directional, with the N=60
+#         sweep as the arbiter.
+#
+#         That is a PLACEMENT, and placements fail silently. Both arms compile, both boot, both
+#         fly, and `[debug] flags active` reports only the PARSE -- so a build whose branch went
+#         the wrong way prints an entirely plausible bench table with a small difference in it,
+#         which is precisely how a sweep arm comes to measure the shipped code twice (the
+#         `?aiwallnav2008` lesson). `[aitopedge] placement:` is emitted from the point of use and
+#         names the branch that actually ran, which is the only observable that separates them.
+#
+#         Read this probe together with its control, ai_top_edge_precard.txt -- one proves the
+#         shipped build composes, the other proves the flag can still reach the pre-card
+#         placement. Either alone passes on a build where the branch always takes one side.
+#
+# FAILURE MEANS: read WHICH line went red.
+#         [aitopedge] missing entirely -> DoAIMove never ran, so the run proved nothing either
+#                                way (precondition, README rule 5). The fast-boot or the AI seat
+#                                moved; check the flags line and that a ship exists.
+#         "placement: post-smoothing" -> THE REGRESSION: an ordinary boot is flying the pre-card
+#                                placement, so the band is once again vetoing every attractor in
+#                                its own 170px.
+#         band=/strength= changed -> the magnitudes were retuned again. Not necessarily wrong, but
+#                                no existing verdict transfers: 2248e5eb's N=60 keep-or-drop was
+#                                taken at 170/20 and 13960838's pickup figures at 170/12.
+#                                Re-measure before believing a bench number.
+#         aitopedgecompose=0 on the flags line -> the seam is being set by something other than
+#                                the URL, which is how a deliberate bug repro reaches a player.
+#
+# NOTES:  The spider rig on purpose: its lane escapes (18) are the term's own stated competitor,
+#         and it is the rig where the pickup rate moved most in the card's directional sweep.
+#         ?invuln pins the precondition -- without it the bot can die before it has flown
+#         anywhere and a short run ends with nothing to assert.
+#         MUTATION-TESTED TWICE, and the first attempt at this probe FAILED both -- worth knowing
+#         before trusting a similar one:
+#         (a) inverting the dispatch (`if (!TopEdgeComposes)` on the `repel` site) turns this
+#             probe AND its control red while the flags line stays green. It did NOT while
+#             `[aitopedge]` was derived from `TopEdgeComposes` at a single site instead of being
+#             passed each branch's own name -- the report was then just a second reading of the
+#             condition, i.e. worth exactly as much as the flags dump it was added to improve on.
+#         (b) dropping the `!TopEdgeComposes` guard on the post-smoothing site -- the band applied
+#             at BOTH sites, so double strength on an ordinary boot -- turns the `expect-not`
+#             below red. It did NOT while the two sites shared ONE report latch, because whichever
+#             fired first silenced the other and the run printed exactly a healthy build's line.
+#             Hence one latch per site (`PlayerShip.topEdgeReported`); do not "simplify" it back.
+#
+# eahl: --flags "?level=Level2&spiderboss&aiplayer&aibench&noattract&invuln&seed=1&difficulty=Very_Hard"
+
+# The flags dump was printed at all, and does NOT carry the seam. Asserted BEFORE the first
+# `mark`: the dump is a BOOT line, so marking above it discards the subject. The positive half is
+# what stops the expect-not being vacuous on a run that printed no dump whatsoever.
+# `level=Level2`, not `spiderboss` -- the level FAST-BOOTS are not named in the dump at all
+# (verified: the spider rig's line ends `aiplayer aibench`), so an expect on the fast-boot's own
+# name goes red on a perfectly healthy run. `[aitopedge]` below is what proves the rig was reached.
+expect      \[debug\] flags active:.*level=Level2
+expect-not  \[debug\] flags active:.*aitopedgecompose
+
+mark
+step 900 nodraw
+
+# ...and the composed placement is what actually steered.
+expect      \[aitopedge\] placement: composed band=170px strength=12
+expect-not  \[aitopedge\] placement: post-smoothing
+quit

@@ -138,6 +138,10 @@ between Fable and Opus:
   fully architects each ticket's solution first, Opus agents implement to
   Fable's spec (farm's own-plan checkpoint replaced by design-note
   conformance).
+- **`fable-fleet`** — one Fable subagent per ticket running the normal
+  CONTRIBUTING workflow solo; the orchestrating session only spawns them
+  (no checkpoints, no review). Prices oversight itself against the two
+  supervised strategies.
 
 All run on the plain Agent tool underneath (`model: "opus"` for the fleet,
 worktree isolation) — no workflow runtime, so every strategy is measured by

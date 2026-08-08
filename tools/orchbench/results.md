@@ -30,6 +30,7 @@ The prose ledger for the experiment [`README.md`](README.md) defines: which divi
 
 ## Still to run
 
-1. Rep 2 for each strategy (fresh orchestrating session per run; protocol minimum before trusting any ranking).
-2. The scoring pass over the three run branches: per-ticket N=60 gates (`ai_sweep.py`) + blind A/B/C rubric → `scores.csv`.
-3. After the LAST strategy run: re-raise the archived follow-up cards from `archive/` (marsboss preset `30fe3de4`, tutorial timeout `fa5d98d8`, plus the solo/oracle runs' finds) onto the board.
+1. `fable-fleet` rep 1 (strategy added 2026-08-08: one Fable subagent per ticket on the normal CONTRIBUTING workflow, orchestrator spawns-only — prices oversight itself; see strategies.md). Note the strategy set has grown since the first three reps ran; the batch and rubric are unchanged, so rows stay comparable.
+2. Rep 2 for each strategy (fresh orchestrating session per run; protocol minimum before trusting any ranking).
+3. The scoring pass over the run branches: per-ticket N=60 gates (`ai_sweep.py`) + blind A/B/C/D rubric → `scores.csv`.
+4. After the LAST strategy run: re-raise the archived follow-up cards from `archive/` (marsboss preset `30fe3de4`, tutorial timeout `fa5d98d8`, plus the solo/oracle runs' finds) onto the board.

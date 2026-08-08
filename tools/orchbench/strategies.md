@@ -84,6 +84,30 @@ Hypothesis: Fable tokens move up front (design) instead of into plan
 review; implementation at Opus rates with fewer mid-flight stalls (fewer
 open decisions), at the risk that a wrong design taxes the whole ticket.
 
+## fable-fleet
+
+**One Fable subagent per ticket, and the orchestrating session does NOTHING
+beyond starting them.** Each agent gets the ticket verbatim, the standard
+pointers, and a pre-assigned worktree slot + branch (pre-assignment is setup
+mechanics, not oversight — simultaneous "pick a free slot" is a known
+failure), and then follows [`CONTRIBUTING.md`](../../CONTRIBUTING.md) end to
+end on its own: research, design, implement, cheap-verify, PR, self-merge,
+card paperwork. No plan checkpoint, no ship-gate review, no advisor — the
+spawn prompt says so explicitly, and an agent that would have asked a
+question instead uses its own judgment per the runbook. Cross-ticket
+collisions (shared bench keys, flag tables, doc sections) are resolved
+pairwise by whichever agent merges later, with no overseer sequencing. The
+orchestrator's only remaining moves are the harness bookkeeping itself
+(snap, record, reset) after the fleet drains.
+
+Hypothesis: maximum per-ticket capability AND wall parallelism, at Fable
+rates for every implementation token — cost should land near solo × the
+parallel-overhead factor (4 cold contexts, conflict resolution done four
+times instead of once), wall near the slowest single ticket. What it prices
+against oracle/architect is the value of oversight itself: any quality gap
+is what plan review + ship gates were buying, since the per-agent model here
+strictly dominates the Opus fleets'.
+
 ## Rubric (blind subjective scoring, 1–5 each)
 
 Per ticket. Judges see only the ticket text and the unlabeled diff (plus

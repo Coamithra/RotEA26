@@ -2146,7 +2146,7 @@ the rest are tier-independent.
     the other.
   - Flags: `?airepeldelta= ?ainoisefloor= ?aiseekdeadzone= ?aiorbitlead= ?aiasteroidscale= ?aiasteroidrange=
     ?aiasteroidfall= ?aievade=`, the cone/wedge family above, plus
-    `?aiseekapproach= ?aiseekpowerup= ?aipowerupreach=`. Wiring that `logic_probe` cannot reach is
+    `?aiseekapproach= ?aistandoff= ?aiseekpowerup= ?aipowerupreach=`. Wiring that `logic_probe` cannot reach is
     covered by `tools/headless/probes/ai_boss_approach.txt`.
   - **THE BOSS APPROACH IS SOLVED AGAINST THE BOSS'S OWN REPELLENT, with an INVERTED falloff**
     (card b56633fb, `PlayerShip.BossApproachWeight`). `DefaultSeekApproachWeight` 1.1 was a
@@ -2194,9 +2194,66 @@ the rest are tier-independent.
       `logic_probe`'s **`ProbeAiBossApproach`** pins that plus the crossing, the band bound over
       every tier x weapon x boss hull, the self-limiting interior and the pre-card configuration as
       a negative control; `tools/headless/probes/ai_boss_approach.txt` pins the wiring.
+  - **A RANGE-KEEPING REPELLENT DEFENDS THE BAND FROM THE INSIDE** (card bb949dd9,
+    `PlayerShip.BossStandoffPush`). The attractor above quiets to ~0 inside r* by design -- that is
+    what makes the crossing a parked band -- but until this card nothing then HELD the ship out
+    there, and the only outward force inside the band was the boss's own field. Measured on
+    `?level=Level2&marsboss` at Very_Hard: that field reads **0.57 at the 157px** the ship had
+    settled at, against screen-edge pushes of up to 4, so a corner squeeze walked the bot deep
+    inside its own firing range, pinned it (`coast` 56%, `pos` ~111,340) and let the twin
+    motherships shoot it -- **7 deaths, ALL `Lazer`, five at the identical point (140,444)**. That
+    is the ticket's "goes way nearer bosses than he has to, given bullet range", exactly.
+    - **It is a REPELLENT, not a gate on anything** -- THE FIELD PRINCIPLE. It sums into `repel`,
+      rides the repulsion cancellation floor with every other push, and is emitted at the same
+      per-seat `dodgeAngle` as the radial field. Nothing is suppressed because a boss is near; the
+      mountain is simply steeper where the ship should not be.
+    - **Zero at and beyond the anchor, then `max * ((r* - d)/r*)^2` inward**, capping at
+      `maxSteerStrength` at the hull. Being exactly zero AT r* is the point: the crossing
+      `BossApproachWeight` solves for cannot move, so that method is byte-untouched and the band's
+      width bound is unaffected. It shares the attractor's CLAMPED anchor
+      (`BossApproachMinAnchorPx`) rather than re-deriving firing range -- two copies could disagree
+      about where the band is, which is the one way this term could push the ship out of its own
+      range.
+    - **It is a gentle term at the distances that matter, and the numbers say so.** At the 157px
+      pin it adds 0.26 to a 0.57 field (MarsBoss, base weapon, r* = 210px edge); it only reaches
+      full strength at the hull. So it moves an equilibrium rather than winning an argument --
+      expect a modest `boss=` shift, not a repositioning.
+    - **THE EXPONENT WAS SWEPT AND q=1 IS REFUTED -- IT DESTROYS THE FIRING BAND.** The exponent
+      sets the slope near the anchor, and that slope is the safety property: at q=1 the push just
+      inside r* is 1.01 against an attractor of ~0.68 there, so the term out-votes the pull at the
+      crossing and shoves the ship back out of its own range. The full table lives at
+      `BossStandoffExponent`; the two arms that move `boss=` MOST (q=1: 174-175px) are the two that
+      **never kill the boss at all** -- victories 2/8 -> 0/8, `bossfar` 18% -> 44%, `idle` 15.5% ->
+      38%, i.e. the ship spends half its time unable to shoot, which is the very stall the boss
+      approach exists to end. **So mean distance is a SYMPTOM here, not the thing to maximise**;
+      the ticket's own metric points at a configuration that loses the fight.
+    - **MEASURED, and read this as a direction rather than a verdict -- it is N=8** (seeds 1-4 x2,
+      Very_Hard, `ai_sweep.py`), against `?aistandoff=0`: marsboss `boss=` **157 -> 167px**, deaths
+      13.25 -> 13.50 (diff -0.25 +- 2.21, i.e. nothing), time-to-victory **161s -> 99s**, victories
+      2/8 unchanged; brainboss deaths **4.88 -> 3.88** (paired -1.00 +- 0.00) with `boss=` 108 ->
+      116px; spider **byte-identical on every metric, at scale 1 AND scale 2** -- 4.50 deaths,
+      `SpiderBoss(standing)` 2, and the same `turn`/`revs`/`coast`/`pickups` to the digit, which is
+      the term correctly being INERT where `IsAiPriorityTarget` excludes the boss. The N=60 gate is
+      the real verdict.
+    - `?aistandoff=<scale>` (1 = shipped, **0 = off = the pre-card arm**). `logic_probe`'s
+      **`ProbeAiBossStandoff`** pins the shape at fixed points -- silent at and beyond r*, monotone
+      inward, capped at the hull, continuous at the anchor, the shared clamp, and that the shipped
+      scale is non-zero (a build that baked it back to 0 would pass every other check).
   - **Boss PROXIMITY is descriptive, never a gate.** `bossfar%` and `boss=<px>` describe where the
     ship is; the bot moving closer to a boss to dodge, collect or line up a shot is the field
     working. Gate boss work on OUTCOMES -- `SpiderBoss(standing)` deaths -- not on distance.
+    - **`bossprox=<px>` is the same observable for a boss the approach term never sees** (card
+      bb949dd9). `boss=`/`bossfar=` accrue only via `NoteBossApproach`, i.e. only for a level-
+      HALTING boss -- and `SpiderBoss` deliberately is not one, so the spider rig prints `boss=0px`
+      and answers nothing about proximity at all. `bossprox=` is the mean edge distance to the
+      nearest live BOSS-CLASS entity, `baddy is SpiderBoss || IsAiPriorityTarget(baddy)`, in both
+      `Line()` and `Row()`, reading **`none`** when no such entity was ever on screen (the
+      `killers=none` convention -- an absent key would read as an old build).
+      **It shares `boss=`'s VISIBILITY rule** (the same on-screen box), so on a halting-boss rig the
+      two agree tick for tick, and neither counts the spider parked off-screen through its
+      "Danger!" phases or BrainBoss still easing in from a negative Y -- ticks where the bot can
+      neither see nor react to the boss carry no signal about flying too close and would only
+      dilute the mean. Reference: spider rig 189px, marsboss 182px (== its `boss=`), Level 1 `none`.
 - **DIRECTIONAL REPELLENT SHAPES: every mover projects a MESA along its own velocity** (card
   e425781b). This is the fix the three failed radial campaigns above were pointing at, and it is
   the largest single win the bot has had: **SpaceDodge 2/16 -> 16/16 victories, 33.75 -> 3.25
@@ -2378,6 +2435,14 @@ the rest are tier-independent.
   first two differently** -- `pickups=<n> poffered=<spawned>` and no percentage -- because its
   parser is `split(. .)` then the first `=`, so a value carrying a bracket or a space is what
   breaks `eaAiBench.matrix`; the percentage exists in `Line()` only, for probes to regex.
+  **`bigufos=<n>` (card 2c74d5b7) is the big-UFO sparing rule's only observable** -- live big UFOs
+  at the instant a `SpiderBoss` died, SUMMED over the run's boss deaths (a checkpoint revert can
+  replay the fight; `Line()` and `Row()` both print the `bossdeaths=` count beside it, so a
+  Row-only consumer can normalise the sum). It reads
+  **`none`** when no boss died in the window, which is a different finding from `0` and on the
+  spider rig is the COMMON case -- do not average it in as a zero. Hooked in
+  `SpiderBoss.BeginDeathThroes`, the one place that boss's death is decided, with the counting
+  scan itself behind `AiBench.Enabled` so a no-flag run does no extra work.
   **Standing result worth knowing: on `?level=Level2&spiderboss` (Very_Hard, no `?invuln`, 180
   sim-s, N=16) `SpiderBoss(standing)` is 39 of 101 deaths -- the largest single killer, and more
   than double the moving boss's 25.** So "the AI happily runs into the spider boss when it is
@@ -2385,9 +2450,29 @@ the rest are tier-independent.
   it not at all (deaths 6.31 -> 5.88, standing 39 -> 39).
 - **The SpiderBoss fight is scripted, so its counters are too** (unashamedly special-cased -- it
   is a set-piece with fixed choreography). Only a `Lazer` hurts it and a big UFO fires one AT THE
-  PLAYER, so the AI spares the single big UFO furthest from every ship and lets the boss walk
-  into the beam -- but NOT during a fly-by, where dodging a sweep and a beam at once is what kills
-  it. Its three fixed lanes and its hard-coded X-600 landing column are avoided for the WHOLE
+  PLAYER, so while the boss is alive the AI engages a big UFO only INSIDE `DefaultBigUfoEngagePx`
+  (250) and leaves every more distant one firing, letting the boss walk into the beams -- but NOT
+  during a fly-by, where dodging a sweep and a beam at once is what kills it and every big UFO is
+  shootable again. **It is a self-defense RADIUS, not a headcount** (card 2c74d5b7): it replaced
+  "spare the single big UFO furthest from every ship", which capped the surviving platforms at one
+  however many the fight had. `PlayerShip.AiSparesBigUfo` is the predicate and `?aibigufopx=<px>`
+  the seam, where **0 = never engage a big UFO while the boss stands** (maximal sparing) and a
+  large value is the pre-card "shoot everything in range" arm.
+  - **MEASURED** (`ai_sweep.py --rig spider`, Very_Hard, seeds 1-8 x2, N=16 per arm) -- deaths /
+    victories: **px250 2.44 / 12 of 16**, px150 4.31 / 4, px350 4.31 / 6, **pre(9999) 5.50 / 2**.
+    An INTERIOR optimum, and the two halves of the sweep disagree about which neighbour is the
+    better one (px350 took 6/8 on seeds 1-4 and 0/8 on seeds 5-8), so read 150 and 350 as "not
+    250" rather than as a gradient. **Deaths FELL on every radius arm**, which is the guard this
+    card had to clear -- the beams being spared are aimed AT the ship, and the beam-dodge sidestep
+    is off by card 2248e5eb's deliberate revert. N=16, so the ranking is a hypothesis at the
+    file-wide N=60 bar; the pre-vs-radius gap is what the card rests on.
+  - **`bigufos=` is the rule's ONLY observable** -- a spared UFO fires whether or not the bot
+    could see it, moves no other counter and changes no pixel. Platforms alive at the boss kill,
+    same seeds: **0px 3.00 - 250px 1.83 - 9999 1.50**, monotone in the radius as the rule
+    predicts, and the boss died in 5 / 6 / 2 of those 8 seeds, i.e. the pre-card arm mostly does
+    not resolve the fight at all. Sparing EVERYTHING is not the answer either -- that is what the
+    interior optimum is made of.
+  Its three fixed lanes and its hard-coded X-600 landing column are avoided for the WHOLE
   manoeuvre (the boss is parked off-screen and stationary during the "Danger!" arrow, so neither
   the movement prediction nor the distance field can see it coming); escape is DOWNWARD out of a
   lane (UFOs enter from the top) and LEFT out of a landing.
@@ -2401,6 +2486,18 @@ the rest are tier-independent.
   and MEASURED (card 2248e5eb): removing it costs deaths on both rigs and takes deaths BY `UFO`
   from 132 to 356 on the spider rig** -- see the audit table below. `?aitopedgestrength=0` is the
   2008 arm; the generic 150px/strength-4 screen-bound push underneath it is untouched.
+  - **Its REACH is `100px`, not the `170` the audit table below measured (card 13960838).** The
+    push is LINEAR in the band, so at 170 it still voted 8.2 at Y=100 and 2.35 at Y=150 -- an
+    order of magnitude over the 0.8 powerup seek, which made every powerup in the upper quarter
+    of the screen unreachable and is the whole of "the AI won't pick up powerups". **Shrink the
+    REACH, never the strength**: the ceiling authority is what 2248e5eb measured, and at 100 it is
+    intact (18.0 at Y=10 against 18.8 before, still out-voting a lane escape's 18) while Y >= 100
+    becomes force-free. Spider rig, N=24 (seeds 1-12 x2, `ai_sweep.py`): pickups **48.7% -> 57.9%**
+    (the term-off control reaches 64.8%), deaths flat (3.94 -> 3.88, and the off control is
+    WORSE at 5.50, so 2248e5eb still holds), victories 5/16 -> 7/16, deaths by `UFO` 18 -> 15.
+    Level 1, N=8: pickups 84.7% -> 85.9%, deaths 8.75 -> 8.12, victories 0/8 -> 2/8, `UFO` 4 -> 1.
+    `?aitopedgepx=170` is the pre-card arm. **The four generic screen-edge repulsions are NOT
+    implicated and were not touched** -- they are verbatim 2008 (see "Not suspects" below).
 - **Every avoidance field here shares the `(1-t)^p` falloff shape** (`ThreatFieldStrength`) -- a
   flat push across a band fights the screen bounds instead of easing off once the ship is clear.
 - **Per-tier skill (card c10e3e7f) is keyed off `Settings.EffectiveDifficulty`, NOT
@@ -2495,12 +2592,12 @@ the rest are tier-independent.
     `effective=Easy` to `effective=Hard` as `Demo1` starts.
 - Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aireact=
   ?aigapmargin= ?aiscanrows= ?aicrosspenalty= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx=
-  ?aifieldsize= ?aifieldfall= ?aiseekapproach= ?aiseekpowerup= ?aipowerupreach= ?airepeldelta=
+  ?aifieldsize= ?aifieldfall= ?aiseekapproach= ?aistandoff= ?aiseekpowerup= ?aipowerupreach= ?airepeldelta=
   ?ainoisefloor= ?aiseekdeadzone= ?aiorbitlead= ?aiasteroidscale= ?aiasteroidrange=
   ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge= ?ailaneescape= ?aiconelead= ?aiconemaxlen=
   ?aiconewidth= ?aiconetaper= ?aiconefallalong= ?aiconefallacross= ?aiconescale= ?aiconespread=
   ?aiconewidthmin= ?aiwedgestrength= ?aiwedgefall= ?aitopedgepx= ?aitopedgestrength= ?ailazerpx=
-  ?ailazerstrength= ?ailazerdodge=`
+  ?ailazerstrength= ?ailazerdodge= ?aibigufopx=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
   A malformed value on any of them is REPORTED and ignored, never swallowed, per the file-wide
   value-carrying-flag convention (see "Debug flags & tuning conventions" above; cards 48b7c6b1 +
@@ -2642,6 +2739,11 @@ refuted and reverted.** Positive = that arm is worse than the shipped build of t
 | **top-edge push** (`170px` / strength `20`) | `?aitopedgestrength=0` | **+0.88 +- 0.52** | **+0.67 +- 0.64** | **KEPT** |
 | **beam field + sidestep** (`260px` / `14` / `7`) | `?ailazerpx=150&ailazerstrength=4&ailazerdodge=0` | +0.98 +- 0.65 | **-4.55 +- 0.69** | **REVERTED to 150 / 4 / 0** |
 
+**The table is HISTORY: the top-edge row's `170px` was later cut to `100px` (card 13960838), which
+is what the shipped build runs.** The row is what the KEEP verdict was measured on and stays as
+written; the reach change is documented in the top-edge bullet further up, and it does not disturb
+the verdict (the term-off control is still the worse arm at the new reach).
+
 - **The top-edge term is confirmed by its own stated mechanism, not just by the deaths column.**
   Removing it multiplies exactly the death it was added to prevent: deaths by `UFO` 132 -> 356 on
   the spider rig and 150 -> 212 on Level 1, because a ship pinned on the ceiling is exploded by
@@ -2649,7 +2751,8 @@ refuted and reverted.** Positive = that arm is worse than the shipped build of t
   zero) and rests on Level 1 agreeing independently plus that histogram; do not quote it alone.
 - **The beam field lost on the rig built around a beam, and the killer histogram says why**:
   `SpiderBoss(standing)` 290 -> 6 deaths. A 260px field around a beam that the AI is
-  *deliberately standing near* -- it spares one big UFO so the boss walks into the shot -- was
+  *deliberately standing near* -- it spares the distant big UFOs so the boss walks into their
+  shots (one UFO, when this was measured; a radius since card 2c74d5b7) -- was
   shoving the ship off the beam and into the stationary boss, i.e. re-creating card b56633fb's
   original complaint from the other direction. Victories 3/60 -> 24/60.
 - **Level 1 genuinely prefers the port values (+0.98 +- 0.65) and that regression ships**, stated

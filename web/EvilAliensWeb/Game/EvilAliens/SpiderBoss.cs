@@ -741,6 +741,22 @@ internal class SpiderBoss : AlienDrawableGameComponent
 			break;
 		}
 		state = SpiderBossState.dead;
+		// AI bench (card 2c74d5b7): how many big UFOs were still alive when the boss died -- the
+		// only observable the AI's big-UFO sparing rule has (PlayerShip.AiSparesBigUfo). Counted
+		// off the AI's OWN world model, so a type the bot cannot see is not counted here either.
+		// The scan is gated as well as the Note, so a shipped no-flag run does no extra work.
+		if (EvilAliensWeb.Compat.AiBench.Enabled)
+		{
+			int aliveBigUfos = 0;
+			foreach (AlienDrawableGameComponent scan in oracle.GetBaddies())
+			{
+				if (scan is UFO ufo && ufo.IsBig && !scan.IsDead)
+				{
+					aliveBigUfos++;
+				}
+			}
+			EvilAliensWeb.Compat.AiBench.NoteSpiderBossDeath(aliveBigUfos);
+		}
 		// Null on a puppet -- SpiderBossEvent is the only subscriber and the descriptor builds
 		// its copy through NewSpiderBoss/Setup, so the client never advances a level script here.
 		if (OnAlmostKilled != null)

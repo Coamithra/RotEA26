@@ -143,6 +143,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeAiShotReach(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         rc = ProbeAiSweptPathGuard(asm);
         if (rc != 0)
         {
@@ -677,6 +683,12 @@ internal static class Program
             new { Flag = "aiff",           Prop = "AiFastForward",         Good = "7",   Want = (object)7,     Baked = ""     },
             new { Flag = "aiseekpowerup",  Prop = "AiSeekPowerupWeight",  Good = "2.5", Want = (object)2.5f,  Baked = "0.8"  },
             new { Flag = "aiseekapproach", Prop = "AiSeekApproachWeight", Good = "2.6", Want = (object)2.6f,  Baked = "1.1"  },
+            // The hull-entry reach credit (card bb949dd9). 0 is a MEANINGFUL value (the pre-card
+            // centre-distance range test), so its guard refuses only a negative. Baked "" -- the
+            // default is the bare digit 1, which occurs elsewhere in the captured Parse/Hint
+            // output too easily for an absence check on it to mean anything (the aiscanrows/
+            // aicrosspenalty escape below).
+            new { Flag = "aishotreach",    Prop = "AiShotReachScale",      Good = "0.5", Want = (object)0.5f, Baked = ""     },
             new { Flag = "aipowerupreach", Prop = "AiPowerupReachPx",      Good = "444", Want = (object)444f,  Baked = "150"  },
             // The directional repellent shapes (card e425781b). The three on/off members of the
             // family -- ?aicone= ?aiwedge= ?ailaneescape= -- are deliberately absent, following
@@ -735,7 +747,7 @@ internal static class Program
 
         // The count is DERIVED from the table -- a literal here drifted once already.
         Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all " + rows.Length
-            + " knobs (cards 48b7c6b1 / 2248e5eb / 2c74d5b7)");
+            + " knobs (cards 48b7c6b1 / 2248e5eb / 2c74d5b7 / bb949dd9)");
 
         // One counter and its OWN first-problem detail per leg: a shared sink attaches the
         // diagnosis to whichever Check happens to print it, which in a mutation run put the only
@@ -1037,6 +1049,101 @@ internal static class Program
     // The repellent side is the SHIPPED ThreatFieldStrength, reflected rather than transcribed --
     // a mirrored curve here would agree with itself forever while the field drifted, and the whole
     // point of the design is that the two are solved against each other.
+    // ---- the shot-reach hull-entry credit (card bb949dd9) -----------------------------------
+    //
+    // PlayerShip.ShotReachCredit: the guaranteed distance from a boss's AIM POINT (Position) to
+    // its hull along any ray -- the MIN of the collision box's four face distances measured from
+    // Position, because the hull can be OFFSET from it (BrainBoss's box is centred 55*scale ABOVE
+    // Position). DoAIFire's range gate and the boss-approach anchor both add it to gun range.
+    // What is pinned: the real BrainBoss geometry (its CollisionType is consts + scale + Position,
+    // so an uninitialized instance yields the SHIPPED box with no content), which discriminates
+    // min-of-faces (80) from every plausible wrong spelling -- Width/2 (165), min(W,H)/2 (135),
+    // max face (190); the circle branch through the real JunkBoss; the ?aishotreach= scale arms
+    // including 0 = the pre-card centre test. The IsAiPriorityTarget SCOPING at the two call
+    // sites is wiring inside DoAIFire and stays a live-pass question (the spider rig's
+    // byte-identical A/B is the evidence there).
+    private static int ProbeAiShotReach(Assembly asm)
+    {
+        Console.WriteLine("[logic_probe] AI shot-reach hull-entry credit (card bb949dd9)");
+        Type ship = asm.GetType("EvilAliens.PlayerShip", true);
+        Type adc = asm.GetType("EvilAliens.AlienDrawableGameComponent", true);
+        Type brainT = asm.GetType("EvilAliens.BrainBoss", true);
+        Type junkT = asm.GetType("EvilAliens.JunkBoss", true);
+        Type circleT = asm.GetType("EvilAliens.CollisionSimpleCircle", true);
+        Type flags = asm.GetType("EvilAliensWeb.Compat.DebugFlags", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        const BindingFlags anyInstance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+        MethodInfo creditM = ship.GetMethod("ShotReachCredit", anyStatic);
+        PropertyInfo posP = adc.GetProperty("Position", anyInstance);
+        FieldInfo scaleF = adc.GetField("scale", anyInstance);
+        FieldInfo junkR = junkT.GetField("r", anyInstance);
+        FieldInfo junkC = junkT.GetField("c", anyInstance);
+        PropertyInfo scaleProp = flags.GetProperty("AiShotReachScale", anyStatic);
+        if (creditM == null || posP == null || scaleF == null || junkR == null || junkC == null || scaleProp == null)
+        {
+            Console.WriteLine("FAIL: could not reflect ShotReachCredit / Position / scale / JunkBoss.r/.c"
+                + " / DebugFlags.AiShotReachScale -- renamed or moved?");
+            return 2;
+        }
+
+        Type vec2 = posP.PropertyType;
+        object V(float x, float y) => Activator.CreateInstance(vec2, x, y);
+        float Credit(object baddy) => (float)creditM.Invoke(null, new object[] { baddy });
+
+        object brain = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(brainT);
+        scaleF.SetValue(brain, 1f);
+        posP.SetValue(brain, V(400f, 300f));
+
+        object savedScale = scaleProp.GetValue(null);
+        scaleProp.SetValue(null, null);
+        try
+        {
+            // 1. The shipped BrainBoss geometry: hw 165, hh 135, offset -55 -> faces from Position
+            // are 165/165 (x) and 190 up / 80 down. The credit is the DOWN face: the one distance a
+            // ray from any direction is guaranteed to travel before leaving the hull.
+            float brainCredit = Credit(brain);
+            Check("BrainBoss credit is the MIN face distance from Position (80), not a half-extent",
+                Math.Abs(brainCredit - 80f) < 0.001f,
+                "got " + brainCredit.ToString("0.0") + " -- Width/2 would read 165, min(W,H)/2 135,"
+                + " the max face 190");
+
+            // 2. It rides the boss's pulse: scale 1.1 moves every face by 10%.
+            scaleF.SetValue(brain, 1.1f);
+            float pulsed = Credit(brain);
+            Check("the credit scales with the boss's own pulse (scale 1.1 -> 88)",
+                Math.Abs(pulsed - 88f) < 0.001f, "got " + pulsed.ToString("0.0"));
+            scaleF.SetValue(brain, 1f);
+
+            // 3. The circle branch, through the real JunkBoss (circle at Position, radius r).
+            object junk = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(junkT);
+            junkC.SetValue(junk, Activator.CreateInstance(circleT, V(0f, 0f), 1f));
+            junkR.SetValue(junk, 60f);
+            posP.SetValue(junk, V(400f, 300f));
+            float junkCredit = Credit(junk);
+            Check("a circular hull credits its radius (JunkBoss r=60)",
+                Math.Abs(junkCredit - 60f) < 0.001f, "got " + junkCredit.ToString("0.0"));
+
+            // 4. ?aishotreach= scales it; 0 is the pre-card centre-range test. Set through the
+            // property the flag parser writes, restored (and the restore asserted) on the way out.
+            scaleProp.SetValue(null, 0.5f);
+            float halved = Credit(brain);
+            Check("?aishotreach=0.5 halves the credit", Math.Abs(halved - 40f) < 0.001f,
+                "got " + halved.ToString("0.0"));
+            scaleProp.SetValue(null, 0f);
+            float off = Credit(brain);
+            Check("?aishotreach=0 restores the pre-card centre test (credit 0)",
+                off == 0f, "got " + off.ToString("0.0"));
+        }
+        finally
+        {
+            scaleProp.SetValue(null, savedScale);
+        }
+        Check("the override was restored (a later probe must not inherit it)",
+            Equals(scaleProp.GetValue(null), savedScale), null);
+        return 0;
+    }
+
     private static int ProbeAiBossApproach(Assembly asm)
     {
         Type ship = asm.GetType("EvilAliens.PlayerShip", true);
@@ -1139,11 +1246,20 @@ internal static class Program
             {
                 foreach ((float body, float radius) in hulls)
                 {
+                // The hull-entry reach credit (card bb949dd9): the live anchor is
+                // gunRange + ShotReachCredit(boss) - body, where the credit is the hull's MIN
+                // face distance from Position, scaled by ?aishotreach=. Swept at both extremes --
+                // 0 (the ?aishotreach=0 arm and the pre-card behaviour) and the full radius (a
+                // centred square hull at scale 1, the largest credit the geometry can produce) --
+                // so every invariant below holds across the whole reachable anchor family. The
+                // degenerate (0,0) hull would sweep the same cell twice, hence the guard.
+                foreach (float entry in (radius > 0f) ? new[] { 0f, radius } : new[] { 0f })
+                {
                     float range = tierFieldPx[tier] + radius * sizeScale;
-                    float anchorRaw = life * bulletPerMs - body;
+                    float anchorRaw = life * bulletPerMs + entry - body;
                     float anchor = Math.Max(anchorRaw, minAnchor);
                     string where = (classic ? "classic curve, " : "") + "tier " + tier + " life " + life
-                        + "ms body " + body + "px"
+                        + "ms body " + body + "px entry " + entry.ToString("0") + "px"
                         + " (anchor " + anchor.ToString("0.0") + "px, field " + range.ToString("0") + "px)";
 
                     // 1. AT FIRING RANGE THE NET NEVER POINTS OUT. Where the repellent is still
@@ -1226,6 +1342,7 @@ internal static class Program
                         boundedDetail = where + ": " + A(1400f, anchor, range).ToString("0.00")
                             + " at 1400px reaches the threat field's " + MaxSteer;
                     }
+                }
                 }
             }
         }

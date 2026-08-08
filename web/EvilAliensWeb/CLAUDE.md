@@ -2361,6 +2361,21 @@ the rest are tier-independent.
   and MEASURED (card 2248e5eb): removing it costs deaths on both rigs and takes deaths BY `UFO`
   from 132 to 356 on the spider rig** -- see the audit table below. `?aitopedgestrength=0` is the
   2008 arm; the generic 150px/strength-4 screen-bound push underneath it is untouched.
+  **Since card 13960838 it YIELDS while the bot's live steer target is a powerup inside the
+  band** -- the push (20) outguns the powerup pull (max 4) + seek (0.8) at every point in the
+  band, so a band powerup was mathematically unreachable, and that is measurable: spider-rig
+  pickups 48.0% with the term on vs 63.6% with it off (seeds 1-8 x2). The stand-down is scoped
+  to the dash (the tick the powerup is collected or expires the detour ends and the push is
+  back; a boss-approach or partner-dock steerTarget write re-arms it the same tick), which is
+  what keeps card 2248e5eb's deaths verdict intact. Measured, seeds 1-8 x2 paired (N=16 --
+  steering runs; the N=60 protocol run is outstanding): spider pickups **48.0% -> 66.8%**
+  (129/269 -> 173/259; MORE than the term fully off, 63.6%, because the push still herds the
+  ship down the rest of the time) with deaths flat (3.50 vs 3.56, paired diff 0.06 +- 0.97,
+  win@147s vs 153s); level1 pickups flat (85.5% -> 85.4%) with deaths 7.75 vs 8.50 (within
+  SEM). The `?aitopedgeyield=0` arm reproduces the pre-card baseline digit for digit on the
+  same seeds (129/269, 8.50 deaths), so the seam is a faithful negative control.
+  `?aitopedgeyield=0` is the pre-card unconditional push -- the A/B arm, the
+  `?netstaleguard=0` idiom, out of `Active` like the rest of the `?ai*` family.
 - **Every avoidance field here shares the `(1-t)^p` falloff shape** (`ThreatFieldStrength`) -- a
   flat push across a band fights the screen bounds instead of easing off once the ship is clear.
 - **Per-tier skill (card c10e3e7f) is keyed off `Settings.EffectiveDifficulty`, NOT
@@ -2459,8 +2474,8 @@ the rest are tier-independent.
   ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
   ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge= ?ailaneescape= ?aiconelead= ?aiconemaxlen=
   ?aiconewidth= ?aiconetaper= ?aiconefallalong= ?aiconefallacross= ?aiconescale= ?aiconespread=
-  ?aiconewidthmin= ?aiwedgestrength= ?aiwedgefall= ?aitopedgepx= ?aitopedgestrength= ?ailazerpx=
-  ?ailazerstrength= ?ailazerdodge=`
+  ?aiconewidthmin= ?aiwedgestrength= ?aiwedgefall= ?aitopedgepx= ?aitopedgestrength=
+  ?aitopedgeyield= ?ailazerpx= ?ailazerstrength= ?ailazerdodge=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
   A malformed value on any of them is REPORTED and ignored, never swallowed, per the file-wide
   value-carrying-flag convention (see "Debug flags & tuning conventions" above; cards 48b7c6b1 +
@@ -2602,6 +2617,9 @@ refuted and reverted.** Positive = that arm is worse than the shipped build of t
 | **top-edge push** (`170px` / strength `20`) | `?aitopedgestrength=0` | **+0.88 +- 0.52** | **+0.67 +- 0.64** | **KEPT** |
 | **beam field + sidestep** (`260px` / `14` / `7`) | `?ailazerpx=150&ailazerstrength=4&ailazerdodge=0` | +0.98 +- 0.65 | **-4.55 +- 0.69** | **REVERTED to 150 / 4 / 0** |
 
+- **The top-edge term now YIELDS during a live powerup dash into the band** (card 13960838) --
+  see the top-edge bullet above for the mechanism and numbers; `?aitopedgestrength=0` remains
+  the whole-term 2008 arm and this A/B's verdict stands.
 - **The top-edge term is confirmed by its own stated mechanism, not just by the deaths column.**
   Removing it multiplies exactly the death it was added to prevent: deaths by `UFO` 132 -> 356 on
   the spider rig and 150 -> 212 on Level 1, because a ship pinned on the ceiling is exploded by

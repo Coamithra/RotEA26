@@ -315,7 +315,7 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   ?aiasteroidscale= ?aiasteroidrange= ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge=
   ?ailaneescape= ?aiconelead= ?aiconemaxlen= ?aiconewidth= ?aiconetaper= ?aiconefallalong=
   ?aiconefallacross= ?aiconescale= ?aiconespread= ?aiconewidthmin= ?aiwedgestrength=
-  ?aiwedgefall= ?aisweptmax= ?aitopedgepx= ?aitopedgestrength= ?ailazerpx= ?ailazerstrength=
+  ?aiwedgefall= ?aisweptmax= ?aitopedgepx= ?aitopedgestrength= ?aitopedgeyield= ?ailazerpx= ?ailazerstrength=
   ?ailazerdodge=`. Pair with `?aiplayer`.
   **`?aiwallnav2008=1` is NOT one of those knobs -- it swaps the wall-steering ALGORITHM** (card
   d79b7ea7): `findNextTileOnMap`'s per-tick left-vs-right re-decision and its ~6.6px probe,

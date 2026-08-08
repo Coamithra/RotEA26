@@ -269,6 +269,14 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 		}
 		bool flag = false;
 		flag |= inputHandler.Pressed(MyKeys.Enter) || inputHandler.Pressed(MyKeys.Esc);
+		// Web/PC port (card 22e324d6): a left mouse click -- or a touch tap, which arrives as the
+		// same MyKeys.Mouse1 -- advances the cast too. The 2008 build was Xbox-only and read no
+		// mouse at all (src_decompiled/EvilAliens/CastDisplayer.cs has no mouse anywhere), so the
+		// on-screen "(A) next" prompt had a controller answer and nothing else; StartScreen and
+		// SplashScene were given Mouse1 during the port for exactly this reason and this screen
+		// was the one left behind. RISING EDGE (`Pressed`), like every other advance here -- a
+		// held button must asplode one cast member, not the whole cast.
+		flag |= inputHandler.Pressed(MyKeys.Mouse1);
 		for (int i = 0; i < 4; i++)
 		{
 			flag |= inputHandler.PadPressed(PadKeys.Start, i);
@@ -446,6 +454,20 @@ public class CastDisplayer : DrawableGameComponent, IComponentWatcher
 				debrisrotationspeed[j] *= 0.5f;
 			}
 		}
+	}
+
+	// Which cast member is up, as DATA (`eaCast()` / `eval Cast`), card 22e324d6. The state
+	// machine is private and the ONLY thing a frame says about it is the drawn name, so a probe
+	// asserting that an input advanced the cast has nothing else to read -- and "the click did
+	// nothing" is precisely the silent failure this reports. `state` and `nextstate` are both
+	// here because an advance parks in `waiting` first: immediately after a click the member has
+	// not changed yet, and `next=` is what says the click landed.
+	public string CastReport()
+	{
+		return "state=" + state + " next=" + nextstate
+			+ " name=" + (string.IsNullOrEmpty(alienname) ? "(none)" : alienname)
+			+ " done=" + done
+			+ " showcase=" + (BrainShowcase ? "brain" : (CastShowcase ? "full" : "none"));
 	}
 
 	private void AsplodePlayer()

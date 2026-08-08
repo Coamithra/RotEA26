@@ -607,6 +607,10 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   `eaAward('Pacifist')` (pop an awardment banner now -- every real trigger is minutes deep
   behind a condition a rig cannot produce; see the awardment bullet under "Feature notes"),
   `eaBgCull()` (the background tile-cull oracle — run from inside a level),
+  `eaCast()` (which end-credits Cast member is up, what a pending advance is heading for, and
+  whether the screen is done -- card 22e324d6. The advance input leaves no other trace, so it is
+  the only way to tell a click that advanced the cast from one that was swallowed; reach the
+  screen with `?cast`),
   `eaTeamSeat()` (TeamChallenge's partner-seat resolver over every pad-connection mask -- pure,
   so it needs neither a level nor a gamepad),
   `eaBossTrain()` (the Boss Train's checkpoint/section oracle -- **destructive**, so run it in a
@@ -1025,6 +1029,15 @@ site now lives under:
     with `eaMouseAt` and clicks it, asserting via `eaMenuCensus` that the live menu goes back
     (with the same click at a bare spot as the negative control). So the back tip needs no Chrome
     pass; before the `eaMouseAt` seam it did, because `eaPress` could not move the pointer.
+- **`MyKeys.Mouse1` is a port ADDITION at every screen that takes it, and the list is short**:
+  `StartScreen` (Press Start), `SplashScene` (skip), `MenuSub1.HandleMouse` (menu select), the
+  back tip via its synthetic Esc, and — since card 22e324d6 — `CastDisplayer` (advance the
+  end-credits Cast, i.e. asplode the current member). The 2008 build is the XBOX one and reads no
+  mouse ANYWHERE, so none of these is a regression to hunt in `src_decompiled/` — a screen that
+  ignores clicks was simply never given the treatment. **`CreditsScene`'s own crawl deliberately
+  still does NOT take a click**: its advance key set calls `Terminate()`, so a stray click would
+  skip the whole end sequence rather than step one beat. Verify a click as DATA with `eaCast()` /
+  `eval Cast` on a `?cast` boot; pinned by `tools/headless/probes/cast_click.txt`.
 - **The main menu shifts its row list UP when it would not fit** (card 45c16ef6,
   `MenuSubWithSkull.RowsStartY`). `curY0` keys off the FULL entry count, which unlocking does not
   change, so the list only ever grew DOWNWARD and at 8 visible rows EXIT was drawn clipped off the

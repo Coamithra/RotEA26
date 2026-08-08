@@ -24,7 +24,8 @@ This file is how to *work* in the repo. Detail lives next to the code:
 ## Project tracking (Trello — local backend)
 
 A **local** (offline, file-backed) Trello board is the live tracker. It is NOT on trello.com — it
-lives in the `trello` CLI's local store at `C:\Users\coami\Dropbox\Programming\FakeTrelloData`.
+lives in the `trello` CLI's local store at `C:\Users\coami\Dropbox\Programming\TrelloBoards`
+(`trello local root` prints the authoritative path if it moves again).
 
 - **Board:** `RotEA26 — Evil Aliens Web Port` · id `10989a3d`.
 - **Always pass `--backend local --board 10989a3d`** (the CLI's default backend is `trello`, and

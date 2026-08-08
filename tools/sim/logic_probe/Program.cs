@@ -125,6 +125,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeAiTopEdge(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         rc = ProbeAiConeShape(asm);
         if (rc != 0)
         {
@@ -872,7 +878,7 @@ internal static class Program
             "SeekWeight", "DefaultSeekPowerupWeight",
             "DefaultPowerupReachPx", "DefaultRepulseCancelDelta", "DefaultSteerNoiseFloor",
             "DefaultSeekArriveDeadzonePx", "ShipMaxSpeed", "ShipDeceleration",
-            "SweepLaneAvoidStrength",
+            "SweepLaneAvoidStrength", "DefaultTopEdgeAvoidStrength",
             "DefaultLazerAvoidStrength", "DefaultLazerDodgeStrength"
         };
         var vals = new Dictionary<string, float>();
@@ -920,10 +926,13 @@ internal static class Program
         // The repellents' full-strength magnitudes. maxSteerStrength (4) is a DoAIMove local, so
         // the threat field's and the screen edges' shared peak is spelled here; the rest are
         // reflected.
-        // DefaultTopEdgeAvoidStrength is deliberately NOT in this min: it is added AFTER the low-pass
-        // and so never passes through RepulseCancelDelta at all. Folding it in would mix the two
-        // populations this card just separated, and it could not fail today (20 against a min of
-        // 4), which is exactly how a wrong invariant gets copied.
+        // DefaultTopEdgeAvoidStrength IS in this min since card 13960838, and this comment used to
+        // say the opposite for a reason that has stopped being true: the band was added to
+        // `direction` AFTER the low-pass, so it never passed through RepulseCancelDelta and folding
+        // it in would have mixed two populations. It now sums into `repel` with every other
+        // repellent, so it belongs to this one. It cannot BE the min today (20 against 4), i.e. the
+        // bound is vacuous for this member specifically -- it is here so the population matches the
+        // accumulator, not because it is at risk.
         // DefaultLazerDodgeStrength is folded in only WHEN IT IS ON: card 2248e5eb's measurement
         // took it to 0 and DoAIMove now skips the term outright. This bound is about a repellent
         // that PUSHES being silently eaten by a floor, and a term that is switched off pushes
@@ -932,7 +941,8 @@ internal static class Program
         // will remember: bake the sidestep back on and the bound re-arms itself.
         const float MaxSteerStrength = 4f;
         float weakestRepellent = Math.Min(MaxSteerStrength,
-            Math.Min(vals["SweepLaneAvoidStrength"], vals["DefaultLazerAvoidStrength"]));
+            Math.Min(vals["SweepLaneAvoidStrength"],
+                Math.Min(vals["DefaultTopEdgeAvoidStrength"], vals["DefaultLazerAvoidStrength"])));
         if (vals["DefaultLazerDodgeStrength"] > 0f)
         {
             weakestRepellent = Math.Min(weakestRepellent, vals["DefaultLazerDodgeStrength"]);
@@ -1528,6 +1538,148 @@ internal static class Program
     //
     // Reflection rather than a mirrored formula, deliberately: a transcription of the maths here
     // would agree with itself forever while the shipped shape drifted.
+    // Card 13960838 -- the top-edge danger band: its force PROFILE, the exclusion zone that
+    // profile implies for the powerup pull, and the `?aitopedgecompose=` placement seam.
+    //
+    // WHY A PROBE. The band is invisible: it draws nothing, moves no counter, and its effect on a
+    // pickup is arithmetic between two forces that are never reported side by side. The card was
+    // filed as "the AI won't pick up powerups"; what is assertable is the inequality underneath
+    // that complaint, and it is a pure function of two constants plus DoAIMove's
+    // `maxSteerStrength`. Everything below is DERIVED from those -- no crossover height is
+    // restated, so a later magnitude retune re-derives the bound instead of leaving a stale
+    // number pinned here.
+    private static int ProbeAiTopEdge(Assembly asm)
+    {
+        Type ship = asm.GetType("EvilAliens.PlayerShip", true);
+        Type flags = asm.GetType("EvilAliensWeb.Compat.DebugFlags", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo mag = ship.GetMethod("TopEdgeAvoidMagnitude", anyStatic);
+        MethodInfo parse = flags.GetMethod("Parse", anyStatic);
+        if (mag == null || parse == null)
+        {
+            Console.WriteLine("FAIL: could not reflect the targets (TopEdgeAvoidMagnitude="
+                + (mag != null) + " Parse=" + (parse != null) + ") -- renamed or moved?");
+            return 2;
+        }
+
+        var consts = new Dictionary<string, float>();
+        foreach (string n in new[] { "DefaultTopEdgeDangerPx", "DefaultTopEdgeAvoidStrength", "DefaultSeekPowerupWeight" })
+        {
+            FieldInfo f = ship.GetField(n, anyStatic);
+            if (f == null || !f.IsLiteral)
+            {
+                Console.WriteLine("FAIL: could not reflect PlayerShip." + n + " as a const -- renamed, moved, or no longer const?");
+                return 2;
+            }
+            consts[n] = (float)f.GetRawConstantValue();
+        }
+
+        float px = consts["DefaultTopEdgeDangerPx"];
+        float strength = consts["DefaultTopEdgeAvoidStrength"];
+        float seek = consts["DefaultSeekPowerupWeight"];
+        // `maxSteerStrength` is a DoAIMove LOCAL, so it is spelled here exactly as
+        // ProbeAiFieldComposition spells it. It is the ceiling of the powerup's approach pull
+        // (`MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, t)` at t=0) and the peak of
+        // each generic screen-edge push -- one number doing both jobs, which is the whole reason
+        // the band's 20 is not commensurable with anything else in the method.
+        const float MaxSteerStrength = 4f;
+        Func<float, float, float, float> M3 = (y, d, s) => (float)mag.Invoke(null, new object[] { y, d, s });
+        Func<float, float> M = y => M3(y, px, strength);
+
+        Console.WriteLine("[logic_probe] AI top-edge danger band (card 13960838)");
+
+        // 1. THE PROFILE. Full strength at the screen top, zero at the band's edge, LINEAR between
+        // -- not the `(1-t)^p` spike every threat field uses, because this band is a prior about
+        // where UFOs will appear rather than a field around something that already exists.
+        Check("the band is at full strength at the screen top",
+            Math.Abs(M(0f) - strength) < 1e-4f,
+            "M(0) = " + M(0f) + " vs DefaultTopEdgeAvoidStrength " + strength);
+        Check("the band is silent at and beyond its own depth",
+            M(px) == 0f && M(px + 1f) == 0f && M(600f) == 0f,
+            "M(" + px + ") = " + M(px) + ", M(" + (px + 1f) + ") = " + M(px + 1f)
+            + " -- a band still pushing past its stated depth is a band with no stated depth");
+        Check("the band is LINEAR in depth, not the field falloff",
+            Math.Abs(M(px * 0.5f) - strength * 0.5f) < 1e-3f
+                && Math.Abs(M(px * 0.25f) - strength * 0.75f) < 1e-3f,
+            "M(px/2) = " + M(px * 0.5f) + " (expected " + (strength * 0.5f) + "), M(px/4) = "
+            + M(px * 0.25f) + " (expected " + (strength * 0.75f) + ")");
+        // The guarded divisor. ?aitopedgepx=0 passes that flag's own `>= 0` range check, so this
+        // is a reachable configuration rather than a hypothetical.
+        Check("a zero band depth is silent rather than a division by zero",
+            M3(0f, 0f, strength) == 0f && M3(50f, 0f, strength) == 0f,
+            "M(0, dangerPx=0) = " + M3(0f, 0f, strength) + ", M(50, dangerPx=0) = " + M3(50f, 0f, strength));
+
+        // 2. THE EXCLUSION ZONE -- the card's complaint, as arithmetic. A powerup's pull cannot
+        // exceed MaxSteerStrength (its PowerCurve peak) plus the seek weight carrying its
+        // destination, so wherever the band exceeds that sum no attractor in DoAIMove can reach a
+        // powerup at all. The height is FOUND by scanning the real function rather than computed
+        // from a formula restated here, then cross-checked against the closed form -- so the two
+        // have to agree and neither is this probe's own private belief.
+        float maxPull = MaxSteerStrength + seek;
+        float scanned = -1f;
+        for (int i = 0; i <= 6000; i++)
+        {
+            float y = i * 0.1f;
+            if (M(y) <= maxPull) { scanned = y; break; }
+        }
+        float closedForm = px * (1f - maxPull / strength);
+        Check("the exclusion height agrees with its closed form",
+            scanned >= 0f && Math.Abs(scanned - closedForm) <= 0.11f,
+            "scanned " + scanned.ToString("0.00") + "px vs closed form " + closedForm.ToString("0.00")
+            + "px (dangerPx " + px + ", strength " + strength + ", max powerup pull " + maxPull + ")");
+        // THE FINDING, asserted as a property rather than as a number: at the shipped magnitudes
+        // the zone is NON-EMPTY -- there really is a strip of screen no attractor can win -- and it
+        // is a strict subset of the band, so the lower band is contestable. If a future retune ever
+        // makes the first half false, the card's mechanism is gone and this line is what says so.
+        Check("a non-empty exclusion zone exists at the shipped magnitudes",
+            closedForm > 0f && strength > maxPull,
+            "the band exceeds the strongest possible powerup pull (" + maxPull + ") for the top "
+            + closedForm.ToString("0.0") + "px of the screen -- inside it a pickup is arithmetically"
+            + " unreachable, which is what card 13960838 was reported for");
+        Check("the exclusion zone is a strict subset of the band",
+            closedForm < px,
+            "exclusion " + closedForm.ToString("0.0") + "px vs band depth " + px
+            + " -- were these equal the whole band would be an exclusion zone and the term would be"
+            + " a veto rather than a repellent");
+
+        // 3. THE PLACEMENT SEAM. `?aitopedgecompose=` is an on/off boolean of the ?netstaleguard=
+        // / ?netaimease= shape (it turns a shipped FIX off, so it defaults TRUE and only an
+        // explicit off spelling disables it). It is deliberately ABSENT from ProbeAiFlagRejection's
+        // and ProbeFlagRejectionSweep's tables -- both describe VALUE-CARRYING flags and their
+        // shared "names the value in force" leg does not describe an on/off spelling. This is its
+        // own leg, the ?ripplephase= precedent.
+        Func<string, string> run = query => RunParse(parse, query);
+        Func<bool> composes = () => (bool)flags.GetProperty("AiTopEdgeCompose", anyStatic).GetValue(null);
+        Check("it defaults to COMPOSED, so a shipped build sums the band with every other repellent",
+            composes(), "AiTopEdgeCompose = " + composes());
+        run("?aitopedgecompose=0");
+        Check("an explicit off spelling reaches the placement", !composes(),
+            "AiTopEdgeCompose = " + composes());
+        // Asserted while the flag is OFF, per this file's ordering lesson: a "does not change it"
+        // check run at the default would pass on a build whose parse case does nothing at all.
+        string bad = run("?aitopedgecompose=nope");
+        Check("an unrecognised value is REPORTED and changes nothing",
+            !composes() && bad.Contains("unknown ?aitopedgecompose=") && bad.Contains("POST-SMOOTHING"),
+            "AiTopEdgeCompose = " + composes() + " said: " + FirstLine(bad));
+        // THE SPELLING IS ONE-WAY, and that is the ?netstaleguard= convention rather than an
+        // omission: only an off spelling ever ASSIGNS, so nothing later in a query can quietly put
+        // a shipped fix back on. The distinction matters because it is the difference between this
+        // flag and a plain `IsOn(val)` boolean, and a build that "helpfully" added the on branch
+        // would look correct at a glance -- so it is pinned rather than left to the comment.
+        run("?aitopedgecompose=1");
+        Check("an explicit ON spelling does NOT reinstate it -- the flag is one-way", !composes(),
+            "AiTopEdgeCompose = " + composes()
+            + " -- ?netstaleguard= / ?netaimease= behave identically; a boot gets one Parse, so the"
+            + " only reachable meaning of an on spelling is 'leave the default alone'");
+        // Restored by reflection for the same reason ProbeAiWallScanFlags restores its overrides:
+        // the statics persist across Parse calls in one process, and no query can undo this one.
+        flags.GetProperty("AiTopEdgeCompose", anyStatic).SetValue(null, true);
+        Check("restored to COMPOSED on the way out", composes(),
+            "AiTopEdgeCompose = " + composes()
+            + " -- a later Probe* must not inherit a bug-reproduction placement");
+        return 0;
+    }
+
     private static int ProbeAiConeShape(Assembly asm)
     {
         Type ship = asm.GetType("EvilAliens.PlayerShip", true);

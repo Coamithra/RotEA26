@@ -1,0 +1,45 @@
+# PROBE: ?aitopedgecompose=0 really reaches the PRE-CARD placement (the A/B control)
+#
+# PINS:   card 13960838, the other half of ai_top_edge.txt -- read the two as one probe.
+#         The seam restores the band's pre-card home: added to `direction` AFTER the steering
+#         low-pass, so it is neither smoothed nor eligible for the repulsion-cancel floor. It is
+#         the arm every A/B of this card is measured against, in the ?netstaleguard=0 /
+#         ?netaimease=0 idiom, so a flag that PARSED but did not DISPATCH would quietly turn the
+#         whole comparison into the shipped build measured twice -- and the resulting table looks
+#         exactly like a real (small) result, which is the failure mode worth a probe.
+#
+# FAILURE MEANS: read WHICH line went red.
+#         [aitopedge] missing entirely -> DoAIMove never ran, so the expect-not below would have
+#                                passed on evidence it never had (README rule 1). Same causes as
+#                                the paired probe.
+#         "placement: composed"   -> THE REGRESSION: the flag is on the flags-active line but
+#                                DoAIMove still summed the band into `repel`. Every number taken
+#                                from this arm is measuring the shipped placement.
+#         aitopedgecompose=0 missing from the flags line -> the flag stopped parsing, or dropped
+#                                out of DebugFlags.Active. It MUST stay in Active: it reinstates
+#                                a defect, and Active is what refuses online play.
+#
+# NOTES:  Identical boot to the paired probe except for the flag itself, so the two differ in one
+#         variable. The `=0` spelling specifically -- the flag is one-way by the ?netstaleguard=
+#         convention (only an explicit off spelling assigns), which logic_probe's ProbeAiTopEdge
+#         pins; a bare `?aitopedgecompose` would leave the shipped placement in force and this
+#         probe would go red rather than silently measure the wrong arm.
+#         Mutation-tested by inverting the dispatch on the `repel` site (`if (!TopEdgeComposes)`),
+#         which turns the last two lines red. Note it turns the PAIRED probe red too -- both sites
+#         then test the same condition, so neither arm gets the placement it asked for. That is the
+#         honest result and not a weakness: the two probes are a pair, and the mutation the control
+#         catches ALONE is the one in the paired probe's note (b).
+#
+# eahl: --flags "?level=Level2&spiderboss&aiplayer&aibench&noattract&invuln&seed=1&difficulty=Very_Hard&aitopedgecompose=0"
+
+# The flag parsed AND survived into Active (the dump is gated on it). Asserted BEFORE the first
+# `mark` -- this is a BOOT line, so a `mark` above it discards the subject.
+expect      \[debug\] flags active:.*aitopedgecompose=0
+
+mark
+step 900 nodraw
+
+# ...and the pre-card placement is what actually steered.
+expect      \[aitopedge\] placement: post-smoothing
+expect-not  \[aitopedge\] placement: composed
+quit

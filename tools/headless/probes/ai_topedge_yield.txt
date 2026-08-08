@@ -1,0 +1,24 @@
+# PROBE: the top-edge push YIELDS during a powerup dash into the band (card 13960838)
+#
+# PINS:   PlayerShip.DoAIMove's top-edge yield -- the push stands down while the bot's LIVE
+#         steer target is a powerup inside the 170px band -- read through AiBench's `topyield=`
+#         counter, the yield's only observable (a suppressed push changes no pixel, and the
+#         next thing to notice would be a full ai_sweep campaign's pickup rate). Seed 3 fires
+#         it 18 ticks inside the first 60 sim-s, 5/5 identical runs; the assert is categorical
+#         (nonzero), not the count, per the ?seed= near-determinism caveat.
+# FAILURE MEANS: `topyield=0` -- the yield stopped firing: a new steerTarget writer landed
+#         without the powerupDetourY bookkeeping, the gate inverted, or the NoteTopEdgeYield
+#         call was dropped. Band powerups are then unreachable again (spider-rig pickups 48.0%
+#         against 66.8% with the yield, seeds 1-8 x2). A missing `deaths=` instead means the
+#         run never scored a ship -- a precondition failure, not the defect.
+# MUTATION: commenting out the NoteTopEdgeYield call (or gating the yield off) goes red on the
+#         `topyield=` line; ai_topedge_yield_absent.txt is the seam's other half.
+#
+# eahl: --flags "?level=Level2&spiderboss&aiplayer&aibench&noattract&difficulty=Very_Hard&seed=3"
+
+step 7200 nodraw
+mark
+eval AiBenchRow
+expect      deaths=
+expect      topyield=[1-9]
+quit

@@ -324,6 +324,21 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private static float TopEdgeAvoidStrength => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeAvoidStrength ?? DefaultTopEdgeAvoidStrength;
 
+	// THE YIELD (card 13960838): while the bot's LIVE steer target is a powerup INSIDE the band,
+	// the push stands down and what remains is exactly the 2008 treatment (the generic
+	// 150px/strength-4 screen-bound push below). Without it a band powerup is mathematically
+	// unreachable -- the push (20) outguns the powerup pull (max 4) plus the seek (0.8) at every
+	// point in the band -- and that costs real pickups where powerups linger up top: spider rig
+	// 48.0% -> 63.6% pickup with the whole term off (seeds 1-8 x2). Removing the term outright is
+	// NOT the fix (card 2248e5eb: deaths worsen on both rigs; a ceiling-pinned ship is exploded
+	// by spawning UFOs), so the stand-down is scoped to the dash: the tick the powerup is
+	// collected or expires, `oracle.GetPowerups()` stops returning it, the detour ends and the
+	// push is back. A later steerTarget writer (the boss approach, a partner dock) ending the
+	// detour re-arms it the same tick.
+	// ?aitopedgeyield=0 restores the unconditional push -- the pre-card arm, and the A/B seam
+	// this was measured against.
+	private static bool TopEdgeYieldEnabled => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeYield ?? true;
+
 	// Same, for the descent/climb column (the boss's standing box is 240px wide).
 	private const float VerticalLaneClearancePx = 240f;
 
@@ -1859,6 +1874,13 @@ public class PlayerShip : AlienDrawableGameComponent
 		// written a weight yet by then; the two station fallbacks are exempt because they run
 		// solely while steerTarget is still MaxValue.
 		float steerTargetWeight = SeekWeight;
+		// Y of the powerup the live detour targets, MaxValue while the target is anything else.
+		// Written by the powerup pass, CLEARED by every later steerTarget writer that can outrank
+		// it (boss approach, partner dock) -- it must track the LIVE target, or the top-edge
+		// yield below would stand the push down for a powerup the bot is no longer flying at.
+		// The two station fallbacks are exempt for steerTargetWeight's reason above: they run
+		// solely while steerTarget is still MaxValue, i.e. only when no powerup was chosen.
+		float powerupDetourY = float.MaxValue;
 		float dodgeAngle = 0f;
 		if (player == 0)
 		{
@@ -2116,6 +2138,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				steerTarget = powerup.Position;
 				steerTargetWeight = SeekPowerupWeight;
+				powerupDetourY = powerup.Position.Y;
 			}
 			// PowerupReachPx, not the 150px `steerRange` the 2008 code shared with the screen-edge
 			// margin -- see the const. Beyond this the powerup is still the steerTarget above, so
@@ -2176,6 +2199,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				steerTarget = haltingBoss.Position;
 				steerTargetWeight = pull;
+				powerupDetourY = float.MaxValue;
 			}
 		}
 		foreach (PlayerShip ship in oracle.GetShips())
@@ -2188,6 +2212,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				// would fly the DETOUR at the approach's weight -- the one case where "leave it
 				// at the default" and "leave it at whatever the last writer set" differ.
 				steerTargetWeight = SeekWeight;
+				powerupDetourY = float.MaxValue;
 			}
 		}
 		if (steerTarget.X > 2000f && !collection.ContainsType<Floor>() && connectors.Count == 0)
@@ -2350,7 +2375,16 @@ public class PlayerShip : AlienDrawableGameComponent
 		float topEdgePx = TopEdgeDangerPx;
 		if (topEdgePx > 0f && base.Position.Y < topEdgePx)
 		{
-			direction += new Vector2(0f, TopEdgeAvoidStrength * (1f - base.Position.Y / topEdgePx));
+			if (TopEdgeYieldEnabled && powerupDetourY < topEdgePx)
+			{
+				// The bench note is the yield's ONLY observable -- a suppressed push changes no
+				// pixel -- and it is what the ai_topedge_yield probe pair asserts on.
+				EvilAliensWeb.Compat.AiBench.NoteTopEdgeYield(this);
+			}
+			else
+			{
+				direction += new Vector2(0f, TopEdgeAvoidStrength * (1f - base.Position.Y / topEdgePx));
+			}
 		}
 		if (hasWall)
 		{

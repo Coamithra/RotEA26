@@ -1,0 +1,22 @@
+# PROBE: ?aitopedgeyield=0 restores the unconditional push -- the counter cannot move
+#
+# PINS:   the off arm of card 13960838's A/B seam: with the yield disabled the top-edge push
+#         never stands down, so `topyield=` MUST read 0 on the exact boot where
+#         ai_topedge_yield.txt reads nonzero. The pair together proves the seam DISCRIMINATES
+#         -- the ai_wallnav_2008.txt / _absent.txt shape, because an arm that quietly measured
+#         the shipped code twice would still print a plausible sweep table.
+# FAILURE MEANS: `topyield=` nonzero with the flag off -- the flag no longer gates the yield
+#         (the parse case was dropped, or the gate stopped consulting it); every future
+#         `noyield=` sweep arm is then mislabelled and measures the yield-on build. The
+#         `unknown ?aitopedgeyield` line appearing instead means the parse REJECTED a valid 0.
+# MUTATION: hard-wiring TopEdgeYieldEnabled to true goes red on the `topyield=0` line.
+#
+# eahl: --flags "?level=Level2&spiderboss&aiplayer&aibench&noattract&difficulty=Very_Hard&seed=3&aitopedgeyield=0"
+
+step 7200 nodraw
+mark
+eval AiBenchRow
+expect      deaths=
+expect      topyield=0
+expect-not  unknown \?aitopedgeyield
+quit

@@ -77,6 +77,12 @@ internal static class AiBench
 		// PowerupsSpawned below: a pickup COUNT alone cannot tell "the bot ignores powerups"
 		// from "this run dropped two".
 		public int Pickups;
+
+		// Ticks the top-edge push stood down for a live powerup dash into the band (card
+		// 13960838). The yield's ONLY observable: suppressing a push changes no pixel, so
+		// without this a yield that silently stopped (or never) firing is invisible until a
+		// full sweep notices the pickup rate moved.
+		public int TopEdgeYieldTicks;
 		// The boss-approach term (card 31ceb6ff), measured where it acts. `idle%` and `prog` are
 		// both too far downstream to see it: a boss fight has a dozen other things pushing, so
 		// the outcome moves for reasons that have nothing to do with whether the ship CLOSED.
@@ -354,6 +360,17 @@ internal static class AiBench
 		Rec(ship).Pickups++;
 	}
 
+	// PlayerShip.DoAIMove, the top-edge band — the yield (card 13960838) suppressed the push
+	// this tick because the ship's live steer target is a powerup inside the band.
+	internal static void NoteTopEdgeYield(PlayerShip ship)
+	{
+		if (!Enabled)
+		{
+			return;
+		}
+		Rec(ship).TopEdgeYieldTicks++;
+	}
+
 	// Powerup.Initialize — a pickup entered the world. Run-wide rather than per ship: nothing
 	// about a spawn belongs to a slot, and both ships compete for the same drop.
 	internal static void NotePowerupSpawned()
@@ -522,6 +539,9 @@ internal static class AiBench
 			// Both halves stay, because the rate alone hides "0 of 0".
 			sb.Append(" pickups=").Append(r.Pickups).Append('/').Append(powerupsSpawned)
 				.Append('(').Append(Fmt((powerupsSpawned > 0) ? (100.0 * r.Pickups / powerupsSpawned) : 0.0, 0)).Append("%)");
+			// Always printed too, and for the same reason as pickups: `topyield=0` under
+			// `?aitopedgeyield=0` is the negative control's whole assertion (card 13960838).
+			sb.Append(" topyield=").Append(r.TopEdgeYieldTicks);
 			if (r.BossTicks > 0)
 			{
 				sb.Append(" boss=").Append(Fmt(r.BossDistTotal / r.BossTicks, 0)).Append("px");
@@ -709,6 +729,7 @@ internal static class AiBench
 		// omitted key, so a consumer never has to tell "no deaths" from "old build".
 		sb.Append(" pickups=").Append(r.Pickups);
 		sb.Append(" poffered=").Append(powerupsSpawned);
+		sb.Append(" topyield=").Append(r.TopEdgeYieldTicks);
 		sb.Append(" boss=").Append(Fmt((r.BossTicks > 0L) ? (r.BossDistTotal / r.BossTicks) : 0.0, 0));
 		sb.Append(" bossfar=").Append(Fmt((r.BossTicks > 0L) ? (100.0 * r.BossOutOfRangeTicks / r.BossTicks) : 0.0, 0));
 		sb.Append(" killers=").Append((r.Killers.Count > 0) ? KillerHistogram(r) : "none");

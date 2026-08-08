@@ -320,7 +320,21 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private static float TopEdgeDangerPx => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeDangerPx ?? DefaultTopEdgeDangerPx;
 
-	public const float DefaultTopEdgeAvoidStrength = 20f;
+	// 20 -> 12 (card 13960838). `maxSteerStrength` is 4, and 4 is ALSO the ceiling of the powerup
+	// approach pull, so at 20 the band out-voted the strongest pull possible for the top
+	// `170 * (1 - 4.8/20)` = 129px of the screen -- a strip where a pickup was not unlikely but
+	// arithmetically unreachable, which is the card's complaint. At 12 that strip is 102px, i.e.
+	// NARROWED, not removed: a band that could never out-vote a powerup would not deter a ship
+	// from the spawn line either, which is what card 2248e5eb measured this term as being for.
+	//
+	// MEASURED, and read the direction of the evidence rather than the number: N=16 paired by seed
+	// (seeds 1-8 x2), pickups 45.4% -> 55.7% spider and 52.4% -> 57.4% brainboss, deaths
+	// -1.00 +- 0.84 and -0.19 +- 0.66. **12 rather than something lower is deliberate.**
+	// 2248e5eb's cost for dropping the band outright was +0.67..+0.88 deaths, which is INVISIBLE
+	// at this sweep's ~0.8 SEM -- so a value that merely looks flat on deaths here is not evidence
+	// of being safe, and the conservative pick is the highest strength that recovers most of the
+	// pickup gain. The N=60 gate is the arbiter. `?aitopedgestrength=0` remains the 2008 arm.
+	public const float DefaultTopEdgeAvoidStrength = 12f;
 
 	private static float TopEdgeAvoidStrength => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeAvoidStrength ?? DefaultTopEdgeAvoidStrength;
 
@@ -328,16 +342,19 @@ public class PlayerShip : AlienDrawableGameComponent
 	// repellent: upstream of the cancellation floor and of the steering low-pass. False =
 	// `?aitopedgecompose=0`, the pre-card placement, straight into `direction` AFTER the low-pass.
 	//
-	// The old placement is why the card was filed. The strength above is 5x `maxSteerStrength`,
-	// and `maxSteerStrength` is ALSO the ceiling of the powerup pull a few hundred lines up -- so
-	// inside the band the two are not competing forces at all, they are a force and a rounding
-	// error, and no attractor in the method can survive the top of the screen. Bypassing the
-	// low-pass made it worse than the ratio suggests: every other vote is smoothed toward its
-	// sustained value while this one lands whole on the frame it is computed.
+	// The old placement is why the card was filed. `maxSteerStrength` is ALSO the ceiling of the
+	// powerup pull a few hundred lines up, so at the pre-card strength of 20 the two were not
+	// competing forces at all, they were a force and a rounding error, and no attractor in the
+	// method could survive the top of the screen. Bypassing the low-pass made it worse than the
+	// ratio suggests: every other vote is smoothed toward its sustained value while this one lands
+	// whole on the frame it is computed.
 	//
-	// It is a PLACEMENT change, not a magnitude one -- 170px and 20 are card 2248e5eb's measured
-	// values and are untouched, so the UFO-spawn protection that audit validated is intact
-	// wherever nothing is competing for the band. What changes is that something CAN now compete.
+	// PLACEMENT AND MAGNITUDE ARE SEPARATE CHANGES AND ONLY THE SECOND MOVED THE PICKUP RATE.
+	// This one buys the ability to argue with the band at all -- under the old placement no
+	// strength above 4 could be out-voted, so retuning it would have been meaningless. What the
+	// measurement then showed is that the rate tracks the strength (see DefaultTopEdgeAvoidStrength
+	// for the table and the 20 -> 12 that came with it), while composing it is what carries the
+	// death improvement. Do not collapse the two into one claim.
 	private static bool TopEdgeComposes => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeCompose;
 
 	// One latch PER SITE for the `[aitopedge]` line, keyed on the placement name. Static, so each

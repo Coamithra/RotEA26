@@ -1,10 +1,19 @@
 # PROBE: the top-edge danger band is COMPOSED with the other repellents (the shipped placement)
 #
-# PINS:   card 13960838. The band is 5x `maxSteerStrength`, and `maxSteerStrength` is also the
-#         ceiling of the powerup approach pull -- so where the band lands in DoAIMove decides
-#         whether a pickup near the top of the screen is reachable at all. It used to be added to
-#         `direction` AFTER the steering low-pass, i.e. neither damped nor eligible for the
-#         repulsion-cancel floor; it now sums into `repel` with every other repellent.
+# PINS:   card 13960838, BOTH halves of it -- the placement and the magnitude.
+#         `maxSteerStrength` (4) is the ceiling of the powerup approach pull, so a band several
+#         times that size decides whether a pickup near the top of the screen is reachable at all,
+#         and where the band lands in DoAIMove decides whether it can be argued with. It used to
+#         be strength 20 added to `direction` AFTER the steering low-pass -- neither damped nor
+#         eligible for the repulsion-cancel floor, and unbeatable at any strength above 4. It now
+#         sums into `repel` with every other repellent at strength 12.
+#
+#         THE VALUES IN THE `expect` BELOW ARE 170/12 -- 170px is card 2248e5eb's measured depth,
+#         12 is card 13960838's measured strength. **20 was 2248e5eb's** and is what this probe
+#         asserted until the magnitude was re-measured; do not "restore" it. 12 was chosen as the
+#         highest strength recovering most of the pickup gap (spider 45.4% -> 55.7%, brainboss
+#         52.4% -> 57.4%, deaths -1.00 +- 0.84 / -0.19 +- 0.66) at N=16 directional, with the N=60
+#         sweep as the arbiter.
 #
 #         That is a PLACEMENT, and placements fail silently. Both arms compile, both boot, both
 #         fly, and `[debug] flags active` reports only the PARSE -- so a build whose branch went
@@ -24,9 +33,10 @@
 #         "placement: post-smoothing" -> THE REGRESSION: an ordinary boot is flying the pre-card
 #                                placement, so the band is once again vetoing every attractor in
 #                                its own 170px.
-#         band=/strength= changed -> card 2248e5eb's measured magnitudes were retuned. Not
-#                                necessarily wrong, but its N=60 verdict was taken at 170/20 and
-#                                does not transfer; re-measure before believing a bench number.
+#         band=/strength= changed -> the magnitudes were retuned again. Not necessarily wrong, but
+#                                no existing verdict transfers: 2248e5eb's N=60 keep-or-drop was
+#                                taken at 170/20 and 13960838's pickup figures at 170/12.
+#                                Re-measure before believing a bench number.
 #         aitopedgecompose=0 on the flags line -> the seam is being set by something other than
 #                                the URL, which is how a deliberate bug repro reaches a player.
 #
@@ -62,6 +72,6 @@ mark
 step 900 nodraw
 
 # ...and the composed placement is what actually steered.
-expect      \[aitopedge\] placement: composed band=170px strength=20
+expect      \[aitopedge\] placement: composed band=170px strength=12
 expect-not  \[aitopedge\] placement: post-smoothing
 quit

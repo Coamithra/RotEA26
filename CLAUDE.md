@@ -332,15 +332,16 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   **`?aitopedgecompose=0` is a PLACEMENT, not a magnitude** (card 13960838): it puts the top-edge
   danger band's push back where it was, into `direction` AFTER the steering low-pass, so it is
   neither damped nor eligible for the repulsion-cancel floor. It ships summed into `repel` with
-  every other repellent. The band is strength 20 against a `maxSteerStrength` of 4, and 4 is also
+  every other repellent. The band was strength 20 against a `maxSteerStrength` of 4, and 4 is also
   the CEILING of the powerup approach pull -- so under the old placement no attractor could win
   the top **129px** of the screen and a pickup there was arithmetically unreachable, which is what
-  the card was reported for. `?aitopedgestrength=`/`?aitopedgepx=` already reach the magnitudes
+  the card was reported for. **The same card took the strength 20 -> 12**, narrowing that strip to
+  **102px** rather than removing it. `?aitopedgestrength=`/`?aitopedgepx=` already reach the magnitudes
   (and `=0` there is card 2248e5eb's 2008 arm); no combination of them expresses the placement.
   **The placement alone does NOT move the pickup rate** -- it fixes the composition defect that
-  made the band unbeatable at any strength above 4, and the rate itself tracks the MAGNITUDE, which
-  is unchanged pending an N=60 verdict. Table in web CLAUDE.md; do not quote this card as having
-  fixed the powerup complaint.
+  made the band unbeatable at any strength above 4, and the rate itself tracks the MAGNITUDE. So
+  the two ship together, and only the second addresses the powerup complaint. Both rest on N=16
+  directional evidence with the N=60 scoring pass as the arbiter. Table in web CLAUDE.md.
   **Another deliberate bug reproduction** (the `?nethitstop=1` / `?netstaleguard=0` /
   `?netaimease=0` idiom), IN `DebugFlags.Active` for that reason, and one-way like its siblings --
   it turns a shipped fix off, so it DEFAULTS TRUE and only an explicit off spelling assigns.

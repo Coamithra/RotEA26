@@ -310,7 +310,7 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   MessageChannel to ~1Hz, so any rendered soak measures nothing. `?aiff=<n>` is the watchable
   fast-forward (n sims per drawn frame, each at a synthesised 60Hz dt). Tuning overrides
   `?aismooth= ?aismoothurgent= ?aireact= ?aigapmargin= ?aiscanrows= ?aicrosspenalty=
-  ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall= ?aiseekapproach=
+  ?aithreatlead= ?aibossbias= ?aigunhull= ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall= ?aiseekapproach=
   ?aiseekpowerup= ?aipowerupreach= ?airepeldelta= ?ainoisefloor= ?aiseekdeadzone=
   ?aiasteroidscale= ?aiasteroidrange= ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge=
   ?ailaneescape= ?aiconelead= ?aiconemaxlen= ?aiconewidth= ?aiconetaper= ?aiconefallalong=

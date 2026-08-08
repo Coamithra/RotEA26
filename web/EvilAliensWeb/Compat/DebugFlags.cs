@@ -1434,6 +1434,16 @@ namespace EvilAliensWeb.Compat
 		// All card ada9e839 -- see PlayerShip.DefaultSeekPowerupWeight for the history.
 		public static float? AiSeekPowerupWeight { get; private set; }
 
+		// ?aigunhull=<0..1>     how much of a target's own hull radius counts toward gun reach
+		//                       (card bb949dd9). A bullet only has to reach the HULL, so the
+		//                       reach is `bullet travel + hitRadius`; this scales that credit.
+		//                       `0` restores the pre-card centre-distance fire gate AND the
+		//                       pre-card boss standoff -- the negative control, since the
+		//                       anchor is derived from the same helper. A tuning seam rather
+		//                       than a bug reproduction, so it is OUT of Active (?aisweptmax=
+		//                       precedent). See PlayerShip.AiGunReachPx.
+		public static float? AiGunHullCredit { get; private set; }
+
 		public static float? AiSeekApproachWeight { get; private set; }
 
 		public static float? AiPowerupReachPx { get; private set; }
@@ -3251,6 +3261,17 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(AiSeekPowerupWeight ?? EvilAliens.PlayerShip.DefaultSeekPowerupWeight));
+					}
+					break;
+				case "aigunhull":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aigh) && aigh >= 0f)
+					{
+						AiGunHullCredit = MathHelper.Min(aigh, 1f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiGunHullCredit ?? EvilAliens.PlayerShip.DefaultGunHullCredit));
 					}
 					break;
 				case "aiseekapproach":

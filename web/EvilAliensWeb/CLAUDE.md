@@ -2106,7 +2106,7 @@ the rest are tier-independent.
     the other.
   - Flags: `?airepeldelta= ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
     ?aiasteroidfall= ?aievade=`, the cone/wedge family above, plus
-    `?aiseekapproach= ?aiseekpowerup= ?aipowerupreach=`. Wiring that `logic_probe` cannot reach is
+    `?aiseekapproach= ?aiseekpowerup= ?aipowerupreach= ?aigunhull=`. Wiring that `logic_probe` cannot reach is
     covered by `tools/headless/probes/ai_boss_approach.txt`.
   - **THE BOSS APPROACH IS SOLVED AGAINST THE BOSS'S OWN REPELLENT, with an INVERTED falloff**
     (card b56633fb, `PlayerShip.BossApproachWeight`). `DefaultSeekApproachWeight` 1.1 was a
@@ -2116,8 +2116,8 @@ the rest are tier-independent.
     AWAY from its own destination and `bossfar` read ~99% forever. There is no constant now, and
     no standoff point: the target is the BOSS, and the weight `A(d)` is recomputed every tick.
     - **The shape is upside down on purpose** -- `A` GROWS with distance and quiets to ~0 inside
-      firing range, anchored so `A(r*) = repel(r*)` at `r* = the live max bullet range` (gun range
-      minus the boss's own body term, in edge space). So the net crosses zero exactly where the
+      firing range, anchored so `A(r*) = repel(r*)` at `r* = the live max gun REACH` (which since card
+      bb949dd9 credits the boss's own hull radius, converted into edge space by its body term). So the net crosses zero exactly where the
       ship can shoot from, the whole-sum floor turns that crossing into a parked BAND, and outside
       it the attractor always outweighs the repellent **by shape rather than by a solved constant**
       -- which is what makes it survive a Range powerup, including one out-ranging the threat field
@@ -2125,9 +2125,11 @@ the rest are tier-independent.
     - **The band must stay wider than the ship's 11.3px stopping distance**, or it coasts through
       its own equilibrium. That is what damps the exponent: `k = min(1, budget * r* / w)` with the
       budget derived from that stopping distance and the repellent's real slope. `k = 1` for every
-      boss, tier and weapon in the game **except BrainBoss up close** -- its hull is 233->257px of
-      body term against a 351px gun range, which undamped bands 13.5px falling to 10.0px at its
-      pulse peak. Do not delete the damping as dead code.
+      boss, tier and weapon in the game, and since card bb949dd9 for BrainBoss up close too --
+      its hull (233->257px of body term against a 351px bullet travel) used to leave r* at
+      94-118px, which undamped bands 13.5px falling to 10.0px at its pulse peak; the hull credit
+      moves that r* to ~276px. The damping is therefore INERT at every shipped configuration and
+      is still the BOUND -- do not delete it as dead code.
     - **MEASURED (eahl, Very_Hard, paired seeds 1-16 x2, N=32 per side) -- PHANTOM-ERA, so read
       the ratios and not the absolutes** (card 05a2b818). The re-baseline confirms the mechanism
       survives both PR #298 and the field-range revert: `bossfar` still sits at 25-27% on the
@@ -2154,6 +2156,58 @@ the rest are tier-independent.
       `logic_probe`'s **`ProbeAiBossApproach`** pins that plus the crossing, the band bound over
       every tier x weapon x boss hull, the self-limiting interior and the pre-card configuration as
       a negative control; `tools/headless/probes/ai_boss_approach.txt` pins the wiring.
+  - **A BULLET ONLY HAS TO REACH THE HULL, so gun reach credits the target's own radius** (card
+    bb949dd9, `PlayerShip.AiGunReachPx`). Both the fire gate and the anchor above measured range
+    to the target's CENTRE -- the 2008 test verbatim, and harmless in 2008 because nothing
+    POSITIONED the ship off it. The port's approach term is anchored on that same test, so the
+    ship parked where its CENTRE distance equalled the bullet's travel and threw the whole hull
+    away: measured `boss=159px` of edge distance on `?level=Level2&marsboss` against a 176px
+    corner term, i.e. ~124px closer than it could have shot from, and worse on BrainBoss
+    (r* was 118px). The reach is now `bullet travel + the target's hull radius`, one rule with no
+    per-type code, shared by the gate and the anchor so they cannot drift.
+    - **The credit is the INSCRIBED half-extent (`ThreatRadius`), not the sqrt(2) corner term.**
+      The corner term is the hull's radius along the diagonal only, so crediting it would claim
+      reach the bullet does not have on an axis approach. It also keeps the reach self-limiting
+      against the aim spread: at Very_Hard's PI/12 a shot at the edge of the cone stops striking
+      a 124px-half MarsBoss hull beyond ~480px of centre distance, and the inscribed credit puts
+      the gate at 475.
+    - **IT SPLIT THE TERM INTO TWO REGIMES, and the old "a COMMITMENT outranks a DETOUR"
+      invariant now holds in only one of them. That is accepted, MEASURED, and must not be
+      "restored" with a clamp.** Where the boss's repellent is still audible at r* (90 of the
+      probe's 500 swept combinations) nothing changes: the crossing is exact and the pull outside
+      r* out-votes a 0.8 powerup seek. Where r* has moved out past the field's audible range the
+      weight floors at `DefaultSteerNoiseFloor` and a live powerup detour out-votes the boss --
+      the bot fetches the pickup from a safe standoff and comes back, and what keeps the level
+      advancing is the `X > 2000` sentinel (with nothing else chosen the boss takes the wheel at
+      any weight). **A clamp on the vote is not available**: `steerTargetWeight` IS the pull
+      magnitude, so clamping it moves the equilibrium back inward and reintroduces exactly the
+      solved-constant-plus-discontinuity this term was designed to remove. Audibility does not
+      imply the out-vote either -- audible needs w >= 0.2, out-voting at 1.5x r* needs w >= 0.533
+      -- so the scoped-down version of the old check is not a property of the mechanism, and
+      `ProbeAiBossApproach` asserts non-decreasing growth plus the sentinel instead.
+    - **MEASURED, and this is DIRECTIONAL (N=32: seeds 1-8 x2, not the N=60 floor).** eahl,
+      Very_Hard, `?invuln` OFF, 300s, `?aigunhull=0` (the pre-card gate) as the paired arm;
+      positive = the pre-card build is worse.
+
+      | rig | deaths (shipped vs pre-card) | boss= | bossfar | idle% |
+      |---|---|---|---|---|
+      | `?level=Level3&brainboss` | **3.12 vs 5.44, +2.31 +- 0.38** | 189 vs 109px | 0.9% vs 27.4% | 0.6 vs 15.0 |
+      | `?level=Level2&marsboss` | 11.50 vs 12.00, +0.50 +- 2.15 (n.s.) | 168 vs 161px | 0.9% vs 20.0% | 0.8 vs 17.2 |
+
+      Time-to-victory improved on marsboss (155s vs 181s at 8/16 victories both arms), so
+      standing further out is not costing kill speed. Level 1 and the spider rig are flat within
+      SEM at N=16, and `SpiderBoss(standing)` did not rise. `?aigunhull=0` is the A/B seam and a
+      tuning knob rather than a bug reproduction, so it stays out of `DebugFlags.Active`.
+    - **THE SPIDER RIG HAS NO `boss=` SIGNAL AT ALL, structurally** -- `SpiderBoss` is excluded
+      from `IsAiPriorityTarget` (bullet above), so no halting boss exists there and the bench
+      reads `boss=0 bossfar=0`. It is a DEATHS / `SpiderBoss(standing)` regression rig, never a
+      boss-distance one; the two boss-approach rigs are `marsboss` (added to `ai_sweep.py`'s
+      presets by this card) and `brainboss`.
+    - **The exponent damping is now INERT at every shipped configuration and MUST NOT be deleted
+      as dead code.** It existed for BrainBoss up close, whose r* was 94-118px; the hull credit
+      puts that at ~276px and the slope budget clears `k = 1` by ~4x. It is the BOUND, not a
+      tuning value -- `?aifieldpx=`, `?aigunhull=` and any wider hull can still drive r* down,
+      and the probe asserts the band over that whole domain rather than over the shipped point.
   - **Boss PROXIMITY is descriptive, never a gate.** `bossfar%` and `boss=<px>` describe where the
     ship is; the bot moving closer to a boss to dodge, collect or line up a shot is the field
     working. Gate boss work on OUTCOMES -- `SpiderBoss(standing)` deaths -- not on distance.
@@ -2454,7 +2508,7 @@ the rest are tier-independent.
     attract-demo case means booting `?menu&aibench&difficulty=Easy` and watching it flip from
     `effective=Easy` to `effective=Hard` as `Demo1` starts.
 - Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aireact=
-  ?aigapmargin= ?aiscanrows= ?aicrosspenalty= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx=
+  ?aigapmargin= ?aiscanrows= ?aicrosspenalty= ?aithreatlead= ?aibossbias= ?aigunhull= ?aiaim= ?aifieldpx=
   ?aifieldsize= ?aifieldfall= ?aiseekapproach= ?aiseekpowerup= ?aipowerupreach= ?airepeldelta=
   ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
   ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge= ?ailaneescape= ?aiconelead= ?aiconemaxlen=

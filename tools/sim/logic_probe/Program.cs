@@ -668,6 +668,7 @@ internal static class Program
             // fixed-radius deadzone), so its guard refuses only a negative -- the ?aisweptmax=
             // shape this table's negative leg already expects.
             new { Flag = "aiseeklead",     Prop = "AiSeekLeadMs",          Good = "222", Want = (object)222f,  Baked = "125"  },
+            new { Flag = "aiseekcalm",     Prop = "AiSeekCalmMs",          Good = "2500",Want = (object)2500f, Baked = "1500" },
             new { Flag = "aireact",        Prop = "AiWallReactionMs",      Good = "333", Want = (object)333f,  Baked = "420"  },
             new { Flag = "aigapmargin",    Prop = "AiGapSwitchMargin",     Good = "7",   Want = (object)7f,    Baked = "1.5"  },
             new { Flag = "aiscanrows",     Prop = "AiWallScanRows",        Good = "9",   Want = (object)9,     Baked = ""     },
@@ -734,7 +735,7 @@ internal static class Program
             return 2;
         }
 
-        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 37 knobs (cards 48b7c6b1 / 2248e5eb / fd126847)");
+        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 38 knobs (cards 48b7c6b1 / 2248e5eb / fd126847)");
 
         // One counter and its OWN first-problem detail per leg: a shared sink attaches the
         // diagnosis to whichever Check happens to print it, which in a mutation run put the only
@@ -1055,6 +1056,11 @@ internal static class Program
         {
             new { Label = "radial approach from 300px", X = 300f, Y = 0f, VelAngle = (float)Math.PI },
             new { Label = "oblique pass at 80px", X = 80f, Y = 0f, VelAngle = 2.36f },
+            // Outbound: the cutoff consumes SCALAR speed on purpose (see SeekArriveCutoffPx), so
+            // a ship RECEDING at full speed inside the widened band must also arrive cleanly --
+            // the pull stays silent, it decelerates on its own, and the resumed pull walks it
+            // back with no turnaround overshoot.
+            new { Label = "outbound at 40px", X = 40f, Y = 0f, VelAngle = 0f },
         };
         Func<float, float, float, float, (float winding, float dist, float speed, float settleMs)> runLoop =
             (startX, startY, velAngle, leadMs) =>

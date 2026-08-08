@@ -443,8 +443,15 @@ public class PlayerShip : AlienDrawableGameComponent
 	// forever) while a genuinely idle ship -- the reported case -- still gets the clean arrival.
 	public const float DefaultSeekArriveCalmMs = 1500f;
 
+	private static float SeekArriveCalmMs => EvilAliensWeb.Compat.DebugFlags.AiSeekCalmMs ?? DefaultSeekArriveCalmMs;
+
 	// Pure so logic_probe can drive the closed loop with the real decision (the EvaluateSweptShape
 	// precedent): the seek pull is live iff distToTarget exceeds this.
+	// `speedPxPerMs` is the ship's SCALAR speed, deliberately not the closing component: in the
+	// orbit this exists to break, the velocity is TANGENTIAL and the closing speed reads ~0, so a
+	// Dot()-projected lead would never fire on exactly the reported circling. The residual budget
+	// applies to any heading -- an outbound ship must equally not be pulled into a turnaround it
+	// will overshoot (ProbeAiSeekArrive's outbound entry pins that case).
 	public static float SeekArriveCutoffPx(float deadzonePx, float leadMs, float speedPxPerMs)
 	{
 		return deadzonePx + MathHelper.Max(speedPxPerMs, 0f) * leadMs;
@@ -1904,11 +1911,14 @@ public class PlayerShip : AlienDrawableGameComponent
 		// AFTER the low-pass on purpose -- moving either across that boundary would change wall
 		// and ceiling behaviour this card has no business touching.
 		Vector2 repel = Vector2.Zero;
-		// THREAT PRESSURE -- the sum of the MAGNITUDES of every threat contribution to `repel`
-		// (card fd126847). It exists because `repel` itself cannot answer "is anything pushing
-		// me": two threats shoving from opposite sides cancel to a near-zero VECTOR (that is what
+		// THREAT PRESSURE -- the sum of the magnitudes of every threat's RESULTANT contribution
+		// to `repel` (card fd126847; per THREAT, not per term -- one baddy's cone, evade and
+		// field are folded into a single before/after magnitude, which slightly under-reads a
+		// broadside pass but can never zero out, since a lone threat's terms broadly agree). It
+		// exists because `repel` itself cannot answer "is anything pushing me": two THREATS
+		// shoving from opposite sides cancel to a near-zero VECTOR (that is what
 		// DefaultRepulseCancelDelta is for), while this scalar reads their full combined
-		// pressure. Its one consumer is the seek arrival below -- the velocity lead on the
+		// pressure -- inter-threat cancellation, the lethal case, cannot touch it. Its one consumer is the seek arrival below -- the velocity lead on the
 		// deadzone applies only while nothing is pushing, because the measured alternative (the
 		// lead unconditional, ai_sweep seeds 1-8 x2) parks the ship cleanly in COMBAT too, where
 		// the pre-card arrival transient was incidental evasion: CrazyGame deaths 2.62 -> 6.00,
@@ -2320,6 +2330,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			aiCalmMs = 0f;
 		}
+		EvilAliensWeb.Compat.AiBench.NoteSeekArrive(this, aiCalmMs >= SeekArriveCalmMs, leadSuppressed: false);
 		if (steerTarget.X < 2000f)
 		{
 			delta = base.Position - steerTarget;
@@ -2340,8 +2351,17 @@ public class PlayerShip : AlienDrawableGameComponent
 			// pressure than one surviving repellent could exert. This gates the attractor's own
 			// anti-pingpong mechanism, never the force: the seek still pulls identically under
 			// fire (the field principle, card ada9e839).
-			float arriveLeadMs = (aiCalmMs >= DefaultSeekArriveCalmMs) ? SeekArriveLeadMs : 0f;
-			if (distToTarget > SeekArriveCutoffPx(SeekArriveDeadzonePx, arriveLeadMs, (SpeedVector).Length()))
+			float arriveLeadMs = (aiCalmMs >= SeekArriveCalmMs) ? SeekArriveLeadMs : 0f;
+			float arriveCutoffPx = SeekArriveCutoffPx(SeekArriveDeadzonePx, arriveLeadMs, (SpeedVector).Length());
+			if (distToTarget > SeekArriveDeadzonePx && distToTarget <= arriveCutoffPx)
+			{
+				// The lead just suppressed a pull the bare deadzone would have issued -- the
+				// wiring's only observable (calm banks and cutoffs move no other counter), and
+				// what tools/headless/probes/ai_seek_arrive.txt asserts; ?aiseeklead=0 pins it
+				// to exactly 0, which is that probe's companion control.
+				EvilAliensWeb.Compat.AiBench.NoteSeekArrive(this, calmBanked: false, leadSuppressed: true);
+			}
+			if (distToTarget > arriveCutoffPx)
 			{
 				// Plain positional pull, as in 2008. THE deliberate-destination attractor: it goes
 				// into `direction` and is never floored (card ada9e839), because its anti-pingpong

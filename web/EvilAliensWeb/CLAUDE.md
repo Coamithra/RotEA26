@@ -2062,9 +2062,16 @@ the rest are tier-independent.
     own measured settle time (~1333ms), so combat is pre-card BY CONSTRUCTION: re-perturbation
     faster than the hold keeps the lead off, and a shorter calm is one the old behaviour would
     have spent still orbiting anyway. `?aiseeklead=` overrides the lead, `0` = the pre-card
-    fixed radius everywhere (the A/B seam); `logic_probe`'s **`ProbeAiSeekArrive`** pins the
-    derivation, the calm-banked closed loop, the hold-vs-settle bound, and the lead-0 orbit as
-    its negative control.
+    fixed radius everywhere (the A/B seam); `?aiseekcalm=` overrides the hold, `0` = the
+    measured-worse eager variant, kept reachable so that measurement can be re-run.
+    **Observables: the bench row's `calm=` (share of ticks with the gate open) and `seeklead=`
+    (pulls the bare deadzone would have issued that the lead suppressed)** -- the wiring's only
+    trace, since the mechanism changes no pixel and moves no other counter. Tutorial seed 1
+    reads calm=84 seeklead=82; CrazyGame reads calm=0 seeklead=0 (combat never banks the hold).
+    `logic_probe`'s **`ProbeAiSeekArrive`** pins the derivation, the calm-banked closed loop
+    (radial, oblique and outbound entries), the hold-vs-settle bound, and the lead-0 orbit as
+    its negative control; `tools/headless/probes/ai_seek_arrive.txt` +
+    `ai_seek_arrive_absent.txt` pin the live wiring and the A/B seam.
   - **What this replaced, in one line:** the port ended `DoAIMove` with a 0.95 "park" where the
     2008 original had **0.2** -- above the 0.8 seek, so a lone seek produced no motion at all and
     every deliberate destination (station, powerup, boss standoff) was silently deleted. Restored
@@ -2131,7 +2138,7 @@ the rest are tier-independent.
     are slow enough that most of the belt never passes its speed gate. So a threat's SPEED decides
     which path protects the ship, and a repellent change measured on one rig says nothing about
     the other.
-  - Flags: `?airepeldelta= ?ainoisefloor= ?aiseekdeadzone= ?aiseeklead= ?aiasteroidscale= ?aiasteroidrange=
+  - Flags: `?airepeldelta= ?ainoisefloor= ?aiseekdeadzone= ?aiseeklead= ?aiseekcalm= ?aiasteroidscale= ?aiasteroidrange=
     ?aiasteroidfall= ?aievade=`, the cone/wedge family above, plus
     `?aiseekapproach= ?aiseekpowerup= ?aipowerupreach=`. Wiring that `logic_probe` cannot reach is
     covered by `tools/headless/probes/ai_boss_approach.txt`.
@@ -2483,7 +2490,7 @@ the rest are tier-independent.
 - Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aireact=
   ?aigapmargin= ?aiscanrows= ?aicrosspenalty= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx=
   ?aifieldsize= ?aifieldfall= ?aiseekapproach= ?aiseekpowerup= ?aipowerupreach= ?airepeldelta=
-  ?ainoisefloor= ?aiseekdeadzone= ?aiseeklead= ?aiasteroidscale= ?aiasteroidrange=
+  ?ainoisefloor= ?aiseekdeadzone= ?aiseeklead= ?aiseekcalm= ?aiasteroidscale= ?aiasteroidrange=
   ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge= ?ailaneescape= ?aiconelead= ?aiconemaxlen=
   ?aiconewidth= ?aiconetaper= ?aiconefallalong= ?aiconefallacross= ?aiconescale= ?aiconespread=
   ?aiconewidthmin= ?aiwedgestrength= ?aiwedgefall= ?aitopedgepx= ?aitopedgestrength= ?ailazerpx=

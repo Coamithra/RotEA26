@@ -1,0 +1,48 @@
+# PROBE: the seek arrival's calm clock BANKS and the velocity lead FIRES in a real game
+#
+# PINS:   card fd126847. The anti-orbit arrival (deadzone widened by speed * SeekArriveLeadMs
+#         after DefaultSeekArriveCalmMs of nothing pushing) changes no pixel and moves no other
+#         counter, so a build where the calm clock never banks -- or where the widened cutoff
+#         never actually suppresses a pull -- is byte-identical to a working one in every frame
+#         and every pre-existing metric. logic_probe's ProbeAiSeekArrive proves the pure decision
+#         function; THIS is the wiring half: DoAIMove really accumulates aiCalmMs off
+#         threatPressure and really consults the widened cutoff. `calm=` (share of ticks with the
+#         gate open) and `seeklead=` (pulls the bare deadzone would have issued that the lead
+#         suppressed) on the AiBench row are the mechanism's only observables.
+#
+#         Read together with ai_seek_arrive_absent.txt -- this leg proves the lead fires on a
+#         quiet rig, that one proves ?aiseeklead=0 pins the count to exactly 0 while the calm
+#         clock keeps banking. Either alone passes on a build where the counter is hardwired.
+#
+# FAILURE MEANS: read WHICH line went red.
+#         calm= missing entirely -> the bench row shape changed (AiBench.Row is APPEND-ONLY --
+#                                see the comment there) or the eval failed; nothing about the
+#                                mechanism is known.
+#         calm=0 -> the PRECONDITION broke: the Tutorial's quiet stretches no longer bank 1.5s
+#                                of no-threat-pressure (its pacing changed, or threatPressure
+#                                gained a term that never goes quiet). seeklead's verdict below
+#                                is then vacuous, whatever it reads.
+#         seeklead=0 with calm banked -> THE REGRESSION: the gate opens but the widened cutoff
+#                                never suppresses a pull -- the lead constant, the cutoff call
+#                                or the SpeedVector argument was disconnected.
+#
+# NOTES:  Rig: the Tutorial -- long scripted text phases with nothing threatening, plus powerup
+#         lessons that displace the bot and hand it fresh calm-banked arrivals. Measured at
+#         seed 1: calm=84, seeklead=82 (bounds below are >=1, so a different near-deterministic
+#         world has ~two orders of margin). CrazyGame measures calm=0 seeklead=0 on the same
+#         build -- combat never banks the hold, which is the by-construction survival argument --
+#         so a busy rig here would assert nothing.
+#         Mutation control: the companion probe's ?aiseeklead=0 arm is behaviourally identical to
+#         deleting the wiring, and was measured to zero exactly this count.
+#
+# eahl: --flags "?level=Tutorial&aiplayer&aibench&noattract&seed=1&difficulty=Very_Hard"
+
+mark
+step 5400 nodraw
+eval AiBenchRow
+
+# Precondition first: the rig really banked calm (gate open on a nonzero share of ticks)...
+expect      calm=[1-9]
+# ...and the lead really suppressed pulls the bare deadzone would have issued.
+expect      seeklead=[1-9]
+quit

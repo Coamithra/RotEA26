@@ -345,8 +345,33 @@ public class PlayerShip : AlienDrawableGameComponent
 	// of the screen is off limits while the boss is in play, and being in it is simply a death.
 	private const float SweepLaneAvoidStrength = 18f;
 
-	// How many big UFOs to leave alive during the SpiderBoss fight -- see DoAIFire.
-	private const int SpiderBossLaserPlatforms = 2;
+	// ---- SPARING BIG UFOs FOR THE SPIDER BOSS (card 2c74d5b7) --------------------------------
+	//
+	// The spider boss is only hurt by a Lazer and a big UFO fires one at the player, so every big
+	// UFO the bot kills is a beam platform lost. Two rules decide which ones live, both applied
+	// only while the boss is alive and NOT mid-sweep (dodging a sweep and an invited beam at once
+	// is what kills the bot -- the original single-spare rule's caveat, kept):
+	//
+	//  * the SPARE COUNT: the N big UFOs with the most room around them (distance to the nearest
+	//    ship) are never shot. It was 1 in practice -- the old SpiderBossLaserPlatforms const
+	//    SAID 2 and was referenced by nothing, so the intent had silently decayed to a single
+	//    spare -- and the ranking by room is what keeps the kept platforms at arm's length.
+	//  * the ENGAGE RADIUS: a big UFO farther than this from the ship is left alone even when
+	//    the spare list is full -- the card's own suggestion. A distant platform is not a threat
+	//    worth clearing, it is the boss's executioner charging up; only one close enough to be
+	//    aiming at YOU is self-defence.
+	//
+	// Both are flag-resolved: ?aibigufospare=1&aibigufopx=0 is the pre-card configuration.
+	public const int DefaultBigUfoSpareCount = 2;
+
+	private static int BigUfoSpareCount => EvilAliensWeb.Compat.DebugFlags.AiBigUfoSpareCount ?? DefaultBigUfoSpareCount;
+
+	// 250 sits well inside the base gun range (351px) and just under a big UFO's own threat-field
+	// reach (150 + 1.8 * ~90 = 312), so anything the bot is already dodging is still shootable
+	// and anything beyond its field is left to work.
+	public const float DefaultBigUfoEngageRadiusPx = 250f;
+
+	private static float BigUfoEngageRadiusPx => EvilAliensWeb.Compat.DebugFlags.AiBigUfoEngagePx ?? DefaultBigUfoEngageRadiusPx;
 
 	// THE 2008 MAGNITUDES, RESTORED ON MEASUREMENT (card 2248e5eb). The port had widened the beam
 	// field to 260px / strength 14 and added a 7-strength lateral sidestep, all three unmeasured.
@@ -1690,8 +1715,19 @@ public class PlayerShip : AlienDrawableGameComponent
 		// are aimed AT IT. Sparing them without that measured 24 -> ~70 deaths.
 		bool spiderBossAlive = false;
 		bool bossSweeping = false;
-		UFO sparedUfo = null;
-		float sparedRoom = -1f;
+		// The BigUfoSpareCount platforms with the most room around them -- scored by distance to
+		// the NEAREST ship, so in co-op they are far from everybody. Keeping the kept platforms at
+		// arm's length is what makes this survivable: their beams still cross the screen for the
+		// boss to walk into, but the AI is not standing next to the thing that is aiming at it.
+		// A tiny insertion-sorted array rather than a list sort: N is 2 and this runs per AI ship
+		// per tick. sparedUfos[0] holds the MOST room.
+		int spareCount = Math.Max(BigUfoSpareCount, 0);
+		UFO[] sparedUfos = (spareCount > 0) ? new UFO[spareCount] : null;
+		float[] sparedRooms = (spareCount > 0) ? new float[spareCount] : null;
+		for (int s = 0; s < spareCount; s++)
+		{
+			sparedRooms[s] = -1f;
+		}
 		foreach (AlienDrawableGameComponent scan in baddies)
 		{
 			if (scan is SpiderBoss && !scan.IsDead)
@@ -1699,32 +1735,68 @@ public class PlayerShip : AlienDrawableGameComponent
 				spiderBossAlive = true;
 				bossSweeping |= ((SpiderBoss)scan).AiSweepIncoming;
 			}
-			else if (scan is UFO && ((UFO)scan).IsBig && !scan.IsDead)
+			else if (scan is UFO && ((UFO)scan).IsBig && !scan.IsDead && spareCount > 0)
 			{
-				// Spare exactly ONE, and make it the one with the most room around it -- scored by
-				// its distance to the NEAREST ship, so in co-op it is far from everybody. Keeping
-				// the beam platform at arm's length is what makes this survivable: its beam still
-				// crosses the screen for the boss to walk into, but the AI is not standing next to
-				// the thing that is aiming at it.
 				float room = float.MaxValue;
 				foreach (PlayerShip ship in oracle.GetShips())
 				{
 					Vector2 toShip = scan.Position - ship.Position;
 					room = MathHelper.Min(room, (toShip).Length());
 				}
-				if (room > sparedRoom)
+				for (int s = 0; s < spareCount; s++)
 				{
-					sparedRoom = room;
-					sparedUfo = (UFO)scan;
+					if (room > sparedRooms[s])
+					{
+						for (int t = spareCount - 1; t > s; t--)
+						{
+							sparedRooms[t] = sparedRooms[t - 1];
+							sparedUfos[t] = sparedUfos[t - 1];
+						}
+						sparedRooms[s] = room;
+						sparedUfos[s] = (UFO)scan;
+						break;
+					}
 				}
 			}
 		}
 		// ...but NOT during a fly-by. Dodging a screen-wide sweep and a big UFO's beam at the same
 		// time is how the bot dies, and it is worst in the upper lane where the UFOs live. The
 		// boss spends most of the fight grounded, which is plenty of time to feed it beams.
-		if (!spiderBossAlive || bossSweeping)
+		bool sparingActive = spiderBossAlive && !bossSweeping;
+		if (!sparingActive)
 		{
-			sparedUfo = null;
+			sparedUfos = null;
+		}
+		// A big UFO is spared when it is on the kept-platform list, or -- the card's radius rule
+		// -- when it sits farther from THIS ship than the engage radius while sparing is active.
+		// Excluded targets never reach NoteFireDecision's hadTarget, so sparing cannot read as
+		// idle%.
+		bool IsSparedBigUfo(AlienDrawableGameComponent baddy)
+		{
+			if (!sparingActive || !(baddy is UFO bigUfo) || !bigUfo.IsBig || baddy.IsDead)
+			{
+				return false;
+			}
+			if (sparedUfos != null)
+			{
+				for (int s = 0; s < sparedUfos.Length; s++)
+				{
+					if (ReferenceEquals(sparedUfos[s], baddy))
+					{
+						return true;
+					}
+				}
+			}
+			float engagePx = BigUfoEngageRadiusPx;
+			if (engagePx > 0f)
+			{
+				Vector2 toUfo = baddy.Position - base.Position;
+				if ((toUfo).LengthSquared() > engagePx * engagePx)
+				{
+					return true;
+				}
+			}
+			return false;
 		}
 		float nearestDist = float.MaxValue;
 		AlienDrawableGameComponent nearest = null;
@@ -1742,7 +1814,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		float priorityBiasSq = PriorityTargetBias * PriorityTargetBias;
 		foreach (AlienDrawableGameComponent baddy in baddies)
 		{
-			if (IsAiShootable(baddy) && !ReferenceEquals(baddy, sparedUfo))
+			if (IsAiShootable(baddy) && !IsSparedBigUfo(baddy))
 			{
 				if (isBlastable(baddy) && blast != null && blast.Collides)
 				{

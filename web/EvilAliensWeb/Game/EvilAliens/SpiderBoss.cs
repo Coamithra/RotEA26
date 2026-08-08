@@ -687,6 +687,18 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		hp--;
 		if (hp <= 0 && !base.IsDead)
 		{
+			// The beam-platform census at the instant of death (card 2c74d5b7) -- the one
+			// observable the AI's big-UFO sparing rules have. Counted here, where the death is
+			// decided, because a tick later the debris purge starts changing the population.
+			int aliveBigUfos = 0;
+			foreach (AlienDrawableGameComponent scan in oracle.GetBaddies())
+			{
+				if (scan is UFO && ((UFO)scan).IsBig && !scan.IsDead)
+				{
+					aliveBigUfos++;
+				}
+			}
+			EvilAliensWeb.Compat.AiBench.NoteSpiderBossDeath(aliveBigUfos);
 			BeginDeathThroes();
 			// Online co-op (card ad9c8f8b): this death is DEFERRED -- the debris fall for 5s
 			// before Die() -- but it never runs through KillableAlien.HitBy, so nothing else

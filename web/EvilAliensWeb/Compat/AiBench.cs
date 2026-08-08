@@ -112,6 +112,14 @@ internal static class AiBench
 	// two builds is not a comparison.
 	private static int powerupsSpawned;
 
+	// Big UFOs still alive at each SpiderBoss death, summed over the run, with the death count as
+	// its denominator (card 2c74d5b7). Run-wide like powerupsSpawned: the boss's death belongs to
+	// no slot. It is the ONLY observable the sparing rules have -- a spared UFO changes no other
+	// counter, and a fight where the sparing silently stopped working looks identical frame by
+	// frame; a lower beam-platform census at the kill is the whole point of the card.
+	private static int bigUfosAtBossDeath;
+	private static int spiderBossDeaths;
+
 	private static GameScene lastScene;
 
 	internal static bool Enabled => DebugFlags.AiBench;
@@ -125,6 +133,8 @@ internal static class AiBench
 		verdictMs = 0.0;
 		peakEventPos = 0;
 		powerupsSpawned = 0;
+		bigUfosAtBossDeath = 0;
+		spiderBossDeaths = 0;
 		headlessTotal = TimeSpan.Zero;
 		lastScene = null;
 	}
@@ -365,6 +375,18 @@ internal static class AiBench
 		powerupsSpawned++;
 	}
 
+	// SpiderBoss.CollidesWith, the hp <= 0 branch -- the boss just died; `aliveBigUfos` is the
+	// beam-platform census the caller took at that instant (card 2c74d5b7).
+	internal static void NoteSpiderBossDeath(int aliveBigUfos)
+	{
+		if (!Enabled)
+		{
+			return;
+		}
+		bigUfosAtBossDeath += aliveBigUfos;
+		spiderBossDeaths++;
+	}
+
 	// DoAIFire, once per tick per AI ship: did it have something worth shooting, and did it shoot?
 	internal static void NoteFireDecision(PlayerShip ship, bool hadTarget, bool fired)
 	{
@@ -534,6 +556,13 @@ internal static class AiBench
 			if (r.Killers.Count > 0)
 			{
 				sb.Append(" killers=").Append(KillerHistogram(r));
+			}
+			// Beam platforms alive when the SpiderBoss died, summed over the run's boss kills
+			// (card 2c74d5b7). Only printed once a boss has actually died -- on any other rig the
+			// pair is structurally 0/0 and would read as "the sparing saved nothing".
+			if (spiderBossDeaths > 0)
+			{
+				sb.Append(" bigufos=").Append(bigUfosAtBossDeath).Append(" spiderkills=").Append(spiderBossDeaths);
 			}
 		}
 		return sb.ToString();
@@ -712,6 +741,9 @@ internal static class AiBench
 		sb.Append(" boss=").Append(Fmt((r.BossTicks > 0L) ? (r.BossDistTotal / r.BossTicks) : 0.0, 0));
 		sb.Append(" bossfar=").Append(Fmt((r.BossTicks > 0L) ? (100.0 * r.BossOutOfRangeTicks / r.BossTicks) : 0.0, 0));
 		sb.Append(" killers=").Append((r.Killers.Count > 0) ? KillerHistogram(r) : "none");
+		// Both space-free ints, per the append-only parseRow contract above (card 2c74d5b7).
+		sb.Append(" bigufos=").Append(bigUfosAtBossDeath);
+		sb.Append(" spiderkills=").Append(spiderBossDeaths);
 		return sb.ToString();
 	}
 

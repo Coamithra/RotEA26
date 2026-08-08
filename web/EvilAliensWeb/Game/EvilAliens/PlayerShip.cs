@@ -233,11 +233,15 @@ public class PlayerShip : AlienDrawableGameComponent
 	// A bullet connects at the target's HULL, not its centre (card bb949dd9). The 2008 range test
 	// (and card b56633fb's anchor, derived from it) compared `bulletlifetime * BulletRangePerMs`
 	// against the CENTRE distance, so against a big boss the bot refused shots that would land and
-	// closed a full hull half-extent nearer than its bullets required -- measured on the marsboss
-	// rig as a 171px-edge park where a shot from ~300px still lands (MarsBoss box hw ~124px).
-	// ShotReachCredit is the guaranteed entry distance along ANY aim line through the centre: the
-	// MIN half-extent, so the credit never claims a hit the geometry cannot deliver at some
-	// approach angle. Scaled by ?aishotreach= (0 = the pre-card centre test, the A/B arm); used by
+	// closed a large fraction of the hull nearer than its bullets required -- measured on the
+	// marsboss rig as a 171px-edge park exactly at the old anchor, where a shot from ~67px farther
+	// out still lands (MarsBoss's credit below), and on the brainboss rig as a 109px-mean park.
+	// ShotReachCredit is the guaranteed entry distance along ANY aim line through the aim point:
+	// the aim point is `baddy.Position` and the hull can be OFFSET from it (BrainBoss's box is
+	// centred 55*scale ABOVE Position, MarsBoss's 10*scale left), so the credit is the MIN of the
+	// box's four face distances measured from Position -- never Width/2, which over-claims by up
+	// to 69% on BrainBoss. Floored at 0 for an aim point outside its own hull.
+	// Scaled by ?aishotreach= (0 = the pre-card centre test, the A/B arm); used by
 	// BOTH DoAIFire's range gate and the boss-approach anchor so the standoff the ship holds and
 	// the range it will actually shoot from cannot drift apart (the ThreatBodyTerm rule).
 	// SCOPED TO LEVEL-HALTING BOSSES (IsAiPriorityTarget) at both sites, on measurement rather
@@ -245,7 +249,7 @@ public class PlayerShip : AlienDrawableGameComponent
 	// rigs (paired seeds 1-8 x2) -- earlier trash kills shift the whole powerup/kill economy
 	// (+27% powerup spawns on the spider rig, Lazer deaths 45 -> 81) while buying nothing the
 	// ticket asked for. A boss is also where the credit is material: a UFO's hull credit is a
-	// few px, a MarsBoss's is ~124.
+	// few px, a MarsBoss's is ~67 (box ~249x134 offset (-10,0): min face 134/2).
 	public const float DefaultShotReachHullScale = 1f;
 
 	private static float ShotReachHullScale => EvilAliensWeb.Compat.DebugFlags.AiShotReachScale ?? DefaultShotReachHullScale;
@@ -258,22 +262,23 @@ public class PlayerShip : AlienDrawableGameComponent
 			return 0f;
 		}
 		ICollisionType type = baddy.GetCollisionType();
-		float half = 0f;
-		if (type is CollisionBox)
+		CollisionBox box = (type as CollisionBox)
+			?? ((type is CollisionMultibox) ? ((CollisionMultibox)type).Items[0] : null);
+		float entry = 0f;
+		if (box != null)
 		{
-			CollisionBox box = (CollisionBox)type;
-			half = MathHelper.Min(box.Width, box.Height) / 2f;
-		}
-		else if (type is CollisionMultibox)
-		{
-			CollisionBox item = ((CollisionMultibox)type).Items[0];
-			half = MathHelper.Min(item.Width, item.Height) / 2f;
+			Vector2 p = baddy.Position;
+			entry = MathHelper.Min(
+				MathHelper.Min(p.X - box.Left, box.Right - p.X),
+				MathHelper.Min(p.Y - box.Top, box.Bottom - p.Y));
 		}
 		else if (type is CollisionSimpleCircle)
 		{
-			half = ((CollisionSimpleCircle)type).Radius;
+			CollisionSimpleCircle circle = (CollisionSimpleCircle)type;
+			Vector2 toCentre = circle.Position - baddy.Position;
+			entry = circle.Radius - (toCentre).Length();
 		}
-		return half * scale;
+		return MathHelper.Max(entry, 0f) * scale;
 	}
 
 	// ---- THE BOSS-APPROACH ATTRACTOR (card b56633fb) ----------------------------------------
@@ -1744,9 +1749,13 @@ public class PlayerShip : AlienDrawableGameComponent
 		// reachable target alongside it.
 		float nearestInRangeSq = float.MaxValue;
 		AlienDrawableGameComponent inRangeTarget = null;
-		// A CENTRE distance; each target's ShotReachCredit is added per test below, because a
-		// bullet connects at the hull -- see the const block at ShotReachCredit.
+		// A CENTRE distance, extended per target by its hull-entry credit because a bullet
+		// connects at the hull -- see the const block at ShotReachCredit. ONE definition for
+		// every range test in this method (and the boss-approach anchor mirrors it), so the
+		// gate and the standoff cannot drift apart.
 		float gunRange = bulletlifetime * BulletRangePerMs;
+		float Reach(AlienDrawableGameComponent target)
+			=> gunRange + (IsAiPriorityTarget(target) ? ShotReachCredit(target) : 0f);
 		// A level-halting boss is worth reaching past a lot of trash, so it competes on a
 		// DISCOUNTED distance rather than by raw proximity. Scored in the same squared space the
 		// loop compares in, hence the squared factor.
@@ -1772,13 +1781,13 @@ public class PlayerShip : AlienDrawableGameComponent
 					nearest = baddy;
 				}
 				float trueDistSq = (toBaddy).LengthSquared();
-				// The hull credit applies to level-HALTING bosses only -- see ShotReachCredit's
-				// const block. Extending every target's gate was built and MEASURED WORSE (card
-				// bb949dd9): the earlier trash kills shift the whole powerup/kill economy (+27%
-				// powerup spawns on the spider rig) and deaths rose on both boss rigs, while the
-				// ticket's complaint is the BOSS standoff. Scoped this way the spider rig -- no
-				// priority targets -- is untouched by construction.
-				float reach = gunRange + (IsAiPriorityTarget(baddy) ? ShotReachCredit(baddy) : 0f);
+				// Reach() credits level-HALTING bosses only -- see ShotReachCredit's const block.
+				// Extending every target's gate was built and MEASURED WORSE (card bb949dd9):
+				// the earlier trash kills shift the whole powerup/kill economy (+27% powerup
+				// spawns on the spider rig) and deaths rose on both boss rigs, while the ticket's
+				// complaint is the BOSS standoff. Scoped this way the spider rig -- no priority
+				// targets -- is untouched by construction.
+				float reach = Reach(baddy);
 				if (onScreen && trueDistSq <= reach * reach && trueDistSq < nearestInRangeSq)
 				{
 					nearestInRangeSq = trueDistSq;
@@ -1793,12 +1802,12 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			Vector2 toChosen = nearest.Position - base.Position;
 			nearestDist = (toChosen).Length();
-			chosenReach = gunRange + (IsAiPriorityTarget(nearest) ? ShotReachCredit(nearest) : 0f);
+			chosenReach = Reach(nearest);
 			if (nearestDist > chosenReach && inRangeTarget != null)
 			{
 				nearest = inRangeTarget;
 				nearestDist = (float)Math.Sqrt(nearestInRangeSq);
-				chosenReach = gunRange + (IsAiPriorityTarget(nearest) ? ShotReachCredit(nearest) : 0f);
+				chosenReach = Reach(nearest);
 			}
 		}
 		else

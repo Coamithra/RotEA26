@@ -1439,7 +1439,10 @@ namespace EvilAliensWeb.Compat
 		// ?aishotreach=<0..1>   scale on the hull-entry credit DoAIFire's range gate and the
 		//                       boss-approach anchor add to gun range (card bb949dd9 -- a bullet
 		//                       connects at the target's HULL, not its centre). 0 restores the
-		//                       pre-card centre-distance test, which is the A/B arm.
+		//                       pre-card centre-distance test, which is the A/B arm. Out of
+		//                       `Active` like every other ?ai* value knob: it steers only the
+		//                       local `ControlDevice.AI` bot, which never flies in an online
+		//                       session, so it cannot change a shared run.
 		public static float? AiShotReachScale { get; private set; }
 
 		public static float? AiPowerupReachPx { get; private set; }
@@ -3273,6 +3276,9 @@ namespace EvilAliensWeb.Compat
 				case "aishotreach":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aisrc) && aisrc >= 0f)
 					{
+						// Clamped at 1 rather than an absurd-value ceiling like its neighbours,
+						// deliberately: above 1 the credit would claim a hit past the hull the
+						// bullet actually reaches, so over-crediting is made unreachable.
 						AiShotReachScale = MathHelper.Min(aisrc, 1f);
 					}
 					else

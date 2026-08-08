@@ -137,6 +137,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeAiBossStandoff(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         rc = ProbeAiSweptPathGuard(asm);
         if (rc != 0)
         {
@@ -672,6 +678,11 @@ internal static class Program
             new { Flag = "aiseekpowerup",  Prop = "AiSeekPowerupWeight",  Good = "2.5", Want = (object)2.5f,  Baked = "0.8"  },
             new { Flag = "aiseekapproach", Prop = "AiSeekApproachWeight", Good = "2.6", Want = (object)2.6f,  Baked = "1.1"  },
             new { Flag = "aipowerupreach", Prop = "AiPowerupReachPx",      Good = "444", Want = (object)444f,  Baked = "150"  },
+            // The boss range-keeping repellent (card bb949dd9). Baked "" for the reason the rows
+            // below take that escape: it bakes 1, a single digit that occurs throughout the
+            // captured "(expected ...)" clause. 0 is MEANINGFUL here (the pre-card arm), so its
+            // guard refuses only a negative -- the shape this table's negative leg already expects.
+            new { Flag = "aistandoff",     Prop = "AiBossStandoffScale",   Good = "2.4", Want = (object)2.4f,  Baked = ""     },
             // The directional repellent shapes (card e425781b). The three on/off members of the
             // family -- ?aicone= ?aiwedge= ?ailaneescape= -- are deliberately absent, following
             // ?aievade=: the IsOn/IsExplicitlyOff spelling has its own convention and this table's
@@ -729,7 +740,7 @@ internal static class Program
         }
 
         Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all " + rows.Length
-            + " knobs (cards 48b7c6b1 / 2248e5eb / 2c74d5b7)");
+            + " knobs (cards 48b7c6b1 / 2248e5eb / 2c74d5b7 / bb949dd9)");
 
         // One counter and its OWN first-problem detail per leg: a shared sink attaches the
         // diagnosis to whichever Check happens to print it, which in a mutation run put the only
@@ -1237,6 +1248,228 @@ internal static class Program
             !spiderPriority, "IsAiPriorityTarget(SpiderBoss) = " + spiderPriority);
         Check("control: BrainBoss IS one, so the predicate is not simply refusing everything",
             brainPriority, "IsAiPriorityTarget(BrainBoss) = " + brainPriority);
+        return 0;
+    }
+
+    // ---- the boss RANGE-KEEPING repellent (card bb949dd9) ------------------------------------
+    //
+    // PlayerShip.BossStandoffPush is the mountain that defends the parked band the attractor above
+    // solves for. Inside r* that attractor has quieted by design, and until this card nothing else
+    // held the ship out there: the boss's own field reads ~0.6 at the measured 157px pin against
+    // screen-edge pushes of up to 4, so a corner squeeze walked the ship deep inside its own firing
+    // range and pinned it to be shot.
+    //
+    // What is asserted here is the SHAPE, at fixed points -- the ProbeAiConeShape rule, and for the
+    // same reason. Two properties carry the whole design and neither is negotiable: it is EXACTLY
+    // zero at and beyond the anchor (so the crossing BossApproachWeight solves for cannot move,
+    // and that method stays byte-untouched), and it rises monotonically to full steer strength at
+    // the hull.
+    private static int ProbeAiBossStandoff(Assembly asm)
+    {
+        Console.WriteLine("[logic_probe] AI boss range-keeping repellent (card bb949dd9)");
+        Type ship = asm.GetType("EvilAliens.PlayerShip", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo pushM = ship.GetMethod("BossStandoffPush", anyStatic);
+        MethodInfo strengthM = ship.GetMethod("ThreatFieldStrength", anyStatic, null,
+            new[] { typeof(float), typeof(float), typeof(float), typeof(bool) }, null);
+        if (pushM == null || strengthM == null)
+        {
+            Console.WriteLine("FAIL: could not reflect PlayerShip.BossStandoffPush / ThreatFieldStrength"
+                + " -- renamed or moved?");
+            return 2;
+        }
+
+        float Const(string n)
+        {
+            FieldInfo f = ship.GetField(n, anyStatic);
+            if (f == null || !f.IsLiteral)
+            {
+                throw new InvalidOperationException("could not reflect PlayerShip." + n + " as a const");
+            }
+            return (float)f.GetRawConstantValue();
+        }
+
+        float minAnchor, sizeScale, falloff, bulletPerMs, shippedScale;
+        float[] tierFieldPx;
+        try
+        {
+            minAnchor = Const("BossApproachMinAnchorPx");
+            sizeScale = Const("DefaultThreatFieldSizeScale");
+            falloff = Const("DefaultThreatFieldFalloff");
+            bulletPerMs = Const("BulletRangePerMs");
+            shippedScale = Const("DefaultBossStandoffScale");
+            FieldInfo skillF = ship.GetField("AiSkillByDifficulty", anyStatic);
+            Array skills = (Array)skillF.GetValue(null);
+            FieldInfo fieldPxF = skills.GetType().GetElementType()
+                .GetField("FieldPx", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            tierFieldPx = new float[skills.Length];
+            for (int i = 0; i < skills.Length; i++)
+            {
+                tierFieldPx[i] = (float)fieldPxF.GetValue(skills.GetValue(i));
+            }
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine("FAIL: " + e.Message);
+            return 2;
+        }
+
+        const float MaxSteer = 4f;
+        float Push(float d, float anchor) => (float)pushM.Invoke(null, new object[] { d, anchor, MaxSteer });
+        float Repel(float d, float range) => d >= range
+            ? 0f
+            : (float)strengthM.Invoke(null, new object[] { d / range, MaxSteer, falloff, false });
+
+        // The whole reachable anchor domain: r* = gunRange - body, over every weapon (450ms base
+        // to the 1500ms a maxed Range powerup reaches) and every halting boss's hull, plus the
+        // clamp floor itself and two anchors no weapon reaches, so the shape is pinned beyond what
+        // ships today rather than only at it.
+        float[] anchors = { minAnchor, 40f, 94f, 118f, 210f, 245f, 351f, 600f, 1170f };
+
+        // 1. ZERO AT AND BEYOND THE ANCHOR. This is what leaves the attractor's crossing exactly
+        //    where it was, so the parked band is unmoved and BossApproachWeight needed no edit.
+        //    Dropping the `d < anchor` gate fails here.
+        bool outsideOk = true;
+        string outsideDetail = "";
+        foreach (float anchor in anchors)
+        {
+            foreach (float beyond in new[] { 0f, 0.5f, 1f, 25f, 400f, 5000f })
+            {
+                float v = Push(anchor + beyond, anchor);
+                if (v != 0f)
+                {
+                    outsideOk = false;
+                    outsideDetail = "anchor " + anchor.ToString("0.0") + "px, d " + (anchor + beyond).ToString("0.0")
+                        + "px -> " + v.ToString("0.0000");
+                }
+            }
+        }
+        Check("silent AT and BEYOND firing range, so the attractor's solved crossing cannot move",
+            outsideOk, outsideDetail.Length > 0 ? outsideDetail : anchors.Length + " anchors x 6 distances");
+
+        // 2. IT ACTUALLY PUSHES INSIDE. The positive control for section 1 -- a build returning 0
+        //    everywhere would satisfy every other inequality here.
+        bool insideOk = true;
+        string insideDetail = "";
+        foreach (float anchor in anchors)
+        {
+            float half = Push(anchor * 0.5f, anchor);
+            if (!(half > 0f))
+            {
+                insideOk = false;
+                insideDetail = "anchor " + anchor.ToString("0.0") + "px -> " + half.ToString("0.0000") + " at half range";
+            }
+        }
+        Check("control: it is NOT silent inside firing range (half range pushes)",
+            insideOk, insideDetail.Length > 0 ? insideDetail
+                : "e.g. anchor 210px -> " + Push(105f, 210f).ToString("0.000") + " at 105px");
+
+        // 3. MONOTONE toward the boss, and CAPPED AT THE HULL. A repellent that eased off as the
+        //    ship got closer would be worse than none; the cap is what bounds it against the rest
+        //    of the field (nothing here may exceed maxSteerStrength). A sign flip fails here.
+        bool monoOk = true, capOk = true;
+        string monoDetail = "", capDetail = "";
+        foreach (float anchor in anchors)
+        {
+            float prev = 0f;
+            for (int step = 40; step >= 0; step--)
+            {
+                float d = anchor * step / 40f;
+                float v = Push(d, anchor);
+                if (v < prev - 1e-6f)
+                {
+                    monoOk = false;
+                    monoDetail = "anchor " + anchor.ToString("0.0") + "px: " + v.ToString("0.0000")
+                        + " at " + d.ToString("0.0") + "px, under " + prev.ToString("0.0000") + " further out";
+                }
+                prev = v;
+            }
+            float hull = Push(0f, anchor);
+            if (Math.Abs(hull - MaxSteer) > 1e-4f)
+            {
+                capOk = false;
+                capDetail = "anchor " + anchor.ToString("0.0") + "px -> " + hull.ToString("0.0000") + " at the hull";
+            }
+        }
+        Check("grows monotonically as the ship closes", monoOk,
+            monoDetail.Length > 0 ? monoDetail : anchors.Length + " anchors x 41 samples");
+        Check("tops out at exactly maxSteerStrength at the hull, never above it", capOk,
+            capDetail.Length > 0 ? capDetail : "= " + MaxSteer + " at d=0 for every anchor");
+
+        // 4. CONTINUOUS AT THE ANCHOR. The band is only ~31px wide at the shipped numbers, so a
+        //    term that stepped up at r* would push the ship straight back out of the equilibrium
+        //    the attractor just solved for. 1px inside must still be negligible against the 0.2
+        //    whole-sum floor.
+        bool contOk = true;
+        string contDetail = "";
+        foreach (float anchor in anchors)
+        {
+            float justInside = Push(anchor - 1f, anchor);
+            if (justInside > 0.02f)
+            {
+                contOk = false;
+                contDetail = "anchor " + anchor.ToString("0.0") + "px -> " + justInside.ToString("0.0000") + " 1px inside";
+            }
+        }
+        Check("continuous at the anchor (1px inside is still under a tenth of the 0.2 floor)",
+            contOk, contDetail.Length > 0 ? contDetail
+                : "worst " + Push(minAnchor - 1f, minAnchor).ToString("0.0000") + " at the " + minAnchor + "px clamp floor");
+
+        // 5. IT SHARES THE ATTRACTOR'S CLAMPED ANCHOR. Two copies of "firing range" would let the
+        //    pull and the push disagree about where the band is, which is the one way this term
+        //    could shove the ship OUT of its own range -- so a sub-floor anchor must behave
+        //    exactly as the floor does, not as itself.
+        bool clampOk = true;
+        string clampDetail = "";
+        foreach (float raw in new[] { 0f, -50f, 5f, minAnchor - 0.5f })
+        {
+            foreach (float d in new[] { 0f, 10f, minAnchor * 0.5f, minAnchor })
+            {
+                if (Math.Abs(Push(d, raw) - Push(d, minAnchor)) > 1e-5f)
+                {
+                    clampOk = false;
+                    clampDetail = "anchor " + raw.ToString("0.0") + "px at d " + d.ToString("0.0")
+                        + "px: " + Push(d, raw).ToString("0.0000") + " vs the floor's " + Push(d, minAnchor).ToString("0.0000");
+                }
+            }
+        }
+        Check("a sub-floor anchor clamps to BossApproachMinAnchorPx, exactly as the attractor's does",
+            clampOk, clampDetail.Length > 0 ? clampDetail : "clamped at " + minAnchor + "px");
+
+        // 6. THE MECHANISM, at the configuration the ticket was measured on: top tier, base weapon,
+        //    MarsBoss's ~141px hull, and the 157px edge distance the pinned ship sat at. The claim
+        //    is not that this alone beats a 4-strength corner push at that point -- it is that the
+        //    outward force there is STRICTLY GREATER than the pre-card build's, at every distance
+        //    inside r*, so the equilibrium the squeeze settles at moves outward. The pre-card
+        //    build is the boss field alone, which is why it is computed here rather than asserted.
+        float marsBody = 141f;
+        float vhRange = tierFieldPx[tierFieldPx.Length - 1] + (marsBody / (float)Math.Sqrt(2.0)) * sizeScale;
+        float marsAnchor = 450f * bulletPerMs - marsBody;
+        bool addsOk = true;
+        string addsDetail = "";
+        for (int step = 0; step < 40; step++)
+        {
+            float d = marsAnchor * step / 40f;
+            if (!(Repel(d, vhRange) + Push(d, marsAnchor) * shippedScale > Repel(d, vhRange)))
+            {
+                addsOk = false;
+                addsDetail = "no gain at " + d.ToString("0.0") + "px";
+            }
+        }
+        Check("MarsBoss/base weapon: the outward force inside r* strictly exceeds the pre-card field alone",
+            addsOk, addsDetail.Length > 0 ? addsDetail
+                : "anchor " + marsAnchor.ToString("0.0") + "px; at the measured 157px pin, field "
+                + Repel(157f, vhRange).ToString("0.00") + " -> " + (Repel(157f, vhRange) + Push(157f, marsAnchor) * shippedScale).ToString("0.00")
+                + ", and at 60px " + Repel(60f, vhRange).ToString("0.00") + " -> "
+                + (Repel(60f, vhRange) + Push(60f, marsAnchor) * shippedScale).ToString("0.00"));
+
+        // 7. THE TERM IS ON IN THE SHIPPED BUILD. Everything above describes a function; this is
+        //    the one line that says the game USES it. Baking the scale back to 0 -- the pre-card
+        //    arm, which `?aistandoff=0` exists to reach -- would leave every check above green
+        //    while shipping the ticket's bug back.
+        Check("shipped scale is non-zero, so the term is live and not merely present",
+            shippedScale > 0f, "DefaultBossStandoffScale = " + shippedScale
+                + " (?aistandoff=0 is the pre-card arm)");
         return 0;
     }
 

@@ -131,6 +131,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeAiSeekArrive(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         rc = ProbeAiConeShape(asm);
         if (rc != 0)
         {
@@ -906,8 +912,12 @@ internal static class Program
         float repelDelta = vals["DefaultRepulseCancelDelta"], noiseFloor = vals["DefaultSteerNoiseFloor"];
         float deadzone = vals["DefaultSeekArriveDeadzonePx"];
 
-        // 1. THE DEADZONE COVERS THE STOPPING DISTANCE. This is the property that makes the
-        // attractors' hard-edged deadzone sound instead of an oscillator: `Move(null, ...)`
+        // 1. THE DEADZONE COVERS THE STOPPING DISTANCE. NECESSARY BUT NOT SUFFICIENT, and card
+        // fd126847 measured the difference: a ship crossing the deadzone is still under thrust for
+        // ~6 ticks (the steering low-pass keeps a decaying command alive), so this bound describes
+        // a COASTING ship and the station seek pingponged anyway. The arrive gate that closes that
+        // is ProbeAiSeekArrive's; this assertion is still the floor the radius rests on.
+        // `Move(null, ...)`
         // applies deceleration alone, so a ship entering at full speed coasts v^2 / 2a further.
         // If the deadzone is smaller than that the ship sails out the FAR side still under the
         // attractor's pull, turns round, and pingpongs -- which is the symptom the 0.95 park was
@@ -1685,6 +1695,171 @@ internal static class Program
         Check("restored to COMPOSED on the way out", composes(),
             "AiTopEdgeCompose = " + composes()
             + " -- a later Probe* must not inherit a bug-reproduction placement");
+        return 0;
+    }
+
+    // The seek's PREDICTIVE ARRIVE GATE (card fd126847). `PlayerShip.SeekArriveEngaged` answers
+    // "should the station pull still be on", and the claim is not a value but a BEHAVIOUR: a ship
+    // closing on its station must come to rest without crossing to the far side of the deadzone and
+    // re-triggering. That is a closed loop, so this case set drives one -- the real predicate, the
+    // real motion constants, and a transcription of the two engine steps that close it (the
+    // AlienDrawableGameComponent.Move integrator and DoAIMove's low-pass + noise floor), in the
+    // `ReferencePass` idiom. The transcription is the RIG, not the subject; the subject is the
+    // predicate, and the pre-card position-only gate runs beside it as the negative control.
+    private static int ProbeAiSeekArrive(Assembly asm)
+    {
+        Type ship = asm.GetType("EvilAliens.PlayerShip", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo gate = ship.GetMethod("SeekArriveEngaged", anyStatic);
+        if (gate == null)
+        {
+            Console.WriteLine("FAIL: could not reflect PlayerShip.SeekArriveEngaged -- renamed or moved?");
+            return 2;
+        }
+        string[] names = { "ShipMaxSpeed", "ShipDeceleration", "ShipAcceleration",
+                           "DefaultSeekArriveDeadzonePx", "DefaultSteerSmoothMs",
+                           "DefaultSteerNoiseFloor", "SeekWeight" };
+        var vals = new Dictionary<string, float>();
+        foreach (string n in names)
+        {
+            FieldInfo f = ship.GetField(n, anyStatic);
+            if (f == null || !f.IsLiteral)
+            {
+                Console.WriteLine("FAIL: could not reflect PlayerShip." + n + " as a const -- renamed, moved, or no longer const?");
+                return 2;
+            }
+            vals[n] = (float)f.GetRawConstantValue();
+        }
+        // Vector2 off the signature, not by name: it lives in the KNI assembly, not the probed one.
+        Type vec2 = gate.GetParameters()[0].ParameterType;
+        Func<float, float, object> V = (x, y) => Activator.CreateInstance(vec2, new object[] { x, y });
+
+        float maxSpeed = vals["ShipMaxSpeed"], decel = vals["ShipDeceleration"], accel = vals["ShipAcceleration"];
+        float dz = vals["DefaultSeekArriveDeadzonePx"], smoothMs = vals["DefaultSteerSmoothMs"];
+        float floor = vals["DefaultSteerNoiseFloor"], weight = vals["SeekWeight"];
+        const float DtMs = 1000f / 60f;
+
+        Func<float, float, float, bool> engaged = (toTargetX, velX, smoothed) =>
+            (bool)gate.Invoke(null, new object[] { V(toTargetX, 0f), V(velX, 0f), dz, smoothed, smoothMs, floor });
+
+        Console.WriteLine("[logic_probe] AI seek predictive arrive gate (card fd126847)");
+
+        // 1. AT REST IT IS THE PRE-CARD GATE, EXACTLY. A stationary ship has no tail and no coast,
+        // so the predicted rest point is where it stands and the answer collapses to
+        // `dist > deadzone`. This is what makes the change a refinement of the old rule rather
+        // than a new one, and it is why no re-tuning of the deadzone radius is implied.
+        bool restMatches = true;
+        for (float d = 0.5f; d <= 60f; d += 0.5f)
+        {
+            if (engaged(d, 0f, 0f) != (d > dz))
+            {
+                restMatches = false;
+            }
+        }
+        Check("at rest the gate reduces to the pre-card `dist > deadzone`", restMatches,
+            "a stationary ship must get exactly the old answer at every distance, or the deadzone"
+            + " radius no longer means what DefaultSeekArriveDeadzonePx says it means");
+
+        // 2. IT IS A STRICT SUPERSET OF THE OLD OFF-CASES -- it can only ever switch the pull OFF,
+        // never on. That is the property that bounds the blast radius of this card: the seek can
+        // never appear where it did not before, so no destination becomes newly reachable and no
+        // new force enters the sum. Swept over speed, distance and the smoother's live magnitude.
+        bool superset = true, everDiffers = false;
+        for (float d = 1f; d <= 80f; d += 1f)
+        {
+            for (float v = 0f; v <= maxSpeed + 0.001f; v += maxSpeed / 8f)
+            {
+                for (float s = 0f; s <= weight; s += weight / 4f)
+                {
+                    // Closing head-on: the ship is at +d and moving in -x, i.e. toTarget is -d.
+                    bool now = engaged(0f - d, 0f - v, s);
+                    bool old = d > dz;
+                    if (now && !old)
+                    {
+                        superset = false;
+                    }
+                    if (now != old)
+                    {
+                        everDiffers = true;
+                    }
+                }
+            }
+        }
+        Check("the gate never pulls where the pre-card gate did not", superset,
+            "SeekArriveEngaged returned true inside the deadzone or where `dist > deadzone` is"
+            + " false -- it must only ever REMOVE pull");
+        // ...and it must actually differ somewhere, or the whole card is a no-op that passes.
+        Check("control: it does differ from the pre-card gate somewhere in that sweep", everDiffers,
+            "identical everywhere means the predictive term is inert and this case set is vacuous");
+
+        // 3. THE CLOSED LOOP -- the actual claim. Fly a lone station seek in from 200px with the
+        // real integrator and require that once the ship is inside the deadzone it never leaves
+        // again. The pre-card gate is run through the identical rig as the control: it overshoots,
+        // which is the limit cycle card fd126847 was filed for.
+        Func<bool, (bool reexits, float rest, int reversals)> fly = (predictive) =>
+        {
+            // Transcribed from AlienDrawableGameComponent.Move(float?, GameTime) and the tail of
+            // DoAIMove. 1-D along x, which is what a head-on arrival is; `speed` is signed here
+            // because a 1-D heading is a sign.
+            float pos = 200f, speed = 0f, ai = 0f;
+            bool wasInside = false, reexited = false;
+            int reversals = 0, lastSign = 0;
+            for (int i = 0; i < 900; i++)
+            {
+                float toTarget = 0f - pos;
+                bool on = predictive
+                    ? (bool)gate.Invoke(null, new object[] { V(toTarget, 0f), V(speed, 0f), dz, Math.Abs(ai), smoothMs, floor })
+                    : Math.Abs(toTarget) > dz;
+                float cmd = on ? (Math.Sign(toTarget) * weight) : 0f;
+                float blend = 1f - (float)Math.Exp(0f - DtMs / smoothMs);
+                ai += (cmd - ai) * blend;
+                float steer = (Math.Abs(ai) <= floor) ? 0f : ai;
+                // Move(): decelerate along the current heading, then thrust (accel + decel) along
+                // the commanded one; Move() keeps only the ANGLE, hence the sign.
+                float dec = Math.Min(decel * DtMs, Math.Abs(speed)) * Math.Sign(speed);
+                float acc = (steer == 0f) ? 0f : (Math.Sign(steer) * (accel + decel) * DtMs);
+                speed = Math.Max(0f - maxSpeed, Math.Min(maxSpeed, speed - dec + acc));
+                pos += speed * DtMs;
+                int sign = Math.Sign(speed);
+                if (sign != 0 && lastSign != 0 && sign != lastSign)
+                {
+                    reversals++;
+                }
+                if (sign != 0)
+                {
+                    lastSign = sign;
+                }
+                bool inside = Math.Abs(pos) <= dz;
+                if (wasInside && !inside)
+                {
+                    reexited = true;
+                }
+                wasInside = inside;
+            }
+            return (reexited, Math.Abs(pos), reversals);
+        };
+        var shipped = fly(true);
+        var preCard = fly(false);
+        Console.WriteLine("  arrival from 200px: predictive rest=" + shipped.rest.ToString("0.0")
+            + "px reversals=" + shipped.reversals + " reexit=" + shipped.reexits
+            + " | pre-card rest=" + preCard.rest.ToString("0.0")
+            + "px reversals=" + preCard.reversals + " reexit=" + preCard.reexits);
+        Check("a ship that reaches the deadzone stays in it", !shipped.reexits,
+            "the ship left the deadzone again under its own momentum, which is the limit cycle:"
+            + " the low-pass keeps thrusting after the pull is cut, so the deadzone radius alone"
+            + " does not bound the stopping distance");
+        Check("the arrival makes no U-turn", shipped.reversals == 0,
+            "a heading reversal on a straight-in approach to a STATIONARY target is an overshoot"
+            + " being corrected -- exactly the jitter pair this card is measured on");
+        Check("it comes to rest inside the deadzone", shipped.rest <= dz,
+            "rest " + shipped.rest.ToString("0.0") + "px vs a deadzone of " + dz
+            + "px -- releasing the pull early must still land the ship at its station, not short of it");
+        // NEGATIVE CONTROL. The identical rig on the pre-card gate must show the defect, or this
+        // whole case set is asserting about a rig that cannot fail.
+        Check("control: the pre-card position-only gate DOES overshoot on that approach",
+            preCard.reexits && preCard.reversals > 0,
+            "the pre-card gate arrived cleanly here, so the rig is not reproducing the reported"
+            + " behaviour and the three assertions above prove nothing");
         return 0;
     }
 

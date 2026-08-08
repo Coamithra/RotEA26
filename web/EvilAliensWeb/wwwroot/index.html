@@ -1211,6 +1211,16 @@
         //                     about a skull's appearance changes with its volley position, so
         //                     this is the only way to see a volley starting part-way through.
         //                     Pair with the ?skullvolley boot flag for a per-shot trace.
+        //   eaAiSeek() — print every AI ship's deliberate destination: which KIND of target won the
+        //                tick (station / powerup / boss / dock / blast), where it is, and whether
+        //                the arrive gate is pulling. The AI bench's steer= is the post-low-pass sum,
+        //                so it cannot tell one attractor from another; nothing about the seek is
+        //                visible in a frame either. Pair with ?aiseeklog for a per-tick trace.
+        window.eaAiSeek = () => {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugAiSeek'); }
+            catch (e) { console.warn('[debug] eaAiSeek failed (game not booted yet?): ' + e.message); }
+        };
+
         window.eaSkullVolley = () => {
             try { DotNet.invokeMethod('EvilAliensWeb', 'debugSkullVolley'); }
             catch (e) { console.warn('[debug] eaSkullVolley failed (game not booted yet?): ' + e.message); }

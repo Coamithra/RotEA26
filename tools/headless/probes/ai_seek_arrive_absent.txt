@@ -1,0 +1,28 @@
+# PROBE: `?aiseekarrive=0` really restores the pre-card position-only arrive gate
+#
+# PINS:   card fd126847, the negative control of ai_seek_arrive.txt -- read the two as one probe.
+#         The flag is a DELIBERATE bug reproduction (the ?netstaleguard=0 / ?netaimease=0 idiom):
+#         it is the arm every before/after number in this card was measured against, so a build
+#         where it parses but does not reach DoAIMove's dispatch would measure the SHIPPED gate
+#         twice and produce a plausible table with a small difference in it. `arrive=` is reported
+#         from the branch that ran, which is the only observable that can say otherwise.
+#
+# FAILURE MEANS:
+#   * `arrive=predictive` seen  -> the flag no longer reaches the dispatch. Any A/B taken since is
+#                                  comparing the shipped build with itself.
+#   * flags-active line missing `aiseekarrive=0` -> it stopped parsing, or dropped out of
+#                                  DebugFlags.Active. It must stay IN Active: it turns a shipped
+#                                  fix off, so it must never reach a public co-op lobby.
+#   * no `kind=station` line     -> vacuous run; see ai_seek_arrive.txt.
+#
+# eahl: --flags "?level=Braineroids&aiplayer&aiseeklog&invuln&noattract&seed=1&difficulty=Very_Hard&aiseekarrive=0"
+
+# Printed at BOOT, so it is asserted BEFORE the first `mark` (a mark above it discards the subject).
+expect      \[debug\] flags active:.*aiseekarrive=0
+
+mark
+step 900 nodraw
+
+expect      \[aiseek\] p0 kind=station .* arrive=position
+expect-not  \[aiseek\] p0 kind=station .* arrive=predictive
+quit

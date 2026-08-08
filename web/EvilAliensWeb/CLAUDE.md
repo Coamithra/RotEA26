@@ -2035,6 +2035,47 @@ the rest are tier-independent.
     standoff) are never floored; each stops pulling inside its own DEADZONE. Then the two are
     summed and `DefaultSteerNoiseFloor` (0.2, applied AFTER the low-pass so the ship can actually
     reach zero rather than chase a decaying residual) catches the leftover equilibrium case.
+  - **THE STATION SEEK'S ARRIVE GATE IS PREDICTIVE, because a deadzone sized on the COASTING
+    stopping distance does not bound a ship that is still under thrust** (card fd126847). The pull
+    used to be a bare `distance > deadzone`; when it switched off, the steering low-pass kept
+    `aiSteer` alive for ~6 more ticks and `Move()` kept thrusting at FULL acceleration down that
+    decaying vector, so the ship crossed the deadzone still accelerating, left the far side and
+    re-armed the gate. Measured on the idle station (`?level=Braineroids`, `?aiseeklog`): each
+    arrival swept 26.9px -> 3.1px -> 16.7px with several heading reversals. `SeekArriveEngaged` now
+    predicts where the ship would come to REST (that tail, then the coast) and releases the pull once
+    that point is inside the deadzone; the arrival is monotone and it settles at 5.9px.
+    - **It only ever switches the seek OFF -- it adds no vector, and at rest it reduces exactly to
+      the old `dist > deadzone`.** That is what keeps it clear of the velocity-damped ARRIVE that was
+      tried and reverted (a `-SpeedVector` term brakes every real manoeuvre); it also means no
+      destination becomes newly reachable. `logic_probe`'s **`ProbeAiSeekArrive`** pins the superset
+      property, the at-rest reduction and the closed-loop arrival, with the pre-card gate through the
+      same rig as the negative control.
+    - **THE TAIL IS CAPPED AT THE SEEK'S OWN WEIGHT, and that cap is the difference between a
+      deadzone and a gate on another force.** Predicting off the whole smoothed sum releases the
+      station pull ~100px out on any tick a threat is pushing at 4 -- i.e. the seek switches itself
+      off whenever the bot is dodging, which is exactly the composition break the field principle
+      forbids. Measured: **+4.00 +- 1.94 deaths on CrazyGame at N=16** uncapped, collapsing to
+      -1.12 +- 1.81 (spans zero) once capped.
+    - **SCOPE: the idle STATION only.** Every other `steerTarget` writer has its own arrival
+      semantics -- a powerup ceases to exist on contact, the boss approach parks in a solved band,
+      a dock partner and a blastable cluster both move -- so they keep the plain position test.
+    - **Directional evidence only so far (N=16, cheap-verification pass).** Station-scoped rates over
+      4 seeds: deadzone re-exits 15.5 -> 8.6 per 1000 station ticks, U-turns 16.7 -> 10.2.
+      Braineroids 180s N=16: `turn` 153 -> 142 deg/s, `revs` 2.66 -> 2.62, **`idle` 8.0% -> 5.2%**
+      (the guard -- a wedged bot also scores low jitter), coast 52.9% -> 58.1%, pickups flat.
+    - Flag: **`?aiseekarrive=0`** restores the pre-card gate -- a deliberate bug reproduction in the
+      `?netstaleguard=0` idiom, hence IN `DebugFlags.Active`. **`?aiseeklog`** prints the seek as
+      data (below). Probes: `tools/headless/probes/ai_seek_arrive.txt` + `ai_seek_arrive_absent.txt`
+      (read as one pair -- they pin the WIRING; `ProbeAiSeekArrive` pins the behaviour).
+  - **`?aiseeklog` / `eaAiSeek()` is the only observable the seek has** (same card). The AI bench's
+    `steer=` is the post-low-pass SUM, so from outside the ship one attractor cannot be told from
+    another, and nothing about a destination is visible in a frame. The `[aiseek]` line reports which
+    KIND won the tick (`station` / `powerup` / `boss` / `dock` / `blast` / `junkboss`), the target,
+    the distance, the speed, the gate, and **which gate branch actually RAN** (`arrive=predictive|
+    position`, read from the branch and not from the flag -- card d79b7ea7's lesson).
+    **It is what ATTRIBUTES an oscillation**: the "spinning circles" reported on
+    `?level=Level3&brainboss` reads `kind=boss dist~300px gate=on` throughout, i.e. it is the boss
+    approach's equilibrium and not the station seek at all.
   - **Each attractor's deadzone is sized by the ship's STOPPING DISTANCE**, which is
     `0.5 * ShipMaxSpeed^2 / ShipDeceleration` = **11.3px**. Below that the ship coasts out the far
     side still under the pull and pingpongs; `DefaultSeekArriveDeadzonePx` is **15** since card
@@ -2109,7 +2150,7 @@ the rest are tier-independent.
     are slow enough that most of the belt never passes its speed gate. So a threat's SPEED decides
     which path protects the ship, and a repellent change measured on one rig says nothing about
     the other.
-  - Flags: `?airepeldelta= ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
+  - Flags: `?aiseekarrive=0 ?aiseeklog ?airepeldelta= ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
     ?aiasteroidfall= ?aievade=`, the cone/wedge family above, plus
     `?aiseekapproach= ?aiseekpowerup= ?aipowerupreach= ?aigunhull=`. Wiring that `logic_probe` cannot reach is
     covered by `tools/headless/probes/ai_boss_approach.txt`.

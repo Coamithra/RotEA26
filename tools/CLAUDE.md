@@ -938,6 +938,19 @@ level-select screenshot cropped from the meme splash). Don't hand-edit.
   **this box runs up to eight worktree agents, so do not raise it casually.** It needs a built
   `eahl` (`dotnet build tools/headless -c Debug`) and, like `aiwallnav`, benches whatever was last
   built — rebuild after editing `PlayerShip.cs` or you will measure the old constants.
+- **`tools/sim/ai_seek_trace.py`** (card fd126847): the AI's per-tick DESTINATION, reduced. It runs
+  `eahl` with `?aiseeklog`, keeps the ticks where the idle STATION owns the steer, and reports
+  deadzone re-exits, travel U-turns and the resting distance — the arrival oscillation that
+  `ai_sweep.py` cannot see, because `?aibench`'s `turn`/`revs` are the whole steering sum and a
+  station pingpong is indistinguishable there from a busy dodge.
+  ```sh
+  python tools/sim/ai_seek_trace.py --seeds 1,2,3,4          # both arms, Braineroids
+  python tools/sim/ai_seek_trace.py --rig Level3 --dump      # the raw per-tick rows
+  ```
+  **Counts are per 1000 station ticks, and that is not decoration**: a behavioural change reroutes
+  the level from the first tick, so the two arms never walk the same world and only rates compare.
+  `--arms` takes bare query fragments (`aiseekarrive=0` is the pre-card gate). Like `ai_sweep.py` it
+  benches the last-built `eahl` — rebuild after editing `PlayerShip.cs`.
 - **`tools/sim/net_jip_sync.py`** (card 054947f3): the automated join-in-progress suite, and the
   only tool here that drives **two eahl PROCESSES**. A real listed host plays a level, a fresh
   menu-session joiner attaches to it every `--cadence` seconds, and the two worlds are DIFFED

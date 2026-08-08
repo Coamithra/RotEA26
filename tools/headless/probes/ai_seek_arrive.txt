@@ -1,0 +1,47 @@
+# PROBE: the station seek runs through the PREDICTIVE arrive gate, and says which gate ran
+#
+# PINS:   card fd126847. The seek's arrive gate used to be `distance > deadzone` alone, which is
+#         only self-stabilising for a COASTING ship -- the steering low-pass keeps thrusting for
+#         ~6 ticks after the pull is cut, so the ship crossed the deadzone, left the far side and
+#         re-triggered. Measured on the idle station: a 26.9px -> 3.1px -> 16.7px sweep per
+#         arrival, several heading reversals each time.
+#
+#         WHAT THIS PROBE CAN SEE, AND WHAT IT CANNOT. The BEHAVIOUR -- no overshoot, no U-turn,
+#         rest inside the deadzone -- is a closed loop and is pinned by `logic_probe`'s
+#         ProbeAiSeekArrive, which drives the real predicate through the real motion constants
+#         with the pre-card gate beside it as the control. What that cannot cover is the WIRING:
+#         whether DoAIMove's station branch actually reaches the predicate in a real level. That
+#         is this probe, and it is the same silent-failure class as ai_wallnav_2008.txt -- the
+#         `arrive=` field is reported from the BRANCH THAT RAN, not from the flag, so a build
+#         whose dispatch is inverted cannot print a plausible line.
+#
+#         Read it together with ai_seek_arrive_absent.txt: one proves the shipped build takes the
+#         predictive branch, the other proves `?aiseekarrive=0` really reaches the pre-card gate
+#         (i.e. that the A/B seam every number in this card was measured against is real). Either
+#         alone passes on a build where the branch always takes one side.
+#
+# FAILURE MEANS: read WHICH line went red.
+#   * no `kind=station` line   -> the run never reached an idle station seek, so the assertions
+#                                 below are vacuous (README rule 5). The level or the bot's
+#                                 target priority moved -- check the boot, not the gate.
+#   * `arrive=position` seen    -> THE REGRESSION: the station branch fell through to the
+#                                 pre-card gate with no flag asking for it.
+#   * no `[aiseek]` at all      -> ?aiseeklog stopped parsing, or NoteAiSeek is no longer called.
+#
+# NOTES:  Braineroids is the rig because the bot spends most of it parked at the idle station
+#         (400,400) -- it is where the station seek is the term that owns the steer. ?invuln and
+#         ?seed= pin the precondition: a death moves the ship and rerolls the approach.
+#         MUTATION-TESTED by inverting the dispatch (`!DebugFlags.AiSeekArrive`), which turns the
+#         second assertion red while the first stays green.
+#
+# eahl: --flags "?level=Braineroids&aiplayer&aiseeklog&invuln&noattract&seed=1&difficulty=Very_Hard"
+
+mark
+step 900 nodraw
+
+# The station seek was actually exercised (the precondition), ...
+expect      \[aiseek\] p0 kind=station
+# ...and every station tick went through the predictive gate.
+expect      \[aiseek\] p0 kind=station .* arrive=predictive
+expect-not  \[aiseek\] p0 kind=station .* arrive=position
+quit

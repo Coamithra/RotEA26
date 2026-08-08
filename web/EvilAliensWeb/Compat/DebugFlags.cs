@@ -1430,6 +1430,26 @@ namespace EvilAliensWeb.Compat
 		//                       distance (PlayerShip.DefaultSeekArriveDeadzonePx).
 		public static float? AiSeekDeadzonePx { get; private set; }
 
+		// ?aiseeklog: make every AI ship report its deliberate destination on an `[aiseek]` line,
+		// once per tick -- which KIND of target won the tick, where it is, how far the ship is
+		// from it, how fast the ship is closing, and whether the arrive gate is pulling
+		// (card fd126847). Nothing about the seek is visible in a frame and the AI bench's
+		// `steer=` is post-low-pass, so the raw destination cannot be read from outside at all:
+		// this is the only observable that can say WHICH attractor an oscillation belongs to.
+		// Diagnostic only -- reading it changes nothing, so it is OUT of `Active`.
+		public static bool AiSeekLog { get; private set; }
+
+		// The seek's PREDICTIVE arrive gate (card fd126847), ON by default -- `?aiseekarrive=0`
+		// turns it OFF, restoring the pre-card gate that compared the ship's CURRENT position
+		// against the deadzone alone and so kept thrusting into a destination it was already
+		// going to overshoot (measured: a 38px, 20-tick limit cycle about the idle station).
+		//
+		// DEFAULTS TRUE, so `Active` asks the inverse (`!AiSeekArrive`) -- the `?netstaleguard=0`
+		// / `?netaimease=0` shape, and in `Active` for the same reason: it is a deliberate bug
+		// reproduction, i.e. the A/B control this card's numbers were measured against, and it
+		// must never be what a public build is flying.
+		public static bool AiSeekArrive { get; private set; } = true;
+
 		// ?aiseekpowerup=<w>    the pull toward a POWERUP the bot has chosen to fetch, and
 		// ?aiseekapproach=<s>   REDEFINED BY CARD b56633fb: a SCALE on the boss approach's own
 		//                       SOLVED weight (1 = as shipped), not a weight any more. The boss
@@ -3289,6 +3309,24 @@ namespace EvilAliensWeb.Compat
 							InForce(AiSeekDeadzonePx ?? EvilAliens.PlayerShip.DefaultSeekArriveDeadzonePx));
 					}
 					break;
+				case "aiseeklog":
+					AiSeekLog = IsOn(val);
+					break;
+				case "aiseekarrive":
+					// Same asymmetry as ?netstaleguard / ?netaimease: an unrecognised value here
+					// would silently turn a shipped FIX off, so only an explicit off spelling
+					// disables it and anything else is reported and ignored.
+					if (IsExplicitlyOff(val))
+					{
+						AiSeekArrive = false;
+					}
+					else if (!IsOn(val))
+					{
+						Console.WriteLine("[debug] unknown ?" + key + "= value '" + val
+							+ "' (expected 0/off to disable) -- ignored, the seek's predictive"
+							+ " arrive gate stays " + (AiSeekArrive ? "ON" : "OFF"));
+					}
+					break;
 				case "aiseekpowerup":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aisp) && aisp >= 0f)
 					{
@@ -4146,7 +4184,7 @@ namespace EvilAliensWeb.Compat
 					+ "REFUSE its own pairing (a menu session rejects while debug flags are active). "
 					+ "Add &netallowdebug.");
 			}
-			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || !NetChargeAimEase || AiWallNav2008 || !AiTopEdgeCompose || AiFastForward > 1;
+			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || !NetChargeAimEase || AiWallNav2008 || !AiSeekArrive || !AiTopEdgeCompose || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -4190,6 +4228,11 @@ namespace EvilAliensWeb.Compat
 						// the ORIGINAL algorithm must be tellable from one that measured the
 						// shipped one -- the two produce plausible tables either way.
 						+ (AiWallNav2008 ? " aiwallnav2008" : "")
+						// Same rule again, for this card's deliberate bug repro: prints only when
+						// the predictive arrive gate is OFF, so an arm that measured the
+						// PRE-CARD seek is tellable from one that measured the shipped one.
+						+ (!AiSeekArrive ? " aiseekarrive=0" : "")
+						+ (AiSeekLog ? " aiseeklog" : "")
 						+ (!AiTopEdgeCompose ? " aitopedgecompose=0" : "")
 						+ (Harness != null
 							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "") + " bg=" + HarnessBg

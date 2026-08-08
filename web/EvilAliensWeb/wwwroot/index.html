@@ -253,6 +253,24 @@
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugAiBenchWorld')); }
             catch (e) { console.warn('[debug] eaAiBench.world failed: ' + e.message); }
         };
+        // eaBigUfoSpare(px) — which big UFOs the AI is deliberately leaving alive for the spider
+        // boss to walk into, evaluated at `px` AND at 0 in the same tick (card 2c74d5b7). The
+        // same-instant pair is the point: the population evolves, so running one arm and then
+        // the other inside a fight compares two different screens and can invert the result.
+        // eaBigUfoEngage(px) / eaBigUfoEngageClear() drive the radius live — it bakes to 0 (off,
+        // a measured verdict), so turning it on is the only way to see the arm engage.
+        window.eaBigUfoSpare = (px) => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugBigUfoSpare', px || 0)); }
+            catch (e) { console.warn('[debug] eaBigUfoSpare failed (in a level?): ' + e.message); }
+        };
+        window.eaBigUfoEngage = (px) => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugBigUfoEngage', px || 0)); }
+            catch (e) { console.warn('[debug] eaBigUfoEngage failed: ' + e.message); }
+        };
+        window.eaBigUfoEngageClear = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugBigUfoEngageClear')); }
+            catch (e) { console.warn('[debug] eaBigUfoEngageClear failed: ' + e.message); }
+        };
         // eaAiBench.soak(simSeconds) — run the AI headless: tick the real game loop at a fixed
         // 60Hz dt with NO Draw, in bounded chunks, until simSeconds elapse or the level ends.
         // This is the only reliable way to soak from automation — a background tab throttles rAF

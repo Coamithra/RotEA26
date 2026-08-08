@@ -227,8 +227,108 @@ public class PlayerShip : AlienDrawableGameComponent
 	// Bullet travel per ms of its lifetime -- i.e. `bulletlifetime * this` is how far a shot
 	// reaches. The 0.78 factor is the 2008 range test in DoAIFire, named here because the
 	// boss-approach ANCHOR r* is derived from it, so "close until you can shoot" and "a shot
-	// reaches this far" cannot drift apart.
+	// reaches this far" cannot drift apart. It is exactly `Bullet.Initialize`'s Speed, and a
+	// bullet dies on its lifetime, so the travel is exact rather than approximate.
 	private const float BulletRangePerMs = 0.78f;
+
+	// ---- GUN REACH: A BULLET ONLY HAS TO REACH THE HULL (card bb949dd9) --------------------
+	//
+	// WHAT WAS WRONG. Both the fire gate and the boss-approach anchor measured range to the
+	// target's CENTRE -- the 2008 test, verbatim (src_decompiled DoAIFire, `num2 <= bulletlifetime
+	// * 0.78f`), and harmless in 2008 because nothing POSITIONED the ship off it. The port's
+	// approach term is anchored on that same test, so the ship parked where its centre distance
+	// equalled the bullet's travel and threw away the whole hull: measured on `?level=Level2&
+	// marsboss`, `boss=159px` of EDGE distance against a hull whose corner term is 176px, i.e.
+	// the bot flew ~124px closer than it could have shot from. On BrainBoss (hull 233->257px
+	// against a 351px reach) it is worse still -- r* was 118px.
+	//
+	// THE RULE, and it is one rule with no per-type code: a shot aimed at the centre strikes the
+	// hull after `centreDist - hitRadius`, so the reach is the bullet's travel PLUS the target's
+	// own hull radius. Small targets get a small credit and nothing about them changes; a boss
+	// gets a big one, which is the whole point.
+	//
+	// THE CREDIT IS THE INSCRIBED HALF-EXTENT (ThreatRadius), NOT the sqrt(2) corner term
+	// (ThreatBodyTerm), and that is the conservative choice ON PURPOSE: the corner term is the
+	// hull's radius along the diagonal only, so crediting it would claim reach the bullet does
+	// not have when the ship approaches along an axis. It is also what keeps the reach
+	// self-limiting against the aim spread -- at Very_Hard's PI/12, a shot at the edge of the
+	// cone stops striking a 124px-half MarsBoss hull beyond ~480px of centre distance, and the
+	// inscribed credit puts the gate at 475.
+	//
+	// BOTH CALLERS GO THROUGH THIS, which is the same argument ThreatBodyTerm's own comment
+	// makes: two copies would let the gate the bot fires on and the anchor it parks on drift
+	// apart, and then the ship stands where it cannot shoot.
+	public const float DefaultGunHullCredit = 1f;
+
+	// ?aigunhull= -- the A/B seam on that credit. `0` restores the pre-card centre-distance gate
+	// (and with it the pre-card anchor) exactly, which is the negative control. A tuning seam,
+	// not a bug reproduction, so it stays OUT of DebugFlags.Active -- the ?aisweptmax= precedent.
+	private static float GunHullCredit => EvilAliensWeb.Compat.DebugFlags.AiGunHullCredit ?? DefaultGunHullCredit;
+
+	// Max CENTRE distance a shot aimed at the target's centre can be fired from and still strike
+	// its hull. PURE -- primitives in, distance out -- so logic_probe sweeps it over the whole
+	// bulletlifetime range and every hull with no game running, rather than restating it.
+	public static float AiGunReachPx(float bulletLifetime, float hitRadius)
+	{
+		return bulletLifetime * BulletRangePerMs + MathHelper.Max(hitRadius, 0f) * GunHullCredit;
+	}
+
+	// ---- SPARING THE SPIDER BOSS'S EXECUTIONERS (card 2c74d5b7) ------------------------------
+	//
+	// Only a Lazer hurts the SpiderBoss (SpiderBoss.CollidesWith), and a BIG UFO fires one six
+	// times as often as a small one (UFO.Update: 0.0009/ms against 0.00015). The boss's whole HP
+	// pool is `5 * DifficultyFactorized(0.75)`, so the fight's LENGTH is very nearly "how many big
+	// UFOs got to fire" -- every one the bot clears is a gun it took away from itself, and killing
+	// one mid-windup (the 2500ms UFOState.lazor charge) deletes the beam outright.
+	//
+	// DoAIFire already spares exactly ONE, the one furthest from every ship. The card asked for
+	// "some" -- i.e. more than one -- and proposed a reduced engage radius to get there. That
+	// mechanism is BUILT and reachable (`?aibigufopx=<px>`), and it **BAKES TO 0, i.e. OFF**,
+	// because across its whole usable band it measured as a net loss. Read the next two bullets
+	// before re-enabling it.
+	//
+	// **THE BAND IS BOUNDED ABOVE BY THE BOT'S REACH, which is the durable answer to the card's
+	// question.** It never fires past AiGunReachPx -- `bulletlifetime * BulletRangePerMs` = 351px
+	// at the base weapon PLUS the target's hull credit (card bb949dd9) -- so a radius at or above
+	// that is behaviourally inert. Measured ~400px for a big UFO: runs at 400 / 420 / 450 produce
+	// an identical world. "Reduce the radius" therefore has ~100..400px to work in, not an open
+	// range.
+	//
+	// **AND EVERY VALUE IN THAT BAND LOSES.** eahl, Very_Hard, `?invuln` off, seeds 1-8 x2 (N=16,
+	// small -- these are directional, and the sign was consistent across both variants):
+	//
+	//   arm                       deaths (paired)   victories   win@    Lazer kills   mean alive
+	//   off (=0)                  3.81              6/16        158s    49            1.32
+	//   capped at 250             +0.94 +- 1.09     7/16        219s    68            1.36
+	//   capped at 300             +1.19 +- 1.23     4/16        112s    68            1.40
+	//   UNCAPPED at 250           +1.50 +- 0.89     6/16        241s    72            1.46
+	//
+	// The counter moves exactly as designed and the fight does not follow. The mechanism is that
+	// the beams the bot is inviting are aimed AT IT and it was already dying to them (`Lazer` is
+	// ~90% of deaths on this rig), so each extra platform costs more dodging than it buys boss
+	// damage. Neither deaths diff clears 2 SEM, so this is "not better", not "significantly
+	// worse" -- but nothing here is an improvement to ship.
+	//
+	// WHY A RADIUS AND NOT "SPARE N". Distance is what makes sparing survivable at all: the beam
+	// is aimed AT THE PLAYER at fire time and stays put for >=3250ms, so a far platform's beam
+	// crosses most of the screen for the boss to walk into while a near one's is a point-blank
+	// shot the bot has no room to leave. A count would spare the nearest as readily as the far.
+	//
+	// IF YOU RE-OPEN THIS, the untried directions are the ones that change WHERE the bot stands
+	// rather than how many guns it leaves alive -- the beam-avoidance magnitudes (card 2248e5eb
+	// re-measured those and they are not obviously final on this rig) or a positional term that
+	// keeps the ship off the invited beam's line. Raising the radius is not one of them.
+	public const float DefaultBigUfoEngagePx = 0f;
+
+	private static float BigUfoEngagePx => EvilAliensWeb.Compat.DebugFlags.AiBigUfoEngagePx ?? DefaultBigUfoEngagePx;
+
+	// How many big UFOs the radius gate may leave alive at once, the spare-one rule INCLUDED --
+	// so with `?aibigufopx=` on, at most this many. Deliberately NOT a flag: `?aibigufopx=` is
+	// the one seam here, and a second knob would let a sweep wander back to the uncapped
+	// configuration the table above records as the worst arm of the four. It is a name for the
+	// two slots (`sparedUfo` + `sparedFarUfo`) in DoAIFire rather than a loop bound -- at 2 an
+	// explicit pair is cheaper and clearer than a top-N scan, so raising it means writing one.
+	public const int BigUfoSpareCap = 2;
 
 	// ---- THE BOSS-APPROACH ATTRACTOR (card b56633fb) ----------------------------------------
 	//
@@ -256,10 +356,17 @@ public class PlayerShip : AlienDrawableGameComponent
 	// There is no deadzone and no standoff radius. The whole-sum floor (DefaultSteerNoiseFloor
 	// 0.2) then turns the crossing into a BAND -- |A - repel| <= 0.2 reads as "hold still" -- and
 	// that band has to be wider than the ship's 11.3px stopping distance or it coasts through and
-	// pingpongs. Width is 0.4 / (|A'| + |repel'|); at the shipped numbers (Very_Hard, base weapon:
-	// r* = 181.3px edge, w = 0.678, |repel'| = 0.00905/px, |A'| = w/r* = 0.00374/px) that is
-	// **31px**, i.e. 2.7x the stopping distance. Swept over every tier and the whole
-	// bulletlifetime range by logic_probe's ProbeAiBossApproach, which is where the bound lives.
+	// pingpongs. Width is 0.4 / (|A'| + |repel'|). The worked example this used to carry (r* =
+	// 181.3px edge, band 31px) is CARD bb949dd9-SUPERSEDED: r* now credits the boss's hull, so
+	// the same MarsBoss-sized hull solves to r* ~ 301px edge with a much shallower repellent
+	// there, and the band is correspondingly wider. Read the bound off
+	// logic_probe's ProbeAiBossApproach, which sweeps every tier x the whole bulletlifetime range
+	// x every hull and is where the bound actually lives -- not off a number in this comment.
+	// SIDE EFFECT WORTH KNOWING: at the new r* the boss's own repellent has often decayed BELOW
+	// the whole-sum floor, so the equilibrium is the floored-attractor case this shape was
+	// already built for (the Range-powerup branch below), not a solved crossing. The ship then
+	// parks somewhat inside r* rather than on it -- still far outside where it used to stand,
+	// and `bossfar` remains the honest readout of whether it can shoot from there.
 	//
 	// KNOWN LIMIT -- THE BAND ASSUMES THE TWO FORCES ARE COLLINEAR, AND FOR SEATS 3/4 THEY ARE NOT.
 	// The radial threat push is emitted at `VectorToAngle(...) + dodgeAngle`, a per-slot rotation
@@ -281,17 +388,20 @@ public class PlayerShip : AlienDrawableGameComponent
 	// asserts directly rather than taking on the shape's word.
 	private const float BossApproachExponent = 1f;
 
-	// Anchor floor. r* is derived (gun range minus the boss's own body term), so a boss whose hull
+	// Anchor floor. r* is derived (gun reach minus the boss's own body term), so a boss whose hull
 	// is bigger than the weapon's reach would drive it to zero or below -- and a tiny r* is what
 	// makes |A'| = w/r* explode and collapses the band. Floored at 3x the 11.3px stopping distance:
 	// below that the ship cannot hold a standoff there anyway, and the band bound is verified AT
 	// the floor rather than assumed away.
-	// IT IS THE FIRST RESORT, NOT THE WHOLE ANSWER: it can only rescue an anchor that has gone to
-	// zero, and the measured failure is a boss with a LIVE anchor of ~100px, which the floor never
-	// touches. That case is what the exponent damping below exists for. Raising this floor instead
-	// was measured and rejected: covering it needs ~115px, and asking the ship to stand 115px
-	// clear of a hull that wide parks it OUTSIDE gun range -- reinstating the never-shoots failure
-	// this whole term exists to remove.
+	// CARD bb949dd9 PUSHED EVERY REAL HULL WELL CLEAR OF IT and the floor is now unreached in
+	// practice -- the reach credits the hull radius, so r* is `travel - (sqrt(2)-1)*halfExtent`
+	// and the widest boss in the game (BrainBoss at its pulse peak, halfExtent 182) still solves
+	// to ~276px. Keep it: `?aifieldpx=`/`?aigunhull=` and a hypothetical wider boss can still
+	// drive r* down, and the probe verifies the band bound AT the floor.
+	// THE PARAGRAPH THAT USED TO SIT HERE IS OBSOLETE, and it is worth knowing why rather than
+	// just deleting it: raising this floor to ~115px was rejected because "asking the ship to
+	// stand 115px clear of a hull that wide parks it OUTSIDE gun range". That was true only
+	// while gun range was measured to the boss's CENTRE; it is not the trade any more.
 	private const float BossApproachMinAnchorPx = 34f;
 
 	// SAFETY FACTOR on the band bound: the parked band must be at least this many stopping
@@ -320,9 +430,95 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private static float TopEdgeDangerPx => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeDangerPx ?? DefaultTopEdgeDangerPx;
 
-	public const float DefaultTopEdgeAvoidStrength = 20f;
+	// 20 -> 12 (card 13960838). `maxSteerStrength` is 4, and 4 is ALSO the ceiling of the powerup
+	// approach pull, so at 20 the band out-voted the strongest pull possible for the top
+	// `170 * (1 - 4.8/20)` = 129px of the screen -- a strip where a pickup was not unlikely but
+	// arithmetically unreachable, which is the card's complaint. At 12 that strip is 102px, i.e.
+	// NARROWED, not removed: a band that could never out-vote a powerup would not deter a ship
+	// from the spawn line either, which is what card 2248e5eb measured this term as being for.
+	//
+	// MEASURED, and read the direction of the evidence rather than the number: N=16 paired by seed
+	// (seeds 1-8 x2), pickups 45.4% -> 55.7% spider and 52.4% -> 57.4% brainboss, deaths
+	// -1.00 +- 0.84 and -0.19 +- 0.66. **12 rather than something lower is deliberate.**
+	// 2248e5eb's cost for dropping the band outright was +0.67..+0.88 deaths, which is INVISIBLE
+	// at this sweep's ~0.8 SEM -- so a value that merely looks flat on deaths here is not evidence
+	// of being safe, and the conservative pick is the highest strength that recovers most of the
+	// pickup gain. The N=60 gate is the arbiter. `?aitopedgestrength=0` remains the 2008 arm.
+	public const float DefaultTopEdgeAvoidStrength = 12f;
 
 	private static float TopEdgeAvoidStrength => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeAvoidStrength ?? DefaultTopEdgeAvoidStrength;
+
+	// WHERE the band's push is applied (card 13960838). True = into `repel`, with every other
+	// repellent: upstream of the cancellation floor and of the steering low-pass. False =
+	// `?aitopedgecompose=0`, the pre-card placement, straight into `direction` AFTER the low-pass.
+	//
+	// The old placement is why the card was filed. `maxSteerStrength` is ALSO the ceiling of the
+	// powerup pull a few hundred lines up, so at the pre-card strength of 20 the two were not
+	// competing forces at all, they were a force and a rounding error, and no attractor in the
+	// method could survive the top of the screen. Bypassing the low-pass made it worse than the
+	// ratio suggests: every other vote is smoothed toward its sustained value while this one lands
+	// whole on the frame it is computed.
+	//
+	// PLACEMENT AND MAGNITUDE ARE SEPARATE CHANGES AND ONLY THE SECOND MOVED THE PICKUP RATE.
+	// This one buys the ability to argue with the band at all -- under the old placement no
+	// strength above 4 could be out-voted, so retuning it would have been meaningless. What the
+	// measurement then showed is that the rate tracks the strength (see DefaultTopEdgeAvoidStrength
+	// for the table and the 20 -> 12 that came with it), while composing it is what carries the
+	// death improvement. Do not collapse the two into one claim.
+	private static bool TopEdgeComposes => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeCompose;
+
+	// One latch PER SITE for the `[aitopedge]` line, keyed on the placement name. Static, so each
+	// is per PROCESS rather than per ship -- four co-op ships would otherwise print four times and
+	// a pool recycle more still.
+	//
+	// TWO LATCHES, NOT ONE, and the difference is a real defect class: a single shared latch means
+	// whichever site fires first silences the other, so a build applying the band at BOTH sites --
+	// double strength on an ordinary boot -- prints exactly the line a healthy build prints. That
+	// mutation passed the probe pair while the latch was shared (measured). Per-site, such a build
+	// prints both lines and the pair's `expect-not` catches it.
+	private static readonly HashSet<string> topEdgeReported = new HashSet<string>();
+
+	// Which placement actually RAN. The `[debug] flags active` dump reports only the PARSE, so an
+	// A/B arm whose flag parsed but whose branch did not fire measures the shipped code twice and
+	// prints an entirely plausible table -- the `?aiwallnav2008` lesson, and the reason that flag
+	// prints its own line too.
+	//
+	// **CALLED FROM INSIDE EACH BRANCH, and passed the branch's OWN name -- never handed
+	// `TopEdgeComposes` to re-derive.** A version reading the predicate here was written first and
+	// is exactly as useless as the flags dump: inverting the dispatch left it printing "composed"
+	// while the push went the other way, and the probe pair passed on the mutation it exists to
+	// catch (measured). The report has to be evidence of the branch, not a second reading of its
+	// condition.
+	private static void ReportTopEdgePlacement(string placement)
+	{
+		if (topEdgeReported.Add(placement))
+		{
+			Console.WriteLine("[aitopedge] placement: " + placement + " band=" + TopEdgeDangerPx
+				+ "px strength=" + TopEdgeAvoidStrength);
+		}
+	}
+
+	// The band's magnitude at a design-space Y, as a pure function of its two parameters, so
+	// logic_probe can sweep the profile and DERIVE the crossover against the powerup pull instead
+	// of having a number restated beside it (card 13960838; the 05a2b818 style). DoAIMove calls
+	// this rather than repeating the arithmetic -- a second copy is how the probe comes to be
+	// pinning a formula the game does not use.
+	//
+	// LINEAR, not the `(1-t)^p` spike every threat field uses: this band is a PRIOR about where
+	// UFOs are going to appear rather than a field around something that already exists, so it has
+	// to be pushing well before the ship gets there. That shape is card 2248e5eb's and is untouched.
+	//
+	// `dangerPx > 0` is the guarded divisor -- `?aitopedgepx=0` passes that flag's own `>= 0` range
+	// check, so a zero depth is reachable, and relying on the position clamp to keep Y positive
+	// would be leaning on an invariant three hundred lines away.
+	public static float TopEdgeAvoidMagnitude(float y, float dangerPx, float strength)
+	{
+		if (dangerPx <= 0f || y >= dangerPx)
+		{
+			return 0f;
+		}
+		return strength * (1f - y / dangerPx);
+	}
 
 	// Same, for the descent/climb column (the boss's standing box is 240px wide).
 	private const float VerticalLaneClearancePx = 240f;
@@ -1741,6 +1937,110 @@ public class PlayerShip : AlienDrawableGameComponent
 		aiGapColumn = -1;
 	}
 
+	// WHICH big UFOs the AI deliberately leaves alive during a SpiderBoss fight, and the boss
+	// facts the caller needs from the same scan (cards f4d1721f / 2c74d5b7).
+	//
+	// The SpiderBoss fight is won with the ENEMY's guns: only a Lazer can hurt the boss, and a big
+	// UFO fires one AT THE PLAYER, so the boss walks into any beam that crosses the screen. Killing
+	// every big UFO leaves nothing but the helper mothership's slow cycle. So:
+	//   * ONE is always spared -- the one with the most ROOM, scored by its distance to the NEAREST
+	//     ship so that in co-op it is far from everybody. Keeping the beam platform at arm's length
+	//     is what makes this survivable: its beam still crosses the screen for the boss to walk
+	//     into, but the AI is not standing next to the thing that is aiming at it. This only pays
+	//     off together with the beam dodging in DoAIMove; sparing without it measured 24 -> ~70
+	//     deaths.
+	//   * ONE MORE is spared if it is further than `engagePx` from every ship -- the radius gate,
+	//     capped at BigUfoSpareCap in total. `engagePx <= 0` is the gate OFF, i.e. the pre-card
+	//     build exactly. See DefaultBigUfoEngagePx for why that is what ships.
+	//   * NEITHER is spared during a fly-by. Dodging a screen-wide sweep and a big UFO's beam at
+	//     the same time is how the bot dies, and it is worst in the upper lane where the UFOs live.
+	//     The boss spends most of the fight grounded, which is plenty of time to feed it beams.
+	//
+	// SEPARATE FROM DoAIFire, AND STATIC, so the decision can be read as DATA at one instant over
+	// one world (`eaBigUfoSpare()`), which is the only honest way to A/B the gate: the population
+	// evolves, so running one arm and then the other inside a single fight compares two different
+	// screens and can invert the true result (measured -- it did, during this card). It takes
+	// `engagePx` as a PARAMETER rather than reading the flag for the same reason.
+	// `oracle` is instance state, so this is static-in-spirit rather than static.
+	private void SelectSparedBigUfos(List<AlienDrawableGameComponent> baddies, float engagePx,
+		out UFO sparedUfo, out UFO sparedFarUfo, out int bigUfosAlive,
+		out bool spiderBossAlive, out bool bossSweeping)
+	{
+		spiderBossAlive = false;
+		bossSweeping = false;
+		sparedUfo = null;
+		sparedFarUfo = null;
+		bigUfosAlive = 0;
+		float sparedRoom = -1f;
+		// The radius gate's slot is the SECOND-most-roomy big UFO, because the most-roomy one is
+		// already `sparedUfo` -- "spare the furthest one beyond the radius" and the spare-one rule
+		// would otherwise name the same UFO and the gate would do nothing at all.
+		float sparedFarRoom = -1f;
+		foreach (AlienDrawableGameComponent scan in baddies)
+		{
+			if (scan is SpiderBoss && !scan.IsDead)
+			{
+				spiderBossAlive = true;
+				bossSweeping |= ((SpiderBoss)scan).AiSweepIncoming;
+			}
+			else if (scan is UFO && ((UFO)scan).IsBig && !scan.IsDead)
+			{
+				bigUfosAlive++;
+				float room = float.MaxValue;
+				foreach (PlayerShip ship in oracle.GetShips())
+				{
+					Vector2 toShip = scan.Position - ship.Position;
+					room = MathHelper.Min(room, (toShip).Length());
+				}
+				// Top TWO by room, most first. The `>` (not `>=`) on the first slot preserves the
+				// pre-card tie-break exactly -- first seen wins -- so gate-off is the OLD build
+				// and not merely a similar one.
+				if (room > sparedRoom)
+				{
+					sparedFarRoom = sparedRoom;
+					sparedFarUfo = sparedUfo;
+					sparedRoom = room;
+					sparedUfo = (UFO)scan;
+				}
+				else if (room > sparedFarRoom)
+				{
+					sparedFarRoom = room;
+					sparedFarUfo = (UFO)scan;
+				}
+			}
+		}
+		if (!spiderBossAlive || bossSweeping)
+		{
+			sparedUfo = null;
+			sparedFarUfo = null;
+		}
+		else if (engagePx <= 0f || sparedFarRoom <= engagePx)
+		{
+			// The `engagePx <= 0f` half is tested EXPLICITLY rather than left to fall out of the
+			// comparison: `room` is a length, so `room > 0` holds for every UFO and a bare
+			// `sparedFarRoom > engagePx` would spare one at every radius INCLUDING zero -- the
+			// exact opposite of the pre-card build a zero is supposed to restore.
+			sparedFarUfo = null;
+		}
+	}
+
+	// eaBigUfoSpare() -- the decision above, evaluated over the LIVE world at two radii at once.
+	// Same-instant, same-screen, so it says what the rule does rather than what a 45-second slice
+	// of a stochastic fight happened to contain.
+	internal string AiBigUfoSpareReadout(float engagePx)
+	{
+		List<AlienDrawableGameComponent> baddies = oracle.GetBaddies();
+		SelectSparedBigUfos(baddies, engagePx, out UFO on1, out UFO on2, out int alive,
+			out bool bossAlive, out bool sweeping);
+		SelectSparedBigUfos(baddies, 0f, out UFO off1, out UFO off2, out int _, out bool _, out bool _);
+		int sparedOn = (on1 != null ? 1 : 0) + (on2 != null ? 1 : 0);
+		int sparedOff = (off1 != null ? 1 : 0) + (off2 != null ? 1 : 0);
+		return "[ai] bigufo alive=" + alive + " boss=" + (bossAlive ? "alive" : "none")
+			+ " sweeping=" + (sweeping ? "yes" : "no")
+			+ " engage=" + engagePx.ToString("F0", System.Globalization.CultureInfo.InvariantCulture) + "px"
+			+ " spared=" + sparedOn + " sparedAtZero=" + sparedOff + " cap=" + BigUfoSpareCap;
+	}
+
 	private void DoAIFire(GameTime gameTime, List<AlienDrawableGameComponent> baddies)
 	{
 		float aimSpread = AimSpread;
@@ -1753,44 +2053,11 @@ public class PlayerShip : AlienDrawableGameComponent
 		// a couple are deliberately spared -- the surplus is still cleared.
 		// This only pays off together with the laser dodging below: the beams the AI is inviting
 		// are aimed AT IT. Sparing them without that measured 24 -> ~70 deaths.
-		bool spiderBossAlive = false;
-		bool bossSweeping = false;
-		UFO sparedUfo = null;
-		float sparedRoom = -1f;
-		foreach (AlienDrawableGameComponent scan in baddies)
-		{
-			if (scan is SpiderBoss && !scan.IsDead)
-			{
-				spiderBossAlive = true;
-				bossSweeping |= ((SpiderBoss)scan).AiSweepIncoming;
-			}
-			else if (scan is UFO && ((UFO)scan).IsBig && !scan.IsDead)
-			{
-				// Spare exactly ONE, and make it the one with the most room around it -- scored by
-				// its distance to the NEAREST ship, so in co-op it is far from everybody. Keeping
-				// the beam platform at arm's length is what makes this survivable: its beam still
-				// crosses the screen for the boss to walk into, but the AI is not standing next to
-				// the thing that is aiming at it.
-				float room = float.MaxValue;
-				foreach (PlayerShip ship in oracle.GetShips())
-				{
-					Vector2 toShip = scan.Position - ship.Position;
-					room = MathHelper.Min(room, (toShip).Length());
-				}
-				if (room > sparedRoom)
-				{
-					sparedRoom = room;
-					sparedUfo = (UFO)scan;
-				}
-			}
-		}
-		// ...but NOT during a fly-by. Dodging a screen-wide sweep and a big UFO's beam at the same
-		// time is how the bot dies, and it is worst in the upper lane where the UFOs live. The
-		// boss spends most of the fight grounded, which is plenty of time to feed it beams.
-		if (!spiderBossAlive || bossSweeping)
-		{
-			sparedUfo = null;
-		}
+		SelectSparedBigUfos(baddies, BigUfoEngagePx, out UFO sparedUfo, out UFO sparedFarUfo,
+			out int bigUfosAlive, out bool spiderBossAlive, out bool _);
+		// The bench's own view of this (card 2c74d5b7). No-op unless ?aibench.
+		EvilAliensWeb.Compat.AiBench.NoteBigUfos(spiderBossAlive, bigUfosAlive,
+			(sparedUfo != null ? 1 : 0) + (sparedFarUfo != null ? 1 : 0));
 		float nearestDist = float.MaxValue;
 		AlienDrawableGameComponent nearest = null;
 		// The priority bias decides WHICH target wins, but a discounted boss can win from well
@@ -1800,14 +2067,16 @@ public class PlayerShip : AlienDrawableGameComponent
 		// reachable target alongside it.
 		float nearestInRangeSq = float.MaxValue;
 		AlienDrawableGameComponent inRangeTarget = null;
-		float gunRangeSq = (bulletlifetime * BulletRangePerMs) * (bulletlifetime * BulletRangePerMs);
+		// PER CANDIDATE since card bb949dd9, not one shared radius: the reach includes the
+		// target's own hull credit (see AiGunReachPx), so a boss is engageable from further out
+		// than a bullet is. Everything else about the scan is unchanged.
 		// A level-halting boss is worth reaching past a lot of trash, so it competes on a
 		// DISCOUNTED distance rather than by raw proximity. Scored in the same squared space the
 		// loop compares in, hence the squared factor.
 		float priorityBiasSq = PriorityTargetBias * PriorityTargetBias;
 		foreach (AlienDrawableGameComponent baddy in baddies)
 		{
-			if (IsAiShootable(baddy) && !ReferenceEquals(baddy, sparedUfo))
+			if (IsAiShootable(baddy) && !ReferenceEquals(baddy, sparedUfo) && !ReferenceEquals(baddy, sparedFarUfo))
 			{
 				if (isBlastable(baddy) && blast != null && blast.Collides)
 				{
@@ -1826,7 +2095,8 @@ public class PlayerShip : AlienDrawableGameComponent
 					nearest = baddy;
 				}
 				float trueDistSq = (toBaddy).LengthSquared();
-				if (onScreen && trueDistSq <= gunRangeSq && trueDistSq < nearestInRangeSq)
+				float reachPx = AiGunReachPx(bulletlifetime, ThreatRadius(baddy));
+				if (onScreen && trueDistSq <= reachPx * reachPx && trueDistSq < nearestInRangeSq)
 				{
 					nearestInRangeSq = trueDistSq;
 					inRangeTarget = baddy;
@@ -1835,14 +2105,22 @@ public class PlayerShip : AlienDrawableGameComponent
 		}
 		// Undo the bias before the range test: the discount decides WHICH target wins, never
 		// whether a bullet can actually reach it.
+		// The reach is now the CHOSEN target's own (card bb949dd9), so it is re-read whenever
+		// `nearest` changes -- a fallback to the nearest reachable target swaps the hull the
+		// credit came from, and testing the fallback against the discounted winner's reach would
+		// be the drift this whole helper exists to prevent. Zero when nothing was found, which
+		// with `nearestDist = MaxValue` means "do not fire".
+		float nearestReach = 0f;
 		if (nearest != null)
 		{
 			Vector2 toChosen = nearest.Position - base.Position;
 			nearestDist = (toChosen).Length();
-			if (nearestDist > bulletlifetime * BulletRangePerMs && inRangeTarget != null)
+			nearestReach = AiGunReachPx(bulletlifetime, ThreatRadius(nearest));
+			if (nearestDist > nearestReach && inRangeTarget != null)
 			{
 				nearest = inRangeTarget;
 				nearestDist = (float)Math.Sqrt(nearestInRangeSq);
+				nearestReach = AiGunReachPx(bulletlifetime, ThreatRadius(nearest));
 			}
 		}
 		else
@@ -1850,7 +2128,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			nearestDist = float.MaxValue;
 		}
 		bool fired = false;
-		if (nearestDist <= bulletlifetime * BulletRangePerMs)
+		if (nearestDist <= nearestReach)
 		{
 			fired = true;
 			if (nearest is JunkBoss)
@@ -2304,9 +2582,14 @@ public class PlayerShip : AlienDrawableGameComponent
 		if (haltingBoss != null)
 		{
 			float bossEdgeDist = ThreatEdgeDistance(base.Position, haltingBoss);
-			// Gun range is a CENTRE distance (it is what DoAIFire range-tests), so the body term
-			// converts it into the edge space everything here is measured in.
-			float anchorPx = bulletlifetime * BulletRangePerMs - ThreatBodyTerm(haltingBoss);
+			// Gun REACH is a CENTRE distance (it is what DoAIFire range-tests), so the body term
+			// converts it into the edge space everything here is measured in. Since card
+			// bb949dd9 the reach credits the boss's own hull radius -- a bullet only has to
+			// reach the hull -- so r* is `travel - (sqrt(2)-1)*halfExtent` rather than
+			// `travel - sqrt(2)*halfExtent`, and the ship stands where it can actually shoot
+			// from instead of a whole hull's width closer. Same helper as the gate, on purpose.
+			float anchorPx = AiGunReachPx(bulletlifetime, ThreatRadius(haltingBoss))
+				- ThreatBodyTerm(haltingBoss);
 			float pull = BossApproachWeight(bossEdgeDist, anchorPx, ThreatFieldRange(haltingBoss),
 				ThreatTypeFalloff(haltingBoss), ThreatTypeClassicCurve(haltingBoss),
 				ThreatTypeScale(haltingBoss), maxSteerStrength, SteerNoiseFloor) * BossApproachScale;
@@ -2323,7 +2606,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			// after this), and there the boss takes the wheel at any weight: the alternative is
 			// hovering at a station the boss may not be in range of, which is the stall this whole
 			// term exists to end. So the comparison is against a real competing vote only.
-			if (steerTarget.X > 2000f || pull > steerTargetWeight)
+			if (ChooseBossSteerTarget(pull, steerTargetWeight, steerTarget.X > 2000f))
 			{
 				steerTarget = haltingBoss.Position;
 				steerTargetWeight = pull;
@@ -2492,6 +2775,28 @@ public class PlayerShip : AlienDrawableGameComponent
 				repel += push * new Vector2(0f, -1f);
 			}
 		}
+		// THE TOP-EDGE DANGER BAND. The top edge is not just a boundary, it is where UFOs enter --
+		// a ship pinned against it gets exploded by something spawning on top of it. The stock edge
+		// repulsion above tops out at maxSteerStrength (4), which is no contest against a lane
+		// escape (18) or the spider boss's own field, so fleeing upward parked the ship on the
+		// ceiling. This term is scaled to actually compete. Card 2248e5eb measured it against the
+		// 2008 arm (`?aitopedgestrength=0`) at N=60 and KEPT it; its magnitudes are untouched here.
+		//
+		// PLACEMENT (card 13960838): it is a REPELLENT, so it belongs HERE, in `repel`, with every
+		// other one -- upstream of the cancellation floor and of the low-pass. It used to be added
+		// to `direction` AFTER the smoothing, which made it the one steering vote in the whole
+		// method that was neither damped nor allowed to cancel: a raw 0..20 vector welded onto a
+		// smoothed sum whose usual magnitude is order 1-4. The consequence was not subtle -- the
+		// powerup pull a few hundred lines up maxes out at that same `maxSteerStrength`, so
+		// wherever the band beat 4 a pickup was arithmetically unreachable, which is what the card
+		// was reported for. See TopEdgeAvoidMagnitude for the shape and the guarded divisor.
+		Vector2 topEdgePush = new Vector2(0f,
+			TopEdgeAvoidMagnitude(base.Position.Y, TopEdgeDangerPx, TopEdgeAvoidStrength));
+		if (TopEdgeComposes)
+		{
+			repel += topEdgePush;
+			ReportTopEdgePlacement("composed");
+		}
 		// THE REPULSION CANCELLATION FLOOR, and then the combine (card ada9e839). Everything that
 		// pushes AWAY has now had its say; if the resultant of all of it is at or below the delta,
 		// the repellents have argued each other to a standstill and the ship is not pushed at all.
@@ -2533,19 +2838,14 @@ public class PlayerShip : AlienDrawableGameComponent
 		// "do not fly into that" override, and low-passing it (as an earlier revision did) turns a
 		// full reversal into a gentle suggestion -- which measured as 46 wall contacts against the
 		// old code's 8.
-		// The top edge is not just a boundary, it is where UFOs enter -- a ship pinned against it
-		// gets exploded by something spawning on top of it. The stock edge repulsion tops out at
-		// maxSteerStrength (4), which is no contest against a lane escape (18) or the spider
-		// boss's own field, so fleeing upward parked the ship on the ceiling. This term is scaled
-		// to actually compete, and it ramps linearly rather than with the steep field falloff so
-		// it is already pushing well before the ship gets there.
-		// `topEdgePx > 0` is the guarded divisor, mirroring the beam field above: ?aitopedgepx=0
-		// passes the flag's `>= 0` range check, and relying on the position clamp to keep Y
-		// positive is an invariant three hundred lines away.
-		float topEdgePx = TopEdgeDangerPx;
-		if (topEdgePx > 0f && base.Position.Y < topEdgePx)
+		// ?aitopedgecompose=0 -- the top-edge band's PRE-CARD placement, restored verbatim: added
+		// here, downstream of the low-pass, so it is neither smoothed nor subject to the
+		// repulsion-cancel floor. It is the A/B arm for card 13960838 and the deliberate bug
+		// reproduction, nothing else; the composed placement above is what ships.
+		if (!TopEdgeComposes)
 		{
-			direction += new Vector2(0f, TopEdgeAvoidStrength * (1f - base.Position.Y / topEdgePx));
+			direction += topEdgePush;
+			ReportTopEdgePlacement("post-smoothing");
 		}
 		if (hasWall)
 		{
@@ -3068,15 +3368,22 @@ public class PlayerShip : AlienDrawableGameComponent
 		// of the weapon's reach has a small r* with a LARGE w sitting on it, and the linear k=1
 		// curve turns over too fast for the ship to stop inside the band.
 		//
-		// THE ONE CONFIGURATION THAT MAKES THIS BITE -- do not delete it as dead code. BrainBoss at
-		// its pulse peak on the base weapon: its hitbox is hw = 165 * scale and `scale` pulses
-		// 1.00 -> 1.10 (deeper as its HP drops), so the body term runs 233 -> 257px against a
-		// 351px gun range, leaving r* at 118 -> 94px. Undamped that bands 13.5px at scale 1.0 and
-		// 10.0px at the peak -- through the 11.3px stopping distance, i.e. the ship coasts across
-		// its own equilibrium and pingpongs while shooting the brain. Damped, k solves to 0.24 at
-		// rest and 0.09 at the peak, and the band is 22.2px at both. Every OTHER halting boss, tier and weapon in the game
-		// solves to k = 1 and is untouched (the next-tightest band is 53px), and any Range powerup
-		// removes the case entirely by growing r*.
+		// DO NOT DELETE THIS AS DEAD CODE -- and since card bb949dd9 it reads even more like dead
+		// code than it did, because NO shipped configuration reaches k < 1 any more.
+		// THE CONFIGURATION THAT USED TO MAKE IT BITE: BrainBoss at its pulse peak on the base
+		// weapon: its hitbox is hw = 165 * scale and `scale` pulses 1.00 -> 1.10 (deeper as its
+		// HP drops), so the body term runs 233 -> 257px against a 351px bullet travel, which left
+		// r* at 118 -> 94px. Undamped that bands 13.5px at scale 1.0 and 10.0px at the peak --
+		// through the 11.3px stopping distance, i.e. the ship coasts across its own equilibrium
+		// and pingpongs while shooting the brain. Damped, k solved to 0.24 at rest and 0.09 at
+		// the peak, and the band was 22.2px at both.
+		// WHAT CHANGED: the gun reach now credits the hull radius, so that same brain solves to
+		// r* ~ 276px instead of 94 and the slope budget clears k = 1 by ~4x. The damping is
+		// therefore INERT at every tier x weapon x hull that ships today -- which is exactly the
+		// state in which someone deletes it. It is the bound, not a tuning value: `?aifieldpx=`,
+		// `?aigunhull=` and any boss with a wider hull than today's can still drive r* down, and
+		// ProbeAiBossApproach asserts the band over that whole domain rather than over the
+		// shipped point.
 		//
 		// The repellent's slope is measured on the REAL curve rather than differentiated by hand,
 		// so this stays correct across both curve families and any per-type falloff.
@@ -3102,6 +3409,19 @@ public class PlayerShip : AlienDrawableGameComponent
 		// ?aifieldcurve=classic the repellent at r* can be 3.75 against the 3.5 cap (found by
 		// ProbeAiBossApproach sweeping both curve families, not by inspection).
 		return MathHelper.Clamp(pull, 0f, MathHelper.Max(BossApproachMaxWeight, w));
+	}
+
+	// Does the boss approach take the steering wheel this tick? PURE, and extracted (card
+	// bb949dd9) because it is the FLOORED regime's only real assertion: since the anchor credits
+	// the boss's hull, r* often sits where the boss's own repellent has decayed under the
+	// whole-sum floor, so the pull floats at DefaultSteerNoiseFloor and loses every contest with
+	// a live 0.8 powerup detour. What keeps a level-halting boss reachable there is the SENTINEL
+	// -- with nothing else chosen the boss takes the wheel at any weight -- and a probe asserting
+	// "the weight floors at 0.2" would pass on a build where that takeover had been broken.
+	// logic_probe's ProbeAiBossApproach calls this, so the rule is verified rather than copied.
+	public static bool ChooseBossSteerTarget(float pull, float currentTargetWeight, bool nobodyChose)
+	{
+		return nobodyChose || pull > currentTargetWeight;
 	}
 
 	// Centre-to-EDGE offset of a threat's hull -- what `dist` subtracts from a centre distance to

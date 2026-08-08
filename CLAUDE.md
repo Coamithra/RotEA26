@@ -310,13 +310,13 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   MessageChannel to ~1Hz, so any rendered soak measures nothing. `?aiff=<n>` is the watchable
   fast-forward (n sims per drawn frame, each at a synthesised 60Hz dt). Tuning overrides
   `?aismooth= ?aismoothurgent= ?aireact= ?aigapmargin= ?aiscanrows= ?aicrosspenalty=
-  ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall= ?aiseekapproach=
+  ?aithreatlead= ?aibossbias= ?aigunhull= ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall= ?aiseekapproach=
   ?aiseekpowerup= ?aipowerupreach= ?airepeldelta= ?ainoisefloor= ?aiseekdeadzone= ?aiseeklog
   ?aiasteroidscale= ?aiasteroidrange= ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge=
   ?ailaneescape= ?aiconelead= ?aiconemaxlen= ?aiconewidth= ?aiconetaper= ?aiconefallalong=
   ?aiconefallacross= ?aiconescale= ?aiconespread= ?aiconewidthmin= ?aiwedgestrength=
   ?aiwedgefall= ?aisweptmax= ?aitopedgepx= ?aitopedgestrength= ?ailazerpx= ?ailazerstrength=
-  ?ailazerdodge=`. Pair with `?aiplayer`.
+  ?ailazerdodge= ?aibigufopx=`. Pair with `?aiplayer`.
   **`?aiwallnav2008=1` is NOT one of those knobs -- it swaps the wall-steering ALGORITHM** (card
   d79b7ea7): `findNextTileOnMap`'s per-tick left-vs-right re-decision and its ~6.6px probe,
   transcribed verbatim from `src_decompiled/`, in place of the port's committed-gap column search.
@@ -329,6 +329,27 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   is printed once per process as `[aiwallnav] steering: port|2008` -- the flags dump reports only
   the PARSE, and an arm that measured the shipped code twice prints a plausible table. Pinned by
   the probe pair `tools/headless/probes/ai_wallnav_2008.txt` + `ai_wallnav_2008_absent.txt`.
+  **`?aitopedgecompose=0` is a PLACEMENT, not a magnitude** (card 13960838): it puts the top-edge
+  danger band's push back where it was, into `direction` AFTER the steering low-pass, so it is
+  neither damped nor eligible for the repulsion-cancel floor. It ships summed into `repel` with
+  every other repellent. The band was strength 20 against a `maxSteerStrength` of 4, and 4 is also
+  the CEILING of the powerup approach pull -- so under the old placement no attractor could win
+  the top **129px** of the screen and a pickup there was arithmetically unreachable, which is what
+  the card was reported for. **The same card took the strength 20 -> 12**, narrowing that strip to
+  **102px** rather than removing it. `?aitopedgestrength=`/`?aitopedgepx=` already reach the magnitudes
+  (and `=0` there is card 2248e5eb's 2008 arm); no combination of them expresses the placement.
+  **The placement alone does NOT move the pickup rate** -- it fixes the composition defect that
+  made the band unbeatable at any strength above 4, and the rate itself tracks the MAGNITUDE. So
+  the two ship together, and only the second addresses the powerup complaint. Both rest on N=16
+  directional evidence with the N=60 scoring pass as the arbiter. Table in web CLAUDE.md.
+  **Another deliberate bug reproduction** (the `?nethitstop=1` / `?netstaleguard=0` /
+  `?netaimease=0` idiom), IN `DebugFlags.Active` for that reason, and one-way like its siblings --
+  it turns a shipped fix off, so it DEFAULTS TRUE and only an explicit off spelling assigns.
+  Which placement actually ran is printed once per process as
+  `[aitopedge] placement: composed|post-smoothing` -- the flags dump reports only the PARSE, and
+  an arm that measured the shipped code twice prints a plausible table. Pinned by the probe pair
+  `tools/headless/probes/ai_top_edge.txt` + `ai_top_edge_precard.txt` and by `logic_probe`'s
+  `ProbeAiTopEdge`. Details: web CLAUDE.md.
   **`?aiseekarrive=0` is not a knob either -- it restores the pre-card ARRIVE GATE** (card
   fd126847): the station seek used to release on `distance > deadzone` alone, which does not bound
   a ship still under thrust (the steering low-pass keeps `Move()` at full acceleration for ~6
@@ -350,6 +371,16 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   reset the observed-velocity history per life, so every POOL-RECYCLED entity reported a phantom
   teleport on its first tick (`EvilBullet` at 14.9 px/ms against a declared 0.24). Details: web
   CLAUDE.md.
+  **`?aibigufopx=<px>` is a REFUTED arm kept reachable, not a tuning knob** (card 2c74d5b7): it
+  lets the AI spare a SECOND big UFO during the spider-boss fight (the ones that fire the only
+  thing that hurts that boss), capped at two total, and it **bakes to 0 = OFF** because every
+  value in its usable band measured worse. Two findings worth not re-deriving: the radius is
+  **inert at or above ~400px** -- base gun range 351px PLUS the target's own hull credit
+  (card bb949dd9), since the bot never shoots past its reach; runs at 400/420/450 are the same
+  world -- and sparing more raises `Lazer` deaths faster than it shortens the fight. The bench gained `bigufo=`/`bigspared=`/`bigalive=` for it; **compare arms on
+  `bigspared`** (the decision), not `bigufo` (the outcome, which is noisier than the effect).
+  Pinned by `tools/headless/probes/ai_bigufo_gate.txt` + `ai_bigufo_gate_off.txt` +
+  `ai_bigufo_death.txt`. Details + the table: web CLAUDE.md.
   **The bench also reports `killers=<Type>:<n>` (with `SpiderBoss(standing)` split out),
   `pickups=<n>/<spawned>(<pct>%)` and `boss=<px> bossfar=<pct>`** (cards 31ceb6ff / ada9e839) --
   which is what turned "the AI runs into the stationary spider boss" and "the AI ignores

@@ -249,6 +249,26 @@ Exit 0 = all cases pass, 1 = a mismatch, 2 = the target could not be reflected (
   **6** FAIL, and tightening the ceiling to a copied 3.0 turns **3** -- including the separation
   leg, while MarsBoss's measured 2.404 still passes, which is exactly the silent mistune the
   property exists to catch.
+- **Top-edge band case set: `ProbeAiTopEdge`** (card 13960838) -- the AI's "UFOs spawn here" band,
+  which is invisible by construction: it draws nothing, moves no counter, and its effect on a
+  pickup is arithmetic between two forces that are never reported side by side. What it pins is
+  that inequality. The band's strength (20) is 5x DoAIMove's `maxSteerStrength` (4), and 4 is ALSO
+  the ceiling of the powerup approach pull, so the band out-votes the strongest possible pull for
+  the top `dangerPx * (1 - (4 + SeekPowerupWeight)/strength)` of the screen -- a strip where a
+  pickup is not unlikely but arithmetically unreachable. **That height is FOUND by scanning the
+  real `PlayerShip.TopEdgeAvoidMagnitude` and then cross-checked against the closed form**, so
+  neither is the probe's own private belief and a magnitude retune re-derives the bound instead of
+  leaving a stale number pinned. The remaining legs are the profile (full strength at y=0, silent
+  at and past `dangerPx`, LINEAR between, and a `dangerPx=0` that is silent rather than a division
+  by zero -- reachable, since `?aitopedgepx=`'s guard accepts 0) and the `?aitopedgecompose=`
+  placement seam. **That flag is deliberately absent from BOTH rejection tables** -- they describe
+  value-carrying flags and their shared "names the value in force" leg does not describe an on/off
+  spelling -- so its rejection leg lives here, the `?ripplephase=` precedent; it also pins that the
+  spelling is ONE-WAY (`=1` does not reinstate), which is what distinguishes it from a plain
+  `IsOn(val)` boolean, and it restores the flag by reflection on the way out.
+  **It cannot see the PLACEMENT itself** -- that lives in `DoAIMove`, which needs a `Game` -- so
+  read it with `tools/headless/probes/ai_top_edge.txt` + `ai_top_edge_precard.txt`, whose headers
+  carry the two mutations and the two ways an earlier revision of that pair passed them vacuously.
 - The probe deliberately does NOT reference `web/EvilAliensWeb` (that project targets
   browser-wasm and cannot be a `ProjectReference` of a desktop exe), so nothing in `web/` knows it
   exists and CI -- which only publishes `web/EvilAliensWeb` -- is untouched.

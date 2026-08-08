@@ -125,6 +125,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeAiTopEdge(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         rc = ProbeAiSeekArrive(asm);
         if (rc != 0)
         {
@@ -698,10 +704,25 @@ internal static class Program
             // back at us. 0 is a MEANINGFUL value here (guard off), so its guard refuses only a
             // negative -- which is the shape this table's negative leg already expects.
             new { Flag = "aisweptmax",     Prop = "AiSweptMaxSpeedPxPerMs",Good = "12",  Want = (object)12f,   Baked = "5"    },
+            // The gun-reach hull credit (card bb949dd9). 0 is a MEANINGFUL value (it restores the
+            // pre-card centre-distance gate, which is the A/B seam), so like ?aisweptmax= its
+            // guard refuses only a negative -- the shape this table's negative leg expects.
+            // GOOD IS <= 1 ON PURPOSE: the parse CLAMPS with MathHelper.Min(v, 1f), and this
+            // table's accepted leg reads the property BACK, so a test value above the clamp would
+            // have to name the clamped number rather than the one passed. Baked "" because the
+            // default is the single digit 1, which occurs throughout the captured output -- the
+            // same escape aifieldfall/aiscanrows already take.
+            new { Flag = "aigunhull",      Prop = "AiGunHullCredit",       Good = "0.5", Want = (object)0.5f,  Baked = ""     },
             // The two remaining port additions (card 2248e5eb). ?aitopedgestrength= and
             // ?ailazerdodge= take 0 as a MEANINGFUL value (it is the 2008 arm), so like
             // ?aisweptmax= their guards refuse only a negative -- the shape this table's
             // negative leg already expects.
+            // The spider-boss big-UFO engage radius (card 2c74d5b7). 0 is MEANINGFUL (gate off),
+            // so like ?aisweptmax= / ?aitopedgestrength= its guard refuses only a negative -- the
+            // shape this table's negative leg already expects. Baked "" for the ?ailazerdodge=
+            // reason directly below: it BAKES to 0, a single digit that occurs elsewhere in the
+            // captured output, so the absence check would fire on text that is not the default.
+            new { Flag = "aibigufopx",     Prop = "AiBigUfoEngagePx",      Good = "137", Want = (object)137f,  Baked = ""     },
             new { Flag = "aitopedgepx",    Prop = "AiTopEdgeDangerPx",     Good = "233", Want = (object)233f,  Baked = "170"  },
             new { Flag = "aitopedgestrength",Prop = "AiTopEdgeAvoidStrength",Good = "33",Want = (object)33f,   Baked = "20"   },
             new { Flag = "ailazerpx",      Prop = "AiLazerAvoidRangePx",   Good = "311", Want = (object)311f,  Baked = "150"  },
@@ -730,7 +751,11 @@ internal static class Program
             return 2;
         }
 
-        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 36 knobs (cards 48b7c6b1 / 2248e5eb)");
+        // Count DERIVED from the table rather than a literal -- the header said 36 while the
+        // table already ran 37, and two cards then added a knob each in parallel. A header that
+        // can quietly disagree with the rows beneath it is worse than no header.
+        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all " + rows.Length
+            + " knobs (cards 48b7c6b1 / 2248e5eb / bb949dd9 / 2c74d5b7)");
 
         // One counter and its OWN first-problem detail per leg: a shared sink attaches the
         // diagnosis to whichever Check happens to print it, which in a mutation run put the only
@@ -867,7 +892,7 @@ internal static class Program
             "SeekWeight", "DefaultSeekPowerupWeight",
             "DefaultPowerupReachPx", "DefaultRepulseCancelDelta", "DefaultSteerNoiseFloor",
             "DefaultSeekArriveDeadzonePx", "ShipMaxSpeed", "ShipDeceleration",
-            "SweepLaneAvoidStrength",
+            "SweepLaneAvoidStrength", "DefaultTopEdgeAvoidStrength",
             "DefaultLazerAvoidStrength", "DefaultLazerDodgeStrength"
         };
         var vals = new Dictionary<string, float>();
@@ -919,10 +944,13 @@ internal static class Program
         // The repellents' full-strength magnitudes. maxSteerStrength (4) is a DoAIMove local, so
         // the threat field's and the screen edges' shared peak is spelled here; the rest are
         // reflected.
-        // DefaultTopEdgeAvoidStrength is deliberately NOT in this min: it is added AFTER the low-pass
-        // and so never passes through RepulseCancelDelta at all. Folding it in would mix the two
-        // populations this card just separated, and it could not fail today (20 against a min of
-        // 4), which is exactly how a wrong invariant gets copied.
+        // DefaultTopEdgeAvoidStrength IS in this min since card 13960838, and this comment used to
+        // say the opposite for a reason that has stopped being true: the band was added to
+        // `direction` AFTER the low-pass, so it never passed through RepulseCancelDelta and folding
+        // it in would have mixed two populations. It now sums into `repel` with every other
+        // repellent, so it belongs to this one. It cannot BE the min today (20 against 4), i.e. the
+        // bound is vacuous for this member specifically -- it is here so the population matches the
+        // accumulator, not because it is at risk.
         // DefaultLazerDodgeStrength is folded in only WHEN IT IS ON: card 2248e5eb's measurement
         // took it to 0 and DoAIMove now skips the term outright. This bound is about a repellent
         // that PUSHES being silently eaten by a floor, and a term that is switched off pushes
@@ -931,7 +959,8 @@ internal static class Program
         // will remember: bake the sidestep back on and the bound re-arms itself.
         const float MaxSteerStrength = 4f;
         float weakestRepellent = Math.Min(MaxSteerStrength,
-            Math.Min(vals["SweepLaneAvoidStrength"], vals["DefaultLazerAvoidStrength"]));
+            Math.Min(vals["SweepLaneAvoidStrength"],
+                Math.Min(vals["DefaultTopEdgeAvoidStrength"], vals["DefaultLazerAvoidStrength"])));
         if (vals["DefaultLazerDodgeStrength"] > 0f)
         {
             weakestRepellent = Math.Min(weakestRepellent, vals["DefaultLazerDodgeStrength"]);
@@ -989,12 +1018,19 @@ internal static class Program
         MethodInfo strengthM = ship.GetMethod("ThreatFieldStrength", anyStatic, null,
             new[] { typeof(float), typeof(float), typeof(float), typeof(bool) }, null);
         MethodInfo priorityM = ship.GetMethod("IsAiPriorityTarget", anyStatic);
-        if (weightM == null || strengthM == null || priorityM == null)
+        // The gun reach the anchor is derived from (card bb949dd9), reflected rather than
+        // restated: this probe used to spell `life * bulletPerMs - body` out itself, which is
+        // exactly the second copy ThreatBodyTerm's comment warns about -- the game could change
+        // where the ship parks and the probe would keep asserting about the old formula.
+        MethodInfo reachM = ship.GetMethod("AiGunReachPx", anyStatic, null,
+            new[] { typeof(float), typeof(float) }, null);
+        if (weightM == null || strengthM == null || priorityM == null || reachM == null)
         {
             Console.WriteLine("FAIL: could not reflect PlayerShip.BossApproachWeight / ThreatFieldStrength"
-                + " / IsAiPriorityTarget -- renamed or moved?");
+                + " / IsAiPriorityTarget / AiGunReachPx -- renamed or moved?");
             return 2;
         }
+        float Reach(float life, float radius) => (float)reachM.Invoke(null, new object[] { life, radius });
 
         float Const(string n)
         {
@@ -1071,8 +1107,8 @@ internal static class Program
         };
         int crossings = 0, bandsChecked = 0;
         float worstBand = float.MaxValue;
-        bool crossingOk = true, bandOk = true, pushedOutOk = true, boundedOk = true;
-        string crossingDetail = "", bandDetail = "", pushedOutDetail = "", boundedDetail = "";
+        bool crossingOk = true, bandOk = true, pushedOutOk = true, boundedOk = true, reachOk = true;
+        string crossingDetail = "", bandDetail = "", pushedOutDetail = "", boundedDetail = "", reachDetail = "";
         foreach (bool curve in new[] { false, true })
         {
         classic = curve;
@@ -1083,8 +1119,22 @@ internal static class Program
                 foreach ((float body, float radius) in hulls)
                 {
                     float range = tierFieldPx[tier] + radius * sizeScale;
-                    float anchorRaw = life * bulletPerMs - body;
+                    float anchorRaw = Reach(life, radius) - body;
                     float anchor = Math.Max(anchorRaw, minAnchor);
+                    // THE ANCHOR MUST BE SOMEWHERE A SHOT ACTUALLY CONNECTS FROM (card bb949dd9).
+                    // Converted back to the centre distance the fire gate tests, r* has to sit
+                    // inside the gun's reach -- otherwise the term parks the ship where it cannot
+                    // shoot, which is the failure the whole approach exists to remove. The floor
+                    // is the one legitimate way past it (it only ever pushes the anchor OUT, for
+                    // a hull wider than the weapon reaches), so it is excluded rather than
+                    // silently tolerated.
+                    if (anchorRaw >= minAnchor && anchor + body > Reach(life, radius) + 0.001f)
+                    {
+                        reachOk = false;
+                        reachDetail = "tier " + tier + " life " + life + "ms body " + body
+                            + "px: anchor " + (anchor + body).ToString("0.0")
+                            + "px centre vs a gun reach of " + Reach(life, radius).ToString("0.0") + "px";
+                    }
                     string where = (classic ? "classic curve, " : "") + "tier " + tier + " life " + life
                         + "ms body " + body + "px"
                         + " (anchor " + anchor.ToString("0.0") + "px, field " + range.ToString("0") + "px)";
@@ -1194,6 +1244,10 @@ internal static class Program
         Check("closing never outranks not dying (the pull stays under the threat field's 4)",
             boundedOk, boundedDetail.Length > 0 ? boundedDetail
                 : "ceiling max(BossApproachMaxWeight " + maxWeight + ", the solved anchor weight)");
+        Check("r* is a distance a shot actually connects from (card bb949dd9)",
+            reachOk, reachDetail.Length > 0 ? reachDetail
+                : bandsChecked + " combinations: the anchor converted back to a centre distance"
+                  + " never exceeds AiGunReachPx (bullet travel + the target's hull radius)");
 
         // 5. THE SHIPPED CONFIGURATION, spelled out so a future reader can see the actual numbers
         // rather than only the inequalities: the top tier, base weapon, and BRAINBOSS's hull --
@@ -1204,14 +1258,125 @@ internal static class Program
         // cannot silently re-label this example.
         float brainBody = 233f;
         float vhRange = tierFieldPx[tierFieldPx.Length - 1] + (brainBody / Sq2) * sizeScale;
-        float vhAnchor = 450f * bulletPerMs - brainBody;
+        float vhAnchor = Reach(450f, brainBody / Sq2) - brainBody;
         float vhW = A(vhAnchor, vhAnchor, vhRange);
-        Check("a COMMITMENT outranks a DETOUR at engagement range (approach > the 0.8 powerup seek)",
-            A(vhAnchor * 1.5f, vhAnchor, vhRange) > 0.8f,
-            "top tier / base weapon / BrainBoss: pull " + A(vhAnchor * 1.5f, vhAnchor, vhRange).ToString("0.00")
-            + " at 1.5x firing range (anchor " + vhAnchor.ToString("0.0") + "px, solved weight "
-            + vhW.ToString("0.000") + ") -- a halting boss stops the level advancing at all,"
-            + " a pickup does not");
+
+        // 5b. THE TERM HAS TWO REGIMES, AND BOTH ARE ASSERTED (card bb949dd9). Which one a
+        // configuration lands in is decided by whether the boss's own repellent is still AUDIBLE
+        // (>= the whole-sum floor) at r*:
+        //   AUDIBLE   -- w is solved against it, the crossing is exact (section 1), and the pull
+        //                outside r* is big enough to out-vote a 0.8 powerup detour. This is the
+        //                invariant card b56633fb shipped, and it is unchanged where it applies.
+        //   FLOORED   -- r* now sits far enough out (the reach credits the hull) that the
+        //                repellent has decayed under the floor, so w floors at DefaultSteerNoiseFloor
+        //                and the pull is BELOW the powerup seek. A detour then out-votes the boss.
+        // THAT SECOND REGIME IS NOT A DEGRADATION AND MUST NOT BE "FIXED" BY CLAMPING THE WEIGHT:
+        // `steerTargetWeight` IS the pull magnitude, so a clamp moves the equilibrium back inward
+        // and reintroduces exactly the solved-constant-plus-discontinuity card b56633fb designed
+        // out. What keeps the level advancing there is the SENTINEL in DoAIMove -- with no
+        // competing destination the boss takes the wheel at ANY weight -- and that is asserted
+        // below rather than assumed. Measured on all four AI rigs: bossfar 27% -> 0.5%,
+        // idle 13.8% -> 0.5%, deaths better or flat, pickups up.
+        bool audibleAtAnchor = Repel(vhAnchor, vhRange) >= noiseFloor;
+        Check("regime: the worked example is FLOORED (its repellent is inaudible at r*)",
+            !audibleAtAnchor, "top tier / base weapon / BrainBoss: repellent "
+            + Repel(vhAnchor, vhRange).ToString("0.000") + " at r* " + vhAnchor.ToString("0.0")
+            + "px vs the " + noiseFloor + " floor -- so the weight floors at " + vhW.ToString("0.000")
+            + " rather than being solved");
+        // MEASURED WHILE WRITING THIS, and it is why the old check could not simply be scoped to
+        // the audible regime: AUDIBILITY DOES NOT IMPLY THE OUT-VOTE. Audible means the solved
+        // weight clears the 0.2 floor; out-voting a 0.8 detour at 1.5x r* needs it to clear
+        // 0.8/1.5 = 0.533. Cells sit between the two (classic curve, tier 4, 450ms, body 141px:
+        // pull 0.47), so "outranks a detour" was never a property of the mechanism -- it was a
+        // property of where the OLD anchor happened to sit, and restating it scoped would just
+        // move the failure. What IS a property of the shape, and what a build that had gone inert
+        // or inverted would break, is that the pull GROWS with distance outside r*. That is
+        // asserted instead, over the whole domain rather than only the audible part.
+        int audibleCells = 0, floorCells = 0;
+        bool growsOk = true;
+        string growsDetail = "";
+        foreach (bool curve2 in new[] { false, true })
+        {
+        classic = curve2;
+        for (int tier = 0; tier < tierFieldPx.Length; tier++)
+        {
+            foreach (float life in lifetimes)
+            {
+                foreach ((float body, float radius) in hulls)
+                {
+                    float range = tierFieldPx[tier] + radius * sizeScale;
+                    float anchor = Math.Max(Reach(life, radius) - body, minAnchor);
+                    if (Repel(anchor, range) >= noiseFloor)
+                    {
+                        audibleCells++;
+                    }
+                    else
+                    {
+                        floorCells++;
+                    }
+                    // Increasing outside r*, so the further the boss the harder the term pulls --
+                    // the INVERTED shape the whole design rests on. A flat or decaying build (the
+                    // ordinary falloff someone might "restore") fails here.
+                    // NON-decreasing, not strictly increasing, and BOTH exceptions are deliberate
+                    // branches of the shape rather than slack: section 4's ceiling saturates a
+                    // hull wide enough to solve past it (400px body, 547ms: 3.12 -> 3.50 -> 3.50),
+                    // and the exponent damping goes FLAT (k=0, a constant w) where the repellent
+                    // alone is steeper than the band bound allows (classic curve, 141px body:
+                    // 0.47 throughout). Saturating or holding is those bounds working; going DOWN
+                    // never is, and the strict case is pinned separately on the shipped example.
+                    if (A(anchor * 1.5f, anchor, range) < A(anchor, anchor, range) - 0.0005f
+                        || A(anchor * 2f, anchor, range) < A(anchor * 1.5f, anchor, range) - 0.0005f)
+                    {
+                        growsOk = false;
+                        growsDetail = (classic ? "classic curve, " : "") + "tier " + tier
+                            + " life " + life + "ms body " + body + "px: pull "
+                            + A(anchor, anchor, range).ToString("0.00") + " -> "
+                            + A(anchor * 1.5f, anchor, range).ToString("0.00") + " -> "
+                            + A(anchor * 2f, anchor, range).ToString("0.00")
+                            + " at r* / 1.5x / 2x";
+                    }
+                }
+            }
+        }
+        }
+        classic = false;
+        Check("the pull NEVER DECAYS with distance outside r*, over the whole domain (the inverted shape)",
+            growsOk, growsDetail.Length > 0 ? growsDetail
+                : audibleCells + " of " + (audibleCells + floorCells) + " combinations are in the"
+                  + " audible regime (crossing exact, section 1); the other " + floorCells
+                  + " float at the noise floor and rely on the sentinel below");
+        // ...and it is not flat EVERYWHERE, which the non-decreasing sweep alone would allow --
+        // a build returning a constant would pass it. The shipped example is a k=1 cell.
+        Check("control: on the shipped configuration the pull STRICTLY grows (it is not a constant)",
+            A(vhAnchor * 1.5f, vhAnchor, vhRange) > vhW + 0.0005f
+                && A(vhAnchor * 2f, vhAnchor, vhRange) > A(vhAnchor * 1.5f, vhAnchor, vhRange) + 0.0005f,
+            "top tier / base weapon / BrainBoss: " + vhW.ToString("0.00") + " -> "
+            + A(vhAnchor * 1.5f, vhAnchor, vhRange).ToString("0.00") + " -> "
+            + A(vhAnchor * 2f, vhAnchor, vhRange).ToString("0.00") + " at r* / 1.5x / 2x");
+
+        // THE FLOORED REGIME'S ASSERTION, and it is deliberately about the SENTINEL rather than
+        // about `w == 0.2` -- a build whose weight floors correctly but whose sentinel takeover
+        // is broken (a boss that never becomes the steerTarget when nothing else has chosen)
+        // would sail through a restatement of the floor. `ChooseBossSteerTarget` is the extracted
+        // predicate DoAIMove actually calls, so this covers the wiring and not a copy of it.
+        MethodInfo sentinelM = ship.GetMethod("ChooseBossSteerTarget", anyStatic);
+        if (sentinelM == null)
+        {
+            Console.WriteLine("FAIL: could not reflect PlayerShip.ChooseBossSteerTarget -- renamed?");
+            return 2;
+        }
+        bool Takes(float pull, float currentWeight, bool nobodyChose) =>
+            (bool)sentinelM.Invoke(null, new object[] { pull, currentWeight, nobodyChose });
+        Check("floored regime: with NO competing destination the boss takes the wheel at any weight",
+            Takes(vhW, 0f, true) && Takes(0.0001f, 0.8f, true),
+            "the sentinel (nothing else has chosen) ignores the weight entirely -- pull "
+            + vhW.ToString("0.000") + " and a near-zero pull both take it, which is what keeps a"
+            + " level-halting boss reachable while the term floats at the floor");
+        Check("control: against a REAL competing vote the boss must out-weigh it, floored or not",
+            !Takes(vhW, 0.8f, false) && Takes(1.2f, 0.8f, false),
+            "a floored pull " + vhW.ToString("0.000") + " does NOT delete a live 0.8 powerup detour,"
+            + " while a pull of 1.2 does take it -- so the sentinel is a no-competitor rule, not a"
+            + " blanket override");
 
         // 6. NEGATIVE CONTROL -- the PRE-CARD configuration over the same curve. The standoff was
         // clamp(gunRange * 0.6, 130, 300) as a CENTRE distance carrying a flat 1.1, and the defect
@@ -1221,11 +1386,47 @@ internal static class Program
         const float PreCardWeight = 1.1f;
         float preStandoffEdge = Math.Min(Math.Max(450f * bulletPerMs * 0.6f, 130f), 300f) - brainBody;
         float preRepel = Repel(preStandoffEdge, vhRange);
+        // The "this build" half asks for the net to point IN (or be exactly zero), not for an
+        // exact zero: since card bb949dd9 pushed r* out past the hull, this worked example sits
+        // in the FLOORED branch -- the boss's own repellent has decayed under the whole-sum
+        // floor at r*, so there is nothing there to be exactly equal to. That is the same case
+        // the Range powerup already reached, and section 1 above is what still requires the
+        // crossing to be exact wherever the repellent IS audible (90 of the 500 combinations).
         Check("control: the pre-card standoff+1.1 is OUT-VOTED at its own destination, and this build is not",
-            PreCardWeight < preRepel && Math.Abs(A(vhAnchor, vhAnchor, vhRange) - Repel(vhAnchor, vhRange)) <= 0.0005f,
+            PreCardWeight < preRepel && A(vhAnchor, vhAnchor, vhRange) >= Repel(vhAnchor, vhRange) - 0.0005f,
             "pre-card: weight " + PreCardWeight + " against a repellent of " + preRepel.ToString("0.00")
             + " at its " + preStandoffEdge.ToString("0.0") + "px edge standoff (net points AWAY, which is why"
-            + " bossfar read ~99%); this build: net 0 at its " + vhAnchor.ToString("0.0") + "px anchor");
+            + " bossfar read ~99%); this build: attractor " + A(vhAnchor, vhAnchor, vhRange).ToString("0.00")
+            + " against " + Repel(vhAnchor, vhRange).ToString("0.00") + " at its "
+            + vhAnchor.ToString("0.0") + "px anchor");
+
+        // 6b. NEGATIVE CONTROL FOR THE HULL CREDIT (card bb949dd9). `?aigunhull=0` must reproduce
+        // the pre-card gate and anchor EXACTLY -- centre distance against bullet travel, r* =
+        // travel - body -- or the seam is not an A/B and the shipped arm has nothing to be
+        // measured against. Driven through the real DebugFlags property the game reads, not
+        // through a second copy of the formula, and reset afterwards so no later section runs
+        // under it.
+        Type flagsT = asm.GetType("EvilAliensWeb.Compat.DebugFlags", true);
+        PropertyInfo creditP = flagsT.GetProperty("AiGunHullCredit",
+            BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        float shippedReach = Reach(450f, brainBody / Sq2);
+        float offReach;
+        try
+        {
+            creditP.SetValue(null, 0f);
+            offReach = Reach(450f, brainBody / Sq2);
+        }
+        finally
+        {
+            creditP.SetValue(null, null);
+        }
+        Check("control: ?aigunhull=0 restores the pre-card centre-distance reach exactly",
+            Math.Abs(offReach - 450f * bulletPerMs) <= 0.001f
+                && shippedReach > offReach + 1f
+                && Math.Abs(Reach(450f, brainBody / Sq2) - shippedReach) <= 0.001f,
+            "credit 0 -> " + offReach.ToString("0.0") + "px (bullet travel "
+            + (450f * bulletPerMs).ToString("0.0") + "px), shipped -> " + shippedReach.ToString("0.0")
+            + "px, and the override is cleared again afterwards");
 
         // 7. SPIDERBOSS IS EXCLUDED FROM BOSS APPROACH, EXPLICITLY. It was excluded by omission,
         // which is the same behaviour and no protection: adding it to the list is the obvious edit,
@@ -1355,6 +1556,148 @@ internal static class Program
     //
     // Reflection rather than a mirrored formula, deliberately: a transcription of the maths here
     // would agree with itself forever while the shipped shape drifted.
+    // Card 13960838 -- the top-edge danger band: its force PROFILE, the exclusion zone that
+    // profile implies for the powerup pull, and the `?aitopedgecompose=` placement seam.
+    //
+    // WHY A PROBE. The band is invisible: it draws nothing, moves no counter, and its effect on a
+    // pickup is arithmetic between two forces that are never reported side by side. The card was
+    // filed as "the AI won't pick up powerups"; what is assertable is the inequality underneath
+    // that complaint, and it is a pure function of two constants plus DoAIMove's
+    // `maxSteerStrength`. Everything below is DERIVED from those -- no crossover height is
+    // restated, so a later magnitude retune re-derives the bound instead of leaving a stale
+    // number pinned here.
+    private static int ProbeAiTopEdge(Assembly asm)
+    {
+        Type ship = asm.GetType("EvilAliens.PlayerShip", true);
+        Type flags = asm.GetType("EvilAliensWeb.Compat.DebugFlags", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo mag = ship.GetMethod("TopEdgeAvoidMagnitude", anyStatic);
+        MethodInfo parse = flags.GetMethod("Parse", anyStatic);
+        if (mag == null || parse == null)
+        {
+            Console.WriteLine("FAIL: could not reflect the targets (TopEdgeAvoidMagnitude="
+                + (mag != null) + " Parse=" + (parse != null) + ") -- renamed or moved?");
+            return 2;
+        }
+
+        var consts = new Dictionary<string, float>();
+        foreach (string n in new[] { "DefaultTopEdgeDangerPx", "DefaultTopEdgeAvoidStrength", "DefaultSeekPowerupWeight" })
+        {
+            FieldInfo f = ship.GetField(n, anyStatic);
+            if (f == null || !f.IsLiteral)
+            {
+                Console.WriteLine("FAIL: could not reflect PlayerShip." + n + " as a const -- renamed, moved, or no longer const?");
+                return 2;
+            }
+            consts[n] = (float)f.GetRawConstantValue();
+        }
+
+        float px = consts["DefaultTopEdgeDangerPx"];
+        float strength = consts["DefaultTopEdgeAvoidStrength"];
+        float seek = consts["DefaultSeekPowerupWeight"];
+        // `maxSteerStrength` is a DoAIMove LOCAL, so it is spelled here exactly as
+        // ProbeAiFieldComposition spells it. It is the ceiling of the powerup's approach pull
+        // (`MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, t)` at t=0) and the peak of
+        // each generic screen-edge push -- one number doing both jobs, which is the whole reason
+        // the band's 20 is not commensurable with anything else in the method.
+        const float MaxSteerStrength = 4f;
+        Func<float, float, float, float> M3 = (y, d, s) => (float)mag.Invoke(null, new object[] { y, d, s });
+        Func<float, float> M = y => M3(y, px, strength);
+
+        Console.WriteLine("[logic_probe] AI top-edge danger band (card 13960838)");
+
+        // 1. THE PROFILE. Full strength at the screen top, zero at the band's edge, LINEAR between
+        // -- not the `(1-t)^p` spike every threat field uses, because this band is a prior about
+        // where UFOs will appear rather than a field around something that already exists.
+        Check("the band is at full strength at the screen top",
+            Math.Abs(M(0f) - strength) < 1e-4f,
+            "M(0) = " + M(0f) + " vs DefaultTopEdgeAvoidStrength " + strength);
+        Check("the band is silent at and beyond its own depth",
+            M(px) == 0f && M(px + 1f) == 0f && M(600f) == 0f,
+            "M(" + px + ") = " + M(px) + ", M(" + (px + 1f) + ") = " + M(px + 1f)
+            + " -- a band still pushing past its stated depth is a band with no stated depth");
+        Check("the band is LINEAR in depth, not the field falloff",
+            Math.Abs(M(px * 0.5f) - strength * 0.5f) < 1e-3f
+                && Math.Abs(M(px * 0.25f) - strength * 0.75f) < 1e-3f,
+            "M(px/2) = " + M(px * 0.5f) + " (expected " + (strength * 0.5f) + "), M(px/4) = "
+            + M(px * 0.25f) + " (expected " + (strength * 0.75f) + ")");
+        // The guarded divisor. ?aitopedgepx=0 passes that flag's own `>= 0` range check, so this
+        // is a reachable configuration rather than a hypothetical.
+        Check("a zero band depth is silent rather than a division by zero",
+            M3(0f, 0f, strength) == 0f && M3(50f, 0f, strength) == 0f,
+            "M(0, dangerPx=0) = " + M3(0f, 0f, strength) + ", M(50, dangerPx=0) = " + M3(50f, 0f, strength));
+
+        // 2. THE EXCLUSION ZONE -- the card's complaint, as arithmetic. A powerup's pull cannot
+        // exceed MaxSteerStrength (its PowerCurve peak) plus the seek weight carrying its
+        // destination, so wherever the band exceeds that sum no attractor in DoAIMove can reach a
+        // powerup at all. The height is FOUND by scanning the real function rather than computed
+        // from a formula restated here, then cross-checked against the closed form -- so the two
+        // have to agree and neither is this probe's own private belief.
+        float maxPull = MaxSteerStrength + seek;
+        float scanned = -1f;
+        for (int i = 0; i <= 6000; i++)
+        {
+            float y = i * 0.1f;
+            if (M(y) <= maxPull) { scanned = y; break; }
+        }
+        float closedForm = px * (1f - maxPull / strength);
+        Check("the exclusion height agrees with its closed form",
+            scanned >= 0f && Math.Abs(scanned - closedForm) <= 0.11f,
+            "scanned " + scanned.ToString("0.00") + "px vs closed form " + closedForm.ToString("0.00")
+            + "px (dangerPx " + px + ", strength " + strength + ", max powerup pull " + maxPull + ")");
+        // THE FINDING, asserted as a property rather than as a number: at the shipped magnitudes
+        // the zone is NON-EMPTY -- there really is a strip of screen no attractor can win -- and it
+        // is a strict subset of the band, so the lower band is contestable. If a future retune ever
+        // makes the first half false, the card's mechanism is gone and this line is what says so.
+        Check("a non-empty exclusion zone exists at the shipped magnitudes",
+            closedForm > 0f && strength > maxPull,
+            "the band exceeds the strongest possible powerup pull (" + maxPull + ") for the top "
+            + closedForm.ToString("0.0") + "px of the screen -- inside it a pickup is arithmetically"
+            + " unreachable, which is what card 13960838 was reported for");
+        Check("the exclusion zone is a strict subset of the band",
+            closedForm < px,
+            "exclusion " + closedForm.ToString("0.0") + "px vs band depth " + px
+            + " -- were these equal the whole band would be an exclusion zone and the term would be"
+            + " a veto rather than a repellent");
+
+        // 3. THE PLACEMENT SEAM. `?aitopedgecompose=` is an on/off boolean of the ?netstaleguard=
+        // / ?netaimease= shape (it turns a shipped FIX off, so it defaults TRUE and only an
+        // explicit off spelling disables it). It is deliberately ABSENT from ProbeAiFlagRejection's
+        // and ProbeFlagRejectionSweep's tables -- both describe VALUE-CARRYING flags and their
+        // shared "names the value in force" leg does not describe an on/off spelling. This is its
+        // own leg, the ?ripplephase= precedent.
+        Func<string, string> run = query => RunParse(parse, query);
+        Func<bool> composes = () => (bool)flags.GetProperty("AiTopEdgeCompose", anyStatic).GetValue(null);
+        Check("it defaults to COMPOSED, so a shipped build sums the band with every other repellent",
+            composes(), "AiTopEdgeCompose = " + composes());
+        run("?aitopedgecompose=0");
+        Check("an explicit off spelling reaches the placement", !composes(),
+            "AiTopEdgeCompose = " + composes());
+        // Asserted while the flag is OFF, per this file's ordering lesson: a "does not change it"
+        // check run at the default would pass on a build whose parse case does nothing at all.
+        string bad = run("?aitopedgecompose=nope");
+        Check("an unrecognised value is REPORTED and changes nothing",
+            !composes() && bad.Contains("unknown ?aitopedgecompose=") && bad.Contains("POST-SMOOTHING"),
+            "AiTopEdgeCompose = " + composes() + " said: " + FirstLine(bad));
+        // THE SPELLING IS ONE-WAY, and that is the ?netstaleguard= convention rather than an
+        // omission: only an off spelling ever ASSIGNS, so nothing later in a query can quietly put
+        // a shipped fix back on. The distinction matters because it is the difference between this
+        // flag and a plain `IsOn(val)` boolean, and a build that "helpfully" added the on branch
+        // would look correct at a glance -- so it is pinned rather than left to the comment.
+        run("?aitopedgecompose=1");
+        Check("an explicit ON spelling does NOT reinstate it -- the flag is one-way", !composes(),
+            "AiTopEdgeCompose = " + composes()
+            + " -- ?netstaleguard= / ?netaimease= behave identically; a boot gets one Parse, so the"
+            + " only reachable meaning of an on spelling is 'leave the default alone'");
+        // Restored by reflection for the same reason ProbeAiWallScanFlags restores its overrides:
+        // the statics persist across Parse calls in one process, and no query can undo this one.
+        flags.GetProperty("AiTopEdgeCompose", anyStatic).SetValue(null, true);
+        Check("restored to COMPOSED on the way out", composes(),
+            "AiTopEdgeCompose = " + composes()
+            + " -- a later Probe* must not inherit a bug-reproduction placement");
+        return 0;
+    }
+
     // The seek's PREDICTIVE ARRIVE GATE (card fd126847). `PlayerShip.SeekArriveEngaged` answers
     // "should the station pull still be on", and the claim is not a value but a BEHAVIOUR: a ship
     // closing on its station must come to rest without crossing to the far side of the deadzone and

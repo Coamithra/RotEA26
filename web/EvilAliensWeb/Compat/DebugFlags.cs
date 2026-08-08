@@ -341,6 +341,14 @@ namespace EvilAliensWeb.Compat
 		// ?rippletune): overrides the knobs in real time. BombRipple resolves ALL of them in
 		// PackedRings rather than baking them in at Fire, so a slider drag retunes the very
 		// next frame -- rings already travelling, and the parked screenshot ring, included.
+		// Card 2c74d5b7 -- eaBigUfoEngage()/eaBigUfoEngageClear(). Null restores the baked
+		// PlayerShip.DefaultBigUfoEngagePx (0, gate off), which is what makes "the bake has not
+		// silently moved" assertable inside one process.
+		internal static void SetBigUfoEngageOverride(float? px)
+		{
+			AiBigUfoEngagePx = px;
+		}
+
 		internal static void SetRippleOverride(float? master, float? amp, float? radius,
 			float? duration, float? width, float? falloff, float? rim, float? phase)
 		{
@@ -1454,6 +1462,16 @@ namespace EvilAliensWeb.Compat
 		// All card ada9e839 -- see PlayerShip.DefaultSeekPowerupWeight for the history.
 		public static float? AiSeekPowerupWeight { get; private set; }
 
+		// ?aigunhull=<0..1>     how much of a target's own hull radius counts toward gun reach
+		//                       (card bb949dd9). A bullet only has to reach the HULL, so the
+		//                       reach is `bullet travel + hitRadius`; this scales that credit.
+		//                       `0` restores the pre-card centre-distance fire gate AND the
+		//                       pre-card boss standoff -- the negative control, since the
+		//                       anchor is derived from the same helper. A tuning seam rather
+		//                       than a bug reproduction, so it is OUT of Active (?aisweptmax=
+		//                       precedent). See PlayerShip.AiGunReachPx.
+		public static float? AiGunHullCredit { get; private set; }
+
 		public static float? AiSeekApproachWeight { get; private set; }
 
 		public static float? AiPowerupReachPx { get; private set; }
@@ -1559,6 +1577,20 @@ namespace EvilAliensWeb.Compat
 
 		public static float? AiTopEdgeAvoidStrength { get; private set; }
 
+		// `?aitopedgecompose=0` (card 13960838) -- put the top-edge band's push back where it was:
+		// into `direction` AFTER the steering low-pass, so it is neither damped nor eligible for
+		// the repulsion-cancel floor, and no attractor inside the band can out-vote it. It ships
+		// summed into `repel` with every other repellent instead.
+		//
+		// Not a knob and not a magnitude: `?aitopedgestrength=` already reaches the strength, and
+		// `=0` there is card 2248e5eb's 2008 arm. This is the PLACEMENT, which no combination of
+		// the two value flags can express.
+		//
+		// IN `Active`, the `?netstaleguard=0` / `?netaimease=0` idiom: it turns a shipped FIX off,
+		// so it DEFAULTS TRUE and `Active` tests its negation. A deliberate bug reproduction must
+		// never reach a public lobby.
+		public static bool AiTopEdgeCompose { get; private set; } = true;
+
 		// ?ailazerpx=<px>        how wide a berth a live beam gets,
 		// ?ailazerstrength=<f>   how hard it pushes at the beam, and
 		// ?ailazerdodge=<f>      the lateral sidestep during a big UFO's windup, which 2008 has no
@@ -1575,6 +1607,21 @@ namespace EvilAliensWeb.Compat
 		public static float? AiLazerAvoidStrength { get; private set; }
 
 		public static float? AiLazerDodgeStrength { get; private set; }
+
+		// ?aibigufopx=<px>     how close a BIG UFO has to be before the AI will shoot it, but ONLY
+		//                      while a spider boss is alive (card 2c74d5b7). A big UFO's Lazer is
+		//                      the only thing that hurts that boss, so every one the bot clears is
+		//                      a gun it took away from itself; beyond this radius ONE more is left
+		//                      alone to fire (PlayerShip.BigUfoSpareCap -- two spared in total,
+		//                      counting the pre-existing spare-one rule).
+		//                      **IT BAKES TO 0, i.e. OFF**, and that is a measured verdict rather
+		//                      than a placeholder -- every value in its usable band lost on the
+		//                      spider rig, and above ~351px (base gun range) it is inert. The
+		//                      table and the reasoning are at PlayerShip.DefaultBigUfoEngagePx;
+		//                      this flag is what makes the arm reachable again.
+		//                      The single-spare rule underneath is unaffected either way, so at 0
+		//                      the furthest big UFO is still spared exactly as before.
+		public static float? AiBigUfoEngagePx { get; private set; }
 
 		// ?aisweptmax=<px/ms>  the ceiling on a believable OBSERVED speed in the DEFAULT swept-path
 		//                      seam (card c1d783ad). Above it the path is refused, because a raw
@@ -3291,6 +3338,17 @@ namespace EvilAliensWeb.Compat
 							InForce(AiSeekPowerupWeight ?? EvilAliens.PlayerShip.DefaultSeekPowerupWeight));
 					}
 					break;
+				case "aigunhull":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aigh) && aigh >= 0f)
+					{
+						AiGunHullCredit = MathHelper.Min(aigh, 1f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiGunHullCredit ?? EvilAliens.PlayerShip.DefaultGunHullCredit));
+					}
+					break;
 				case "aiseekapproach":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aisa) && aisa >= 0f)
 					{
@@ -3371,6 +3429,37 @@ namespace EvilAliensWeb.Compat
 						// negative -- the ?aisweptmax= shape.
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(AiTopEdgeAvoidStrength ?? EvilAliens.PlayerShip.DefaultTopEdgeAvoidStrength));
+					}
+					break;
+				case "aitopedgecompose":
+					// Same asymmetry as ?netstaleguard= / ?netaimease= above, for the same reason:
+					// an unrecognised value here would silently turn a shipped FIX off, so only an
+					// explicit off spelling disables it and anything else is reported and ignored.
+					if (IsExplicitlyOff(val))
+					{
+						AiTopEdgeCompose = false;
+					}
+					else if (!IsOn(val))
+					{
+						// Names the setting actually IN FORCE, not the shipped default -- a
+						// repeated flag (?aitopedgecompose=0&aitopedgecompose=nope) keeps the
+						// earlier valid value.
+						Console.WriteLine("[debug] unknown ?" + key + "= value '" + val
+							+ "' (expected 0/off to disable) -- ignored, the top-edge band stays "
+							+ (AiTopEdgeCompose ? "COMPOSED" : "POST-SMOOTHING"));
+					}
+					break;
+				case "aibigufopx":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aibup) && aibup >= 0f)
+					{
+						AiBigUfoEngagePx = MathHelper.Min(aibup, 2000f);
+					}
+					else
+					{
+						// 0 is MEANINGFUL here (gate off = pre-card behaviour), so the guard refuses
+						// only a negative -- the ?aisweptmax= shape.
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiBigUfoEngagePx ?? EvilAliens.PlayerShip.DefaultBigUfoEngagePx));
 					}
 					break;
 				case "ailazerpx":
@@ -4095,7 +4184,7 @@ namespace EvilAliensWeb.Compat
 					+ "REFUSE its own pairing (a menu session rejects while debug flags are active). "
 					+ "Add &netallowdebug.");
 			}
-			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || !NetChargeAimEase || AiWallNav2008 || !AiSeekArrive || AiFastForward > 1;
+			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || !NetChargeAimEase || AiWallNav2008 || !AiSeekArrive || !AiTopEdgeCompose || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -4144,6 +4233,7 @@ namespace EvilAliensWeb.Compat
 						// PRE-CARD seek is tellable from one that measured the shipped one.
 						+ (!AiSeekArrive ? " aiseekarrive=0" : "")
 						+ (AiSeekLog ? " aiseeklog" : "")
+						+ (!AiTopEdgeCompose ? " aitopedgecompose=0" : "")
 						+ (Harness != null
 							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "") + " bg=" + HarnessBg
 							: ""));

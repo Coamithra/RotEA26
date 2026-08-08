@@ -2338,6 +2338,14 @@ the rest are tier-independent.
   first two differently** -- `pickups=<n> poffered=<spawned>` and no percentage -- because its
   parser is `split(. .)` then the first `=`, so a value carrying a bracket or a space is what
   breaks `eaAiBench.matrix`; the percentage exists in `Line()` only, for probes to regex.
+  **`bigufos=<n>` (card 2c74d5b7) is the big-UFO sparing rule's only observable** -- live big UFOs
+  at the instant a `SpiderBoss` died, SUMMED over the run's boss deaths (a checkpoint revert can
+  replay the fight; `Line()` and `Row()` both print the `bossdeaths=` count beside it, so a
+  Row-only consumer can normalise the sum). It reads
+  **`none`** when no boss died in the window, which is a different finding from `0` and on the
+  spider rig is the COMMON case -- do not average it in as a zero. Hooked in
+  `SpiderBoss.BeginDeathThroes`, the one place that boss's death is decided, with the counting
+  scan itself behind `AiBench.Enabled` so a no-flag run does no extra work.
   **Standing result worth knowing: on `?level=Level2&spiderboss` (Very_Hard, no `?invuln`, 180
   sim-s, N=16) `SpiderBoss(standing)` is 39 of 101 deaths -- the largest single killer, and more
   than double the moving boss's 25.** So "the AI happily runs into the spider boss when it is
@@ -2345,9 +2353,29 @@ the rest are tier-independent.
   it not at all (deaths 6.31 -> 5.88, standing 39 -> 39).
 - **The SpiderBoss fight is scripted, so its counters are too** (unashamedly special-cased -- it
   is a set-piece with fixed choreography). Only a `Lazer` hurts it and a big UFO fires one AT THE
-  PLAYER, so the AI spares the single big UFO furthest from every ship and lets the boss walk
-  into the beam -- but NOT during a fly-by, where dodging a sweep and a beam at once is what kills
-  it. Its three fixed lanes and its hard-coded X-600 landing column are avoided for the WHOLE
+  PLAYER, so while the boss is alive the AI engages a big UFO only INSIDE `DefaultBigUfoEngagePx`
+  (250) and leaves every more distant one firing, letting the boss walk into the beams -- but NOT
+  during a fly-by, where dodging a sweep and a beam at once is what kills it and every big UFO is
+  shootable again. **It is a self-defense RADIUS, not a headcount** (card 2c74d5b7): it replaced
+  "spare the single big UFO furthest from every ship", which capped the surviving platforms at one
+  however many the fight had. `PlayerShip.AiSparesBigUfo` is the predicate and `?aibigufopx=<px>`
+  the seam, where **0 = never engage a big UFO while the boss stands** (maximal sparing) and a
+  large value is the pre-card "shoot everything in range" arm.
+  - **MEASURED** (`ai_sweep.py --rig spider`, Very_Hard, seeds 1-8 x2, N=16 per arm) -- deaths /
+    victories: **px250 2.44 / 12 of 16**, px150 4.31 / 4, px350 4.31 / 6, **pre(9999) 5.50 / 2**.
+    An INTERIOR optimum, and the two halves of the sweep disagree about which neighbour is the
+    better one (px350 took 6/8 on seeds 1-4 and 0/8 on seeds 5-8), so read 150 and 350 as "not
+    250" rather than as a gradient. **Deaths FELL on every radius arm**, which is the guard this
+    card had to clear -- the beams being spared are aimed AT the ship, and the beam-dodge sidestep
+    is off by card 2248e5eb's deliberate revert. N=16, so the ranking is a hypothesis at the
+    file-wide N=60 bar; the pre-vs-radius gap is what the card rests on.
+  - **`bigufos=` is the rule's ONLY observable** -- a spared UFO fires whether or not the bot
+    could see it, moves no other counter and changes no pixel. Platforms alive at the boss kill,
+    same seeds: **0px 3.00 - 250px 1.83 - 9999 1.50**, monotone in the radius as the rule
+    predicts, and the boss died in 5 / 6 / 2 of those 8 seeds, i.e. the pre-card arm mostly does
+    not resolve the fight at all. Sparing EVERYTHING is not the answer either -- that is what the
+    interior optimum is made of.
+  Its three fixed lanes and its hard-coded X-600 landing column are avoided for the WHOLE
   manoeuvre (the boss is parked off-screen and stationary during the "Danger!" arrow, so neither
   the movement prediction nor the distance field can see it coming); escape is DOWNWARD out of a
   lane (UFOs enter from the top) and LEFT out of a landing.
@@ -2472,7 +2500,7 @@ the rest are tier-independent.
   ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge= ?ailaneescape= ?aiconelead= ?aiconemaxlen=
   ?aiconewidth= ?aiconetaper= ?aiconefallalong= ?aiconefallacross= ?aiconescale= ?aiconespread=
   ?aiconewidthmin= ?aiwedgestrength= ?aiwedgefall= ?aitopedgepx= ?aitopedgestrength= ?ailazerpx=
-  ?ailazerstrength= ?ailazerdodge=`
+  ?ailazerstrength= ?ailazerdodge= ?aibigufopx=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
   A malformed value on any of them is REPORTED and ignored, never swallowed, per the file-wide
   value-carrying-flag convention (see "Debug flags & tuning conventions" above; cards 48b7c6b1 +
@@ -2626,7 +2654,8 @@ the verdict (the term-off control is still the worse arm at the new reach).
   zero) and rests on Level 1 agreeing independently plus that histogram; do not quote it alone.
 - **The beam field lost on the rig built around a beam, and the killer histogram says why**:
   `SpiderBoss(standing)` 290 -> 6 deaths. A 260px field around a beam that the AI is
-  *deliberately standing near* -- it spares one big UFO so the boss walks into the shot -- was
+  *deliberately standing near* -- it spares the distant big UFOs so the boss walks into their
+  shots (one UFO, when this was measured; a radius since card 2c74d5b7) -- was
   shoving the ship off the beam and into the stationary boss, i.e. re-creating card b56633fb's
   original complaint from the other direction. Victories 3/60 -> 24/60.
 - **Level 1 genuinely prefers the port values (+0.98 +- 0.65) and that regression ships**, stated

@@ -1,0 +1,69 @@
+# PROBE: a mouse click advances the end-credits Cast screen
+#
+# PINS:   card 22e324d6. The Cast screen (after beating the game) asplodes the current member and
+#         moves to the next on Enter/Esc/pad; a LEFT MOUSE CLICK did nothing, because
+#         CastDisplayer.Update never read MyKeys.Mouse1. The 2008 build was Xbox-only and read no
+#         mouse at all, so there was nothing to regress FROM -- StartScreen and SplashScene were
+#         given Mouse1 during the port and this screen was the one left behind.
+#
+# WHY A PROBE: the failure is silent and invisible. A click that is swallowed draws exactly the
+#         frame a click that never happened draws, nothing is logged, no counter moves, and the
+#         state machine is private -- which is why the bug survived to be reported by a player
+#         rather than caught here. `eaCast()` / `eval Cast` is the only observable, and a
+#         screenshot cannot substitute: two different cast members are two different pictures,
+#         but "this picture is the one the click should have left" is not something a shot says.
+#
+# WHY `?cast`: the real screen is reachable only by beating Level 3 on Hard. `?cast` runs the
+#         WHOLE CastDisplayer state machine through HarnessScene (`DebugFlags.CastShow`) -- the
+#         real component, the real Update, the real input path. NOT `?castbrain`, which parks on
+#         Brain Spawn and ignores the advance input by design (`if (flag2 && !BrainShowcase)`).
+#
+# FAILURE MEANS:
+#   * section 3 missing        -> the click no longer advances the cast. The Mouse1 line in
+#                                 CastDisplayer.Update is gone, or InputHandler stopped feeding
+#                                 MyKeys.Mouse1 (the MouseLatch / off-canvas filter lane).
+#   * section 2 FAILED (the control fired) -> the cast advanced on its own, so section 3 proves
+#                                 nothing. Only intro/waiting advance on stateTimer; a member
+#                                 state waits for input forever. Something else is advancing it.
+#   * section 1 missing        -> the run never reached a cast member; every later line is
+#                                 vacuous. Check ?cast still boots the harness.
+#
+# NOTE `next=` is what says a pending advance landed: an advance parks in `waiting` for the
+# asplosion first, so immediately after the click the MEMBER has not changed yet. This probe
+# steps 120 frames (2 s) past the click, comfortably past the 1000 ms Asplode hold, so it can
+# assert the arrived-at member directly.
+#
+# NOTE no `eval MouseAt` is needed and that is deliberate: the Cast screen hit-tests nothing, so
+# the button alone must advance it wherever the cursor is (under eahl the physical mouse is
+# suppressed and the cursor is parked off-screen at -1000,-1000).
+#
+# MUTATION-TESTED: commenting out `flag |= inputHandler.Pressed(MyKeys.Mouse1)` in
+# CastDisplayer.Update -- i.e. reproducing the reported bug -- leaves all three reads at
+# `state=ufo ... name=UFO` and section 3 goes red, while sections 1 and 2 still pass.
+#
+# eahl: --flags "?cast"
+
+# --- 1. POSITIVE: the harness really did reach the first cast member (UFO). Without this, the
+# control below is satisfied by a screen that never started and section 3 by nothing at all.
+step 150
+mark
+eval Cast
+expect \[cast\] state=ufo next=intro name=UFO done=False showcase=full
+expect \[cast\] casts=1
+
+# --- 2. CONTROL: the cast does NOT advance by itself. A member state has no timer; only intro
+# and waiting do. 300 frames (5 s) is 5x the longest asplosion hold, so an advance here would be
+# the screen moving on its own and would make section 3 unattributable.
+step 300
+mark
+eval Cast
+expect \[cast\] state=ufo next=intro name=UFO done=False showcase=full
+
+# --- 3. THE CLAIM: one left-click asplodes the UFO and the cast arrives at the next member.
+eval Press Mouse1 1
+step 120
+mark
+eval Cast
+expect \[cast\] state=braineroid next=braineroid name=Brain Spawn done=False showcase=full
+
+quit

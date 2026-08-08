@@ -1559,6 +1559,30 @@ namespace EvilAliensWeb.Compat
 			Console.WriteLine("[skull] skulls=" + n + " trace=" + (DebugFlags.SkullVolley ? "on" : "off"));
 		}
 
+		// Report the end-credits Cast screen's state as data (`eaCast()` / `eval Cast`), card
+		// 22e324d6. The advance input (Enter/Esc/pad/A MOUSE CLICK) leaves no trace of its own:
+		// a click that fails to advance draws exactly the frame a click that never happened
+		// draws, and the state machine is private. `casts=0` means no Cast screen is up, which
+		// is a real answer -- reach one with `?cast` (the full state machine) or `?castbrain`
+		// (parked on Brain Spawn, which ignores the advance input by design).
+		[JSInvokable("debugCast")]
+		public static void Cast()
+		{
+			int n = 0;
+			Microsoft.Xna.Framework.Game game =
+				EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>().ComponentBin.Game;
+			foreach (Microsoft.Xna.Framework.IGameComponent item
+				in (System.Collections.ObjectModel.Collection<Microsoft.Xna.Framework.IGameComponent>)(object)game.Components)
+			{
+				if (item is EvilAliens.CastDisplayer cast)
+				{
+					Console.WriteLine("[cast] " + cast.CastReport());
+					n++;
+				}
+			}
+			Console.WriteLine("[cast] casts=" + n);
+		}
+
 		// Report the WORLD clock as data (`eaWorldClock()` / `eval WorldClock`), card d79a2f48.
 		// The clock every Draw-time cosmetic reads instead of gameTime.TotalGameTime, plus the
 		// freeze depth that gates it -- which is the whole mechanism, and the only part of it a

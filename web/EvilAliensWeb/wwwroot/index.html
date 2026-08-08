@@ -1198,6 +1198,16 @@
             catch (e) { console.warn('[debug] eaSkullVolley failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: the end-credits Cast screen's state (card 22e324d6).
+        //   eaCast() — print which cast member is up, what a pending advance is heading for, and
+        //              whether the screen has finished. The advance input (Enter/Esc/pad/a mouse
+        //              click) leaves no other trace, so this is the only way to tell a click that
+        //              advanced the cast from one that was swallowed. Reach the screen with ?cast.
+        window.eaCast = () => {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugCast'); }
+            catch (e) { console.warn('[debug] eaCast failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: live-set the ship-connector lightning knobs (the ?level=TeamChallenge tuner). Drives
         // Compat/DebugInput.SetConnector so the slider panel below (and the console) can retune the
         // docking-link FX without a page reload. Console: eaConnector(2, 6, 1, 2.5, 1) — main bolt

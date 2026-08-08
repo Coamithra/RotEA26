@@ -965,6 +965,9 @@ namespace EvilAliensWeb.Compat
 		// stepped through with Enter. The real Cast screen is only reachable after beating
 		// Level 3 on Hard; this is the way to eyeball it (e.g. the per-member frame
 		// interpolation). True => SkipSplash + AutoStart, routes into the harness.
+		// It is also the rig for the cast's ADVANCE INPUT (card 22e324d6) -- a mouse click
+		// advances it like Enter/Esc/pad -- since ?castbrain locks onto Brain Spawn and ignores
+		// that input by design. Read the result with `eaCast()` / `eval Cast`.
 		public static bool CastShow { get; private set; }
 
 		// Post-level text crawl (card bee8f0e0), all three read by CreditsScene.

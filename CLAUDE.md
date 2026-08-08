@@ -311,7 +311,7 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   fast-forward (n sims per drawn frame, each at a synthesised 60Hz dt). Tuning overrides
   `?aismooth= ?aismoothurgent= ?aireact= ?aigapmargin= ?aiscanrows= ?aicrosspenalty=
   ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx= ?aifieldsize= ?aifieldfall= ?aiseekapproach=
-  ?aiseekpowerup= ?aipowerupreach= ?airepeldelta= ?ainoisefloor= ?aiseekdeadzone=
+  ?aiseekpowerup= ?aipowerupreach= ?airepeldelta= ?ainoisefloor= ?aiseekdeadzone= ?aiseeklog
   ?aiasteroidscale= ?aiasteroidrange= ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge=
   ?ailaneescape= ?aiconelead= ?aiconemaxlen= ?aiconewidth= ?aiconetaper= ?aiconefallalong=
   ?aiconefallacross= ?aiconescale= ?aiconespread= ?aiconewidthmin= ?aiwedgestrength=
@@ -329,6 +329,19 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   is printed once per process as `[aiwallnav] steering: port|2008` -- the flags dump reports only
   the PARSE, and an arm that measured the shipped code twice prints a plausible table. Pinned by
   the probe pair `tools/headless/probes/ai_wallnav_2008.txt` + `ai_wallnav_2008_absent.txt`.
+  **`?aiseekarrive=0` is not a knob either -- it restores the pre-card ARRIVE GATE** (card
+  fd126847): the station seek used to release on `distance > deadzone` alone, which does not bound
+  a ship still under thrust (the steering low-pass keeps `Move()` at full acceleration for ~6
+  ticks after the pull is cut), so the ship crossed the deadzone, left the far side and re-armed --
+  the reported pingpong. **Another deliberate bug reproduction** (the `?netstaleguard=0` /
+  `?netaimease=0` idiom) and IN `DebugFlags.Active` for that reason; like those it turns a shipped
+  FIX off, so it DEFAULTS TRUE and `Active` tests its negation. **`?aiseeklog`** is its
+  instrument -- an `[aiseek]` line per tick naming which KIND of destination won, how far it is,
+  and **which gate branch actually ran** -- and is what ATTRIBUTES an oscillation to a term at all
+  (the "spinning circles" on `?level=Level3&brainboss` is the BOSS approach's equilibrium, not the
+  station seek). Console `eaAiSeek()` / `eval AiSeek`; pinned by the probe pair
+  `tools/headless/probes/ai_seek_arrive.txt` + `ai_seek_arrive_absent.txt` and by `logic_probe`'s
+  `ProbeAiSeekArrive`. Details: web CLAUDE.md.
   **`?aisweptmax=<px/ms>` is a GUARD, not a tuning knob** (card c1d783ad): above it the DEFAULT
   swept-path seam refuses the path, because a raw one-frame position delta reports an enormous
   velocity for anything repositioned in a single tick and the cone would sweep the screen for that

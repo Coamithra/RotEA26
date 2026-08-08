@@ -1534,6 +1534,30 @@ namespace EvilAliensWeb.Compat
 					: "live"));
 		}
 
+		// Report every AI ship's deliberate destination as data (`eaAiSeek()` / `eval AiSeek`),
+		// card fd126847. Which KIND of target won the tick, where it is, and whether the arrive gate
+		// is pulling -- none of which is visible in a frame, and none of which survives the steering
+		// low-pass the AI bench's `steer=` reports. Pair with the `?aiseeklog` boot flag for a
+		// per-tick trace. An empty report means no AI ship is flying, which is a real answer.
+		[JSInvokable("debugAiSeek")]
+		public static void AiSeek()
+		{
+			int n = 0;
+			Microsoft.Xna.Framework.Game game =
+				EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>().ComponentBin.Game;
+			foreach (Microsoft.Xna.Framework.IGameComponent item
+				in (System.Collections.ObjectModel.Collection<Microsoft.Xna.Framework.IGameComponent>)(object)game.Components)
+			{
+				if (item is EvilAliens.PlayerShip ship
+					&& ship.EffectiveController() == EvilAliens.ControlDevice.AI)
+				{
+					Console.WriteLine("[aiseek] " + ship.AiSeekReport());
+					n++;
+				}
+			}
+			Console.WriteLine("[aiseek] ships=" + n + " trace=" + (DebugFlags.AiSeekLog ? "on" : "off"));
+		}
+
 		// Report every live EvilSkull's volley state as data (`eaSkullVolley()` / `eval
 		// SkullVolley`), card d8344c17. `fired` is the counter that was leaking across the object
 		// pool: a freshly spawned skull must always read fired=0, and a screenshot cannot show

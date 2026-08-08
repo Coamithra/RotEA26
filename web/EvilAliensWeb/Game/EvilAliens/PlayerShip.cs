@@ -398,6 +398,91 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private static float SeekArriveDeadzonePx => EvilAliensWeb.Compat.DebugFlags.AiSeekDeadzonePx ?? DefaultSeekArriveDeadzonePx;
 
+	// WHICH deliberate destination won a tick (card fd126847). Diagnostics only -- the steer the AI
+	// bench reports is POST-low-pass, so from outside the ship the raw destination is unreadable and
+	// an oscillation cannot be attributed to a term. `?aiseeklog` / `eaAiSeek()` print it.
+	// It is ALSO what scopes the predictive arrive gate below to the STATION: every other writer of
+	// `steerTarget` has its own arrival semantics (a powerup ceases to exist on contact, the boss
+	// approach parks in a solved band, a dock partner and a blastable cluster are both moving), so
+	// they keep the plain position gate.
+	internal enum AiSeekKind
+	{
+		None,
+		Station,
+		Powerup,
+		Boss,
+		Dock,
+		Blast,
+		JunkBoss
+	}
+
+	// THE PREDICTIVE ARRIVE GATE (card fd126847). Answers "should the seek still be pulling", where
+	// the pre-card answer was the bare `distance > deadzone`.
+	//
+	// WHY THAT WAS NOT ENOUGH, measured. The deadzone is sized against the ship's 11.3px COASTING
+	// stopping distance, and the stability argument at DefaultSeekArriveDeadzonePx assumes the ship
+	// is coasting the moment it crosses the boundary. It is not: the steer is low-passed
+	// (DefaultSteerSmoothMs 90), so when the pull switches off `aiSteer` decays exponentially and
+	// Move() keeps thrusting at FULL acceleration down that decaying vector until it falls under
+	// SteerNoiseFloor -- ~6 more ticks, during which the ship is still speeding up. The real stopping
+	// distance from the boundary is therefore well over the deadzone radius, the ship leaves the far
+	// side, the gate re-arms at full strength, and it slams back. Measured on `?level=Level3&
+	// brainboss`: a 38px, 20-tick limit cycle, 227px of path per second for 3px of net travel.
+	//
+	// THE FIX IS A SWITCH, NEVER A NEW FORCE. It predicts where the ship would come to rest if the
+	// pull stopped NOW (the low-pass tail, then the coast) and stops pulling once that rest point is
+	// inside the deadzone. Two properties make it safe here:
+	//   * it is a STRICT SUPERSET of the pre-card off-cases -- `d <= deadzone` still returns false,
+	//     and at rest the prediction collapses to the ship's own position, so a stationary ship gets
+	//     exactly the old answer. It can only ever switch the seek OFF, never on, and it adds no
+	//     vector to the sum;
+	//   * it therefore cannot brake a real manoeuvre, which is what got the velocity-damped ARRIVE
+	//     (a `-SpeedVector` term in the steer) reverted -- see the seek block in DoAIMove.
+	// `?aiseekarrive=0` restores the pre-card gate; the caller owns that flag, so this stays pure.
+	//
+	// `smoothedMagnitude` is |aiSteer| as it stands BEFORE this tick's blend, i.e. what the tail
+	// would decay from. Using the live value rather than the SeekWeight worst case matters: the worst
+	// case over-predicts by ~30px for a ship that has barely started moving, which would cut the pull
+	// far out and leave the bot creeping to its station in hops.
+	internal static bool SeekArriveEngaged(Vector2 toTarget, Vector2 velocity, float deadzonePx,
+		float smoothedMagnitude, float smoothMs, float noiseFloor)
+	{
+		float dist = (toTarget).Length();
+		if (dist <= deadzonePx)
+		{
+			return false;
+		}
+		float speed = (velocity).Length();
+		if (speed <= 0f)
+		{
+			return true;
+		}
+		// How long the low-pass keeps a command alive after the pull stops: |aiSteer| decays as
+		// exp(-t/smoothMs) and the whole steer is zeroed once it reaches the noise floor. Thrust is
+		// all-or-nothing (Move() keeps only the angle), so every one of those ms is full throttle.
+		float tailMs = 0f;
+		if (smoothMs > 0f && noiseFloor > 0f && smoothedMagnitude > noiseFloor)
+		{
+			tailMs = smoothMs * (float)Math.Log(smoothedMagnitude / noiseFloor);
+		}
+		// Net acceleration while thrusting is ShipAcceleration: Move() adds (accel + decel) along the
+		// command and subtracts decel along the current heading, and the tail points the way the ship
+		// is already going.
+		float tailPx = 0f;
+		float endSpeed = speed;
+		if (tailMs > 0f)
+		{
+			float toMaxMs = (ShipAcceleration > 0f) ? ((ShipMaxSpeed - speed) / ShipAcceleration) : 0f;
+			float accelMs = MathHelper.Clamp(toMaxMs, 0f, tailMs);
+			tailPx = speed * accelMs + 0.5f * ShipAcceleration * accelMs * accelMs;
+			endSpeed = speed + ShipAcceleration * accelMs;
+			tailPx += endSpeed * (tailMs - accelMs);
+		}
+		float coastPx = endSpeed * endSpeed / (2f * ShipDeceleration);
+		Vector2 restPoint = velocity / speed * (tailPx + coastPx);
+		return (restPoint - toTarget).Length() > deadzonePx;
+	}
+
 	// Kept at the 2008 weight so the seek still loses to threat avoidance exactly as before.
 	private const float SeekWeight = 0.8f;
 
@@ -865,6 +950,20 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	// Smoothed steering vector (see DefaultSteerSmoothMs) and the committed wall gap.
 	private Vector2 aiSteer = Vector2.Zero;
+
+	// Last tick's seek decision, for `?aiseeklog` / `eaAiSeek()` (card fd126847). Recorded
+	// unconditionally -- it is four field writes, and a console dump that only worked on a run booted
+	// with the flag would be useless exactly when a live oscillation is in front of you. Only the
+	// PRINTING is gated.
+	private AiSeekKind aiSeekKind;
+
+	private Vector2 aiSeekTarget;
+
+	private float aiSeekDist;
+
+	private bool aiSeekEngaged;
+
+	private bool aiSeekPredictive;
 
 	private int aiGapColumn = -1;
 
@@ -1360,7 +1459,10 @@ public class PlayerShip : AlienDrawableGameComponent
 	// ?aiplayer forces the LOCAL ship onto the AI branch at level start (unattended two-tab
 	// soak tests). The controller field itself stays what it was (Keyboard/pad), so joins,
 	// pause and "which ship do we stream" logic are untouched; Remote puppets are exempt.
-	private ControlDevice EffectiveController()
+	// `internal` rather than private since card fd126847: DebugInput.AiSeek needs it to pick the
+	// bot-driven ships out of the component list, and under `?aiplayer` the seated device is still
+	// Keyboard -- so the field alone would report the wrong set.
+	internal ControlDevice EffectiveController()
 	{
 		if (EvilAliensWeb.Compat.DebugFlags.AIPlayer && !IsNetPuppet)
 		{
@@ -1819,6 +1921,48 @@ public class PlayerShip : AlienDrawableGameComponent
 		return true;
 	}
 
+	// Record (and under `?aiseeklog`, print) this tick's deliberate destination -- card fd126847.
+	// The `[aiseek]` line is the term's ONLY observable: a seek that oscillates and a seek that
+	// holds still produce the same still frame, and the AI bench's `steer=` is the post-low-pass
+	// SUM, in which one attractor cannot be told from another.
+	// `predictive` is the branch that ACTUALLY RAN, threaded in from the call site rather than
+	// re-read off `DebugFlags.AiSeekArrive` here. That is card d79b7ea7's lesson applied: a report
+	// derived from the flag says what was ASKED FOR, and an A/B arm whose dispatch is broken then
+	// measures the shipped gate twice and prints a plausible table. It also lets the line say
+	// `position` for the attractors that are deliberately out of the predictive gate's scope.
+	private void NoteAiSeek(AiSeekKind kind, Vector2 target, float dist, bool engaged, bool predictive)
+	{
+		aiSeekKind = kind;
+		aiSeekTarget = target;
+		aiSeekDist = dist;
+		aiSeekEngaged = engaged;
+		aiSeekPredictive = predictive;
+		if (EvilAliensWeb.Compat.DebugFlags.AiSeekLog)
+		{
+			Console.WriteLine("[aiseek] " + AiSeekReport());
+		}
+	}
+
+	// One ship's seek state as data. Shared by the per-tick `?aiseeklog` trace and the on-demand
+	// `eaAiSeek()` / `eval AiSeek` dump so the two can never drift into describing different things.
+	internal string AiSeekReport()
+	{
+		return "p" + player
+			+ " kind=" + aiSeekKind.ToString().ToLowerInvariant()
+			+ " tgt=" + Fmt(aiSeekTarget.X) + "," + Fmt(aiSeekTarget.Y)
+			+ " pos=" + Fmt(base.Position.X) + "," + Fmt(base.Position.Y)
+			+ " dist=" + Fmt(aiSeekDist)
+			+ " v=" + (SpeedVector).Length().ToString("0.000", System.Globalization.CultureInfo.InvariantCulture)
+			+ " gate=" + (aiSeekEngaged ? "on" : "off")
+			+ " dz=" + Fmt(SeekArriveDeadzonePx)
+			+ " arrive=" + (aiSeekPredictive ? "predictive" : "position");
+	}
+
+	private static string Fmt(float v)
+	{
+		return v.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
+	}
+
 	private void DoAIMove(ref Vector2 direction, GameTime gameTime, List<AlienDrawableGameComponent> baddies)
 	{
 		CollisionLevelMap collisionLevelMap = null;
@@ -1859,6 +2003,10 @@ public class PlayerShip : AlienDrawableGameComponent
 		// written a weight yet by then; the two station fallbacks are exempt because they run
 		// solely while steerTarget is still MaxValue.
 		float steerTargetWeight = SeekWeight;
+		// Which writer owns `steerTarget` (card fd126847). Same INVARIANT as the weight above: a
+		// write that can run after another one must set this too. It is what `?aiseeklog` reports and
+		// what scopes the predictive arrive gate to the station -- see AiSeekKind.
+		AiSeekKind seekKind = AiSeekKind.None;
 		float dodgeAngle = 0f;
 		if (player == 0)
 		{
@@ -1889,12 +2037,14 @@ public class PlayerShip : AlienDrawableGameComponent
 				if (distSq < (toTarget).LengthSquared())
 				{
 					steerTarget = baddy.Position;
+					seekKind = AiSeekKind.Blast;
 				}
 				continue;
 			}
 			if (baddy is JunkBoss)
 			{
 				steerTarget = baddy.Position;
+				seekKind = AiSeekKind.JunkBoss;
 			}
 			// Sidestep a charging beam. A big UFO winds up for 2500ms and locks its aim at the
 			// PLAYER only at the instant it fires, so the dodge is to be somewhere else by then --
@@ -2116,6 +2266,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				steerTarget = powerup.Position;
 				steerTargetWeight = SeekPowerupWeight;
+				seekKind = AiSeekKind.Powerup;
 			}
 			// PowerupReachPx, not the 150px `steerRange` the 2008 code shared with the screen-edge
 			// margin -- see the const. Beyond this the powerup is still the steerTarget above, so
@@ -2176,6 +2327,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				steerTarget = haltingBoss.Position;
 				steerTargetWeight = pull;
+				seekKind = AiSeekKind.Boss;
 			}
 		}
 		foreach (PlayerShip ship in oracle.GetShips())
@@ -2188,10 +2340,12 @@ public class PlayerShip : AlienDrawableGameComponent
 				// would fly the DETOUR at the approach's weight -- the one case where "leave it
 				// at the default" and "leave it at whatever the last writer set" differ.
 				steerTargetWeight = SeekWeight;
+				seekKind = AiSeekKind.Dock;
 			}
 		}
 		if (steerTarget.X > 2000f && !collection.ContainsType<Floor>() && connectors.Count == 0)
 		{
+			seekKind = AiSeekKind.Station;
 			if (oracle.LiveShips == 1)
 			{
 				if (collection.ContainsType<Wall>())
@@ -2218,6 +2372,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		}
 		if (steerTarget.X > 2000f && collection.ContainsType<Floor>() && connectors.Count == 0)
 		{
+			seekKind = AiSeekKind.Station;
 			if (oracle.LiveShips == 1)
 			{
 				(steerTarget) = new Vector2(266f, 300f);
@@ -2231,19 +2386,52 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			delta = base.Position - steerTarget;
 			float distToTarget = (delta).Length();
-			if (distToTarget > SeekArriveDeadzonePx)
+			// THE PREDICTIVE ARRIVE GATE (card fd126847), and note the SCOPE: the station only. Every
+			// other writer of `steerTarget` has arrival semantics of its own -- a powerup stops
+			// existing on contact, the boss approach parks in a band solved against the boss's own
+			// repellent, a dock partner and a blastable cluster both move -- so predicting a rest
+			// point against those would be predicting against a target that will not be there. They
+			// keep the plain position test, which for them is the whole of their deadzone.
+			// See SeekArriveEngaged for why the position test alone pingpongs at a FIXED target.
+			bool predictiveArrive = seekKind == AiSeekKind.Station
+				&& EvilAliensWeb.Compat.DebugFlags.AiSeekArrive;
+			bool seekEngaged = predictiveArrive
+				// The CALM time constant, not the adaptive one the blend below will pick: the tail is
+				// what the smoother does once the pull is gone, and a station seek that has just
+				// been switched off IS the calm case. Under a strong push the real constant
+				// collapses toward SteerSmoothUrgentMs and this over-predicts the tail -- which only
+				// releases the station pull sooner, in a tick where the repellents own the steer
+				// anyway.
+				// THE TAIL IS CAPPED AT THE SEEK'S OWN WEIGHT, and that cap is not a detail -- it is
+				// what keeps this a deadzone rather than a gate on another force (the field
+				// principle, card ada9e839). |aiSteer| is the whole smoothed SUM, so on a tick with
+				// a threat pushing at 4 it predicts a 270ms tail and would release the station pull
+				// ~100px out -- i.e. the seek would silently switch itself off whenever the bot was
+				// dodging. Measured: that costs +4.00 +- 1.94 deaths on CrazyGame at N=16. The seek
+				// can only ever have put its own weight into the smoother, so that is the most its
+				// own decay can be worth, and everything above it belongs to forces that will still
+				// be driving the ship after this pull is gone.
+				? SeekArriveEngaged(steerTarget - base.Position, SpeedVector, SeekArriveDeadzonePx,
+					MathHelper.Min((aiSteer).Length(), steerTargetWeight), SteerSmoothMs, SteerNoiseFloor)
+				: (distToTarget > SeekArriveDeadzonePx);
+			NoteAiSeek(seekKind, steerTarget, distToTarget, seekEngaged, predictiveArrive);
+			if (seekEngaged)
 			{
 				// Plain positional pull, as in 2008. THE deliberate-destination attractor: it goes
 				// into `direction` and is never floored (card ada9e839), because its anti-pingpong
 				// mechanism is the deadzone above -- switched off inside it, full strength outside,
-				// a hard edge. That is sound here precisely BECAUSE the deadzone covers the ship's
-				// stopping distance: a ship crossing the edge at full speed coasts 11.3px and
-				// halts inside the zone, so it cannot cross back out under its own momentum and
-				// re-trigger. **The margin is 3.7px at the shipped 15px radius**, not the
+				// a hard edge.
+				// **THAT HARD EDGE IS NOT SELF-STABILISING, AND THIS COMMENT USED TO CLAIM IT WAS**
+				// (card fd126847). The claim was that a ship crossing the edge at full speed coasts
+				// 11.3px and halts inside the zone, so it cannot cross back out under its own
+				// momentum -- which is true of a COASTING ship and false of this one, because the
+				// low-pass keeps thrusting for ~6 ticks after the pull is switched off. The gate
+				// above predicts that tail instead; the deadzone radius is still what it is measured
+				// against. **The margin is 3.7px at the shipped 15px radius**, not the
 				// comfortable one it was at 30 -- which is exactly why card 05a2b818 stopped at
 				// 15 rather than taking the 2008 value of 10 that measured better. Anything at or
-				// below 11.3 breaks this paragraph; ProbeAiFieldComposition derives that bound
-				// from the motion constants and fails on it. See DefaultSeekArriveDeadzonePx.
+				// below 11.3 breaks the bound; ProbeAiFieldComposition derives it from the motion
+				// constants and fails on it. See DefaultSeekArriveDeadzonePx.
 				// A velocity-damped ARRIVE was tried here instead and reverted -- it contains
 				// -SpeedVector, so it brakes the ship whenever it is moving relative to its station,
 				// which is most of a boss fight. That measured coast 28% -> 59% and 24 -> 70 deaths:
@@ -2251,6 +2439,13 @@ public class PlayerShip : AlienDrawableGameComponent
 				direction += steerTargetWeight
 					* MyMath.AngleToVector(MyMath.VectorToAngle(steerTarget - base.Position));
 			}
+		}
+		else
+		{
+			// Recorded too, so `?aiseeklog` can tell "no destination this tick" (docked, or a Floor
+			// level with connectors up) from "the log stopped" -- a gap in the trace otherwise reads
+			// as the ship having been removed.
+			NoteAiSeek(AiSeekKind.None, steerTarget, 0f, engaged: false, predictive: false);
 		}
 		float edgeMargin = steerRange;
 		float bottomEdge = 600f;

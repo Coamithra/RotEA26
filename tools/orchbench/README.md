@@ -40,6 +40,32 @@ tokens — raw token counts are not comparable across tiers.
   decomposition here.
 - Don't run unrelated work in the session between `snap` and `record`.
 
+## Resetting between runs — `reset_run.py`
+
+A strategy run dirties the second shared surface: the Trello board (cards
+claimed/moved/edited, and any **new** cards the run raises). The next rep
+must start from the frozen-batch state, but nothing may be lost — new
+tickets in particular are real findings. The local backend is file-backed,
+so the tool snapshots the board's raw files and restores them
+byte-identically, archiving every change first:
+
+```sh
+python tools/orchbench/reset_run.py snap -o board_start.json   # beside usage snap
+# ... run the strategy ...
+python tools/orchbench/reset_run.py diff  board_start.json     # preview
+python tools/orchbench/reset_run.py reset board_start.json --label fable-oracle-rep1
+```
+
+`reset` writes `archive/<ts>-<label>.json` (full before/after text of every
+changed card, new cards verbatim) plus a `.md` summary, then restores the
+board. The archive dir is committed — it is run output, like `runs.csv`;
+re-raise archived tickets on the board after the *last* strategy run, so no
+strategy sees another's findings. Deliberately untouched: `orchbench/*` run
+branches (the scoring pass checks them out), the board's `activity.log`
+(append-only history of what the run did), and git state generally — it
+*reports* new branches and a dirty tree, it never deletes. `--selftest`
+covers the cycle against a synthetic store.
+
 ## Ledgers
 
 - **`runs.csv`** — one row per (strategy × rep) batch run: wall time, token
@@ -102,6 +128,8 @@ Tell the orchestrating session, e.g.:
 
 > run orchbench: strategy fable-oracle, rep 1
 
-It will snapshot, execute the strategy over all tickets per
-`strategies.md`, commit each ticket's result to its run branch, and
-`record` the batch row.
+It will snapshot (usage **and** board), execute the strategy over all
+tickets per `strategies.md`, commit each ticket's result to its run branch,
+`record` the batch row, and finish with
+`reset_run.py reset --label <strategy>-rep<n>` so the next run starts from
+the frozen board.

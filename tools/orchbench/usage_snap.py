@@ -36,8 +36,10 @@ from pathlib import Path
 # Cache read bills at 0.1x the input rate; cache WRITES depend on TTL --
 # 1.25x for 5-minute entries, 2x for 1-hour entries. The usage blocks carry
 # a per-TTL breakdown (usage.cache_creation.ephemeral_{5m,1h}_input_tokens),
-# so each bucket is priced at its own rate rather than assuming a TTL: this
-# root session demonstrably writes 1h entries, subagents may differ.
+# so each bucket is priced at its own rate rather than assuming a TTL.
+# Measured 2026-08-08 (a subagent reading its own transcript vs the root's):
+# the root session writes 1h entries exclusively, subagents write 5m
+# exclusively -- so a mixed run genuinely needs the per-record split.
 PRICES = {
     "claude-fable-5": (10.0, 50.0),
     "claude-mythos-5": (10.0, 50.0),
@@ -58,9 +60,10 @@ FIELDS = ("input_tokens", "output_tokens", "cache_read_input_tokens",
 
 # One row per (strategy x rep) batch run. Per-ticket quality lives in
 # scores.csv, filled by the scoring pass -- see README -> Ledgers.
-CSV_COLUMNS = ("strategy", "rep", "tickets", "started_at", "wall_s",
-               "cost_usd", "out_tok", "cw_5m_tok", "cw_1h_tok",
-               "cache_read_tok", "in_tok", "notes")
+CSV_COLUMNS: tuple[str, ...] = (
+    "strategy", "rep", "tickets", "started_at", "wall_s",
+    "cost_usd", "out_tok", "cw_5m_tok", "cw_1h_tok",
+    "cache_read_tok", "in_tok", "notes")
 
 
 def rates_for(model):

@@ -1,0 +1,2 @@
+strategy,rep,tickets,started_at,wall_s,cost_usd,out_tok,cw_5m_tok,cw_1h_tok,cache_read_tok,in_tok,rw_events,rw_tok,notes
+fable-oracle,0,TEST,2026-08-08T14:20:19,733,19.0614,40747,268588,41257,23224590,207,0,0,"plumbing test: off-batch card 22e324d6, single Opus agent; window includes strategy-doc rewrite chatter"

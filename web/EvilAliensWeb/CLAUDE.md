@@ -2361,6 +2361,47 @@ the rest are tier-independent.
   and MEASURED (card 2248e5eb): removing it costs deaths on both rigs and takes deaths BY `UFO`
   from 132 to 356 on the spider rig** -- see the audit table below. `?aitopedgestrength=0` is the
   2008 arm; the generic 150px/strength-4 screen-bound push underneath it is untouched.
+  - **It is a REPELLENT and it now composes like one (card 13960838).** It used to be added to
+    `direction` AFTER the low-pass, which made it the one steering vote in `DoAIMove` that was
+    neither damped nor eligible for `RepulseCancelDelta` -- a raw 0..20 vector welded onto a
+    smoothed sum whose usual magnitude is order 1-4. It sums into `repel` with the rest;
+    **`?aitopedgecompose=0` restores the old placement** (a deliberate bug reproduction, in
+    `Active`, one-way like `?netstaleguard=0`), and `[aitopedge] placement:` names the branch that
+    ran because the flags dump reports only the parse.
+  - **THE ARITHMETIC, which is the card's whole complaint.** The powerup approach pull is
+    `MyMath.PowerCurve(maxSteerStrength, ...)`, so it cannot exceed **4**, and the seek carrying
+    its destination adds 0.8. The band is **20**. So it out-votes the strongest possible pull
+    everywhere above `170 * (1 - 4.8/20)` = **129px**, and inside that strip a pickup was not
+    "unlikely", it was arithmetically unreachable -- there is no ship position, no powerup
+    position and no tier at which the sum points up. Note what this is NOT: the band is not
+    competing with a comparable force and winning, it is competing with a quantity a quarter its
+    size that happens to share the method. `logic_probe`'s **`ProbeAiTopEdge`** derives that
+    height from the two constants rather than pinning 129, so a retune re-derives it.
+  - **DIRECTIONAL, N=16 (seeds 1-8 x2), NOT the gate -- and the honest reading is that the
+    PLACEMENT change does NOT fix the pickup rate.** Paired by seed on the two rigs, pickup RATE
+    and paired deaths vs the shipped (composed) arm:
+
+    | arm | spider pickups | brainboss pickups | spider deaths | brainboss deaths |
+    |---|---|---|---|---|
+    | shipped (composed) | 45.4% | 52.4% | -- | -- |
+    | `?aitopedgecompose=0` (pre-card placement) | 47.1% | 54.0% | -0.38 +- 0.94 | **+1.12 +- 0.77** |
+    | `?aitopedgestrength=0` (no band at all) | **63.6%** | 54.5% | +0.38 +- 0.62 | -0.25 +- 0.62 |
+    | `?aitopedgestrength=12` | 55.7% | 57.4% | **-1.00 +- 0.84** | -0.19 +- 0.66 |
+
+    So the composed placement earns its keep on brainboss DEATHS (the pre-card arm is +1.12 +- 0.77
+    worse, the clearest signal in the table) and is flat elsewhere -- but the card's own metric
+    moves with the MAGNITUDE, not with where the term is applied. **Do not read the placement
+    change as the fix for "the AI won't pick up powerups"**; it is the composition defect underneath
+    it, and it is what makes a magnitude retune meaningful at all, since under the old placement the
+    band could not be out-voted at any strength above 4. The magnitude itself is UNCHANGED at card
+    2248e5eb's measured 20 pending an N=60 verdict; `?aitopedgestrength=12` is the standing
+    candidate (it recovers about half the pickup gap on both rigs while deaths move favourably or
+    not at all), and removal outright stays refuted by that card at N=60.
+  - **The generic four screen-edge repulsions were re-checked against `src_decompiled` for this
+    card and are 2008 VERBATIM** -- `steerRange` 150, strengths 0..4, `PowerCurve` exp 2, the 560px
+    Floor bottom (2008 lines 1070-1113), and so is the powerup's own pull and its 150px reach
+    (lines 995-1015). So of everything pushing the ship away from an edge, **the top-edge band is
+    the only term the port added at all**, which is the answer to the card's question.
 - **Every avoidance field here shares the `(1-t)^p` falloff shape** (`ThreatFieldStrength`) -- a
   flat push across a band fights the screen bounds instead of easing off once the ship is clear.
 - **Per-tier skill (card c10e3e7f) is keyed off `Settings.EffectiveDifficulty`, NOT
@@ -2459,13 +2500,18 @@ the rest are tier-independent.
   ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
   ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge= ?ailaneescape= ?aiconelead= ?aiconemaxlen=
   ?aiconewidth= ?aiconetaper= ?aiconefallalong= ?aiconefallacross= ?aiconescale= ?aiconespread=
-  ?aiconewidthmin= ?aiwedgestrength= ?aiwedgefall= ?aitopedgepx= ?aitopedgestrength= ?ailazerpx=
+  ?aiconewidthmin= ?aiwedgestrength= ?aiwedgefall= ?aitopedgepx= ?aitopedgestrength= ?aitopedgecompose= ?ailazerpx=
   ?ailazerstrength= ?ailazerdodge=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
   A malformed value on any of them is REPORTED and ignored, never swallowed, per the file-wide
   value-carrying-flag convention (see "Debug flags & tuning conventions" above; cards 48b7c6b1 +
   4e401005). The one wrinkle specific to this family: `?aiaim`/`?aifieldpx` name "the per-tier
   skill row" as the in-force setting when no override stands. Pinned by `ProbeAiFlagRejection`.
+  **`?aitopedgecompose=` is the one ON/OFF member of that list and is deliberately outside both
+  rejection tables** -- they describe VALUE-carrying flags and their shared "names the value in
+  force" leg does not describe an on/off spelling (the same reason `?aicone=`/`?aiwedge=`/
+  `?ailaneescape=`/`?aievade=` are absent). Its rejection leg lives in `ProbeAiTopEdge` instead,
+  the `?ripplephase=` precedent.
   Console: `eaAiBench()`, `eaAiBench.soak(s)`, `eaAiBench.matrix(...)`, `eaAiBench.world()`,
   `eaAiBench.reset()`. Pair
   with `?aiplayer` and `?difficulty=Very_Hard`.

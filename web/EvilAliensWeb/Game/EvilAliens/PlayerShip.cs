@@ -324,6 +324,75 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private static float TopEdgeAvoidStrength => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeAvoidStrength ?? DefaultTopEdgeAvoidStrength;
 
+	// WHERE the band's push is applied (card 13960838). True = into `repel`, with every other
+	// repellent: upstream of the cancellation floor and of the steering low-pass. False =
+	// `?aitopedgecompose=0`, the pre-card placement, straight into `direction` AFTER the low-pass.
+	//
+	// The old placement is why the card was filed. The strength above is 5x `maxSteerStrength`,
+	// and `maxSteerStrength` is ALSO the ceiling of the powerup pull a few hundred lines up -- so
+	// inside the band the two are not competing forces at all, they are a force and a rounding
+	// error, and no attractor in the method can survive the top of the screen. Bypassing the
+	// low-pass made it worse than the ratio suggests: every other vote is smoothed toward its
+	// sustained value while this one lands whole on the frame it is computed.
+	//
+	// It is a PLACEMENT change, not a magnitude one -- 170px and 20 are card 2248e5eb's measured
+	// values and are untouched, so the UFO-spawn protection that audit validated is intact
+	// wherever nothing is competing for the band. What changes is that something CAN now compete.
+	private static bool TopEdgeComposes => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeCompose;
+
+	// One latch PER SITE for the `[aitopedge]` line, keyed on the placement name. Static, so each
+	// is per PROCESS rather than per ship -- four co-op ships would otherwise print four times and
+	// a pool recycle more still.
+	//
+	// TWO LATCHES, NOT ONE, and the difference is a real defect class: a single shared latch means
+	// whichever site fires first silences the other, so a build applying the band at BOTH sites --
+	// double strength on an ordinary boot -- prints exactly the line a healthy build prints. That
+	// mutation passed the probe pair while the latch was shared (measured). Per-site, such a build
+	// prints both lines and the pair's `expect-not` catches it.
+	private static readonly HashSet<string> topEdgeReported = new HashSet<string>();
+
+	// Which placement actually RAN. The `[debug] flags active` dump reports only the PARSE, so an
+	// A/B arm whose flag parsed but whose branch did not fire measures the shipped code twice and
+	// prints an entirely plausible table -- the `?aiwallnav2008` lesson, and the reason that flag
+	// prints its own line too.
+	//
+	// **CALLED FROM INSIDE EACH BRANCH, and passed the branch's OWN name -- never handed
+	// `TopEdgeComposes` to re-derive.** A version reading the predicate here was written first and
+	// is exactly as useless as the flags dump: inverting the dispatch left it printing "composed"
+	// while the push went the other way, and the probe pair passed on the mutation it exists to
+	// catch (measured). The report has to be evidence of the branch, not a second reading of its
+	// condition.
+	private static void ReportTopEdgePlacement(string placement)
+	{
+		if (topEdgeReported.Add(placement))
+		{
+			Console.WriteLine("[aitopedge] placement: " + placement + " band=" + TopEdgeDangerPx
+				+ "px strength=" + TopEdgeAvoidStrength);
+		}
+	}
+
+	// The band's magnitude at a design-space Y, as a pure function of its two parameters, so
+	// logic_probe can sweep the profile and DERIVE the crossover against the powerup pull instead
+	// of having a number restated beside it (card 13960838; the 05a2b818 style). DoAIMove calls
+	// this rather than repeating the arithmetic -- a second copy is how the probe comes to be
+	// pinning a formula the game does not use.
+	//
+	// LINEAR, not the `(1-t)^p` spike every threat field uses: this band is a PRIOR about where
+	// UFOs are going to appear rather than a field around something that already exists, so it has
+	// to be pushing well before the ship gets there. That shape is card 2248e5eb's and is untouched.
+	//
+	// `dangerPx > 0` is the guarded divisor -- `?aitopedgepx=0` passes that flag's own `>= 0` range
+	// check, so a zero depth is reachable, and relying on the position clamp to keep Y positive
+	// would be leaning on an invariant three hundred lines away.
+	public static float TopEdgeAvoidMagnitude(float y, float dangerPx, float strength)
+	{
+		if (dangerPx <= 0f || y >= dangerPx)
+		{
+			return 0f;
+		}
+		return strength * (1f - y / dangerPx);
+	}
+
 	// Same, for the descent/climb column (the boss's standing box is 240px wide).
 	private const float VerticalLaneClearancePx = 240f;
 
@@ -2297,6 +2366,28 @@ public class PlayerShip : AlienDrawableGameComponent
 				repel += push * new Vector2(0f, -1f);
 			}
 		}
+		// THE TOP-EDGE DANGER BAND. The top edge is not just a boundary, it is where UFOs enter --
+		// a ship pinned against it gets exploded by something spawning on top of it. The stock edge
+		// repulsion above tops out at maxSteerStrength (4), which is no contest against a lane
+		// escape (18) or the spider boss's own field, so fleeing upward parked the ship on the
+		// ceiling. This term is scaled to actually compete. Card 2248e5eb measured it against the
+		// 2008 arm (`?aitopedgestrength=0`) at N=60 and KEPT it; its magnitudes are untouched here.
+		//
+		// PLACEMENT (card 13960838): it is a REPELLENT, so it belongs HERE, in `repel`, with every
+		// other one -- upstream of the cancellation floor and of the low-pass. It used to be added
+		// to `direction` AFTER the smoothing, which made it the one steering vote in the whole
+		// method that was neither damped nor allowed to cancel: a raw 0..20 vector welded onto a
+		// smoothed sum whose usual magnitude is order 1-4. The consequence was not subtle -- the
+		// powerup pull a few hundred lines up maxes out at that same `maxSteerStrength`, so
+		// wherever the band beat 4 a pickup was arithmetically unreachable, which is what the card
+		// was reported for. See TopEdgeAvoidMagnitude for the shape and the guarded divisor.
+		Vector2 topEdgePush = new Vector2(0f,
+			TopEdgeAvoidMagnitude(base.Position.Y, TopEdgeDangerPx, TopEdgeAvoidStrength));
+		if (TopEdgeComposes)
+		{
+			repel += topEdgePush;
+			ReportTopEdgePlacement("composed");
+		}
 		// THE REPULSION CANCELLATION FLOOR, and then the combine (card ada9e839). Everything that
 		// pushes AWAY has now had its say; if the resultant of all of it is at or below the delta,
 		// the repellents have argued each other to a standstill and the ship is not pushed at all.
@@ -2338,19 +2429,14 @@ public class PlayerShip : AlienDrawableGameComponent
 		// "do not fly into that" override, and low-passing it (as an earlier revision did) turns a
 		// full reversal into a gentle suggestion -- which measured as 46 wall contacts against the
 		// old code's 8.
-		// The top edge is not just a boundary, it is where UFOs enter -- a ship pinned against it
-		// gets exploded by something spawning on top of it. The stock edge repulsion tops out at
-		// maxSteerStrength (4), which is no contest against a lane escape (18) or the spider
-		// boss's own field, so fleeing upward parked the ship on the ceiling. This term is scaled
-		// to actually compete, and it ramps linearly rather than with the steep field falloff so
-		// it is already pushing well before the ship gets there.
-		// `topEdgePx > 0` is the guarded divisor, mirroring the beam field above: ?aitopedgepx=0
-		// passes the flag's `>= 0` range check, and relying on the position clamp to keep Y
-		// positive is an invariant three hundred lines away.
-		float topEdgePx = TopEdgeDangerPx;
-		if (topEdgePx > 0f && base.Position.Y < topEdgePx)
+		// ?aitopedgecompose=0 -- the top-edge band's PRE-CARD placement, restored verbatim: added
+		// here, downstream of the low-pass, so it is neither smoothed nor subject to the
+		// repulsion-cancel floor. It is the A/B arm for card 13960838 and the deliberate bug
+		// reproduction, nothing else; the composed placement above is what ships.
+		if (!TopEdgeComposes)
 		{
-			direction += new Vector2(0f, TopEdgeAvoidStrength * (1f - base.Position.Y / topEdgePx));
+			direction += topEdgePush;
+			ReportTopEdgePlacement("post-smoothing");
 		}
 		if (hasWall)
 		{

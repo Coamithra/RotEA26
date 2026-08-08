@@ -329,6 +329,26 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   is printed once per process as `[aiwallnav] steering: port|2008` -- the flags dump reports only
   the PARSE, and an arm that measured the shipped code twice prints a plausible table. Pinned by
   the probe pair `tools/headless/probes/ai_wallnav_2008.txt` + `ai_wallnav_2008_absent.txt`.
+  **`?aitopedgecompose=0` is a PLACEMENT, not a magnitude** (card 13960838): it puts the top-edge
+  danger band's push back where it was, into `direction` AFTER the steering low-pass, so it is
+  neither damped nor eligible for the repulsion-cancel floor. It ships summed into `repel` with
+  every other repellent. The band is strength 20 against a `maxSteerStrength` of 4, and 4 is also
+  the CEILING of the powerup approach pull -- so under the old placement no attractor could win
+  the top **129px** of the screen and a pickup there was arithmetically unreachable, which is what
+  the card was reported for. `?aitopedgestrength=`/`?aitopedgepx=` already reach the magnitudes
+  (and `=0` there is card 2248e5eb's 2008 arm); no combination of them expresses the placement.
+  **The placement alone does NOT move the pickup rate** -- it fixes the composition defect that
+  made the band unbeatable at any strength above 4, and the rate itself tracks the MAGNITUDE, which
+  is unchanged pending an N=60 verdict. Table in web CLAUDE.md; do not quote this card as having
+  fixed the powerup complaint.
+  **Another deliberate bug reproduction** (the `?nethitstop=1` / `?netstaleguard=0` /
+  `?netaimease=0` idiom), IN `DebugFlags.Active` for that reason, and one-way like its siblings --
+  it turns a shipped fix off, so it DEFAULTS TRUE and only an explicit off spelling assigns.
+  Which placement actually ran is printed once per process as
+  `[aitopedge] placement: composed|post-smoothing` -- the flags dump reports only the PARSE, and
+  an arm that measured the shipped code twice prints a plausible table. Pinned by the probe pair
+  `tools/headless/probes/ai_top_edge.txt` + `ai_top_edge_precard.txt` and by `logic_probe`'s
+  `ProbeAiTopEdge`. Details: web CLAUDE.md.
   **`?aisweptmax=<px/ms>` is a GUARD, not a tuning knob** (card c1d783ad): above it the DEFAULT
   swept-path seam refuses the path, because a raw one-frame position delta reports an enormous
   velocity for anything repositioned in a single tick and the cone would sweep the screen for that

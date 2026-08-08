@@ -112,6 +112,15 @@ internal static class AiBench
 	// two builds is not a comparison.
 	private static int powerupsSpawned;
 
+	// Big UFOs still alive at the moment a SpiderBoss died, summed over the run's boss deaths, and
+	// how many died (card 2c74d5b7). Run-wide rather than per ship: the platforms belong to the
+	// fight, not to a slot. This is the ONLY observable the sparing rule has -- a spared UFO fires
+	// its beam whether or not the AI could see it, moves no other counter and changes no pixel, so
+	// without this "the bot leaves beam platforms alive" and "the bot killed them all and got
+	// lucky" produce identical rows. Null-ish state is the sentinel: no boss died in the window.
+	private static int bigUfosAtBossDeath;
+	private static int spiderBossDeaths;
+
 	private static GameScene lastScene;
 
 	internal static bool Enabled => DebugFlags.AiBench;
@@ -125,6 +134,8 @@ internal static class AiBench
 		verdictMs = 0.0;
 		peakEventPos = 0;
 		powerupsSpawned = 0;
+		bigUfosAtBossDeath = 0;
+		spiderBossDeaths = 0;
 		headlessTotal = TimeSpan.Zero;
 		lastScene = null;
 	}
@@ -354,6 +365,21 @@ internal static class AiBench
 		Rec(ship).Pickups++;
 	}
 
+	// SpiderBoss.BeginDeathThroes — the single point where that boss's death is decided (both the
+	// Lazer hit that lands it and the join peer's replay of the host's beat come through there).
+	// `aliveBigUfos` is the beam-platform population the fight ended with: the rule in
+	// PlayerShip.AiSparesBigUfo exists to keep it above zero, and it is counted at the DEATH
+	// because that is the one instant at which "did sparing them work" has an answer.
+	internal static void NoteSpiderBossDeath(int aliveBigUfos)
+	{
+		if (!Enabled)
+		{
+			return;
+		}
+		spiderBossDeaths++;
+		bigUfosAtBossDeath += aliveBigUfos;
+	}
+
 	// Powerup.Initialize — a pickup entered the world. Run-wide rather than per ship: nothing
 	// about a spawn belongs to a slot, and both ships compete for the same drop.
 	internal static void NotePowerupSpawned()
@@ -452,6 +478,15 @@ internal static class AiBench
 			sb.Append("prog=").Append(peakEventPos).Append('/').Append(scene.BenchEventCount).Append(' ');
 		}
 		sb.Append(verdict ?? "running");
+		// Beam platforms left alive at the SpiderBoss's death, summed over the run's boss deaths
+		// (a checkpoint revert can replay the fight), with the death count beside it so the sum is
+		// readable. `none` when no boss died in the window -- 0 platforms at a kill and no kill at
+		// all are opposite findings. Line() only for the count, like `bossw=` above.
+		sb.Append(" bigufos=").Append((spiderBossDeaths > 0) ? bigUfosAtBossDeath.ToString(CultureInfo.InvariantCulture) : "none");
+		if (spiderBossDeaths > 0)
+		{
+			sb.Append(" bossdeaths=").Append(spiderBossDeaths);
+		}
 		foreach (KeyValuePair<int, ShipRec> kv in ships)
 		{
 			ShipRec r = kv.Value;
@@ -685,6 +720,14 @@ internal static class AiBench
 		sb.Append(" progTotal=").Append((scene != null) ? scene.BenchEventCount : 0);
 		sb.Append(" level=").Append((scene != null) ? scene.Level.ToString() : "none");
 		sb.Append(" difficulty=").Append(Settings.GetInstance().CurrentDifficulty);
+		// Card 2c74d5b7. APPEND-ONLY like the keys at the tail, and placed BEFORE the noship early
+		// return on purpose: it is run-wide, so a row with no steering ship still has an answer,
+		// and the contract is `none` rather than an omitted key. The value is the SUM over the
+		// run's SpiderBoss deaths, so `bossdeaths=` rides beside it here too -- a Row-only
+		// consumer (ai_sweep reads Row) could not otherwise normalise an arm where the boss died
+		// twice against one where it died six times.
+		sb.Append(" bigufos=").Append((spiderBossDeaths > 0) ? bigUfosAtBossDeath.ToString(CultureInfo.InvariantCulture) : "none");
+		sb.Append(" bossdeaths=").Append(spiderBossDeaths);
 		if (r == null)
 		{
 			// No ship ever steered. On a level whose ships are all AI that is itself the

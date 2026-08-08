@@ -36,4 +36,4 @@ The prose ledger for the experiment [`README.md`](README.md) defines: which divi
 
 1. Rep 2 for each strategy (fresh orchestrating session per run; protocol minimum before trusting any ranking). For fleet rep 2: rep-unique branch names, and the poll-in-turn line in the spawn prompt (see above).
 2. The scoring pass over the run branches: per-ticket N=60 gates (`ai_sweep.py`) + blind A/B/C/D rubric → `scores.csv`.
-3. After the LAST strategy run: re-raise the archived follow-up cards from `archive/` (marsboss preset `30fe3de4`, tutorial timeout `fa5d98d8`, plus the solo/oracle runs' finds) onto the board.
+3. After the LAST strategy run: re-raise the archived follow-up cards from `archive/` (marsboss preset `30fe3de4`, tutorial timeout `fa5d98d8`, plus oracle's three AI finds — note its orbit-instead-of-parking card may already be resolved by fleet's T2/T3, so check the winning branch before re-raising; solo and fleet filed none) onto the board.

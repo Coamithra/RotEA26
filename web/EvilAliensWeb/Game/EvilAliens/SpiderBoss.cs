@@ -722,6 +722,14 @@ internal class SpiderBoss : AlienDrawableGameComponent
 	// the host's EvDying beat (card ad9c8f8b) rather than being handed a boss that vanishes.
 	private void BeginDeathThroes()
 	{
+		// The bench's "big UFOs alive at the boss kill" census (card 2c74d5b7) -- counted where
+		// the death is DECIDED, before the state flip below, and only on the first entry (the
+		// deferred-death seam may call this again; see NetBeginDeferredDeathSelf's guard).
+		// No-op unless ?aibench.
+		if (state != SpiderBossState.dead)
+		{
+			EvilAliensWeb.Compat.AiBench.NoteSpiderBossDeath();
+		}
 		switch (state)
 		{
 		case SpiderBossState.flyleft:

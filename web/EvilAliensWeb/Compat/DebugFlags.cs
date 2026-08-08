@@ -1552,6 +1552,13 @@ namespace EvilAliensWeb.Compat
 		// +10.20 CrazyGame deaths), so these knobs move the magnitudes only.
 		public static float? AiLazerAvoidRangePx { get; private set; }
 
+		// ?aibigufopx=<px>  the big-UFO engage radius during the SpiderBoss fight (card
+		//                   2c74d5b7): beyond it a big UFO is left alive as a beam platform for
+		//                   the boss to walk into. 0 is MEANINGFUL (the rule off -- the pre-card
+		//                   spare-one-only behaviour), so the guard refuses only a negative.
+		//                   Values at or above gun range (~351px) are inert.
+		public static float? AiBigUfoEngagePx { get; private set; }
+
 		public static float? AiLazerAvoidStrength { get; private set; }
 
 		public static float? AiLazerDodgeStrength { get; private set; }
@@ -3344,6 +3351,19 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(AiLazerAvoidRangePx ?? EvilAliens.PlayerShip.DefaultLazerAvoidRangePx));
+					}
+					break;
+				case "aibigufopx":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aibup) && aibup >= 0f)
+					{
+						AiBigUfoEngagePx = MathHelper.Min(aibup, 800f);
+					}
+					else
+					{
+						// 0 is MEANINGFUL here (the radius rule off), so the guard refuses only
+						// a negative -- the ?aisweptmax= shape.
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiBigUfoEngagePx ?? EvilAliens.PlayerShip.DefaultBigUfoEngagePx));
 					}
 					break;
 				case "ailazerstrength":

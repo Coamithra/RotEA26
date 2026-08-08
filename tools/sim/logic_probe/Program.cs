@@ -692,6 +692,15 @@ internal static class Program
             // back at us. 0 is a MEANINGFUL value here (guard off), so its guard refuses only a
             // negative -- which is the shape this table's negative leg already expects.
             new { Flag = "aisweptmax",     Prop = "AiSweptMaxSpeedPxPerMs",Good = "12",  Want = (object)12f,   Baked = "5"    },
+            // The gun-reach hull credit (card bb949dd9). 0 is a MEANINGFUL value (it restores the
+            // pre-card centre-distance gate, which is the A/B seam), so like ?aisweptmax= its
+            // guard refuses only a negative -- the shape this table's negative leg expects.
+            // GOOD IS <= 1 ON PURPOSE: the parse CLAMPS with MathHelper.Min(v, 1f), and this
+            // table's accepted leg reads the property BACK, so a test value above the clamp would
+            // have to name the clamped number rather than the one passed. Baked "" because the
+            // default is the single digit 1, which occurs throughout the captured output -- the
+            // same escape aifieldfall/aiscanrows already take.
+            new { Flag = "aigunhull",      Prop = "AiGunHullCredit",       Good = "0.5", Want = (object)0.5f,  Baked = ""     },
             // The two remaining port additions (card 2248e5eb). ?aitopedgestrength= and
             // ?ailazerdodge= take 0 as a MEANINGFUL value (it is the 2008 arm), so like
             // ?aisweptmax= their guards refuse only a negative -- the shape this table's
@@ -724,7 +733,9 @@ internal static class Program
             return 2;
         }
 
-        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all 36 knobs (cards 48b7c6b1 / 2248e5eb)");
+        // Count off `rows` rather than a literal -- the header said 36 while the table ran 37.
+        Console.WriteLine("[logic_probe] DebugFlags ?ai* value rejection, all " + rows.Length
+            + " knobs (cards 48b7c6b1 / 2248e5eb / bb949dd9)");
 
         // One counter and its OWN first-problem detail per leg: a shared sink attaches the
         // diagnosis to whichever Check happens to print it, which in a mutation run put the only

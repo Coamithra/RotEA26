@@ -116,17 +116,20 @@ covers the cycle against a synthetic store.
 Defined as procedures in `strategies.md` — they vary how the labor splits
 between Fable and Opus:
 
-- **`fable-solo`** — Fable does every ticket itself, sequentially, in one
-  session. No delegation.
-- **`fable-oracle`** — one Opus agent per ticket in parallel; Fable
-  dispatches, answers agents' questions via SendMessage, writes no code.
-- **`fable-architect`** — Fable writes a full design note per ticket, Opus
-  agents implement to spec in parallel, Fable reviews against its own
-  design.
+- **`fable-solo`** — Fable follows CONTRIBUTING.md itself, but grabs the
+  whole batch and solves it in one sweep. No delegation.
+- **`fable-oracle`** — the `/farm` skill as shipped, scoped to the batch's
+  cards: Opus agents design their own solutions, Fable reviews plans, rules
+  on questions, and runs the ship-gate diff review.
+- **`fable-architect`** — `/farm` with the design moved up front: Fable
+  fully architects each ticket's solution first, Opus agents implement to
+  Fable's spec (farm's own-plan checkpoint replaced by design-note
+  conformance).
 
-All are executed with the plain Agent tool (`model: "opus"` for Opus
-agents, worktree isolation for parallel implementers) — no workflow runtime,
-so every strategy is measured by the same meter.
+All run on the plain Agent tool underneath (`model: "opus"` for the fleet,
+worktree isolation) — no workflow runtime, so every strategy is measured by
+the same meter. No strategy opens or merges PRs: work stops at the run
+branches, so `main` stays put and no run sees another's output.
 
 ## Running a batch
 

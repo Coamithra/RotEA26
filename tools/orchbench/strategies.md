@@ -17,9 +17,14 @@ Constants for every strategy:
 - Cheap verification (logic probe, eahl, short bench soaks) happens inside
   the run; the N=60 sweep gate is the scoring pass unless a ticket says
   otherwise.
-- The strategy defines who is allowed to do what. Fable writing code in an
-  Opus-implements strategy contaminates the cell — if it happens (e.g. an
-  agent dies), note it in `notes` or discard the rep.
+- No PRs are opened or merged in any strategy: "ship" ends at the committed
+  run branch. Merging would move `main` under the later strategies and let
+  one run see another's work; the scoring pass checks branches out directly.
+- The strategy defines who is allowed to do what. In the Opus-implements
+  strategies, /farm's inline ship-gate fixes (small findings corrected
+  directly in a paused agent's worktree) are part of the strategy and are
+  fine; Fable implementing a whole ticket itself contaminates the cell — if
+  it happens (e.g. an agent dies), note it in `notes` or discard the rep.
 - **Subagent caches live 5 minutes** (root: 1h — measured 2026-08-08). An
   agent idling past that (waiting on a SendMessage answer, a review) pays a
   full prefix re-write on resume: ~$0.58 extra per stall at 100k Opus
@@ -31,52 +36,48 @@ Constants for every strategy:
 
 ## fable-solo
 
-Fable does all the tickets itself, sequentially, in one session. No
-subagents (beyond trivial read-only searches). One ticket at a time:
-research → implement → cheap-verify → commit → next ticket.
+Fable follows [`CONTRIBUTING.md`](../../CONTRIBUTING.md) itself — but
+instead of a single card, it grabs the whole ticket batch and solves it in
+one fell swoop: one session, tickets in sequence, research → implement →
+cheap-verify → commit to that ticket's run branch → next ticket. No
+subagents beyond trivial read-only searches.
 
 The quality ceiling / cost ceiling reference point: maximum capability on
 every step, zero parallelism, every token at Fable rates.
 
 ## fable-oracle
 
-Opus does the work; Fable dispatches and unblocks.
+**The `/farm` skill, run as shipped** over exactly the batch's cards (its
+"only the <topic> cards" form), with the shared constants above as
+overrides: run-branch names, no PR/merge, cheap verification only inside
+the metered window. Everything else is farm's own doctrine — Opus fleet
+(`model: "opus"`), agents research and design their OWN solutions, the
+mandatory plan checkpoint reviewed by Fable, Fable ruling on mid-flight
+questions and advising on hard calls, and Fable's inline ship-gate diff
+review before an agent ships.
 
-1. Fable spawns one Opus agent per ticket (`model: "opus"`, worktree
-   isolation), in parallel, each with the full ticket brief and this
-   standing instruction: *"If you hit a decision you cannot resolve from
-   the ticket, the code, or repo conventions — a design fork, an ambiguous
-   requirement, a suspicious measurement — STOP and end your report with
-   the question(s) instead of guessing."*
-2. When an agent reports back with questions, Fable answers via
-   `SendMessage` (the agent continues with its context intact). Fable may
-   read code to answer well, but writes no implementation itself.
-3. Repeat until each agent has committed; Fable sanity-reads each final
-   report (not the full diff — that would drift into architect/reviewer).
-
-Hypothesis: near-Opus cost, shorter wall than solo (parallel tickets),
-quality depends on whether agents ask the right questions.
+Hypothesis: implementation at Opus rates, wall shortened by parallelism;
+Fable spend concentrates in plan reviews and the ship gate. The stall tax
+(above) is farm's known cost shape — paused agents wait on Fable's rulings.
 
 ## fable-architect
 
-Fable designs; Opus implements to spec.
+`/farm` with one important difference: **the agents do not design their own
+solutions.** Before spawning anything, Fable researches each card and
+writes a full design note — mechanism, files/seams to touch, tuning values
+or how to derive them, verification plan, risks, explicit don'ts. Depth
+bar: an implementer should need no design decisions of its own. Opus
+agents then implement Fable's design; farm's research+design checkpoint is
+replaced by "read the design note, confirm understanding, flag conflicts
+with what you find in the tree". Deviating from the design requires
+reporting back first (Fable amends the design or holds the line). Farm's
+remaining machinery is unchanged — advisor role, orphan sweeps, and the
+ship-gate review, which here checks the diff against Fable's own design
+note (the design is the contract).
 
-1. **Design phase (Fable, batch):** for each ticket, Fable researches the
-   code enough to write a concrete design note — mechanism, files/seams to
-   touch, tuning values or how to derive them, verification plan, risks and
-   explicit don'ts. Depth bar: an implementer should need no design
-   decisions of their own.
-2. **Implementation phase (Opus, parallel):** one Opus agent per ticket,
-   each given ticket + design note, in its own worktree. Deviating from the
-   design requires reporting back first (Fable either amends the design or
-   holds the line).
-3. Fable reviews each diff against its own design note (this strategy
-   *does* include Fable review — the design is the contract) and requests
-   fixes; agents apply them.
-
-Hypothesis: Fable tokens concentrated where they matter (design/review),
-implementation at Opus rates; wall = design phase (serial-ish) +
-implementation (parallel).
+Hypothesis: Fable tokens move up front (design) instead of into plan
+review; implementation at Opus rates with fewer mid-flight stalls (fewer
+open decisions), at the risk that a wrong design taxes the whole ticket.
 
 ## Rubric (blind subjective scoring, 1–5 each)
 

@@ -558,7 +558,8 @@ namespace EvilAliensWeb.Compat
 			DebugFlags.SetBigUfoEngageOverride((float)px);
 			return "[ai] big-UFO engage radius = " + Fmt0(px) + "px"
 				+ ((px <= 0.0) ? " (gate OFF -- spare-one rule only)" : "")
-				+ ((px >= 351.0) ? " (at or above base gun range -- INERT, nothing is shot that far)" : "");
+				+ ((px >= 400.0) ? " (at or above the bot's reach for a big UFO -- behaviourally INERT,"
+					+ " nothing is shot that far; bigspared still counts the spare)" : "");
 		}
 
 		// Drop the override, so the SHIPPED default is readable back in the same process. That is

@@ -2111,7 +2111,7 @@ the rest are tier-independent.
     the other.
   - Flags: `?airepeldelta= ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
     ?aiasteroidfall= ?aievade=`, the cone/wedge family above, plus
-    `?aiseekapproach= ?aiseekpowerup= ?aipowerupreach=`. Wiring that `logic_probe` cannot reach is
+    `?aiseekapproach= ?aiseekpowerup= ?aipowerupreach= ?aigunhull=`. Wiring that `logic_probe` cannot reach is
     covered by `tools/headless/probes/ai_boss_approach.txt`.
   - **THE BOSS APPROACH IS SOLVED AGAINST THE BOSS'S OWN REPELLENT, with an INVERTED falloff**
     (card b56633fb, `PlayerShip.BossApproachWeight`). `DefaultSeekApproachWeight` 1.1 was a
@@ -2121,8 +2121,8 @@ the rest are tier-independent.
     AWAY from its own destination and `bossfar` read ~99% forever. There is no constant now, and
     no standoff point: the target is the BOSS, and the weight `A(d)` is recomputed every tick.
     - **The shape is upside down on purpose** -- `A` GROWS with distance and quiets to ~0 inside
-      firing range, anchored so `A(r*) = repel(r*)` at `r* = the live max bullet range` (gun range
-      minus the boss's own body term, in edge space). So the net crosses zero exactly where the
+      firing range, anchored so `A(r*) = repel(r*)` at `r* = the live max gun REACH` (which since card
+      bb949dd9 credits the boss's own hull radius, converted into edge space by its body term). So the net crosses zero exactly where the
       ship can shoot from, the whole-sum floor turns that crossing into a parked BAND, and outside
       it the attractor always outweighs the repellent **by shape rather than by a solved constant**
       -- which is what makes it survive a Range powerup, including one out-ranging the threat field
@@ -2130,9 +2130,11 @@ the rest are tier-independent.
     - **The band must stay wider than the ship's 11.3px stopping distance**, or it coasts through
       its own equilibrium. That is what damps the exponent: `k = min(1, budget * r* / w)` with the
       budget derived from that stopping distance and the repellent's real slope. `k = 1` for every
-      boss, tier and weapon in the game **except BrainBoss up close** -- its hull is 233->257px of
-      body term against a 351px gun range, which undamped bands 13.5px falling to 10.0px at its
-      pulse peak. Do not delete the damping as dead code.
+      boss, tier and weapon in the game, and since card bb949dd9 for BrainBoss up close too --
+      its hull (233->257px of body term against a 351px bullet travel) used to leave r* at
+      94-118px, which undamped bands 13.5px falling to 10.0px at its pulse peak; the hull credit
+      moves that r* to ~276px. The damping is therefore INERT at every shipped configuration and
+      is still the BOUND -- do not delete it as dead code.
     - **MEASURED (eahl, Very_Hard, paired seeds 1-16 x2, N=32 per side) -- PHANTOM-ERA, so read
       the ratios and not the absolutes** (card 05a2b818). The re-baseline confirms the mechanism
       survives both PR #298 and the field-range revert: `bossfar` still sits at 25-27% on the
@@ -2159,6 +2161,58 @@ the rest are tier-independent.
       `logic_probe`'s **`ProbeAiBossApproach`** pins that plus the crossing, the band bound over
       every tier x weapon x boss hull, the self-limiting interior and the pre-card configuration as
       a negative control; `tools/headless/probes/ai_boss_approach.txt` pins the wiring.
+  - **A BULLET ONLY HAS TO REACH THE HULL, so gun reach credits the target's own radius** (card
+    bb949dd9, `PlayerShip.AiGunReachPx`). Both the fire gate and the anchor above measured range
+    to the target's CENTRE -- the 2008 test verbatim, and harmless in 2008 because nothing
+    POSITIONED the ship off it. The port's approach term is anchored on that same test, so the
+    ship parked where its CENTRE distance equalled the bullet's travel and threw the whole hull
+    away: measured `boss=159px` of edge distance on `?level=Level2&marsboss` against a 176px
+    corner term, i.e. ~124px closer than it could have shot from, and worse on BrainBoss
+    (r* was 118px). The reach is now `bullet travel + the target's hull radius`, one rule with no
+    per-type code, shared by the gate and the anchor so they cannot drift.
+    - **The credit is the INSCRIBED half-extent (`ThreatRadius`), not the sqrt(2) corner term.**
+      The corner term is the hull's radius along the diagonal only, so crediting it would claim
+      reach the bullet does not have on an axis approach. It also keeps the reach self-limiting
+      against the aim spread: at Very_Hard's PI/12 a shot at the edge of the cone stops striking
+      a 124px-half MarsBoss hull beyond ~480px of centre distance, and the inscribed credit puts
+      the gate at 475.
+    - **IT SPLIT THE TERM INTO TWO REGIMES, and the old "a COMMITMENT outranks a DETOUR"
+      invariant now holds in only one of them. That is accepted, MEASURED, and must not be
+      "restored" with a clamp.** Where the boss's repellent is still audible at r* (90 of the
+      probe's 500 swept combinations) nothing changes: the crossing is exact and the pull outside
+      r* out-votes a 0.8 powerup seek. Where r* has moved out past the field's audible range the
+      weight floors at `DefaultSteerNoiseFloor` and a live powerup detour out-votes the boss --
+      the bot fetches the pickup from a safe standoff and comes back, and what keeps the level
+      advancing is the `X > 2000` sentinel (with nothing else chosen the boss takes the wheel at
+      any weight). **A clamp on the vote is not available**: `steerTargetWeight` IS the pull
+      magnitude, so clamping it moves the equilibrium back inward and reintroduces exactly the
+      solved-constant-plus-discontinuity this term was designed to remove. Audibility does not
+      imply the out-vote either -- audible needs w >= 0.2, out-voting at 1.5x r* needs w >= 0.533
+      -- so the scoped-down version of the old check is not a property of the mechanism, and
+      `ProbeAiBossApproach` asserts non-decreasing growth plus the sentinel instead.
+    - **MEASURED, and this is DIRECTIONAL (N=32: seeds 1-8 x2, not the N=60 floor).** eahl,
+      Very_Hard, `?invuln` OFF, 300s, `?aigunhull=0` (the pre-card gate) as the paired arm;
+      positive = the pre-card build is worse.
+
+      | rig | deaths (shipped vs pre-card) | boss= | bossfar | idle% |
+      |---|---|---|---|---|
+      | `?level=Level3&brainboss` | **3.12 vs 5.44, +2.31 +- 0.38** | 189 vs 109px | 0.9% vs 27.4% | 0.6 vs 15.0 |
+      | `?level=Level2&marsboss` | 11.50 vs 12.00, +0.50 +- 2.15 (n.s.) | 168 vs 161px | 0.9% vs 20.0% | 0.8 vs 17.2 |
+
+      Time-to-victory improved on marsboss (155s vs 181s at 8/16 victories both arms), so
+      standing further out is not costing kill speed. Level 1 and the spider rig are flat within
+      SEM at N=16, and `SpiderBoss(standing)` did not rise. `?aigunhull=0` is the A/B seam and a
+      tuning knob rather than a bug reproduction, so it stays out of `DebugFlags.Active`.
+    - **THE SPIDER RIG HAS NO `boss=` SIGNAL AT ALL, structurally** -- `SpiderBoss` is excluded
+      from `IsAiPriorityTarget` (bullet above), so no halting boss exists there and the bench
+      reads `boss=0 bossfar=0`. It is a DEATHS / `SpiderBoss(standing)` regression rig, never a
+      boss-distance one; the two boss-approach rigs are `marsboss` (added to `ai_sweep.py`'s
+      presets by this card) and `brainboss`.
+    - **The exponent damping is now INERT at every shipped configuration and MUST NOT be deleted
+      as dead code.** It existed for BrainBoss up close, whose r* was 94-118px; the hull credit
+      puts that at ~276px and the slope budget clears `k = 1` by ~4x. It is the BOUND, not a
+      tuning value -- `?aifieldpx=`, `?aigunhull=` and any wider hull can still drive r* down,
+      and the probe asserts the band over that whole domain rather than over the shipped point.
   - **Boss PROXIMITY is descriptive, never a gate.** `bossfar%` and `boss=<px>` describe where the
     ship is; the bot moving closer to a boss to dodge, collect or line up a shot is the field
     working. Gate boss work on OUTCOMES -- `SpiderBoss(standing)` deaths -- not on distance.
@@ -2378,9 +2432,13 @@ the rest are tier-independent.
       (2, spare-one included). `PlayerShip.SelectSparedBigUfos` is the whole rule, factored out
       of `DoAIFire` so it can be read as data.
     - **THE BAND IS BOUNDED ABOVE BY GUN RANGE -- this is the durable answer to the card's
-      question.** The bot never fires past `bulletlifetime * BulletRangePerMs` = **351px** at the
-      base weapon, so any radius at or above that is INERT: `?aibigufopx=400` is byte-identical
-      to `=0`. "Reduce the radius" has ~100..350px to work in, not an open range.
+      question.** The bot never fires past its own REACH, so any radius at or above that is
+      behaviourally inert. That reach is `bulletlifetime * BulletRangePerMs` = 351px at the base
+      weapon **plus the target's hull credit** (card bb949dd9, which landed alongside this one),
+      which measures **~400px** for a big UFO -- runs at 400 / 420 / 450 produce an identical
+      world. So "reduce the radius" has ~100..400px to work in, not an open range. Note
+      `bigspared` still counts a spare above that threshold: it is the DECISION, and a decision
+      to spare something already out of reach changes no behaviour.
     - **AND EVERY VALUE IN IT LOSES.** eahl, Very_Hard, `?invuln` off, spider rig, seeds 1-8 x2
       (**N=16 -- directional, below this file's N=60 floor**, but the sign was consistent across
       both variants and all three radii):
@@ -2411,6 +2469,59 @@ the rest are tier-independent.
   and MEASURED (card 2248e5eb): removing it costs deaths on both rigs and takes deaths BY `UFO`
   from 132 to 356 on the spider rig** -- see the audit table below. `?aitopedgestrength=0` is the
   2008 arm; the generic 150px/strength-4 screen-bound push underneath it is untouched.
+  **Its strength is 12 since card 13960838** (2248e5eb measured and kept it at 20); the 170px depth
+  is unchanged. That card's N=60 keep-or-drop verdict was taken at 20, so it establishes that the
+  band EARNS ITS KEEP, not that 20 is the right size -- which is what left the magnitude open.
+  - **It is a REPELLENT and it now composes like one (card 13960838).** It used to be added to
+    `direction` AFTER the low-pass, which made it the one steering vote in `DoAIMove` that was
+    neither damped nor eligible for `RepulseCancelDelta` -- a raw 0..20 vector welded onto a
+    smoothed sum whose usual magnitude is order 1-4. It sums into `repel` with the rest;
+    **`?aitopedgecompose=0` restores the old placement** (a deliberate bug reproduction, in
+    `Active`, one-way like `?netstaleguard=0`), and `[aitopedge] placement:` names the branch that
+    ran because the flags dump reports only the parse.
+  - **THE ARITHMETIC, which is the card's whole complaint.** The powerup approach pull is
+    `MyMath.PowerCurve(maxSteerStrength, ...)`, so it cannot exceed **4**, and the seek carrying
+    its destination adds 0.8. The band was **20**. So it out-voted the strongest possible pull
+    everywhere above `170 * (1 - 4.8/20)` = **129px**, and inside that strip a pickup was not
+    "unlikely", it was arithmetically unreachable -- there is no ship position, no powerup
+    position and no tier at which the sum points up. Note what this is NOT: the band was not
+    competing with a comparable force and winning, it was competing with a quantity a quarter its
+    size that happens to share the method. **At the shipped 12 that strip is `170 * (1 - 4.8/12)`
+    = 102px**, so it is narrowed rather than removed -- a band that never out-voted a powerup
+    would not be a UFO-spawn deterrent either. `logic_probe`'s **`ProbeAiTopEdge`** derives the
+    height from the two constants rather than pinning either number, so a retune re-derives it.
+  - **DIRECTIONAL, N=16 (seeds 1-8 x2), NOT the gate -- and the honest reading is that the
+    PLACEMENT change does NOT fix the pickup rate.** Paired by seed on the two rigs, pickup RATE
+    and paired deaths vs the shipped (composed) arm:
+
+    All arms below run the COMPOSED placement except where stated; the strength column is what
+    changed. Pickup RATE, and paired deaths vs the strength-20 composed arm:
+
+    | arm | spider pickups | brainboss pickups | spider deaths | brainboss deaths |
+    |---|---|---|---|---|
+    | composed, strength 20 | 45.4% | 52.4% | -- | -- |
+    | `?aitopedgecompose=0` (pre-card placement, 20) | 47.1% | 54.0% | -0.38 +- 0.94 | **+1.12 +- 0.77** |
+    | `?aitopedgestrength=0` (no band at all) | **63.6%** | 54.5% | +0.38 +- 0.62 | -0.25 +- 0.62 |
+    | **`?aitopedgestrength=12` -- WHAT SHIPS** | 55.7% | 57.4% | **-1.00 +- 0.84** | -0.19 +- 0.66 |
+
+    **TWO SEPARATE CHANGES, and only the second moves the card's own metric.** The composed
+    placement earns its keep on brainboss DEATHS (the pre-card arm is +1.12 +- 0.77 worse, the
+    clearest signal in the table) and is flat on pickups -- so **do not read the placement change
+    as the fix for "the AI won't pick up powerups"**. It is the composition defect underneath it,
+    and it is what makes a magnitude retune meaningful at all: under the old placement the band
+    could not be out-voted at ANY strength above 4, so tuning it would have changed nothing.
+    **The magnitude is 20 -> 12**, which recovers about half the pickup gap on both rigs while
+    deaths move favourably (spider) or not at all (brainboss). **12 rather than a lower value is
+    deliberate and is a statement about the EVIDENCE, not about the optimum**: card 2248e5eb's
+    deaths cost for removing the band outright was +0.67..+0.88, which is invisible at this
+    sweep's ~0.8 SEM, so the conservative choice is the highest strength recovering most of the
+    gain rather than the lowest that looks flat. Removal outright stays refuted by that card at
+    N=60, and **the N=60 scoring pass is the arbiter of the 12** -- everything here is N=16.
+  - **The generic four screen-edge repulsions were re-checked against `src_decompiled` for this
+    card and are 2008 VERBATIM** -- `steerRange` 150, strengths 0..4, `PowerCurve` exp 2, the 560px
+    Floor bottom (2008 lines 1070-1113), and so is the powerup's own pull and its 150px reach
+    (lines 995-1015). So of everything pushing the ship away from an edge, **the top-edge band is
+    the only term the port added at all**, which is the answer to the card's question.
 - **Every avoidance field here shares the `(1-t)^p` falloff shape** (`ThreatFieldStrength`) -- a
   flat push across a band fights the screen bounds instead of easing off once the ship is clear.
 - **Per-tier skill (card c10e3e7f) is keyed off `Settings.EffectiveDifficulty`, NOT
@@ -2504,18 +2615,23 @@ the rest are tier-independent.
     attract-demo case means booting `?menu&aibench&difficulty=Easy` and watching it flip from
     `effective=Easy` to `effective=Hard` as `Demo1` starts.
 - Flags: `?aibench` · `?aiff=<2-64>` · `?aismooth= ?aismoothurgent= ?aireact=
-  ?aigapmargin= ?aiscanrows= ?aicrosspenalty= ?aithreatlead= ?aibossbias= ?aiaim= ?aifieldpx=
+  ?aigapmargin= ?aiscanrows= ?aicrosspenalty= ?aithreatlead= ?aibossbias= ?aigunhull= ?aiaim= ?aifieldpx=
   ?aifieldsize= ?aifieldfall= ?aiseekapproach= ?aiseekpowerup= ?aipowerupreach= ?airepeldelta=
   ?ainoisefloor= ?aiseekdeadzone= ?aiasteroidscale= ?aiasteroidrange=
   ?aiasteroidfall= ?aievade= ?aicone= ?aiwedge= ?ailaneescape= ?aiconelead= ?aiconemaxlen=
   ?aiconewidth= ?aiconetaper= ?aiconefallalong= ?aiconefallacross= ?aiconescale= ?aiconespread=
-  ?aiconewidthmin= ?aiwedgestrength= ?aiwedgefall= ?aitopedgepx= ?aitopedgestrength= ?ailazerpx=
-  ?ailazerstrength= ?ailazerdodge= ?aibigufopx=`
+  ?aiconewidthmin= ?aiwedgestrength= ?aiwedgefall= ?aitopedgepx= ?aitopedgestrength=
+  ?aitopedgecompose= ?ailazerpx= ?ailazerstrength= ?ailazerdodge= ?aibigufopx=`
   (null => the baked `PlayerShip.Default*` consts, so a shipped build is unchanged).
   A malformed value on any of them is REPORTED and ignored, never swallowed, per the file-wide
   value-carrying-flag convention (see "Debug flags & tuning conventions" above; cards 48b7c6b1 +
   4e401005). The one wrinkle specific to this family: `?aiaim`/`?aifieldpx` name "the per-tier
   skill row" as the in-force setting when no override stands. Pinned by `ProbeAiFlagRejection`.
+  **`?aitopedgecompose=` is the one ON/OFF member of that list and is deliberately outside both
+  rejection tables** -- they describe VALUE-carrying flags and their shared "names the value in
+  force" leg does not describe an on/off spelling (the same reason `?aicone=`/`?aiwedge=`/
+  `?ailaneescape=`/`?aievade=` are absent). Its rejection leg lives in `ProbeAiTopEdge` instead,
+  the `?ripplephase=` precedent.
   Console: `eaAiBench()`, `eaAiBench.soak(s)`, `eaAiBench.matrix(...)`, `eaAiBench.world()`,
   `eaAiBench.reset()`. Pair
   with `?aiplayer` and `?difficulty=Very_Hard`.

@@ -17,10 +17,17 @@
 # never got there. Hence the latch initialises to -1, in Reset() AND at the field, since a
 # process whose first run never goes through Reset() would otherwise start at default(int).
 #
-# WHY THIS SEED. ?seed=2 kills the boss inside 180 sim-seconds and leaves 5 big UFOs alive at
-# that instant. Unseeded, whether the boss dies at all in the budget is a coin flip -- the bot
-# wins this rig roughly 12 runs in 16 at 300s -- so the precondition is PINNED, not waited out
-# (card af4c3694). ?invuln keeps a death from eating the ticks; it does not affect the boss's HP.
+# WHY THIS SEED. ?seed=1 kills the boss inside 180 sim-seconds and leaves 4 big UFOs alive at
+# that instant, on both repetitions. Unseeded, whether the boss dies at all in the budget is a
+# coin flip -- the bot wins this rig roughly 12 runs in 16 at 300s -- so the precondition is
+# PINNED, not waited out (card af4c3694). ?invuln keeps a death from eating the ticks; it does
+# not affect the boss's HP.
+#
+# THE SEED IS A RIG PARAMETER, NOT A CONSTANT OF NATURE -- expect to re-pick it. It was ?seed=2
+# until card bb949dd9 (gun reach credits the target's hull) landed alongside this one and moved
+# the world enough that seed 2 stopped killing the boss inside the budget. If this probe goes
+# red with bigalive=-1 and the run is otherwise healthy, sweep a few seeds for one that still
+# reaches a kill and re-pin it here; that is maintenance, not a regression.
 #
 # THE FIRST-DEATH-ONLY RULE is deliberate and asserted by construction here: the latch refuses to
 # overwrite once set, because the number means "how many executioners were still alive when it
@@ -36,7 +43,7 @@
 # MUTATION-TESTED: removing the NoteSpiderBossDeath call leaves bigalive at -1 and turns the leg
 # red; initialising the latch to 0 instead of -1 makes it read 0 and also turns it red.
 #
-# eahl: --flags "?level=Level2&spiderboss&aiplayer&aibench&invuln&difficulty=Very_Hard&seed=2&noattract"
+# eahl: --flags "?level=Level2&spiderboss&aiplayer&aibench&invuln&difficulty=Very_Hard&seed=1&noattract"
 
 step 150 nodraw
 mark

@@ -1442,6 +1442,16 @@ namespace EvilAliensWeb.Compat
 		// All card ada9e839 -- see PlayerShip.DefaultSeekPowerupWeight for the history.
 		public static float? AiSeekPowerupWeight { get; private set; }
 
+		// ?aigunhull=<0..1>     how much of a target's own hull radius counts toward gun reach
+		//                       (card bb949dd9). A bullet only has to reach the HULL, so the
+		//                       reach is `bullet travel + hitRadius`; this scales that credit.
+		//                       `0` restores the pre-card centre-distance fire gate AND the
+		//                       pre-card boss standoff -- the negative control, since the
+		//                       anchor is derived from the same helper. A tuning seam rather
+		//                       than a bug reproduction, so it is OUT of Active (?aisweptmax=
+		//                       precedent). See PlayerShip.AiGunReachPx.
+		public static float? AiGunHullCredit { get; private set; }
+
 		public static float? AiSeekApproachWeight { get; private set; }
 
 		public static float? AiPowerupReachPx { get; private set; }
@@ -1546,6 +1556,20 @@ namespace EvilAliensWeb.Compat
 		public static float? AiTopEdgeDangerPx { get; private set; }
 
 		public static float? AiTopEdgeAvoidStrength { get; private set; }
+
+		// `?aitopedgecompose=0` (card 13960838) -- put the top-edge band's push back where it was:
+		// into `direction` AFTER the steering low-pass, so it is neither damped nor eligible for
+		// the repulsion-cancel floor, and no attractor inside the band can out-vote it. It ships
+		// summed into `repel` with every other repellent instead.
+		//
+		// Not a knob and not a magnitude: `?aitopedgestrength=` already reaches the strength, and
+		// `=0` there is card 2248e5eb's 2008 arm. This is the PLACEMENT, which no combination of
+		// the two value flags can express.
+		//
+		// IN `Active`, the `?netstaleguard=0` / `?netaimease=0` idiom: it turns a shipped FIX off,
+		// so it DEFAULTS TRUE and `Active` tests its negation. A deliberate bug reproduction must
+		// never reach a public lobby.
+		public static bool AiTopEdgeCompose { get; private set; } = true;
 
 		// ?ailazerpx=<px>        how wide a berth a live beam gets,
 		// ?ailazerstrength=<f>   how hard it pushes at the beam, and
@@ -3276,6 +3300,17 @@ namespace EvilAliensWeb.Compat
 							InForce(AiSeekPowerupWeight ?? EvilAliens.PlayerShip.DefaultSeekPowerupWeight));
 					}
 					break;
+				case "aigunhull":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aigh) && aigh >= 0f)
+					{
+						AiGunHullCredit = MathHelper.Min(aigh, 1f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiGunHullCredit ?? EvilAliens.PlayerShip.DefaultGunHullCredit));
+					}
+					break;
 				case "aiseekapproach":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aisa) && aisa >= 0f)
 					{
@@ -3356,6 +3391,24 @@ namespace EvilAliensWeb.Compat
 						// negative -- the ?aisweptmax= shape.
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(AiTopEdgeAvoidStrength ?? EvilAliens.PlayerShip.DefaultTopEdgeAvoidStrength));
+					}
+					break;
+				case "aitopedgecompose":
+					// Same asymmetry as ?netstaleguard= / ?netaimease= above, for the same reason:
+					// an unrecognised value here would silently turn a shipped FIX off, so only an
+					// explicit off spelling disables it and anything else is reported and ignored.
+					if (IsExplicitlyOff(val))
+					{
+						AiTopEdgeCompose = false;
+					}
+					else if (!IsOn(val))
+					{
+						// Names the setting actually IN FORCE, not the shipped default -- a
+						// repeated flag (?aitopedgecompose=0&aitopedgecompose=nope) keeps the
+						// earlier valid value.
+						Console.WriteLine("[debug] unknown ?" + key + "= value '" + val
+							+ "' (expected 0/off to disable) -- ignored, the top-edge band stays "
+							+ (AiTopEdgeCompose ? "COMPOSED" : "POST-SMOOTHING"));
 					}
 					break;
 				case "aibigufopx":
@@ -4093,7 +4146,7 @@ namespace EvilAliensWeb.Compat
 					+ "REFUSE its own pairing (a menu session rejects while debug flags are active). "
 					+ "Add &netallowdebug.");
 			}
-			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || !NetChargeAimEase || AiWallNav2008 || AiFastForward > 1;
+			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || !NetChargeAimEase || AiWallNav2008 || !AiTopEdgeCompose || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -4137,6 +4190,7 @@ namespace EvilAliensWeb.Compat
 						// the ORIGINAL algorithm must be tellable from one that measured the
 						// shipped one -- the two produce plausible tables either way.
 						+ (AiWallNav2008 ? " aiwallnav2008" : "")
+						+ (!AiTopEdgeCompose ? " aitopedgecompose=0" : "")
 						+ (Harness != null
 							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "") + " bg=" + HarnessBg
 							: ""));

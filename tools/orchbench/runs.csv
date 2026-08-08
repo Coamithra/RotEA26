@@ -1,2 +1,3 @@
 strategy,rep,tickets,started_at,wall_s,cost_usd,out_tok,cw_5m_tok,cw_1h_tok,cache_read_tok,in_tok,rw_events,rw_tok,notes
 fable-oracle,0,TEST,2026-08-08T14:20:19,733,19.0614,40747,268588,41257,23224590,207,0,0,"plumbing test: off-batch card 22e324d6, single Opus agent; window includes strategy-doc rewrite chatter"
+fable-solo,1,"T1,T2,T3,T4",2026-08-08T15:19:51,2122,91.1192,106432,0,864778,68483926,1807,0,0,"T1 topedge 200/10 (PR315), T2 orbit brake (PR316), T3 audited-and-refuted doc-only (PR317), T4 spare-2+radius + bigufos counter (PR318); cheap gates only in-window (N=16/32 screens, logic_probe, ai_* probes); N=60 gates deferred to scoring"

@@ -2361,6 +2361,18 @@ the rest are tier-independent.
   and MEASURED (card 2248e5eb): removing it costs deaths on both rigs and takes deaths BY `UFO`
   from 132 to 356 on the spider rig** -- see the audit table below. `?aitopedgestrength=0` is the
   2008 arm; the generic 150px/strength-4 screen-bound push underneath it is untouched.
+  - **Its REACH is `100px`, not the `170` the audit table below measured (card 13960838).** The
+    push is LINEAR in the band, so at 170 it still voted 8.2 at Y=100 and 2.35 at Y=150 -- an
+    order of magnitude over the 0.8 powerup seek, which made every powerup in the upper quarter
+    of the screen unreachable and is the whole of "the AI won't pick up powerups". **Shrink the
+    REACH, never the strength**: the ceiling authority is what 2248e5eb measured, and at 100 it is
+    intact (18.0 at Y=10 against 18.8 before, still out-voting a lane escape's 18) while Y >= 100
+    becomes force-free. Spider rig, N=24 (seeds 1-12 x2, `ai_sweep.py`): pickups **48.7% -> 57.9%**
+    (the term-off control reaches 64.8%), deaths flat (3.94 -> 3.88, and the off control is
+    WORSE at 5.50, so 2248e5eb still holds), victories 5/16 -> 7/16, deaths by `UFO` 18 -> 15.
+    Level 1, N=8: pickups 84.7% -> 85.9%, deaths 8.75 -> 8.12, victories 0/8 -> 2/8, `UFO` 4 -> 1.
+    `?aitopedgepx=170` is the pre-card arm. **The four generic screen-edge repulsions are NOT
+    implicated and were not touched** -- they are verbatim 2008 (see "Not suspects" below).
 - **Every avoidance field here shares the `(1-t)^p` falloff shape** (`ThreatFieldStrength`) -- a
   flat push across a band fights the screen bounds instead of easing off once the ship is clear.
 - **Per-tier skill (card c10e3e7f) is keyed off `Settings.EffectiveDifficulty`, NOT
@@ -2601,6 +2613,11 @@ refuted and reverted.** Positive = that arm is worse than the shipped build of t
 |---|---|---|---|---|
 | **top-edge push** (`170px` / strength `20`) | `?aitopedgestrength=0` | **+0.88 +- 0.52** | **+0.67 +- 0.64** | **KEPT** |
 | **beam field + sidestep** (`260px` / `14` / `7`) | `?ailazerpx=150&ailazerstrength=4&ailazerdodge=0` | +0.98 +- 0.65 | **-4.55 +- 0.69** | **REVERTED to 150 / 4 / 0** |
+
+**The table is HISTORY: the top-edge row's `170px` was later cut to `100px` (card 13960838), which
+is what the shipped build runs.** The row is what the KEEP verdict was measured on and stays as
+written; the reach change is documented in the top-edge bullet further up, and it does not disturb
+the verdict (the term-off control is still the worse arm at the new reach).
 
 - **The top-edge term is confirmed by its own stated mechanism, not just by the deaths column.**
   Removing it multiplies exactly the death it was added to prevent: deaths by `UFO` 132 -> 356 on

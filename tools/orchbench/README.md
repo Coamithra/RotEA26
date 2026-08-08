@@ -57,20 +57,26 @@ byte-identically, archiving every change first:
 
 ```sh
 python tools/orchbench/reset_run.py snap -o board_start.json   # beside usage snap
-# ... run the strategy ...
+# ... run the strategy (normal flows: worktrees, PRs, merges into main) ...
 python tools/orchbench/reset_run.py diff  board_start.json     # preview
-python tools/orchbench/reset_run.py reset board_start.json --label fable-oracle-rep1
+python tools/orchbench/reset_run.py reset board_start.json \
+    --label fable-oracle-rep1 --git
 ```
 
 `reset` writes `archive/<ts>-<label>.json` (full before/after text of every
 changed card, new cards verbatim) plus a `.md` summary, then restores the
-board. The archive dir is committed — it is run output, like `runs.csv`;
-re-raise archived tickets on the board after the *last* strategy run, so no
-strategy sees another's findings. Deliberately untouched: `orchbench/*` run
-branches (the scoring pass checks them out), the board's `activity.log`
-(append-only history of what the run did), and git state generally — it
-*reports* new branches and a dirty tree, it never deletes. `--selftest`
-covers the cycle against a synthetic store.
+board. With `--git` it also archives the run's `main` tip as the keeper
+branch `orchbench/run-<label>` (pushed; the scoring pass checks it out —
+per-ticket diffs are its merge commits) and moves `main` back to the
+snapshot's baseline commit with `--force-with-lease`. The batch baseline is
+also an annotated tag (`orchbench-base-A` = batch A) so the state main
+returns to has a name that survives any snapshot file. The archive dir is
+committed — it is run output, like `runs.csv`; re-raise archived tickets on
+the board after the *last* strategy run, so no strategy sees another's
+findings. Deliberately untouched: the board's `activity.log` (append-only
+history of what the run did), and `orchbench/*` branches are never deleted.
+`--selftest` covers the board cycle against a synthetic store and the git
+cycle against a temp repo.
 
 ## Ledgers
 
@@ -128,8 +134,8 @@ between Fable and Opus:
 
 All run on the plain Agent tool underneath (`model: "opus"` for the fleet,
 worktree isolation) — no workflow runtime, so every strategy is measured by
-the same meter. No strategy opens or merges PRs: work stops at the run
-branches, so `main` stays put and no run sees another's output.
+the same meter. Runs use the normal flows, PR merges into `main` included;
+isolation comes from the reset (below), not from withholding merges.
 
 ## Running a batch
 

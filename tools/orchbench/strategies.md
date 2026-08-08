@@ -8,18 +8,23 @@ afterwards (see README → Ledgers).
 
 Constants for every strategy:
 
-- Every ticket's change lands on its own branch
-  `orchbench/<ticket>-<strategy>-<rep>`, cut from the ticket's pinned base
-  commit. Agents working in parallel get worktree isolation.
+- Every ticket's change is its own worktree branch + PR merged into `main`,
+  per the runbook (branch names per CONTRIBUTING/farm convention — the
+  `orchbench/` ref namespace is reserved for the harness's keeper branches).
+  Agents working in parallel get worktree isolation.
 - Every implementing agent's prompt includes the ticket file verbatim plus
   the pointer to `CLAUDE.md` / `web/EvilAliensWeb/CLAUDE.md` conventions
   (verification tools first, `?ai*` seams, measurement bar).
 - Cheap verification (logic probe, eahl, short bench soaks) happens inside
   the run; the N=60 sweep gate is the scoring pass unless a ticket says
   otherwise.
-- No PRs are opened or merged in any strategy: "ship" ends at the committed
-  run branch. Merging would move `main` under the later strategies and let
-  one run see another's work; the scoring pass checks branches out directly.
+- Runs use the NORMAL flows — worktrees, PRs, merges into `main`, exactly
+  as CONTRIBUTING.md / /farm ship them. Isolation comes from the reset, not
+  from withholding merges: the batch baseline is a TAG (e.g.
+  `orchbench-base-A`), and after each run `reset_run.py reset --git`
+  archives the run's `main` tip as `orchbench/run-<label>` (scoring checks
+  that out; per-ticket diffs are its merge commits) and moves `main` back
+  to the baseline, so the next strategy starts from the identical state.
 - The strategy defines who is allowed to do what. In the Opus-implements
   strategies, /farm's inline ship-gate fixes (small findings corrected
   directly in a paused agent's worktree) are part of the strategy and are

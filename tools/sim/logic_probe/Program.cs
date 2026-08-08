@@ -696,8 +696,8 @@ internal static class Program
             // ?ailazerdodge= take 0 as a MEANINGFUL value (it is the 2008 arm), so like
             // ?aisweptmax= their guards refuse only a negative -- the shape this table's
             // negative leg already expects.
-            new { Flag = "aitopedgepx",    Prop = "AiTopEdgeDangerPx",     Good = "233", Want = (object)233f,  Baked = "170"  },
-            new { Flag = "aitopedgestrength",Prop = "AiTopEdgeAvoidStrength",Good = "33",Want = (object)33f,   Baked = "20"   },
+            new { Flag = "aitopedgepx",    Prop = "AiTopEdgeDangerPx",     Good = "233", Want = (object)233f,  Baked = "200"  },
+            new { Flag = "aitopedgestrength",Prop = "AiTopEdgeAvoidStrength",Good = "33",Want = (object)33f,   Baked = "10"   },
             new { Flag = "ailazerpx",      Prop = "AiLazerAvoidRangePx",   Good = "311", Want = (object)311f,  Baked = "150"  },
             // Baked "" on the last two: since card 2248e5eb's revert they bake 4 and 0, single
             // digits that occur elsewhere in the captured output, so the absence check would fire

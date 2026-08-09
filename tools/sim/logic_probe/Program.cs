@@ -1651,12 +1651,17 @@ internal static class Program
             "42 px/ms x " + coneLeadMs.ToString("0") + "ms would be "
             + (42f * coneLeadMs).ToString("0") + "px, capped at " + coneMaxLen.ToString("0")
             + "px -- a full-screen corridor from one frame's position delta");
-        // 400px down that corridor the ship is INSIDE the projected shape -- full strength
-        // from one frame's position delta, which is the shove the guard exists to refuse.
-        Check("WHY: and 400px down that corridor it still out-votes the 0.8 seek several times over",
-            ShapeField(teleportShape, "ConeStrength") > 4f * 0.7f,
+        // 400px down that corridor the ship is INSIDE the projected shape. Since the lap-11
+        // whisper-triangle ruling the strength out there is the triangle's peak, not the full
+        // 4 -- but it still out-votes the 0.8 seek from one frame's bogus position delta, which
+        // is the shove the guard exists to refuse.
+        float whisperPeak = (float)ship.GetField("SweptTriangleStrength", anyStatic).GetRawConstantValue();
+        Check("WHY: and 400px down that corridor it still out-votes the 0.8 seek",
+            ShapeField(teleportShape, "ConeStrength") > 0.8f
+                && Math.Abs(ShapeField(teleportShape, "ConeStrength") - whisperPeak) < 0.001f,
             "cone strength " + ShapeField(teleportShape, "ConeStrength").ToString("0.00")
-            + " of a 4.00 peak, at the ship's position");
+            + " (the triangle's whisper peak " + whisperPeak.ToString("0.00")
+            + "), against the 0.8 seek, at the ship's position");
 
         // 6. THE NEGATIVE CONTROL: `?aisweptmax=0` is the A/B seam the card's measurement pass
         // runs against, so it must genuinely restore the pre-card behaviour -- every reposition

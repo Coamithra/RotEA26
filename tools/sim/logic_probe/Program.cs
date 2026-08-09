@@ -655,9 +655,9 @@ internal static class Program
         {
             new { Flag = "aismooth",       Prop = "AiSteerSmoothMs",       Good = "111", Want = (object)111f,  Baked = "90"   },
             new { Flag = "aismoothurgent", Prop = "AiSteerSmoothUrgentMs", Good = "22",  Want = (object)22f,   Baked = "15"   },
-            new { Flag = "airepeldelta",   Prop = "AiRepelCancelDelta",    Good = "3",   Want = (object)3f,    Baked = "0.2"  },
             new { Flag = "ainoisefloor",   Prop = "AiSteerNoiseFloor",     Good = "4",   Want = (object)4f,    Baked = "0.2"  },
             new { Flag = "aiseekdeadzone", Prop = "AiSeekDeadzonePx",      Good = "77",  Want = (object)77f,   Baked = "30"   },
+            new { Flag = "aiseekresume",   Prop = "AiSeekResumePx",        Good = "88",  Want = (object)88f,   Baked = "20"   },
             new { Flag = "aireact",        Prop = "AiWallReactionMs",      Good = "333", Want = (object)333f,  Baked = "420"  },
             new { Flag = "aigapmargin",    Prop = "AiGapSwitchMargin",     Good = "7",   Want = (object)7f,    Baked = "1.5"  },
             new { Flag = "aiscanrows",     Prop = "AiWallScanRows",        Good = "9",   Want = (object)9,     Baked = ""     },
@@ -782,10 +782,10 @@ internal static class Program
         set("AiThreatFieldPx", null);
         string outAim = run("?aiaim=xx");
         string outPx = run("?aifieldpx=xx");
-        Check("per-tier knobs name the SKILL ROW when no override stands",
+        Check("skill knobs name the SKILL ROW when no override stands",
             get("AiAimSpreadRad") == null && get("AiThreatFieldPx") == null
-            && outAim.Contains("staying on the per-tier skill row")
-            && outPx.Contains("staying on the per-tier skill row"),
+            && outAim.Contains("staying on the fixed skill row")
+            && outPx.Contains("staying on the fixed skill row"),
             "aiaim said: " + FirstLine(outAim) + " | aifieldpx said: " + FirstLine(outPx));
 
         // Hand the process back as it was found. Parse can only ASSIGN, so a Probe* added after
@@ -823,16 +823,14 @@ internal static class Program
     //   leg 3  a negative value      -> the same, for the flags whose guard refuses one
     // Reading back also sidesteps every inline clamp (?holofilter caps at 2, ?aifriends at 3, ...)
     // without this file having to know a single one of them.
-    // The AI steering field's COMPOSITION rules (cards ada9e839 / 31ceb6ff / f4d1721f).
+    // The AI steering field's COMPOSITION rules (cards ada9e839 / 31ceb6ff / f4d1721f; floors
+    // and arrival restructured by owner ruling, iterative rep 1).
     //
     // WHAT THE FIELD DOES, so the assertions below read as more than arithmetic. DoAIMove sums
-    // two families of force. REPELLENTS (every threat field, the lazer terms, the spider boss's
-    // lane escapes, the screen edges) accumulate on their own and are dropped wholesale if their
-    // resultant falls to DefaultRepulseCancelDelta or below -- opposing pushes that cancel leave
-    // a vector whose DIRECTION is noise, and Move() discards magnitude and thrusts at full
-    // acceleration along the angle. ATTRACTORS (the idle station, a powerup, a halting boss's
-    // standoff) are never floored; each stops pulling inside its own DEADZONE instead. The two
-    // are then summed, and DefaultSteerNoiseFloor catches the leftover equilibrium case.
+    // every force into one vector and applies ONE blanket equilibrium floor at the end
+    // (DefaultSteerNoiseFloor, 2008's own 0.2 line). The seek's arrival is a HYSTERESIS latch:
+    // the pull parks inside DefaultSeekParkPx and resumes only past DefaultSeekResumePx, so the
+    // anti-pingpong bound lives on the pair rather than on a single radius.
     //
     // WHAT THIS PROBE IS AND IS NOT. It is a set of ORDERING properties over constants that live
     // hundreds of lines apart and are each individually plausible, not a restatement of any one
@@ -859,8 +857,8 @@ internal static class Program
             // threat field, above a detour) moved to ProbeAiBossApproach, where they are asserted
             // about the live curve instead of about a literal.
             "SeekWeight", "DefaultSeekPowerupWeight",
-            "DefaultPowerupReachPx", "DefaultRepulseCancelDelta", "DefaultSteerNoiseFloor",
-            "DefaultSeekArriveDeadzonePx", "ShipMaxSpeed", "ShipDeceleration",
+            "DefaultPowerupReachPx", "DefaultSteerNoiseFloor",
+            "DefaultSeekParkPx", "DefaultSeekResumePx", "ShipMaxSpeed", "ShipDeceleration",
             "SweepLaneAvoidStrength",
             "DefaultLazerAvoidStrength", "DefaultLazerDodgeStrength"
         };
@@ -876,25 +874,29 @@ internal static class Program
             vals[n] = (float)f.GetRawConstantValue();
         }
 
-        Console.WriteLine("[logic_probe] AI steering field composition (card ada9e839)");
+        Console.WriteLine("[logic_probe] AI steering field composition (ada9e839; hysteresis/blanket-floor rework, iterative rep 1)");
         float station = vals["SeekWeight"], powerup = vals["DefaultSeekPowerupWeight"];
-        float repelDelta = vals["DefaultRepulseCancelDelta"], noiseFloor = vals["DefaultSteerNoiseFloor"];
-        float deadzone = vals["DefaultSeekArriveDeadzonePx"];
+        float noiseFloor = vals["DefaultSteerNoiseFloor"];
+        float parkPx = vals["DefaultSeekParkPx"], resumePx = vals["DefaultSeekResumePx"];
 
-        // 1. THE DEADZONE COVERS THE STOPPING DISTANCE. This is the property that makes the
-        // attractors' hard-edged deadzone sound instead of an oscillator: `Move(null, ...)`
-        // applies deceleration alone, so a ship entering at full speed coasts v^2 / 2a further.
-        // If the deadzone is smaller than that the ship sails out the FAR side still under the
-        // attractor's pull, turns round, and pingpongs -- which is the symptom the 0.95 park was
-        // wrongly reached for. Derived from the real motion constants rather than restated, so
-        // retuning the flight model re-derives the bound instead of silently invalidating it.
+        // 1. THE HYSTERESIS PAIR COVERS THE STOPPING DISTANCE. `Move(null, ...)` applies
+        // deceleration alone, so a ship crossing the park edge at full speed coasts v^2 / 2a
+        // further before it halts. That rest point must still be INSIDE the resume radius, or
+        // the latch re-triggers on the ship's own momentum and the arrival pingpongs -- the
+        // single-radius ancestor of this bound sized its one deadzone the same way. Derived from
+        // the real motion constants rather than restated, so retuning the flight model
+        // re-derives the bound instead of silently invalidating it.
         float stoppingPx = vals["ShipMaxSpeed"] * vals["ShipMaxSpeed"] / (2f * vals["ShipDeceleration"]);
-        Check("the seek deadzone covers the ship's stopping distance",
-            deadzone > stoppingPx,
-            "DefaultSeekArriveDeadzonePx " + deadzone + " vs a stopping distance of "
-            + stoppingPx.ToString("0.0") + "px (ShipMaxSpeed " + vals["ShipMaxSpeed"]
-            + " / ShipDeceleration " + vals["ShipDeceleration"]
-            + ") -- below it the ship coasts out the far side and pingpongs about its target");
+        Check("the resume radius exceeds the park radius",
+            resumePx > parkPx,
+            "DefaultSeekResumePx " + resumePx + " vs DefaultSeekParkPx " + parkPx
+            + " -- inverted or equal thresholds make the latch a plain deadzone or a flapper");
+        Check("a full-speed arrival at the park edge halts inside the resume radius",
+            parkPx + stoppingPx < resumePx,
+            "park " + parkPx + " + stopping distance " + stoppingPx.ToString("0.0")
+            + "px (ShipMaxSpeed " + vals["ShipMaxSpeed"] + " / ShipDeceleration "
+            + vals["ShipDeceleration"] + ") vs resume " + resumePx
+            + " -- past it the ship coasts clear of the latch and re-engages on its own momentum");
 
         // 2. NO FLOOR CAN CENSOR A LONE DELIBERATE FORCE. The whole-sum floor must sit below the
         // weakest ATTRACTOR (they are never floored on their own, but they still cross this one)
@@ -926,16 +928,12 @@ internal static class Program
         {
             weakestRepellent = Math.Min(weakestRepellent, vals["DefaultLazerDodgeStrength"]);
         }
-        Check("every REPELLENT's full strength clears the repulsion cancellation delta",
-            weakestRepellent > repelDelta,
-            "weakest repellent " + weakestRepellent + " vs DefaultRepulseCancelDelta " + repelDelta
-            + " -- at or below it a lone threat at point-blank range is dropped and the bot stops"
-            + " dodging that type entirely");
-        Check("a repellent that survives its own floor also clears the whole-sum floor",
-            repelDelta >= noiseFloor,
-            "DefaultRepulseCancelDelta " + repelDelta + " vs DefaultSteerNoiseFloor " + noiseFloor
-            + " -- otherwise a repellent can pass the first floor and be eaten by the second,"
-            + " which is a veto wearing two names");
+        Check("every REPELLENT's full strength clears the whole-sum floor",
+            weakestRepellent > noiseFloor,
+            "weakest repellent " + weakestRepellent + " vs DefaultSteerNoiseFloor " + noiseFloor
+            + " -- at or below it a lone threat at point-blank range is zeroed and the bot stops"
+            + " dodging that type entirely (the repellents-only cancellation floor this bound"
+            + " used to run against was retired with the blanket-floor rework)");
 
         // 3. The boss approach's two ordering claims (below the threat field, above a detour) are
         // ProbeAiBossApproach's now -- it has no constant to compare here since card b56633fb.
@@ -1008,17 +1006,15 @@ internal static class Program
             falloff = Const("DefaultThreatFieldFalloff");
             bulletPerMs = Const("BulletRangePerMs");
             stoppingPx = Const("ShipMaxSpeed") * Const("ShipMaxSpeed") / (2f * Const("ShipDeceleration"));
-            // The per-tier field radius, read out of the real ladder rather than restated -- a tier
-            // added or retuned is then swept by this probe automatically.
-            FieldInfo skillF = ship.GetField("AiSkillByDifficulty", anyStatic);
-            Array skills = (Array)skillF.GetValue(null);
-            FieldInfo fieldPxF = skills.GetType().GetElementType()
+            // The field radius, read out of the real skill rather than restated. The per-tier
+            // ladder is retired (owner ruling, iterative rep 1) -- every tier flies FixedSkill --
+            // so the sweep below runs over the one shipped radius; if a measured ladder ever
+            // returns, read it back out here so the tiers are swept automatically again.
+            FieldInfo skillF = ship.GetField("FixedSkill", anyStatic);
+            object skill = skillF.GetValue(null);
+            FieldInfo fieldPxF = skill.GetType()
                 .GetField("FieldPx", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            tierFieldPx = new float[skills.Length];
-            for (int i = 0; i < skills.Length; i++)
-            {
-                tierFieldPx[i] = (float)fieldPxF.GetValue(skills.GetValue(i));
-            }
+            tierFieldPx = new float[] { (float)fieldPxF.GetValue(skill) };
         }
         catch (Exception e)
         {

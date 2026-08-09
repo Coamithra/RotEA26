@@ -132,43 +132,25 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private const float SteerUrgentDemand = 9f;
 
-	// REPULSION CANCELLATION FLOOR (card ada9e839). Repellents are summed on their own, and if
-	// that resultant comes out at or below this the ship is not pushed at all. It exists for the
-	// case the steering field cannot otherwise express: two threats shoving from opposite sides
-	// resolve to a near-zero vector whose DIRECTION is noise, and Move() discards magnitude and
-	// thrusts at full acceleration along the angle -- so "barely pushed" reads as "sprint that
-	// way" and the ship jitters between two walls instead of holding still between them.
+	// THE BLANKET EQUILIBRIUM FLOOR -- 2008's own line, at 2008's own place (the very end of
+	// DoAIMove): `if (direction.Length() <= 0.2f) direction = Vector2.Zero;`. A steer that has
+	// cancelled to noise is full throttle in an arbitrary direction, because Move() keeps only
+	// the angle; at or below the floor the ship holds still instead.
 	//
-	// 0.2 IS THE 2008 VALUE, restored. The original DoAIMove ended with
-	// `if (direction.Length() <= 0.2f) direction = Vector2.Zero;`. This port raised that to 0.95
-	// -- above the 0.8 seek -- which turned a noise floor into a VETO that deleted every
-	// deliberate destination the bot had (see the seek weights below, and the card). The number
-	// is back where it started; what changed is that it now applies to the repulsion sum ALONE
-	// rather than to the whole steer, so it can never censor an attractor again.
-	public const float DefaultRepulseCancelDelta = 0.2f;
-
-	// WHOLE-SUM equilibrium guard, applied last (see the end of DoAIMove for the placement
-	// argument). Same 0.2, same job at a different level: a steer that has cancelled to noise is
-	// full throttle in an arbitrary direction, because Move() keeps only the angle. It is BELOW
-	// every FIXED-weight attractor by construction -- the weakest is SeekWeight 0.8 and a
-	// surviving repellent already beats DefaultRepulseCancelDelta -- so it can only ever fire on
-	// real cancellation, never censor a lone vote. That bound is the whole difference from the
-	// 0.95 this port shipped, and it is asserted by logic_probe's ProbeAiFieldComposition.
+	// HISTORY, so nobody re-derives either dead end: the port first raised this to 0.95 -- above
+	// the 0.8 seek, a veto that deleted every deliberate destination (card ada9e839 restored
+	// 0.2) -- and then split it into a repellents-only cancellation floor plus this one, so
+	// opposing pushes could be zeroed before an attractor joined the sum. The split was retired
+	// by owner ruling (iterative rep 1, "too smart for its own good"): one floor, whole sum,
+	// exactly as shipped in 2008. Known residual: two repellents whose >0.2 resultant flips
+	// direction over a few px can still rattle the ship -- accepted; a probe-ahead scheme is
+	// logged as a someday, not built.
 	//
-	// THAT HAZARD IS NOW REALISED, DELIBERATELY (card b56633fb). This note used to read "an
-	// attractor that FADES with distance (there is none today) would drop under this floor and be
-	// parked exactly as the 0.95 park parked everything -- such a term must either keep its
-	// magnitude above the floor or accept being inert as a deliberate choice". The boss approach
-	// is that term and takes the second option ON PURPOSE: its weight is solved to CROSS the
-	// repellent at firing range, so this floor is what widens that crossing into a band the ship
-	// can come to rest in. It is therefore out of ProbeAiFieldComposition's weakest-attractor
-	// bound; ProbeAiBossApproach asserts the band instead. The warning still stands for any
-	// FIXED-weight attractor added later.
+	// The boss approach deliberately fades DOWN through this floor near firing range -- that is
+	// what widens its crossing into a parked band (card b56633fb; ProbeAiBossApproach pins it).
 	public const float DefaultSteerNoiseFloor = 0.2f;
 
 	private static float SteerSmoothUrgentMs => EvilAliensWeb.Compat.DebugFlags.AiSteerSmoothUrgentMs ?? DefaultSteerSmoothUrgentMs;
-
-	private static float RepulseCancelDelta => EvilAliensWeb.Compat.DebugFlags.AiRepelCancelDelta ?? DefaultRepulseCancelDelta;
 
 	private static float SteerNoiseFloor => EvilAliensWeb.Compat.DebugFlags.AiSteerNoiseFloor ?? DefaultSteerNoiseFloor;
 
@@ -390,18 +372,28 @@ public class PlayerShip : AlienDrawableGameComponent
 	// which is a confounded measurement, since a lone 0.8 seek was being zeroed outright and
 	// could not fidget.
 	//
-	// 15 IS AN AUDIT RESULT AND THE 30 IT REPLACES IS REFUTED (card 05a2b818). Re-measured clean
-	// at N=60, the response is MONOTONE in this radius on CrazyGame and flat on the other four
-	// rigs -- paired against 30: 10px -3.60 deaths, 15px -2.87, 20px -1.97 (victories 36 -> 50 /
-	// 48 / 44 of 60). **10 measured BEST and was rejected anyway**, on the bound rather than on
-	// the number: it sits BELOW the 11.3px stopping distance, so the ship cannot come to rest
-	// inside it and the radius stops being a deadzone at all -- which is the idle fidget the port
-	// widened it for, and the invariant ProbeAiFieldComposition pins. 15 is the smallest value
-	// that keeps the bound intact, and it takes ~80% of the measured win.
-	// Pinned against the motion constants by logic_probe's ProbeAiFieldComposition.
-	public const float DefaultSeekArriveDeadzonePx = 15f;
+	// HYSTERESIS SINCE ITERATIVE REP 1 (owner ruling): the single radius above is replaced by the
+	// standard two-threshold arrival -- the pull PARKS once the ship is within SeekParkPx and
+	// stays parked until the distance opens past SeekResumePx (target moved, ship was shoved
+	// away, or the seek switched to a different destination, which resets the latch via its
+	// kind). Two radii, one bit of state, no per-target ids: a target swap or a moving target
+	// shows up as the distance opening past the resume radius all by itself.
+	//
+	// THE BOUND MOVES TO THE RESUME RADIUS. A ship crossing the park edge at full speed coasts
+	// the 11.3px stopping distance; with one radius that had to fit INSIDE the zone (hence the
+	// old 15). Under hysteresis the park radius may sit below it -- the ship comes to rest
+	// somewhere inside the RESUME radius, and only re-engages if pushed clear out of it. So the
+	// invariant ProbeAiFieldComposition pins is SeekResumePx > SeekParkPx + 11.3: a full-speed
+	// arrival halts at ~park+11.3, which must still be inside the resume zone or the latch
+	// re-triggers on its own momentum. 8/20 gives 0.7px of margin; watch it if either moves.
+	public const float DefaultSeekParkPx = 8f;
 
-	private static float SeekArriveDeadzonePx => EvilAliensWeb.Compat.DebugFlags.AiSeekDeadzonePx ?? DefaultSeekArriveDeadzonePx;
+	public const float DefaultSeekResumePx = 20f;
+
+	// ?aiseekdeadzone= keeps its name and now drives the PARK radius; ?aiseekresume= is its pair.
+	private static float SeekParkPx => EvilAliensWeb.Compat.DebugFlags.AiSeekDeadzonePx ?? DefaultSeekParkPx;
+
+	private static float SeekResumePx => EvilAliensWeb.Compat.DebugFlags.AiSeekResumePx ?? DefaultSeekResumePx;
 
 	// Kept at the 2008 weight so the seek still loses to threat avoidance exactly as before.
 	private const float SeekWeight = 0.8f;
@@ -642,9 +634,13 @@ public class PlayerShip : AlienDrawableGameComponent
 	// two are shaping very different spans.
 	public const float DefaultLaneWedgeFallAlong = DefaultConeFallAlong;
 
-	private static bool ConeEnabled => EvilAliensWeb.Compat.DebugFlags.AiConeShapes ?? true;
+	// BAKED OFF (owner ruling, iterative rep 1): the cone/wedge machinery stays and `?aicone=1` /
+	// `?aiwedge=1` re-arm it, but the shipped bot flies without velocity prediction until the
+	// shapes earn trust behind proper debugging/visualization. Probes that pin the dormant code
+	// boot with the restore flags.
+	private static bool ConeEnabled => EvilAliensWeb.Compat.DebugFlags.AiConeShapes ?? false;
 
-	private static bool LaneWedgeEnabled => EvilAliensWeb.Compat.DebugFlags.AiLaneWedge ?? true;
+	private static bool LaneWedgeEnabled => EvilAliensWeb.Compat.DebugFlags.AiLaneWedge ?? false;
 
 	private static float ConeLeadMs => EvilAliensWeb.Compat.DebugFlags.AiConeLeadMs ?? DefaultConeLeadMs;
 
@@ -776,45 +772,18 @@ public class PlayerShip : AlienDrawableGameComponent
 	// tier-vs-tier cannot be measured end-to-end (the ENEMIES scale with the same tier, so an
 	// outcome delta between tiers is unattributable), and only the ANCHOR row has evidence behind
 	// it. So do not read the lower rows as measured values -- they are the old proportions.
-	private static readonly AiSkill[] AiSkillByDifficulty = new AiSkill[5]
-	{
-		/* Easy      */ AiSkill.Deg(118f, 22.5f),
-		/* Medium    */ AiSkill.Deg(129f, 19.5f),
-		/* Hard      */ AiSkill.Deg(139f, 17f),
-		/* Very_Hard */ new AiSkill(VeryHardThreatFieldBasePx, VeryHardAimSpreadRad),
-		/* Inzane    */ AiSkill.Deg(VeryHardThreatFieldBasePx, 11.25f)
-	};
+	// PER-TIER SKILL RETIRED (owner ruling, iterative rep 1). 2008 flew one fixed skill at every
+	// difficulty -- aim spread PI/12, field range 150 -- and the ladder below never had evidence
+	// beyond its anchor row (the file's own rescale note admitted the lower rows were
+	// proportions, not measurements). Every tier now flies the Very_Hard values; the table is
+	// kept commented for the day a measured ladder is wanted again.
+	//   Easy AiSkill.Deg(118f, 22.5f) / Medium .Deg(129f, 19.5f) / Hard .Deg(139f, 17f)
+	//   / Very_Hard (anchor) / Inzane .Deg(anchor, 11.25f)
+	private static readonly AiSkill FixedSkill = new AiSkill(VeryHardThreatFieldBasePx, VeryHardAimSpreadRad);
 
-	// EFFECTIVE difficulty, not CurrentDifficulty: the attract demos lock Hard and the tutorial
-	// locks Very_Hard, and only the lock-aware value describes the fight the bot is actually
-	// flying in. See Settings.EffectiveDifficulty.
-	//
-	// Memoised on the tier because this is read per THREAT per ship per frame (ThreatFieldRange is
-	// called inside DoAIMove's baddy loop), which with a full field and four AI friends is
-	// thousands of resolutions a frame -- the same hoist the "Perf batch 2" note above DoAIMove
-	// applies to GetBaddies(). Single-threaded WASM, so a plain non-volatile pair is safe.
-	//
-	// The clamp is NOT for the save file: XmlSerializer writes enums by NAME and throws on an
-	// unknown one (which lands in Settings.onLoadError and yields a fresh Settings), and
-	// ?difficulty= is gated by Enum.IsDefined. It guards the real hazard -- a future
-	// DifficultyLevel member added without a matching row here, which it maps to the last row.
-	private static Settings.DifficultyLevel skillTier = (Settings.DifficultyLevel)(-1);
-
-	private static AiSkill skillCached;
-
-	private static AiSkill Skill
-	{
-		get
-		{
-			Settings.DifficultyLevel tier = Settings.GetInstance().EffectiveDifficulty;
-			if (tier != skillTier)
-			{
-				skillTier = tier;
-				skillCached = AiSkillByDifficulty[MathHelper.Clamp((int)tier, 0, AiSkillByDifficulty.Length - 1)];
-			}
-			return skillCached;
-		}
-	}
+	// One skill at every tier since the ladder retired (above); the ?aiaim/?aifieldpx overrides
+	// still win downstream, which is how any future ladder would be measured.
+	private static AiSkill Skill => FixedSkill;
 
 	// For the ?aibench readout. The RESOLVED values (overrides applied), so the bench line answers
 	// "which skill row am I actually flying?" directly instead of leaving it to be inferred from
@@ -1829,6 +1798,13 @@ public class PlayerShip : AlienDrawableGameComponent
 	private string aiSeekLogKind = "";
 	private int aiSeekLogTick;
 
+	// The seek-arrival hysteresis latch (see DefaultSeekParkPx): parked-in-the-zone, plus which
+	// seek kind parked it -- a kind change resets the latch so a fresh destination pulls
+	// immediately. A stale value on a pool-recycled ship self-heals: a spawn point outside the
+	// resume radius unparks on the first tick.
+	private bool seekParked;
+	private string seekParkedKind = "";
+
 	// One [aiseek] line on every seek-kind change and a heartbeat every 30 ticks while the kind
 	// holds. The line carries where the ship IS, where the seek points, its weight and whether
 	// the deadzone has silenced it -- the attribution a position trace cannot give.
@@ -2089,7 +2065,10 @@ public class PlayerShip : AlienDrawableGameComponent
 				// with a velocity-aligned hat on it, so both halves are real. Placed before the
 				// evade so a mover contributes its cone even on the ticks the evade takes over.
 				AddSweptRepellent(ref repel, baddy, dodgeAngle, maxSteerStrength);
-				if (EvilAliensWeb.Compat.DebugFlags.AiEvadeMovers != false
+				// BAKED OFF with the cones (owner ruling, iterative rep 1): both prediction paths
+				// are dormant, `?aievade=1` re-arms this one. Everything falls through to the
+				// 2008-shaped radial field below.
+				if (EvilAliensWeb.Compat.DebugFlags.AiEvadeMovers == true
 					&& EvadeMovingThreat(ref repel, baddy, dodgeAngle, minSteerStrength, maxSteerStrength))
 				{
 					continue;
@@ -2271,28 +2250,40 @@ public class PlayerShip : AlienDrawableGameComponent
 			}
 			delta = base.Position - steerTarget;
 			float distToTarget = (delta).Length();
+			// HYSTERESIS ARRIVAL (owner ruling, iterative rep 1; see DefaultSeekParkPx). Park the
+			// pull inside SeekParkPx, resume it only past SeekResumePx; a seek-kind change resets
+			// the latch, and a target swap or a moving target opens the distance past the resume
+			// radius on its own, so no per-target identity is needed. The single hard-edged
+			// deadzone this replaces relied on its radius covering the 11.3px stopping distance;
+			// here that bound belongs to the RESUME radius (park + 11.3 < resume), pinned by
+			// ProbeAiFieldComposition.
+			// A velocity-damped ARRIVE was tried in an earlier era and reverted -- it contains
+			// -SpeedVector, so it brakes the ship whenever it is moving relative to its station,
+			// which is most of a boss fight (coast 28% -> 59%, 24 -> 70 deaths). Don't re-derive.
+			if (seekKind != seekParkedKind)
+			{
+				seekParked = false;
+				seekParkedKind = seekKind;
+			}
+			if (seekParked)
+			{
+				if (distToTarget >= SeekResumePx)
+				{
+					seekParked = false;
+				}
+			}
+			else if (distToTarget <= SeekParkPx)
+			{
+				seekParked = true;
+			}
 			if (EvilAliensWeb.Compat.DebugFlags.AiSeekLog)
 			{
-				LogAiSeek(seekKind, steerTarget, steerTargetWeight, distToTarget,
-					distToTarget <= SeekArriveDeadzonePx);
+				LogAiSeek(seekKind, steerTarget, steerTargetWeight, distToTarget, seekParked);
 			}
-			if (distToTarget > SeekArriveDeadzonePx)
+			if (!seekParked)
 			{
-				// Plain positional pull, as in 2008. THE deliberate-destination attractor: it goes
-				// into `direction` and is never floored (card ada9e839), because its anti-pingpong
-				// mechanism is the deadzone above -- switched off inside it, full strength outside,
-				// a hard edge. That is sound here precisely BECAUSE the deadzone covers the ship's
-				// stopping distance: a ship crossing the edge at full speed coasts 11.3px and
-				// halts inside the zone, so it cannot cross back out under its own momentum and
-				// re-trigger. **The margin is 3.7px at the shipped 15px radius**, not the
-				// comfortable one it was at 30 -- which is exactly why card 05a2b818 stopped at
-				// 15 rather than taking the 2008 value of 10 that measured better. Anything at or
-				// below 11.3 breaks this paragraph; ProbeAiFieldComposition derives that bound
-				// from the motion constants and fails on it. See DefaultSeekArriveDeadzonePx.
-				// A velocity-damped ARRIVE was tried here instead and reverted -- it contains
-				// -SpeedVector, so it brakes the ship whenever it is moving relative to its station,
-				// which is most of a boss fight. That measured coast 28% -> 59% and 24 -> 70 deaths:
-				// the bot was being held at a standstill and could not accelerate out of trouble.
+				// Plain positional pull, as in 2008: into `direction`, never floored below the
+				// blanket 0.2 (the pull is 0.8, so the floor cannot censor it alone).
 				direction += steerTargetWeight
 					* MyMath.AngleToVector(MyMath.VectorToAngle(steerTarget - base.Position));
 			}
@@ -2303,22 +2294,12 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			bottomEdge = 560f;
 		}
-		// THE POWERUP YIELD (T1, card 13960838). While the bot's chosen destination is a powerup
-		// sitting INSIDE an edge band, that band's push stands down -- measured on seed 1's
-		// opening chase, the (1,51) corner powerup stalls the approach at the band boundary
-		// (pull 4*(1-t^2) decayed to ~2.9 at the hover point against a ~3.3 edge push), the
-		// chase drags past wantsToTakePowerup's progress>0.6 flip and is abandoned uncollected
-		// (pickups=0/1). Yielding is per-band and only while the powerup is inside THAT band, so
-		// edge safety is untouched the moment the pickup resolves or the target changes; the
-		// generic field principle ("steeper mountain, not a veto") loses here because the
-		// mountain IS the destination's own doorstep -- the powerup is worth briefly standing in
-		// the band, which is a policy choice, not a field-shape one. `?aipowerupyield=0` is the
-		// pre-card arm.
-		bool powerupYield = seekKind == "powerup"
-			&& EvilAliensWeb.Compat.DebugFlags.AiPowerupYield != false;
+		// (An edge-band "powerup yield" briefly lived here in iterative rep 1 and was killed the
+		// same session by owner ruling -- a bandaid on a bandaid; the classic field curve is the
+		// structural fix for edge powerups. The pushes below are 2008 verbatim.)
 		if (!altSteering)
 		{
-			if (base.Position.X < edgeMargin && !(powerupYield && steerTarget.X < edgeMargin))
+			if (base.Position.X < edgeMargin)
 			{
 				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, base.Position.X / edgeMargin);
 				if (altSteering)
@@ -2327,7 +2308,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				}
 				repel += push * new Vector2(1f, 0f);
 			}
-			if (base.Position.X > 800f - edgeMargin && !(powerupYield && steerTarget.X > 800f - edgeMargin))
+			if (base.Position.X > 800f - edgeMargin)
 			{
 				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, Math.Abs((800f - base.Position.X) / edgeMargin));
 				if (altSteering)
@@ -2336,7 +2317,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				}
 				repel += push * new Vector2(-1f, 0f);
 			}
-			if (base.Position.Y < edgeMargin && !(powerupYield && steerTarget.Y < edgeMargin))
+			if (base.Position.Y < edgeMargin)
 			{
 				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, base.Position.Y / edgeMargin);
 				if (altSteering)
@@ -2345,7 +2326,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				}
 				repel += push * new Vector2(0f, 1f);
 			}
-			if (base.Position.Y > bottomEdge - edgeMargin && !(powerupYield && steerTarget.Y > bottomEdge - edgeMargin))
+			if (base.Position.Y > bottomEdge - edgeMargin)
 			{
 				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, Math.Abs((bottomEdge - base.Position.Y) / edgeMargin));
 				if (altSteering)
@@ -2355,21 +2336,15 @@ public class PlayerShip : AlienDrawableGameComponent
 				repel += push * new Vector2(0f, -1f);
 			}
 		}
-		// THE REPULSION CANCELLATION FLOOR, and then the combine (card ada9e839). Everything that
-		// pushes AWAY has now had its say; if the resultant of all of it is at or below the delta,
-		// the repellents have argued each other to a standstill and the ship is not pushed at all.
-		// Applied to `repel` alone and BEFORE the low-pass, which is the only placement that means
-		// anything: the point is to stop a noise-directioned residual from ever entering the sum,
-		// and a floor downstream of the blend would be judging a lagged mixture of this tick's
-		// cancellation and the last few ticks' real pushes.
-		bool repelZeroed = (repel).Length() <= RepulseCancelDelta;
-		// Reported BEFORE the zeroing, because afterwards "two threats cancelled out" and "nothing
-		// was pushing" are the same vector.
-		EvilAliensWeb.Compat.AiBench.NoteRepel(this, repel, repelZeroed);
-		if (repelZeroed)
-		{
-			repel = Vector2.Zero;
-		}
+		// THE COMBINE. The per-family cancellation floor that used to sit here (card ada9e839:
+		// zero `repel` alone when its resultant was <= 0.2, before the low-pass) is GONE -- owner
+		// ruling, iterative rep 1: back to 2008's single blanket floor on the final sum at the
+		// end of the method, on the "too smart for its own good" grounds. The known cost is the
+		// case that floor was built for: two repellents shoving from opposite sides can still
+		// resolve to a >0.2 residual whose direction flips over a few px, which no end-of-sum
+		// floor can catch -- accepted for now (the probe-ahead idea is logged, not built).
+		// `repel` still accumulates separately so the bench can report it as its own vector.
+		EvilAliensWeb.Compat.AiBench.NoteRepel(this, repel, zeroed: false);
 		direction += repel;
 		// Low-pass the summed steer (card f4d1721f). Everything above votes with a vector, Move()
 		// consumes only the resulting ANGLE, and nothing damped how fast that angle could move --
@@ -2406,12 +2381,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		// passes the flag's `>= 0` range check, and relying on the position clamp to keep Y
 		// positive is an invariant three hundred lines away.
 		float topEdgePx = TopEdgeDangerPx;
-		// The powerup yield (see the edge-push block above) covers this band too -- at strength
-		// 20 it out-votes any pull the powerup can ever produce, so a top-band powerup was
-		// categorically unreachable without it. This is fleet-T1's measured mechanism (+19pt
-		// pickups, deaths within SEM, the one rep-1 T1 fix that passed the owner's eye test).
-		if (topEdgePx > 0f && base.Position.Y < topEdgePx
-			&& !(powerupYield && steerTarget.Y < topEdgePx))
+		if (topEdgePx > 0f && base.Position.Y < topEdgePx)
 		{
 			direction += new Vector2(0f, TopEdgeAvoidStrength * (1f - base.Position.Y / topEdgePx));
 		}
@@ -2893,7 +2863,10 @@ public class PlayerShip : AlienDrawableGameComponent
 		return maxSteerStrength * (float)Math.Pow(u, falloff);
 	}
 
-	private static bool ClassicFieldCurve => EvilAliensWeb.Compat.DebugFlags.AiClassicFieldCurve ?? false;
+	// CLASSIC IS THE DEFAULT AGAIN (owner ruling, iterative rep 1): every threat field and the
+	// beam term run 2008's plateau. The spike family stays reachable via ?aifieldcurve=port
+	// (?aifieldfall= only shapes that arm).
+	private static bool ClassicFieldCurve => EvilAliensWeb.Compat.DebugFlags.AiClassicFieldCurve ?? true;
 
 	// Per-type curve family, falling back to the global switch.
 	private static bool ThreatTypeClassicCurve(AlienDrawableGameComponent baddy)
@@ -2901,7 +2874,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		if (baddy is Asteroid)
 		{
 			return EvilAliensWeb.Compat.DebugFlags.AiAsteroidClassicCurve
-				?? EvilAliensWeb.Compat.DebugFlags.AiClassicFieldCurve ?? false;
+				?? EvilAliensWeb.Compat.DebugFlags.AiClassicFieldCurve ?? true;
 		}
 		return ClassicFieldCurve;
 	}

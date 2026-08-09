@@ -1407,26 +1407,25 @@ namespace EvilAliensWeb.Compat
 		//                      "damp when calm, fly when not" balance in PlayerShip.DoAIMove.
 		public static float? AiSteerSmoothUrgentMs { get; private set; }
 
-		// The two cancellation floors (card ada9e839, both baked 0.2):
-		//   ?airepeldelta=<d>   the REPULSION resultant at or below which the repellents have
-		//                       argued each other to a standstill and none of them is applied.
-		//   ?ainoisefloor=<d>   the WHOLE steer at or below which the ship holds still, applied
-		//                       last. Both exist because Move() discards magnitude and thrusts at
-		//                       full acceleration along the ANGLE, so a cancelled-to-noise vector
-		//                       is a sprint in an arbitrary direction rather than a gentle nudge.
-		// `?aipark=` was the pre-card spelling of the second one, and it is GONE rather than
-		// renamed: it was baked at 0.95, i.e. ABOVE the 0.8 seek, so it did not floor noise -- it
-		// deleted every deliberate destination the bot had. A query still passing it would be
-		// asking for the bug back under a name that no longer means the same thing.
-		public static float? AiRepelCancelDelta { get; private set; }
-
+		// ?ainoisefloor=<d>  the ONE equilibrium floor (baked 0.2, 2008's own line): the whole
+		//                    steer at or below which the ship holds still, applied at the end of
+		//                    DoAIMove. Move() discards magnitude and thrusts at full acceleration
+		//                    along the ANGLE, so a cancelled-to-noise vector is a sprint in an
+		//                    arbitrary direction rather than a gentle nudge.
+		// `?airepeldelta=` (the repellents-only cancellation floor, card ada9e839) is GONE with
+		// its mechanism -- owner ruling, iterative rep 1: back to 2008's single blanket floor.
+		// `?aipark=` was the pre-ada9e839 spelling and is also gone: it was baked at 0.95, ABOVE
+		// the 0.8 seek, so it deleted every deliberate destination the bot had.
 		public static float? AiSteerNoiseFloor { get; private set; }
 
-		// ?aiseekdeadzone=<px>  the radius inside which the seek attractor stops pulling -- the
-		//                       anti-pingpong mechanism for every deliberate destination, and the
-		//                       one knob that has to stay above the ship's 11.3px stopping
-		//                       distance (PlayerShip.DefaultSeekArriveDeadzonePx).
+		// ?aiseekdeadzone=<px>  the seek arrival's PARK radius since the hysteresis rework
+		//                       (PlayerShip.DefaultSeekParkPx; the flag keeps its old name), and
+		// ?aiseekresume=<px>    its RESUME radius -- the pull re-engages only past this. The
+		//                       stopping-distance bound lives on the PAIR now: resume must exceed
+		//                       park + 11.3px (PlayerShip.DefaultSeekResumePx).
 		public static float? AiSeekDeadzonePx { get; private set; }
+
+		public static float? AiSeekResumePx { get; private set; }
 
 		// ?aiseekpowerup=<w>    the pull toward a POWERUP the bot has chosen to fetch, and
 		// ?aiseekapproach=<s>   REDEFINED BY CARD b56633fb: a SCALE on the boss approach's own
@@ -1497,14 +1496,6 @@ namespace EvilAliensWeb.Compat
 
 		public static bool? AiLaneEscape { get; private set; }
 
-		// ?aipowerupyield=0 (T1, card 13960838): restore the pre-card behaviour where the screen
-		// edge pushes and the top-edge danger band keep shoving while the bot is trying to grab a
-		// powerup INSIDE that band -- the measured mechanism behind "the AI won't pick up
-		// powerups at the screen edge" (an edge-hugging powerup sits behind a push the 0.8 seek +
-		// near-field pull cannot reliably out-vote, the approach stalls at the band boundary, and
-		// wantsToTakePowerup's progress>0.6 rule then abandons the chase). Default ON: the push
-		// stands down only while the CURRENT steer target is a powerup inside that specific band.
-		public static bool? AiPowerupYield { get; private set; }
 
 		// ?aiconelead=<ms>     cone length per unit speed, as a time horizon;
 		// ?aiconemaxlen=<px>   the ceiling on that length;
@@ -2918,7 +2909,7 @@ namespace EvilAliensWeb.Compat
 						// standing there is no single number to name, and the tier is not settled at
 						// parse time, so say which TABLE is in force rather than guess a row.
 						RejectFlagValue(key, val, "a number >= 0",
-							AiAimSpreadRad.HasValue ? InForce(AiAimSpreadRad.Value) : "the per-tier skill row");
+							AiAimSpreadRad.HasValue ? InForce(AiAimSpreadRad.Value) : "the fixed skill row");
 					}
 					break;
 				case "aigapmargin":
@@ -2990,17 +2981,6 @@ namespace EvilAliensWeb.Compat
 							InForce(AiSteerSmoothUrgentMs ?? EvilAliens.PlayerShip.DefaultSteerSmoothUrgentMs));
 					}
 					break;
-				case "airepeldelta":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var airpd) && airpd >= 0f)
-					{
-						AiRepelCancelDelta = MathHelper.Min(airpd, 20f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiRepelCancelDelta ?? EvilAliens.PlayerShip.DefaultRepulseCancelDelta));
-					}
-					break;
 				case "ainoisefloor":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ainf) && ainf >= 0f)
 					{
@@ -3021,19 +3001,7 @@ namespace EvilAliensWeb.Compat
 					{
 						// A typo here would leave the evade path ON while the run is LABELLED as
 						// having it off -- i.e. a measurement seam quietly measuring the other arm.
-						RejectFlagValue(key, val, "on/off", (AiEvadeMovers ?? true) ? "on" : "off");
-					}
-					break;
-				case "aipowerupyield":
-					if (IsOn(val) || IsExplicitlyOff(val))
-					{
-						AiPowerupYield = IsOn(val);
-					}
-					else
-					{
-						// Same hazard as ?aievade=: a typo would leave the yield ON while the run
-						// is LABELLED as having it off.
-						RejectFlagValue(key, val, "on/off", (AiPowerupYield ?? true) ? "on" : "off");
+						RejectFlagValue(key, val, "on/off", (AiEvadeMovers ?? false) ? "on" : "off");
 					}
 					break;
 				case "aicone":
@@ -3059,8 +3027,9 @@ namespace EvilAliensWeb.Compat
 						// Same hazard as ?aievade=: a typo would leave the shape ON while the run
 						// is LABELLED as having it off, i.e. a measurement seam quietly measuring
 						// the other arm.
+						// Cones and wedges ship OFF now (owner ruling); the lane escapes stay ON.
 						RejectFlagValue(key, val, "on/off",
-							((key == "aicone" ? AiConeShapes : (key == "aiwedge" ? AiLaneWedge : AiLaneEscape)) ?? true) ? "on" : "off");
+							((key == "aicone" ? AiConeShapes : (key == "aiwedge" ? AiLaneWedge : AiLaneEscape)) ?? (key == "ailaneescape")) ? "on" : "off");
 					}
 					break;
 				case "aiconelead":
@@ -3214,8 +3183,10 @@ namespace EvilAliensWeb.Compat
 					}
 					else
 					{
+						// The global family ships classic now (owner ruling); the asteroid
+						// override's null still means "follow the global".
 						RejectFlagValue(key, val, "classic/port",
-							((key == "aifieldcurve" ? AiClassicFieldCurve : AiAsteroidClassicCurve) ?? false) ? "classic" : "port");
+							((key == "aifieldcurve" ? (AiClassicFieldCurve ?? true) : (AiAsteroidClassicCurve ?? AiClassicFieldCurve ?? true))) ? "classic" : "port");
 					}
 					break;
 				case "aiasteroidflatpx":
@@ -3269,7 +3240,18 @@ namespace EvilAliensWeb.Compat
 					else
 					{
 						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiSeekDeadzonePx ?? EvilAliens.PlayerShip.DefaultSeekArriveDeadzonePx));
+							InForce(AiSeekDeadzonePx ?? EvilAliens.PlayerShip.DefaultSeekParkPx));
+					}
+					break;
+				case "aiseekresume":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aisrs) && aisrs >= 0f)
+					{
+						AiSeekResumePx = MathHelper.Min(aisrs, 400f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiSeekResumePx ?? EvilAliens.PlayerShip.DefaultSeekResumePx));
 					}
 					break;
 				case "aiseekpowerup":
@@ -3314,7 +3296,7 @@ namespace EvilAliensWeb.Compat
 					{
 						// Per-tier, like ?aiaim above (PlayerShip.ThreatFieldBasePx => Skill.FieldPx).
 						RejectFlagValue(key, val, "a number >= 0",
-							AiThreatFieldPx.HasValue ? InForce(AiThreatFieldPx.Value) : "the per-tier skill row");
+							AiThreatFieldPx.HasValue ? InForce(AiThreatFieldPx.Value) : "the fixed skill row");
 					}
 					break;
 				case "aifieldsize":

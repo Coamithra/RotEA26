@@ -1972,9 +1972,11 @@ public class PlayerShip : AlienDrawableGameComponent
 				// legitimate "no beam field at all" arm, and d can be exactly 0 (the ship standing
 				// on the beam), which would otherwise reach 0/0.
 				float lazerRange = LazerAvoidRangePx;
+				float lineStrength = 0f;
+				Vector2 lineDir = default(Vector2);
 				if (lazerRange > 0f && d <= lazerRange)
 				{
-					float strength = MyMath.PowerCurve(LazerAvoidStrength, 0f, 2f, d / lazerRange);
+					lineStrength = MyMath.PowerCurve(LazerAvoidStrength, 0f, 2f, d / lazerRange);
 					// THE NEAR-LINE BOOST (owner ruling, lap 9): a beam is guaranteed death, and
 					// flying into one is not something the bot should ever be talked into -- so
 					// the last ~30px before the line carry a SECOND plateau stacked on the first:
@@ -1984,13 +1986,13 @@ public class PlayerShip : AlienDrawableGameComponent
 					// cliff is.
 					if (dBoost < LazerNearBoostRangePx)
 					{
-						strength += MyMath.PowerCurve(LazerNearBoostStrength, 0f, 2f, dBoost / LazerNearBoostRangePx);
+						lineStrength += MyMath.PowerCurve(LazerNearBoostStrength, 0f, 2f, dBoost / LazerNearBoostRangePx);
 					}
 					if (altSteering)
 					{
-						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, d / lazerRange);
+						lineStrength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, d / lazerRange);
 					}
-					repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - shortestpoint) + dodgeAngle);
+					lineDir = MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - shortestpoint) + dodgeAngle);
 				}
 				// THE TIP'S SWEPT SHAPE (owner ruling, lap 5): the beam GROWS -- its tip advances
 				// at growthspeed * DifficultyModifier, faster than the ship at higher tiers --
@@ -2000,18 +2002,37 @@ public class PlayerShip : AlienDrawableGameComponent
 				// literal ~8px half-thickness: a guaranteed-death front deserves no less warning
 				// than a UFO at the same speed just for being thin. No wedge (the LANE concept
 				// does not apply to a lengthwise front).
+				float tipStrength = 0f;
+				Vector2 tipDir = default(Vector2);
+				SweptShape tipShape = default(SweptShape);
 				if (ConeEnabled && ((Lazer)baddy).TryGetAiTipMotion(out Vector2 lazerTip, out Vector2 tipVel))
 				{
 					tipVel *= LazerTipLeadScale;
-					SweptShape tipShape = EvaluateSweptShape(base.Position, lazerTip, tipVel,
+					tipShape = EvaluateSweptShape(base.Position, lazerTip, tipVel,
 						ConeLeadRefRadiusPx, ConeLeadRefRadiusPx, AiHalfExtent(), maxSteerStrength, wedgeEnabled: false);
 					if (tipShape.ConeStrength > 0f)
 					{
-						float tipStrength = tipShape.ConeStrength;
-						EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy,
-							EvilAliensWeb.Compat.AiBench.ThreatPath.Cone, tipStrength, tipShape.ConeLength, tipShape.ConeEdgeDist);
-						repel += tipStrength * MyMath.AngleToVector(MyMath.VectorToAngle(tipShape.ConeDir) + dodgeAngle);
+						tipStrength = tipShape.ConeStrength;
+						tipDir = MyMath.AngleToVector(MyMath.VectorToAngle(tipShape.ConeDir) + dodgeAngle);
 					}
+				}
+				// THE TWO BEAM TERMS COMPETE, NEVER SUM (owner ruling, lap 11) -- the same
+				// higher-force-wins rule the swept shape uses between its own circle and
+				// triangle candidates, applied across the beam's two fields. They cover
+				// complementary territory (the segment that exists vs the swath about to be
+				// claimed) and only meet around the tip, where summing stacked up to 8-12
+				// out of one object. The stronger claim carries the tick; the seam between
+				// them is force-continuous because whichever term is weaker there is weaker
+				// by construction.
+				if (tipStrength > lineStrength)
+				{
+					EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy,
+						EvilAliensWeb.Compat.AiBench.ThreatPath.Cone, tipStrength, tipShape.ConeLength, tipShape.ConeEdgeDist);
+					repel += tipStrength * tipDir;
+				}
+				else if (lineStrength > 0f)
+				{
+					repel += lineStrength * lineDir;
 				}
 			}
 			else

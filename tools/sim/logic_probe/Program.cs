@@ -1375,8 +1375,11 @@ internal static class Program
         const float MaxSteer = 4f;
         const float ShipHalf = 20f;
         // The standard field, restated once for expected values: flat 150, 4 -> 0 on the lap-11
-        // curve max * (1-t)^2 -- steep at the body, whisper at the range edge.
-        float Plateau(float dist) => dist >= 150f ? 0f : MaxSteer * (1f - dist / 150f) * (1f - dist / 150f);
+        // curve max * (1-t)^p, exponent read off the baked const so a rebake re-derives every
+        // expected value here instead of silently invalidating it.
+        float fieldPow = (float)ship.GetField("DefaultFieldCurvePower", anyStatic).GetRawConstantValue();
+        float Plateau(float dist) => dist >= 150f ? 0f
+            : MaxSteer * (float)Math.Pow(1f - dist / 150f, fieldPow);
 
         // Mover at (0,300) travelling +X, so the frame is the identity and every row is
         // hand-checkable. `ahead`/`sideways` are the ship's offset from the anchor.
@@ -1414,16 +1417,28 @@ internal static class Program
         // nearby hull. The value is the standard curve on the CIRCLE's edge distance, even
         // though the ship is geometrically inside the triangle (triangle distance 0).
         float triPeak = (float)ship.GetField("DefaultSweptTriangleStrength", anyStatic).GetRawConstantValue();
-        float TriPlateau(float dist) => dist >= 150f ? 0f : triPeak * (1f - dist / 150f) * (1f - dist / 150f);
+        float TriPlateau(float dist) => dist >= 150f ? 0f
+            : triPeak * (float)Math.Pow(1f - dist / 150f, fieldPow);
         int Winner(object shape) =>
             (int)shapeType.GetField("ConeWinner", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                 .GetValue(shape);
+        // Asserted as the MAX RULE itself rather than "the circle wins here" -- which candidate
+        // carries a given point moves with every tristrength/fieldpow rebake, and the probe must
+        // survive those; hugging the hull the circle must still beat the whisper regardless.
         object onAxis = At(coneLen / 2f, 0f, Speed, BodyR, BodyR, false);
-        Check("inside the triangle near the body: the circle wins at its own curve",
-            Math.Abs(Field(onAxis, "ConeStrength") - Plateau(coneLen / 2f - BodyR)) < 0.01f
-                && Winner(onAxis) == 1,
-            "strength " + Field(onAxis, "ConeStrength").ToString("0.00") + " vs the circle curve "
-            + Plateau(coneLen / 2f - BodyR).ToString("0.00") + ", winner " + Winner(onAxis));
+        float onAxisCircle = Plateau(coneLen / 2f - BodyR);
+        float onAxisWant = Math.Max(onAxisCircle, triPeak);
+        Check("inside the corridor: the STRONGER candidate carries it (the max rule)",
+            Math.Abs(Field(onAxis, "ConeStrength") - onAxisWant) < 0.01f
+                && Winner(onAxis) == ((onAxisCircle >= triPeak) ? 1 : 2),
+            "strength " + Field(onAxis, "ConeStrength").ToString("0.00") + " vs max(circle "
+            + onAxisCircle.ToString("0.00") + ", whisper " + triPeak.ToString("0.00")
+            + "), winner " + Winner(onAxis));
+        object hullHug = At(BodyR + 5f, 0f, Speed, BodyR, BodyR, false);
+        Check("hugging the hull the circle beats the whisper at any bake",
+            Math.Abs(Field(hullHug, "ConeStrength") - Plateau(5f)) < 0.01f && Winner(hullHug) == 1,
+            "strength " + Field(hullHug, "ConeStrength").ToString("0.00") + " vs the circle curve "
+            + Plateau(5f).ToString("0.00") + ", winner " + Winner(hullHug));
 
         // 2b. FAR DOWN A FAST MOVER'S PATH the triangle is the ONLY voice -- the circle's curve
         // is spent (edge distance past 150) and the whisper peak carries the warning. This is
@@ -1450,7 +1465,7 @@ internal static class Program
         // carries it, pushing AWAY on the ship's own side (+Y here), never along the path.
         object beside = At(400f, 110f, 1.5f, BodyR, BodyR, false);
         Check("beside the far corridor: the triangle's edge-normal whisper",
-            Field(beside, "ConeStrength") > 0.05f && Field(beside, "ConeStrength") < triPeak
+            Field(beside, "ConeStrength") > 0.005f && Field(beside, "ConeStrength") < triPeak
                 && VY((object)VField(beside, "ConeDir")) > 0.95f && Winner(beside) == 2,
             "strength " + Field(beside, "ConeStrength").ToString("0.00") + ", dir ("
             + VX((object)VField(beside, "ConeDir")).ToString("0.00") + ","

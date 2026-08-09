@@ -151,9 +151,9 @@ public class PlayerShip : AlienDrawableGameComponent
 	//
 	// DERIVED, not a constant, since the lap-11 curve ruling: the floor is the standard curve's
 	// own value at t = 0.8, i.e. "the last fifth of a lone max-strength repulsor's berth is
-	// noise". 2008's hand-picked 0.2 becomes 4*(1-0.8)^2 = 0.16 at the baked p=2 (the owner
-	// accepted the drift), and it rescales itself under ?aifieldpow=, so the floor keeps
-	// meaning the same fraction of the berth whatever the exponent.
+	// noise". 2008's hand-picked 0.2 becomes 4*(1-0.8)^p -- 0.16 at p=2, 0.0064 at the baked
+	// p=4 -- and it rescales itself under ?aifieldpow=, so the floor keeps meaning the same
+	// fraction of the berth whatever the exponent.
 	public static float DefaultSteerNoiseFloor => FieldCurve(4f, SteerNoiseFloorT);
 
 	// The anchor point on the curve the floor is read from.
@@ -411,10 +411,10 @@ public class PlayerShip : AlienDrawableGameComponent
 	private static float SeekResumePx => EvilAliensWeb.Compat.DebugFlags.AiSeekResumePx ?? DefaultSeekResumePx;
 
 	// DERIVED off the curve since the lap-11 statics ruling: 2008's hand-picked 0.8 sits at
-	// t = 0.55 on the baked quadratic (4 * (1-0.55)^2 = 0.81 -- the drift is accepted), so the
-	// static seek weight is read off the standard curve there and rescales under ?aifieldpow=
-	// exactly like the equilibrium floor. The relative authority is unchanged: a lone repulsor
-	// still out-pushes a seek anywhere inside ~55% of its berth, whatever the exponent.
+	// t = 0.55 on the quadratic (4 * (1-0.55)^2 = 0.81), so the static seek weight is read off
+	// the standard curve there and rescales under ?aifieldpow= exactly like the equilibrium
+	// floor -- 0.164 at the baked p=4. The relative authority is the invariant: a lone
+	// repulsor out-pushes a seek anywhere inside ~55% of its berth, whatever the exponent.
 	private const float SeekWeightT = 0.55f;
 
 	private static float SeekWeight => FieldCurve(4f, SeekWeightT);
@@ -571,7 +571,8 @@ public class PlayerShip : AlienDrawableGameComponent
 	// tip's whole shape (circle included) peaks at this same value -- the tip is a front, not
 	// a hull. ?aitristrength= sweeps it live; EvaluateSweptShape still caps it at the
 	// caller's own max, so empty space never out-peaks the body it belongs to.
-	public const float DefaultSweptTriangleStrength = 1f;
+	// BAKED AT 2 from the same couch session as DefaultFieldCurvePower's 4.
+	public const float DefaultSweptTriangleStrength = 2f;
 
 	private static float SweptTriangleStrength =>
 		EvilAliensWeb.Compat.DebugFlags.AiTriStrength ?? DefaultSweptTriangleStrength;
@@ -2959,7 +2960,11 @@ public class PlayerShip : AlienDrawableGameComponent
 	// pull) deliberately keep their own curve -- this ruling is about repulsors.
 	// ?aifieldpow= sweeps the exponent live; (1-t)^p keeps its shape for ANY p (odd or
 	// fractional included) because the base is clamped non-negative before the pow.
-	public const float DefaultFieldCurvePower = 2f;
+	// BAKED AT 4 from the couch (owner ruling, lap 12): swept live over a full session at
+	// ?aifieldpow=4&aitristrength=2 -- "absolute game changer". The derived anchors follow:
+	// floor 0.0064, static seeks 0.164, so attractors are whispers next to a close threat
+	// and the bot commits to a destination only in genuinely quiet space.
+	public const float DefaultFieldCurvePower = 4f;
 
 	private static float FieldCurvePower =>
 		EvilAliensWeb.Compat.DebugFlags.AiFieldPow ?? DefaultFieldCurvePower;
@@ -3021,35 +3026,26 @@ public class PlayerShip : AlienDrawableGameComponent
 		float w = ThreatFieldStrength(t, maxSteerStrength, falloff, classic) * typeScale;
 		w = MathHelper.Max(w, minWeight);
 
-		// THE EXPONENT IS DAMPED SO THE PARKED BAND SURVIVES A BIG HULL UP CLOSE, and this is
-		// derived, not tuned. The band the whole-sum floor manufactures is
-		// 2*floor / (|A'| + |repel'|) wide, and |A'(r*)| = k*w/r* -- so a boss whose hull eats most
-		// of the weapon's reach has a small r* with a LARGE w sitting on it, and the linear k=1
-		// curve turns over too fast for the ship to stop inside the band.
-		//
-		// THE ONE CONFIGURATION THAT MAKES THIS BITE -- do not delete it as dead code. BrainBoss at
-		// its pulse peak on the base weapon: its hitbox is hw = 165 * scale and `scale` pulses
-		// 1.00 -> 1.10 (deeper as its HP drops), so the body term runs 233 -> 257px against a
-		// 351px gun range, leaving r* at 118 -> 94px. Undamped that bands 13.5px at scale 1.0 and
-		// 10.0px at the peak -- through the 11.3px stopping distance, i.e. the ship coasts across
-		// its own equilibrium and pingpongs while shooting the brain. Damped, k solves to 0.24 at
-		// rest and 0.09 at the peak, and the band is 22.2px at both. Every OTHER halting boss, tier and weapon in the game
-		// solves to k = 1 and is untouched (the next-tightest band is 53px), and any Range powerup
-		// removes the case entirely by growing r*.
-		//
-		// The repellent's slope is measured on the REAL curve rather than differentiated by hand,
-		// so this stays correct across both curve families and any per-type falloff.
-		float h = 1f;
-		float repelSlope = Math.Abs(ThreatFieldStrength(MathHelper.Clamp((anchor - h) / safeRange, 0f, 1f), maxSteerStrength, falloff, classic)
-			- ThreatFieldStrength(MathHelper.Clamp((anchor + h) / safeRange, 0f, 1f), maxSteerStrength, falloff, classic)) * typeScale / (2f * h);
+		// THE PARKED BAND IS EXPLICIT since the derived-floor ruling (lap 12). It used to be
+		// MANUFACTURED by the whole-sum floor -- 2*floor / (|A'| + |repel'|) wide, with an
+		// exponent-damping solve here to keep it above the ship's stopping distance -- and the
+		// lap-11/12 curve-derived floor is far too small to carve one (0.0064 at the baked p=4
+		// gives a ~0.5px band; caught by ProbeAiBossApproach's bound). So inside
+		// BossApproachBandMargin stopping distances of the crossing, the attractor simply
+		// RETURNS the repellent's own value at this distance: the net is exactly zero across
+		// the whole band, at any curve, exponent or floor, by construction. The old damping
+		// solve (BrainBoss's pulsing hull was the one configuration that made it bite) is
+		// superseded and removed with it -- the exponent runs at its ceiling again.
 		float stoppingPx = ShipMaxSpeed * ShipMaxSpeed / (2f * ShipDeceleration);
-		float slopeBudget = 2f * minWeight / (BossApproachBandMargin * stoppingPx) - repelSlope;
-		// A budget of zero means the repellent alone is steeper than the bound allows: nothing the
-		// attractor does can widen the band, so it goes FLAT (k=0, a constant w) -- the best
-		// available shape there, and the constant-weight design the card started from.
-		float k = (w > 0f)
-			? MathHelper.Clamp(MathHelper.Max(slopeBudget, 0f) * anchor / w, 0f, BossApproachExponent)
-			: BossApproachExponent;
+		float bandHalfPx = BossApproachBandMargin * stoppingPx * 0.5f;
+		if (Math.Abs(edgeDist - anchor) <= bandHalfPx)
+		{
+			float repelHere = ThreatFieldStrength(
+				MathHelper.Clamp(MathHelper.Max(edgeDist, 0f) / safeRange, 0f, 1f),
+				maxSteerStrength, falloff, classic) * typeScale;
+			return MathHelper.Clamp(repelHere, 0f, MathHelper.Max(BossApproachMaxWeight, w));
+		}
+		float k = BossApproachExponent;
 
 		float reach = MathHelper.Max(edgeDist, 0f) / anchor;
 		float pull = w * (float)Math.Pow(reach, k);

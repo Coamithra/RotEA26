@@ -520,6 +520,37 @@ namespace EvilAliensWeb.Compat
 			Console.WriteLine("[debug] eaCones " + (on ? "ON" : "OFF"));
 		}
 
+		// eaConesDump / `eval ConesDump`: one line per baddy in the AI's world model with exactly
+		// what the swept-shape pipeline sees -- observed velocity, the path verdict, and the
+		// described geometry. Built for the iterative rep-1 landed-UFO hunt, where 'why does
+		// this thing draw no cone' had no observable at all.
+		[JSInvokable("debugConesDump")]
+		public static string ConesDump()
+		{
+			EvilAliens.Oracle oracle = EvilAliens.ServiceHelper.Get<EvilAliens.IOracleService>()?.Oracle;
+			if (oracle == null)
+			{
+				return "[debug] eaConesDump: no oracle service (game not booted yet?)";
+			}
+			var sb = new System.Text.StringBuilder();
+			sb.Append("[conesdump] type pos collides observedVel described radius apexOffset\n");
+			foreach (EvilAliens.AlienDrawableGameComponent baddy in oracle.GetBaddies())
+			{
+				bool described = EvilAliens.PlayerShip.TryDescribeSweptShape(baddy,
+					out Microsoft.Xna.Framework.Vector2 anchor, out float radius,
+					out Microsoft.Xna.Framework.Vector2 apex);
+				Microsoft.Xna.Framework.Vector2 vel = baddy.ObservedVelocity;
+				sb.AppendFormat(System.Globalization.CultureInfo.InvariantCulture,
+					"  {0} pos={1:0},{2:0} collides={3} vel={4:0.000},{5:0.000} described={6} r={7:0} apexOff={8:0}\n",
+					baddy.GetType().Name, baddy.Position.X, baddy.Position.Y,
+					baddy.Collides ? 1 : 0, vel.X, vel.Y,
+					described ? 1 : 0, radius, described ? (apex - anchor).Length() : 0f);
+			}
+			string outp = sb.ToString();
+			Console.WriteLine(outp);
+			return outp;
+		}
+
 		// JS bridge for the ComponentBin lifecycle scenario suite (eaBinTest in
 		// wwwroot/index.html): DotNet.invokeMethod('EvilAliensWeb', 'debugBinTest'). Runs
 		// Compat/BinTest.Run() against the live bin and returns the PASS/FAIL report.

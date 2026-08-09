@@ -2533,15 +2533,20 @@ public class PlayerShip : AlienDrawableGameComponent
 				: anchor + tipVel / tipSpeed * SweptConeLength(tipSpeed, radius);
 			return true;
 		}
+		radius = MathHelper.Max(ThreatBodyTerm(baddy), 1f);
+		// A threat with NO swept path -- truly motionless (the scroll pauses during Level 2's
+		// set pieces, so parked UFOs really do read zero), or a refused teleport frame -- still
+		// describes its CIRCLE: the radial field's body is a real force and the owner wants it
+		// visible. Only the triangle needs a path. This is why the path test must not gate the
+		// whole description (iterative rep 1 sighting: landed UFOs vanishing from the overlay
+		// whenever the ground stood still).
 		if (!baddy.TryGetAiSweptPath(out anchor, out var velocity, out _))
 		{
-			return false;
+			anchor = baddy.Position;
+			apex = anchor;
+			return true;
 		}
-		radius = MathHelper.Max(ThreatBodyTerm(baddy), 1f);
 		float speed = (velocity).Length();
-		// A stationary threat still describes its CIRCLE (apex == anchor, so the overlay draws
-		// no triangle) -- the radial field's body is a real force and the owner wants it
-		// visible; only the swept triangle needs motion.
 		apex = (speed < 0.001f)
 			? anchor
 			: anchor + velocity / speed * SweptConeLength(speed, radius);

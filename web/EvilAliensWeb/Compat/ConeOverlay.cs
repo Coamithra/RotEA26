@@ -48,13 +48,30 @@ namespace EvilAliensWeb.Compat
                     continue;
                 }
                 Color col = new Color(ShapeColor, Alpha);
+                Vector2 axis = apex - anchor;
+                float len = axis.Length();
+                // A STATIONARY box-threat draws the BOX the field now measures from (owner catch,
+                // lap 8 -- the circle approximation lied about the StationaryBoss's offset, skirt
+                // and flatness, which is what caused the accidents). Movers keep the circle: the
+                // capsule the steering evaluates really is circle-based.
+                if (len < 1f && adc.GetCollisionType() is CollisionBox stillBox)
+                {
+                    DrawBoxOutline(sb, stillBox, col);
+                    continue;
+                }
+                if (len < 1f && adc.GetCollisionType() is CollisionMultibox stillMulti)
+                {
+                    foreach (CollisionBox item in stillMulti.Items)
+                    {
+                        DrawBoxOutline(sb, item, col);
+                    }
+                    continue;
+                }
                 // The body circle (the ring texture's bright band sits on the true radius).
                 sb.Draw(ring, anchor, 0f, radius / 64f, center: true, col, (SpriteEffects)0);
                 // The triangle: perpendicular-diameter corners to the apex, base included for
                 // legibility (the force skips the base edge on the circle-dominance proof, but
                 // the eye wants the closed shape).
-                Vector2 axis = apex - anchor;
-                float len = axis.Length();
                 if (len < 1f)
                 {
                     continue;
@@ -68,6 +85,18 @@ namespace EvilAliensWeb.Compat
                 DrawLine(sb, c1, c2, col);
             }
             sb.BlendMode = prev;
+        }
+
+        private static void DrawBoxOutline(SpriteBatchWrapper sb, CollisionBox box, Color col)
+        {
+            Vector2 tl = new Vector2(box.Left, box.Top);
+            Vector2 tr = new Vector2(box.Right, box.Top);
+            Vector2 br = new Vector2(box.Right, box.Bottom);
+            Vector2 bl = new Vector2(box.Left, box.Bottom);
+            DrawLine(sb, tl, tr, col);
+            DrawLine(sb, tr, br, col);
+            DrawLine(sb, br, bl, col);
+            DrawLine(sb, bl, tl, col);
         }
 
         private static void DrawLine(SpriteBatchWrapper sb, Vector2 start, Vector2 end, Color col)

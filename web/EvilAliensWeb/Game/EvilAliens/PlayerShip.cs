@@ -2014,7 +2014,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				{
 					continue;
 				}
-				float dist = ThreatEdgeDistance(base.Position, baddy);
+				float dist = ThreatEdgeDistance(base.Position, baddy, out Vector2 awayDir);
 				// THE STANDARD FIELD, FLAT (owner ruling, lap 7 -- the full return to 2008):
 				// 150px beyond the body's edge, 4 -> 0 on the quadratic plateau, for EVERY
 				// stationary threat regardless of size -- a big thing's field starts further out
@@ -2030,7 +2030,7 @@ public class PlayerShip : AlienDrawableGameComponent
 						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, dist / SweptFieldRangePx);
 					}
 					EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy, EvilAliensWeb.Compat.AiBench.ThreatPath.Field, strength, SweptFieldRangePx, dist);
-					repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - baddy.Position) + dodgeAngle);
+					repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(awayDir) + dodgeAngle);
 				}
 			}
 		}
@@ -2105,7 +2105,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		// Placed after the powerup pass so a boss fight outranks a pickup detour.
 		if (haltingBoss != null)
 		{
-			float bossEdgeDist = ThreatEdgeDistance(base.Position, haltingBoss);
+			float bossEdgeDist = ThreatEdgeDistance(base.Position, haltingBoss, out _);
 			// Gun range is a CENTRE distance (it is what DoAIFire range-tests), so the body term
 			// converts it into the edge space everything here is measured in.
 			float anchorPx = bulletlifetime * BulletRangePerMs - ThreatBodyTerm(haltingBoss);
@@ -2933,15 +2933,68 @@ public class PlayerShip : AlienDrawableGameComponent
 		return 0f;
 	}
 
-	// Edge distance from a point to a threat. The circle branch CLAMPS and the others do not --
-	// that asymmetry is inherited verbatim from the 2008 code and is preserved on purpose; a box's
-	// edge distance goes negative once the ship is inside the corner radius, which the (1-t)^p
-	// falloff already saturates at full strength.
-	private static float ThreatEdgeDistance(Vector2 from, AlienDrawableGameComponent baddy)
+	// Edge distance AND escape direction from a point to a threat's REAL collision shape (owner
+	// catch, lap 8: the old form circle-approximated every box as width/2*sqrt2 around Position,
+	// which on the StationaryBoss -- wide, flat, offset left, skirt extended 100px down -- put
+	// field coverage over empty air on one side and left the box's lower-right corner
+	// unprotected; the bot walked into the uncovered kill zone believing it had clearance).
+	//   CollisionBox / Multibox -> nearest point on the actual rectangle(s): the laser's
+	//     distance-to-line treatment, one shape more. Inside -> 0, out the nearest face.
+	//   CollisionSimpleCircle   -> radial, clamped, as always.
+	//   anything else           -> the old centre-minus-body-term read, unchanged.
+	private static float ThreatEdgeDistance(Vector2 from, AlienDrawableGameComponent baddy, out Vector2 away)
 	{
+		ICollisionType type = baddy.GetCollisionType();
+		if (type is CollisionBox box)
+		{
+			return BoxEdgeDistance(from, box, out away);
+		}
+		if (type is CollisionMultibox multi)
+		{
+			float best = float.MaxValue;
+			away = Vector2.UnitY;
+			foreach (CollisionBox item in multi.Items)
+			{
+				float d = BoxEdgeDistance(from, item, out Vector2 itemAway);
+				if (d < best)
+				{
+					best = d;
+					away = itemAway;
+				}
+			}
+			return best;
+		}
 		Vector2 toBaddy = from - baddy.Position;
-		float dist = (toBaddy).Length() - ThreatBodyTerm(baddy);
-		return (baddy.GetCollisionType() is CollisionSimpleCircle) ? MathHelper.Clamp(dist, 0f, 1000f) : dist;
+		float len = (toBaddy).Length();
+		away = (len > 0.001f) ? (toBaddy / len) : Vector2.UnitY;
+		float dist = len - ThreatBodyTerm(baddy);
+		return (type is CollisionSimpleCircle) ? MathHelper.Clamp(dist, 0f, 1000f) : dist;
+	}
+
+	// Nearest-feature distance to one axis-aligned box: outside -> distance to the clamped
+	// point, push away from it; inside -> 0, push out the NEAREST FACE (the shortest door,
+	// the same rule as the swept triangle's interior).
+	private static float BoxEdgeDistance(Vector2 from, CollisionBox box, out Vector2 away)
+	{
+		float cx = MathHelper.Clamp(from.X, box.Left, box.Right);
+		float cy = MathHelper.Clamp(from.Y, box.Top, box.Bottom);
+		if (cx != from.X || cy != from.Y)
+		{
+			Vector2 d = from - new Vector2(cx, cy);
+			float len = (d).Length();
+			away = d / MathHelper.Max(len, 0.001f);
+			return len;
+		}
+		float toLeft = from.X - box.Left;
+		float toRight = box.Right - from.X;
+		float toTop = from.Y - box.Top;
+		float toBottom = box.Bottom - from.Y;
+		float min = MathHelper.Min(MathHelper.Min(toLeft, toRight), MathHelper.Min(toTop, toBottom));
+		if (min == toLeft) { away = new Vector2(-1f, 0f); }
+		else if (min == toRight) { away = new Vector2(1f, 0f); }
+		else if (min == toTop) { away = new Vector2(0f, -1f); }
+		else { away = new Vector2(0f, 1f); }
+		return 0f;
 	}
 
 	// Rough half-extent of a threat, so a boss the size of a quarter of the screen is given more

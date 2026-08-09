@@ -817,6 +817,10 @@ namespace EvilAliensWeb.Compat
 		// ?difficulty=Hard). See Level3.PopulateBrainBossOnly.
 		public static bool BrainBoss { get; private set; }
 
+		// ?fakeboss (pair with ?level=Level3): straight into the FakeBoss fight -- otherwise
+		// gated to Easy/Medium and minutes into the level. The ?brainboss idiom.
+		public static bool FakeBoss { get; private set; }
+
 		// ?difficulty=<Easy|Medium|Hard|Very_Hard|Inzane>: pin the difficulty at boot (applied before
 		// any level Initialize runs). The helper's glide speed + aim are difficulty-scaled, so this
 		// makes the spider-boss test deterministic. Null => the saved/menu-chosen difficulty is used.
@@ -3549,6 +3553,9 @@ namespace EvilAliensWeb.Compat
 				case "brainboss":
 					BrainBoss = IsOn(val);
 					break;
+				case "fakeboss":
+					FakeBoss = IsOn(val);
+					break;
 				case "spiders":
 					Spiders = IsOn(val);
 					break;
@@ -4069,7 +4076,7 @@ namespace EvilAliensWeb.Compat
 					+ "REFUSE its own pairing (a menu session rejects while debug flags are active). "
 					+ "Add &netallowdebug.");
 			}
-			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || !NetChargeAimEase || AiWallNav2008 || AiFastForward > 1;
+			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || FakeBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || !NetChargeAimEase || AiWallNav2008 || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -4082,6 +4089,7 @@ namespace EvilAliensWeb.Compat
 							+ (WallsOnly ? " wallsonly" : "")
 							+ (NoWalls ? " nowalls" : "")
 							+ (BrainBoss ? " brainboss" : "")
+							+ (FakeBoss ? " fakeboss" : "")
 							+ (TutorialTraining ? " tutorialtraining" : "")
 							// Same class (card 3b6c12e7): ?win replaces Level 2's script with the ending
 							// unlock chain AND forces Hard, so a run that reached the credits in a

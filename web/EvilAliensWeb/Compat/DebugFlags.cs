@@ -1380,6 +1380,12 @@ namespace EvilAliensWeb.Compat
 		//                    (JunkBoss excepted -- it always gets exact aim)
 		public static float? AiSteerSmoothMs { get; private set; }
 
+		// ?aifieldpow=<p> the standard repulsor curve's exponent, max*(1-t)^p (owner knob, lap 11)
+		public static float? AiFieldPow { get; private set; }
+
+		// ?aitristrength=<s> the triangle/tip whisper peak (owner knob, lap 11)
+		public static float? AiTriStrength { get; private set; }
+
 		public static float? AiWallReactionMs { get; private set; }
 
 		public static float? AiGapSwitchMargin { get; private set; }
@@ -2871,6 +2877,28 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "aiseeklog":
 					AiSeekLog = IsOn(val);
+					break;
+				case "aifieldpow":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aifp) && aifp > 0f)
+					{
+						AiFieldPow = MathHelper.Min(aifp, 16f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(AiFieldPow ?? EvilAliens.PlayerShip.DefaultFieldCurvePower));
+					}
+					break;
+				case "aitristrength":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aits) && aits >= 0f)
+					{
+						AiTriStrength = MathHelper.Min(aits, 100f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiTriStrength ?? EvilAliens.PlayerShip.DefaultSweptTriangleStrength));
+					}
 					break;
 				case "aismooth":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aism) && aism >= 0f)

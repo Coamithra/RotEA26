@@ -552,21 +552,22 @@ public class PlayerShip : AlienDrawableGameComponent
 	// moment it started growing, which was judged "a bit silly" from the couch.
 	public const float LazerTipLeadScale = 2f;
 
-	// Owner ruling (lap 11): the tip's triangle is EMPTY SPACE the beam is about to claim,
-	// not a body -- being in it is survivable in a way touching a bullet is not, so its curve
-	// peaks at 1 where every real repulsor peaks at 4. With the plateau family that still
-	// reads above the 0.2 equilibrium floor until ~55% of the reach ((1-t)^2 = 0.2 at t=0.55),
-	// and the floor tests the summed resultant anyway, so a lone tip push survives it.
-	public const float LazerTipStrength = 1f;
+	// Owner ruling (lap 11): a TRIANGLE is EMPTY SPACE the body (or the beam's tip) is about
+	// to claim, not a body -- being in it is survivable in a way touching a hull is not, so
+	// its curve peaks here where every real repulsor peaks at 4, and the two candidates of a
+	// shape compete by FORCE (the beam's line-vs-tip rule, inside one shape). Near the body
+	// the stronger circle out-votes the triangle wherever both apply; the triangle carries
+	// only the far future path, as a whisper that a real body beats -- inside the triangle
+	// right next to a bullet, the bullet's 4 wins the shape, not the empty space's 1. The
+	// whisper still reads above the 0.2 equilibrium floor until ~55% of the reach
+	// ((1-t)^2 = 0.2 at t=0.55), and the floor tests the summed resultant anyway. The beam
+	// tip's whole shape (circle included) peaks at this same value -- the tip is a front, not
+	// a hull. ?aitristrength= sweeps it live; EvaluateSweptShape still caps it at the
+	// caller's own max, so empty space never out-peaks the body it belongs to.
+	public const float DefaultSweptTriangleStrength = 1f;
 
-	// The same ruling, generalised to EVERY mover's shape: the triangle half of a swept shape
-	// is the space the body is ABOUT to claim, so its curve peaks here where the circle keeps
-	// the caller's full strength, and the two candidates compete by FORCE (the beam's
-	// line-vs-tip rule, inside one shape). Near the body the stronger circle out-votes the
-	// triangle wherever both apply; the triangle carries only the far future path, as a
-	// whisper that a real body beats -- inside the triangle right next to a bullet, the
-	// bullet's 4 wins the shape, not the empty space's 1.
-	public const float SweptTriangleStrength = 1f;
+	private static float SweptTriangleStrength =>
+		EvilAliensWeb.Compat.DebugFlags.AiTriStrength ?? DefaultSweptTriangleStrength;
 
 	// THE MESA IS GONE (owner redesign, iterative rep 1 lap 5). The cone used to be a bespoke
 	// field -- separate along/across falloff exponents, a taper, a magnitude scale, a flat
@@ -2025,7 +2026,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				{
 					tipVel *= LazerTipLeadScale;
 					tipShape = EvaluateSweptShape(base.Position, lazerTip, tipVel,
-						ConeLeadRefRadiusPx, ConeLeadRefRadiusPx, AiHalfExtent(), LazerTipStrength, wedgeEnabled: false);
+						ConeLeadRefRadiusPx, ConeLeadRefRadiusPx, AiHalfExtent(), SweptTriangleStrength, wedgeEnabled: false);
 					if (tipShape.ConeStrength > 0f)
 					{
 						tipStrength = tipShape.ConeStrength;
@@ -2188,7 +2189,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			// converts it into the edge space everything here is measured in.
 			float anchorPx = bulletlifetime * BulletRangePerMs - ThreatBodyTerm(haltingBoss);
 			float pull = BossApproachWeight(bossEdgeDist, anchorPx, SweptFieldRangePx,
-				2f, classic: false, 1f, maxSteerStrength, SteerNoiseFloor) * BossApproachScale;
+				FieldCurvePower, classic: false, 1f, maxSteerStrength, SteerNoiseFloor) * BossApproachScale;
 			// The bench call is UNCONDITIONAL -- the term's calibration is what it measures, and a
 			// tick where the boss lost the vote is exactly the tick worth counting.
 			EvilAliensWeb.Compat.AiBench.NoteBossApproach(this, bossEdgeDist,
@@ -2667,7 +2668,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			}
 			tipVel *= LazerTipLeadScale;
 			SweptShape tipShape = EvaluateSweptShape(pos, tip, tipVel,
-				ConeLeadRefRadiusPx, ConeLeadRefRadiusPx, ship.AiHalfExtent(), LazerTipStrength, wedgeEnabled: false);
+				ConeLeadRefRadiusPx, ConeLeadRefRadiusPx, ship.AiHalfExtent(), SweptTriangleStrength, wedgeEnabled: false);
 			if (tipShape.ConeStrength > lineStrength)
 			{
 				return tipShape.ConeWinner;
@@ -2970,10 +2971,18 @@ public class PlayerShip : AlienDrawableGameComponent
 	// the radial branch, the wedge skirt, and the boss-approach anchor via
 	// ThreatFieldStrength's falloff-2 branch) bends together. Attractors (the powerup's near
 	// pull) deliberately keep their own curve -- this ruling is about repulsors.
+	// ?aifieldpow= sweeps the exponent live; (1-t)^p keeps its shape for ANY p (odd or
+	// fractional included) because the base is clamped non-negative before the pow.
+	public const float DefaultFieldCurvePower = 2f;
+
+	private static float FieldCurvePower =>
+		EvilAliensWeb.Compat.DebugFlags.AiFieldPow ?? DefaultFieldCurvePower;
+
 	private static float FieldCurve(float max, float t)
 	{
 		float inv = 1f - MathHelper.Clamp(t, 0f, 1f);
-		return max * inv * inv;
+		float p = FieldCurvePower;
+		return (p == 2f) ? max * inv * inv : max * (float)Math.Pow(inv, p);
 	}
 
 	// Deliberately NOT MyMath.PowerCurve: that is `max * (1 - t^p)`, whose falloff gets SHALLOWER

@@ -654,6 +654,11 @@ internal static class Program
         var rows = new[]
         {
             new { Flag = "aismooth",       Prop = "AiSteerSmoothMs",       Good = "111", Want = (object)111f,  Baked = "90"   },
+            // The lap-11 curve knobs. Baked "" on both: the defaults render as the single
+            // digits 2 and 1, which occur all over the captured output, so the absence check
+            // would fire on text that is not the default -- the aiff escape.
+            new { Flag = "aifieldpow",     Prop = "AiFieldPow",            Good = "3.5", Want = (object)3.5f,  Baked = ""     },
+            new { Flag = "aitristrength",  Prop = "AiTriStrength",         Good = "2.5", Want = (object)2.5f,  Baked = ""     },
             new { Flag = "aismoothurgent", Prop = "AiSteerSmoothUrgentMs", Good = "22",  Want = (object)22f,   Baked = "15"   },
             new { Flag = "ainoisefloor",   Prop = "AiSteerNoiseFloor",     Good = "4",   Want = (object)4f,    Baked = "0.2"  },
             new { Flag = "aiseekdeadzone", Prop = "AiSeekDeadzonePx",      Good = "77",  Want = (object)77f,   Baked = "30"   },
@@ -1394,7 +1399,7 @@ internal static class Program
         // CIRCLE carries it at its own curve -- the empty-space triangle never out-votes a
         // nearby hull. The value is the standard curve on the CIRCLE's edge distance, even
         // though the ship is geometrically inside the triangle (triangle distance 0).
-        float triPeak = (float)ship.GetField("SweptTriangleStrength", anyStatic).GetRawConstantValue();
+        float triPeak = (float)ship.GetField("DefaultSweptTriangleStrength", anyStatic).GetRawConstantValue();
         float TriPlateau(float dist) => dist >= 150f ? 0f : triPeak * (1f - dist / 150f) * (1f - dist / 150f);
         int Winner(object shape) =>
             (int)shapeType.GetField("ConeWinner", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
@@ -1656,7 +1661,7 @@ internal static class Program
         // whisper-triangle ruling the strength out there is the triangle's peak, not the full
         // 4 -- but it still out-votes the 0.8 seek from one frame's bogus position delta, which
         // is the shove the guard exists to refuse.
-        float whisperPeak = (float)ship.GetField("SweptTriangleStrength", anyStatic).GetRawConstantValue();
+        float whisperPeak = (float)ship.GetField("DefaultSweptTriangleStrength", anyStatic).GetRawConstantValue();
         Check("WHY: and 400px down that corridor it still out-votes the 0.8 seek",
             ShapeField(teleportShape, "ConeStrength") > 0.8f
                 && Math.Abs(ShapeField(teleportShape, "ConeStrength") - whisperPeak) < 0.001f,

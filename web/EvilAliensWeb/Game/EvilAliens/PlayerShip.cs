@@ -1970,6 +1970,26 @@ public class PlayerShip : AlienDrawableGameComponent
 					}
 					repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - shortestpoint) + dodgeAngle);
 				}
+				// THE TIP'S SWEPT SHAPE (owner ruling, lap 5): the beam GROWS -- its tip advances
+				// at growthspeed * DifficultyModifier, faster than the ship at higher tiers --
+				// and the distance-to-line above only covers the segment that already exists, so
+				// the swath about to be claimed had zero warning. The tip gets the standard
+				// swept treatment at the UFO reference radius (factor 1.0), deliberately NOT its
+				// literal ~8px half-thickness: a guaranteed-death front deserves no less warning
+				// than a UFO at the same speed just for being thin. No wedge (the LANE concept
+				// does not apply to a lengthwise front).
+				if (ConeEnabled && ((Lazer)baddy).TryGetAiTipMotion(out Vector2 lazerTip, out Vector2 tipVel))
+				{
+					SweptShape tipShape = EvaluateSweptShape(base.Position, lazerTip, tipVel,
+						ConeLeadRefRadiusPx, ConeLeadRefRadiusPx, AiHalfExtent(), maxSteerStrength, wedgeEnabled: false);
+					if (tipShape.ConeStrength > 0f)
+					{
+						float tipStrength = tipShape.ConeStrength;
+						EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy,
+							EvilAliensWeb.Compat.AiBench.ThreatPath.Cone, tipStrength, tipShape.ConeLength, tipShape.ConeEdgeDist);
+						repel += tipStrength * MyMath.AngleToVector(MyMath.VectorToAngle(tipShape.ConeDir) + dodgeAngle);
+					}
+				}
 			}
 			else
 			{
@@ -2503,25 +2523,40 @@ public class PlayerShip : AlienDrawableGameComponent
 			return false;
 		}
 		// THE STEERING LOOP'S OWN GATES, mirrored, so the overlay draws exactly what the AI
-		// avoids and nothing else: Wall and Lazer take their own dedicated branches (grid nav and
-		// distance-to-line -- never the swept shape), and everything else must be collide-active
-		// AND a genuine threat. Without this the overlay drew shapes on the player's own bullets
-		// and on spent explosions -- things the steering never sees (iterative rep 1 sighting).
-		if (baddy is Wall || baddy is Lazer || !baddy.Collides || !IsAiThreat(baddy))
+		// avoids and nothing else: Wall takes the grid-nav branch (no swept shape), a beam's
+		// SEGMENT is the distance-to-line field (not drawn here) but its GROWING TIP carries the
+		// swept shape the steering now evaluates, and everything else must be collide-active AND
+		// a genuine threat. Without this the overlay drew shapes on the player's own bullets and
+		// on spent explosions -- things the steering never sees (iterative rep 1 sighting).
+		if (baddy is Wall || !baddy.Collides || !IsAiThreat(baddy))
 		{
 			return false;
+		}
+		if (baddy is Lazer beam)
+		{
+			if (!ConeEnabled || !beam.TryGetAiTipMotion(out anchor, out var tipVel))
+			{
+				return false;
+			}
+			radius = ConeLeadRefRadiusPx;
+			float tipSpeed = (tipVel).Length();
+			apex = (tipSpeed < 0.001f)
+				? anchor
+				: anchor + tipVel / tipSpeed * SweptConeLength(tipSpeed, radius);
+			return true;
 		}
 		if (!baddy.TryGetAiSweptPath(out anchor, out var velocity, out _))
 		{
 			return false;
 		}
-		float speed = (velocity).Length();
-		if (speed < 0.001f)
-		{
-			return false;
-		}
 		radius = MathHelper.Max(ThreatBodyTerm(baddy), 1f);
-		apex = anchor + velocity / speed * SweptConeLength(speed, radius);
+		float speed = (velocity).Length();
+		// A stationary threat still describes its CIRCLE (apex == anchor, so the overlay draws
+		// no triangle) -- the radial field's body is a real force and the owner wants it
+		// visible; only the swept triangle needs motion.
+		apex = (speed < 0.001f)
+			? anchor
+			: anchor + velocity / speed * SweptConeLength(speed, radius);
 		return true;
 	}
 

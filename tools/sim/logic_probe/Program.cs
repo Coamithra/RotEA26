@@ -1422,7 +1422,10 @@ internal static class Program
 
         // 5. PAST THE APEX: radial from the tip -- the vertex zone. 60px beyond the apex on the
         // axis must read the standard curve at 60 and push +X (onward, out of the path's line).
-        object past = At(coneLen + 60f, 0f, Speed, BodyR, BodyR, false);
+        // The apex sits at bodyR + coneLen from the anchor: the swept length counts from the
+        // circle's EDGE (owner catch, lap 8 -- measured from the centre, a slow drifter's
+        // triangle drowned inside its own circle and every landed thing's cone was invisible).
+        object past = At(BodyR + coneLen + 60f, 0f, Speed, BodyR, BodyR, false);
         Check("past the apex: radial from the tip at the standard curve",
             Math.Abs(Field(past, "ConeStrength") - Plateau(60f)) < 0.01f
                 && VX((object)VField(past, "ConeDir")) > 0.99f,

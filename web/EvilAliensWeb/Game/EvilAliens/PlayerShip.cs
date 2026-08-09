@@ -2528,7 +2528,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			float tipSpeed = (tipVel).Length();
 			apex = (tipSpeed < 0.001f)
 				? anchor
-				: anchor + tipVel / tipSpeed * SweptConeLength(tipSpeed, radius);
+				: anchor + tipVel / tipSpeed * (radius + SweptConeLength(tipSpeed, radius));
 			return true;
 		}
 		if (baddy is Wall || !baddy.Collides || !IsAiThreat(baddy))
@@ -2549,9 +2549,10 @@ public class PlayerShip : AlienDrawableGameComponent
 			return true;
 		}
 		float speed = (velocity).Length();
+		// Apex from the circle's EDGE, matching EvaluateSweptShape (owner catch, lap 8).
 		apex = (speed < 0.001f)
 			? anchor
-			: anchor + velocity / speed * SweptConeLength(speed, radius);
+			: anchor + velocity / speed * (radius + SweptConeLength(speed, radius));
 		return true;
 	}
 
@@ -2660,7 +2661,12 @@ public class PlayerShip : AlienDrawableGameComponent
 		// The near flank; w == 0 resolves to +perp deterministically, not by float noise.
 		Vector2 side = (w >= 0f) ? perp : (-perp);
 		Vector2 corner = anchor + side * r;
-		Vector2 apex = anchor + axis * coneLen;
+		// APEX FROM THE EDGE, not the centre (owner catch, lap 8): measured from the centre a
+		// slow drifter's size-scaled triangle lands at or inside its own circle -- poke-out
+		// requires speed > ref/lead (~0.086 px/ms), and the Mars ground scroll sits right on it,
+		// so every landed thing's cone drowned invisibly. The body sweeps forward from where its
+		// edge IS, so that is where the triangle starts counting.
+		Vector2 apex = anchor + axis * (r + coneLen);
 		Vector2 edge = apex - corner;
 		float u = Vector2.Dot(d, axis);
 		// Inside test: ahead of the base, and on the inner side of the NEAR edge. (A point past

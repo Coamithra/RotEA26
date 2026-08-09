@@ -559,6 +559,15 @@ public class PlayerShip : AlienDrawableGameComponent
 	// and the floor tests the summed resultant anyway, so a lone tip push survives it.
 	public const float LazerTipStrength = 1f;
 
+	// The same ruling, generalised to EVERY mover's shape: the triangle half of a swept shape
+	// is the space the body is ABOUT to claim, so its curve peaks here where the circle keeps
+	// the caller's full strength, and the two candidates compete by FORCE (the beam's
+	// line-vs-tip rule, inside one shape). Near the body the stronger circle out-votes the
+	// triangle wherever both apply; the triangle carries only the far future path, as a
+	// whisper that a real body beats -- inside the triangle right next to a bullet, the
+	// bullet's 4 wins the shape, not the empty space's 1.
+	public const float SweptTriangleStrength = 1f;
+
 	// THE MESA IS GONE (owner redesign, iterative rep 1 lap 5). The cone used to be a bespoke
 	// field -- separate along/across falloff exponents, a taper, a magnitude scale, a flat
 	// 300px skirt with an optional size-scaled variant -- seven knobs, each individually swept.
@@ -2625,6 +2634,62 @@ public class PlayerShip : AlienDrawableGameComponent
 		return true;
 	}
 
+	// Which element of this object's repulsion is WINNING against `ship` this tick: 0 = nothing
+	// pushes from here right now, 1 = the circle/body (for a beam, its LINE field out-voting the
+	// tip; for a pathless mover, the radial branch in reach), 2 = the triangle. Overlay-only
+	// (owner request, lap 11 -- "does the cone EVER win?"): ?cones colors the winner, so the
+	// competition becomes visible instead of inferred. Mirrors the steering's own arithmetic
+	// via the same EvaluateSweptShape / field constants; the 4f is DoAIMove's maxSteerStrength.
+	internal static int SweptShapeWinnerAt(PlayerShip ship, AlienDrawableGameComponent baddy)
+	{
+		if (ship == null || !ConeEnabled)
+		{
+			return 0;
+		}
+		Vector2 pos = ship.Position;
+		if (baddy is Lazer beam)
+		{
+			if (!beam.Collides || !beam.TryGetAiTipMotion(out Vector2 tip, out Vector2 tipVel))
+			{
+				return 0;
+			}
+			ship.getDistanceToLine(baddy, out float d, out _);
+			float lineStrength = 0f;
+			float lazerRange = LazerAvoidRangePx;
+			if (lazerRange > 0f && d <= lazerRange)
+			{
+				lineStrength = MyMath.PowerCurve(LazerAvoidStrength, 0f, 2f, d / lazerRange);
+				float dBoost = MathHelper.Max(d - ship.AiHalfExtent(), 0f);
+				if (dBoost < LazerNearBoostRangePx)
+				{
+					lineStrength += MyMath.PowerCurve(LazerNearBoostStrength, 0f, 2f, dBoost / LazerNearBoostRangePx);
+				}
+			}
+			tipVel *= LazerTipLeadScale;
+			SweptShape tipShape = EvaluateSweptShape(pos, tip, tipVel,
+				ConeLeadRefRadiusPx, ConeLeadRefRadiusPx, ship.AiHalfExtent(), LazerTipStrength, wedgeEnabled: false);
+			if (tipShape.ConeStrength > lineStrength)
+			{
+				return tipShape.ConeWinner;
+			}
+			return (lineStrength > 0f) ? 1 : 0;
+		}
+		if (baddy is Wall || !baddy.Collides || !IsAiThreat(baddy))
+		{
+			return 0;
+		}
+		if (!baddy.TryGetAiSweptPath(out Vector2 anchor, out Vector2 velocity, out float halfWidth)
+			|| (velocity).Length() < 0.001f)
+		{
+			// The radial branch owns a pathless mover: its circle/box lights up whenever the
+			// flat field is in reach.
+			return (ThreatEdgeDistance(pos, baddy, out _) <= SweptFieldRangePx) ? 1 : 0;
+		}
+		SweptShape shape = EvaluateSweptShape(pos, anchor, velocity,
+			ThreatBodyTerm(baddy), halfWidth, ship.AiHalfExtent(), 4f, wedgeEnabled: false);
+		return shape.ConeWinner;
+	}
+
 	// The unified swept repellent (owner redesign, iterative rep 1 lap 5): for a MOVER this is
 	// the WHOLE repellent -- the shape includes the body circle -- so the caller skips the
 	// radial branch when this returns true, or the circle would be counted twice. Returns false
@@ -2668,6 +2733,10 @@ public class PlayerShip : AlienDrawableGameComponent
 	// outside the shape the ship is).
 	internal struct SweptShape
 	{
+		// Which candidate won the force competition: 0 = neither pushes, 1 = the circle,
+		// 2 = the triangle. The ?cones overlay colors the winner off this.
+		internal int ConeWinner;
+
 		internal float ConeStrength;
 
 		internal Vector2 ConeDir;
@@ -2686,8 +2755,12 @@ public class PlayerShip : AlienDrawableGameComponent
 	}
 
 	// THE SHAPE (owner redesign; see the const block above). Two candidates, evaluated
-	// independently, SHORTER DISTANCE WINS -- which, because the field curve is monotone in
-	// distance, is exactly the distance field of the UNION of the two shapes:
+	// independently, and since lap 11 the HIGHER FORCE WINS -- each candidate runs the standard
+	// curve at its OWN peak (circle: the caller's full strength; triangle:
+	// SweptTriangleStrength, because the triangle is empty space about to be claimed, not a
+	// body). With equal peaks this is exactly the old shorter-distance union rule; with the
+	// weak triangle the circle out-votes it everywhere near the body and the triangle carries
+	// only the far future path as a whisper. The candidates:
 	//   the CIRCLE: the mover's own repulsion circle (radius = its body term, the same one the
 	//     radial branch subtracts). dist = |p - anchor| - r, push radial. This alone makes a
 	//     stationary treatment unnecessary -- wherever "behind", "inside the body" or the
@@ -2761,25 +2834,30 @@ public class PlayerShip : AlienDrawableGameComponent
 			triDist = (away).Length();
 			triDir = (triDist > 0.001f) ? (away / triDist) : side;
 		}
-		// The competition: shorter distance wins = the union's distance field.
-		float dist;
-		Vector2 dir;
-		if (circleDist <= triDist)
+		// The competition is by FORCE, each candidate at its own peak; ties go to the circle
+		// (a body beats the empty space it is about to claim).
+		float circleStrength = (circleDist <= SweptFieldRangePx)
+			? MyMath.PowerCurve(maxSteerStrength, 0f, 2f, circleDist / SweptFieldRangePx)
+			: 0f;
+		float triPeak = MathHelper.Min(SweptTriangleStrength, maxSteerStrength);
+		float triStrength = (triDist <= SweptFieldRangePx)
+			? MyMath.PowerCurve(triPeak, 0f, 2f, triDist / SweptFieldRangePx)
+			: 0f;
+		if (circleStrength >= triStrength && circleStrength > 0f)
 		{
-			dist = circleDist;
-			dir = circleDir;
-		}
-		else
-		{
-			dist = triDist;
-			dir = triDir;
-		}
-		if (dist <= SweptFieldRangePx)
-		{
-			result.ConeStrength = MyMath.PowerCurve(maxSteerStrength, 0f, 2f, dist / SweptFieldRangePx);
-			result.ConeDir = dir;
+			result.ConeWinner = 1;
+			result.ConeStrength = circleStrength;
+			result.ConeDir = circleDir;
 			result.ConeLength = coneLen;
-			result.ConeEdgeDist = dist;
+			result.ConeEdgeDist = circleDist;
+		}
+		else if (triStrength > 0f)
+		{
+			result.ConeWinner = 2;
+			result.ConeStrength = triStrength;
+			result.ConeDir = triDir;
+			result.ConeLength = coneLen;
+			result.ConeEdgeDist = triDist;
 		}
 		// ---- the lane wedge (unchanged in spirit; its outside falloff now rides the same
 		// threat-field curve as everything else instead of a private exponent) ----

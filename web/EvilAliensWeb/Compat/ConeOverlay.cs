@@ -22,6 +22,10 @@ namespace EvilAliensWeb.Compat
         // Magenta-red, distinct from every HitboxOverlay tint (box cyan / circle green /
         // line orange) so both overlays can run at once and stay tellable-apart.
         private static readonly Color ShapeColor = new Color(1f, 0.3f, 0.55f);
+        // The WINNING element (owner request, lap 11): the candidate whose force is actually
+        // pushing the ship this tick draws bright yellow, so circle-vs-triangle competition is
+        // visible instead of inferred. Relative to the first live ship in the pass.
+        private static readonly Color WinColor = new Color(1f, 0.9f, 0.15f);
         private const float Alpha = 0.85f;
         private const int Thickness = 2; // design-space px
 
@@ -35,6 +39,15 @@ namespace EvilAliensWeb.Compat
                 return;
             }
             EnsureTextures(gd);
+            PlayerShip ship = null;
+            for (int i = 0; i < collidables.Count; i++)
+            {
+                if (collidables[i] is PlayerShip ps && !ps.IsDead)
+                {
+                    ship = ps;
+                    break;
+                }
+            }
             SpriteBlendMode prev = sb.BlendMode;
             sb.BlendMode = (SpriteBlendMode)1; // NonPremultiplied, like HitboxOverlay
             for (int i = 0; i < collidables.Count; i++)
@@ -47,7 +60,12 @@ namespace EvilAliensWeb.Compat
                 {
                     continue;
                 }
+                // 0 = nothing pushing from this object right now, 1 = circle/body wins,
+                // 2 = triangle wins -- the winning element draws in WinColor.
+                int winner = PlayerShip.SweptShapeWinnerAt(ship, adc);
                 Color col = new Color(ShapeColor, Alpha);
+                Color circleCol = (winner == 1) ? new Color(WinColor, Alpha) : col;
+                Color triCol = (winner == 2) ? new Color(WinColor, Alpha) : col;
                 Vector2 axis = apex - anchor;
                 float len = axis.Length();
                 // A STATIONARY box-threat draws the BOX the field now measures from (owner catch,
@@ -56,19 +74,19 @@ namespace EvilAliensWeb.Compat
                 // capsule the steering evaluates really is circle-based.
                 if (len < 1f && adc.GetCollisionType() is CollisionBox stillBox)
                 {
-                    DrawBoxOutline(sb, stillBox, col);
+                    DrawBoxOutline(sb, stillBox, circleCol);
                     continue;
                 }
                 if (len < 1f && adc.GetCollisionType() is CollisionMultibox stillMulti)
                 {
                     foreach (CollisionBox item in stillMulti.Items)
                     {
-                        DrawBoxOutline(sb, item, col);
+                        DrawBoxOutline(sb, item, circleCol);
                     }
                     continue;
                 }
                 // The body circle (the ring texture's bright band sits on the true radius).
-                sb.Draw(ring, anchor, 0f, radius / 64f, center: true, col, (SpriteEffects)0);
+                sb.Draw(ring, anchor, 0f, radius / 64f, center: true, circleCol, (SpriteEffects)0);
                 // The triangle: perpendicular-diameter corners to the apex, base included for
                 // legibility (the force skips the base edge on the circle-dominance proof, but
                 // the eye wants the closed shape).
@@ -80,9 +98,9 @@ namespace EvilAliensWeb.Compat
                 Vector2 perp = new Vector2(0f - axis.Y, axis.X);
                 Vector2 c1 = anchor + perp * radius;
                 Vector2 c2 = anchor - perp * radius;
-                DrawLine(sb, c1, apex, col);
-                DrawLine(sb, c2, apex, col);
-                DrawLine(sb, c1, c2, col);
+                DrawLine(sb, c1, apex, triCol);
+                DrawLine(sb, c2, apex, triCol);
+                DrawLine(sb, c1, c2, triCol);
             }
             sb.BlendMode = prev;
         }

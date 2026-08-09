@@ -1388,15 +1388,32 @@ internal static class Program
             "strength " + Field(behind, "ConeStrength").ToString("0.00") + " vs expected "
             + Plateau(50f).ToString("0.00") + ", dir.X " + VX((object)VField(behind, "ConeDir")).ToString("0.00"));
 
-        // 2. INSIDE THE CORRIDOR: distance 0, full strength -- on the axis and just inside the
-        // near edge alike (at u = coneLen/2 the tapering edge sits at BodyR/2).
+        // 2. INSIDE THE CORRIDOR NEAR THE BODY (owner ruling, lap 11): the candidates compete
+        // by FORCE and the triangle peaks at SweptTriangleStrength, so close to the body the
+        // CIRCLE carries it at its own curve -- the empty-space triangle never out-votes a
+        // nearby hull. The value is the standard curve on the CIRCLE's edge distance, even
+        // though the ship is geometrically inside the triangle (triangle distance 0).
+        float triPeak = (float)ship.GetField("SweptTriangleStrength", anyStatic).GetRawConstantValue();
+        float TriPlateau(float dist) => dist >= 150f ? 0f : triPeak * (1f - (dist / 150f) * (dist / 150f));
+        int Winner(object shape) =>
+            (int)shapeType.GetField("ConeWinner", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .GetValue(shape);
         object onAxis = At(coneLen / 2f, 0f, Speed, BodyR, BodyR, false);
-        object nearEdge = At(coneLen / 2f, BodyR / 2f * 0.95f, Speed, BodyR, BodyR, false);
-        Check("inside the triangle: full strength on the axis and just inside the edge alike",
-            Field(onAxis, "ConeStrength") > MaxSteer * 0.999f
-                && Field(nearEdge, "ConeStrength") > MaxSteer * 0.999f,
-            "axis " + Field(onAxis, "ConeStrength").ToString("0.00") + ", near edge "
-            + Field(nearEdge, "ConeStrength").ToString("0.00") + " of " + MaxSteer);
+        Check("inside the triangle near the body: the circle wins at its own curve",
+            Math.Abs(Field(onAxis, "ConeStrength") - Plateau(coneLen / 2f - BodyR)) < 0.01f
+                && Winner(onAxis) == 1,
+            "strength " + Field(onAxis, "ConeStrength").ToString("0.00") + " vs the circle curve "
+            + Plateau(coneLen / 2f - BodyR).ToString("0.00") + ", winner " + Winner(onAxis));
+
+        // 2b. FAR DOWN A FAST MOVER'S PATH the triangle is the ONLY voice -- the circle's curve
+        // is spent (edge distance past 150) and the whisper peak carries the warning. This is
+        // where the cone genuinely WINS, and why it exists at all.
+        object deepPath = At(400f, 0f, 1.5f, BodyR, BodyR, false);
+        Check("deep in a fast mover's path: the triangle wins at its whisper peak",
+            Math.Abs(Field(deepPath, "ConeStrength") - triPeak) < 0.001f && Winner(deepPath) == 2,
+            "strength " + Field(deepPath, "ConeStrength").ToString("0.00") + " vs the triangle peak "
+            + triPeak.ToString("0.00") + ", winner " + Winner(deepPath)
+            + " -- 400px ahead at 1.5px/ms, circle edge distance 370");
 
         // 3. THE RED SLIVER -- the poke-out competition. A point inside the BODY CIRCLE but
         // outside the triangle's edges (just ahead of the base, nearly a radius out) must read
@@ -1408,29 +1425,31 @@ internal static class Program
             "strength " + Field(sliver, "ConeStrength").ToString("0.00") + " of " + MaxSteer
             + " -- the circle candidate must win wherever it pokes out of the triangle");
 
-        // 4. BESIDE THE CORRIDOR: the near edge's normal push -- strength strictly between the
-        // extremes and the direction pushing AWAY on the ship's own side (+Y here), never along
-        // the path. The exact value is the standard curve on the segment distance, which the
-        // zone direction pins as genuinely the EDGE's (a circle-only build points too far -X).
-        object beside = At(coneLen / 2f, BodyR / 2f + 60f, Speed, BodyR, BodyR, false);
-        Check("beside the corridor: a transverse push off the near edge",
-            Field(beside, "ConeStrength") > 0.5f && Field(beside, "ConeStrength") < MaxSteer * 0.98f
-                && VY((object)VField(beside, "ConeDir")) > 0.7f,
+        // 4. BESIDE THE FAR CORRIDOR: the near edge's normal push at the TRIANGLE's whisper
+        // curve -- far enough down the path that the circle is spent, so the edge genuinely
+        // carries it, pushing AWAY on the ship's own side (+Y here), never along the path.
+        object beside = At(400f, 110f, 1.5f, BodyR, BodyR, false);
+        Check("beside the far corridor: the triangle's edge-normal whisper",
+            Field(beside, "ConeStrength") > 0.2f && Field(beside, "ConeStrength") < triPeak
+                && VY((object)VField(beside, "ConeDir")) > 0.95f && Winner(beside) == 2,
             "strength " + Field(beside, "ConeStrength").ToString("0.00") + ", dir ("
             + VX((object)VField(beside, "ConeDir")).ToString("0.00") + ","
-            + VY((object)VField(beside, "ConeDir")).ToString("0.00") + ")");
+            + VY((object)VField(beside, "ConeDir")).ToString("0.00") + "), winner "
+            + Winner(beside));
 
-        // 5. PAST THE APEX: radial from the tip -- the vertex zone. 60px beyond the apex on the
-        // axis must read the standard curve at 60 and push +X (onward, out of the path's line).
-        // The apex sits at bodyR + coneLen from the anchor: the swept length counts from the
-        // circle's EDGE (owner catch, lap 8 -- measured from the centre, a slow drifter's
-        // triangle drowned inside its own circle and every landed thing's cone was invisible).
+        // 5. PAST THE APEX: radial from the tip -- the vertex zone, at the TRIANGLE's peak
+        // (lap 11: the future path is empty space, so its curve tops at SweptTriangleStrength).
+        // 60px beyond the apex on the axis must read that curve at 60 and push +X (onward, out
+        // of the path's line). The apex sits at bodyR + coneLen from the anchor: the swept
+        // length counts from the circle's EDGE (owner catch, lap 8 -- measured from the centre,
+        // a slow drifter's triangle drowned inside its own circle and every landed thing's cone
+        // was invisible).
         object past = At(BodyR + coneLen + 60f, 0f, Speed, BodyR, BodyR, false);
-        Check("past the apex: radial from the tip at the standard curve",
-            Math.Abs(Field(past, "ConeStrength") - Plateau(60f)) < 0.01f
-                && VX((object)VField(past, "ConeDir")) > 0.99f,
+        Check("past the apex: radial from the tip at the triangle's whisper curve",
+            Math.Abs(Field(past, "ConeStrength") - TriPlateau(60f)) < 0.01f
+                && VX((object)VField(past, "ConeDir")) > 0.99f && Winner(past) == 2,
             "strength " + Field(past, "ConeStrength").ToString("0.00") + " vs expected "
-            + Plateau(60f).ToString("0.00"));
+            + TriPlateau(60f).ToString("0.00"));
 
         // 6. THE REACH IS THE STANDARD 150: beyond it, nothing -- from any zone.
         object far = At(-BodyR - 200f, 0f, Speed, BodyR, BodyR, false);

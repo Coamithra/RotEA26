@@ -309,6 +309,23 @@ public class UFO : KillableAlien
 		return (base.Position.X < 0f) | (base.Position.X > 800f) | (base.Position.Y < 0f) | (base.Position.Y > 600f);
 	}
 
+	// A landed UFO's stationary branch breaks out of Update WITHOUT calling base.Update, so its
+	// ObservedVelocity is frozen at the per-life reset of zero even while the scroll-carry line
+	// slides it along the terrain. Announce the carry instead (the SpiderBoss idiom: the swept
+	// path is announced, not observed) so landed UFOs project drift cones like everything else
+	// that moves. StationaryBoss needs no override -- it calls base.Update before its carry.
+	internal override bool TryGetAiSweptPath(out Vector2 anchor, out Vector2 velocity, out float halfWidth)
+	{
+		if (stationary)
+		{
+			anchor = base.Position;
+			velocity = oracle.BackgroundSpeed;
+			halfWidth = AiHalfExtent();
+			return velocity.LengthSquared() > 0.000001f;
+		}
+		return base.TryGetAiSweptPath(out anchor, out velocity, out halfWidth);
+	}
+
 	public override void Update(GameTime gameTime)
 	{
 		invincibilityTimer.Update(gameTime);

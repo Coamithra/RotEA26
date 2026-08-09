@@ -307,7 +307,13 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private static float TopEdgeDangerPx => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeDangerPx ?? DefaultTopEdgeDangerPx;
 
-	public const float DefaultTopEdgeAvoidStrength = 20f;
+	// BAKED OFF (owner ruling, iterative rep 1 lap 3): the band's 20 was calibrated to out-vote
+	// upward shoves of up to 18 from the cone/wedge era, which is retired -- the strongest
+	// upward force left is a plateau field's 4, and 20 buried the powerup near-field's ~4.8
+	// pull five times over (it re-broke every top-edge pickup the moment the yield bandaid was
+	// reverted). The generic top-edge plateau (max 4) is the whole protection now, as in 2008.
+	// `?aitopedgestrength=<n>` restores a band for the A/B; the 170px ramp shape is unchanged.
+	public const float DefaultTopEdgeAvoidStrength = 0f;
 
 	private static float TopEdgeAvoidStrength => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeAvoidStrength ?? DefaultTopEdgeAvoidStrength;
 

@@ -473,6 +473,17 @@ namespace EvilAliensWeb.Compat
 			ShowHitboxes = on;
 		}
 
+		// Draw every mover's swept repulsion shape (body circle + velocity triangle) over the
+		// frame, exactly as the AI evaluates it this tick. OFF by default; ?cones (URL) or
+		// eaCones(true) (console). The ShowHitboxes pattern: a pure overlay, OUT of Active.
+		// Drawn by ConeOverlay from Game1.DrawInner.
+		public static bool ShowCones { get; private set; }
+
+		internal static void SetShowCones(bool on)
+		{
+			ShowCones = on;
+		}
+
 		// Blast (bomb) tuning knobs for the sprite-harness lifetime visualiser (?harness=blast).
 		// All null/default => Blast.cs uses its baked-in constants, so a shipped build is unchanged.
 		//   ?blastactive=<0..1>  the blast stops dealing damage once its fade alpha drops below this
@@ -1774,6 +1785,9 @@ namespace EvilAliensWeb.Compat
 				case "hitbox":
 					ShowHitboxes = IsOn(val);
 					break;
+				case "cones":
+					ShowCones = IsOn(val);
+					break;
 				case "shake":
 				case "screenshake":
 					// Bare ?shake / =true keeps the default 1; a number scales it (0 = off).
@@ -3055,86 +3069,6 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(AiConeMaxLenPx ?? EvilAliens.PlayerShip.DefaultConeMaxLenPx));
-					}
-					break;
-				case "aiconewidth":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aicw) && aicw > 0f)
-					{
-						AiConeWidthPx = MathHelper.Min(aicw, 2000f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number > 0",
-							InForce(AiConeWidthPx ?? EvilAliens.PlayerShip.DefaultConeWidthPx));
-					}
-					break;
-				case "aiconespread":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aicsp) && aicsp >= 0f)
-					{
-						AiConeSpread = MathHelper.Min(aicsp, 200f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiConeSpread ?? EvilAliens.PlayerShip.DefaultConeSpread));
-					}
-					break;
-				case "aiconewidthmin":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aicwm) && aicwm >= 0f)
-					{
-						AiConeWidthMinPx = MathHelper.Min(aicwm, 2000f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiConeWidthMinPx ?? EvilAliens.PlayerShip.DefaultConeWidthMinPx));
-					}
-					break;
-				case "aiconetaper":
-					// REFUSED above 1 rather than clamped: 1 is the top of the taper's real range (a true
-					// triangle), not a guard rail far outside anything anyone would type, so silently
-					// clamping ?aiconetaper=2 would measure 1 under a run labelled 2.
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aict) && aict >= 0f && aict <= 1f)
-					{
-						AiConeTaper = aict;
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number 0..1",
-							InForce(AiConeTaper ?? EvilAliens.PlayerShip.DefaultConeTaper));
-					}
-					break;
-				case "aiconefallalong":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aicfa) && aicfa >= 0f)
-					{
-						AiConeFallAlong = MathHelper.Min(aicfa, 20f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiConeFallAlong ?? EvilAliens.PlayerShip.DefaultConeFallAlong));
-					}
-					break;
-				case "aiconefallacross":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aicfc) && aicfc >= 0f)
-					{
-						AiConeFallAcross = MathHelper.Min(aicfc, 20f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiConeFallAcross ?? EvilAliens.PlayerShip.DefaultConeFallAcross));
-					}
-					break;
-				case "aiconescale":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aics) && aics >= 0f)
-					{
-						AiConeScale = MathHelper.Min(aics, 20f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiConeScale ?? EvilAliens.PlayerShip.DefaultConeScale));
 					}
 					break;
 				case "aiwedgestrength":

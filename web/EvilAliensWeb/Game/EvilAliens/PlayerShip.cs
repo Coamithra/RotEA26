@@ -541,84 +541,19 @@ public class PlayerShip : AlienDrawableGameComponent
 	// project a cone longer than the world.
 	public const float DefaultConeMaxLenPx = 800f;
 
-	// How far OUTSIDE the swept corridor the cone still pushes -- the scale of the ACROSS-axis
-	// falloff. THE ONE VALUE HERE THAT IS NOT DERIVED FROM ANYTHING, so it was swept rather than
-	// picked, and then swept again on a second rig when the first answer proved rig-specific.
-	//
-	// SPACEDODGE, deaths / victories, paired seeds x2:
-	//     75px  21.50 (2/4)  |  150px  8.56 (12/16)  |  300px  3.44 (16/16)  |  450px  6.00 (4/4)
-	// An INTERIOR optimum -- 450 is worse than 300 -- so this is a width that fits the belt, not a
-	// "wider is better" gradient left half-walked.
-	//
-	// THE MAGNITUDE AXIS WAS SWEPT ALONGSIDE IT AND DECLINED AT EQUAL OUTCOME: `?aiconescale=2.5`
-	// also reaches 16/16, at 3.62 deaths against this shape's 3.44. Same call cards ada9e839 and
-	// e88e21ca both made -- a taller mountain is whack-a-mole across levels, ejecting the ship out
-	// of one hazard into the traffic around it, while transverse reach is a change of SHAPE.
-	//
-	// AND THE OBVIOUS GENERALISATION WAS TRIED AND IS WORSE, which is worth knowing before anyone
-	// reaches for it again. CrazyGame wants the OPPOSITE width (deaths 1.00 at 60px, 2.25 at 150,
-	// 8.50 at 300): it fields 30 simultaneous ~5px-half bullets, and a 300px skirt on each buries
-	// the ship in transverse pushes that mostly cancel. The natural fix is the one the radial
-	// field already made -- scale the reach with the mover's hull, as ThreatFieldRange does. So
-	// that was built and measured: `halfExtent * 6.4` (which reproduces 300px at an asteroid's
-	// ~47px half-extent) drops SpaceDodge to 12/16 at 10.12 deaths. Asteroid half-extents VARY,
-	// and the small rocks -- the ones the belt is mostly made of -- lose the wide skirt that is
-	// doing the work. A flat number is not elegant here; it is what measures better.
-	// The rig disagreement is real and unresolved; `?aiconewidth=` is how the next attempt reaches
-	// it, and the CrazyGame cost is stated in the card rather than hidden.
-	public const float DefaultConeWidthPx = 300f;
-
-	// Optional SIZE SCALING of that reach: 0 = off (the flat width above), otherwise the reach is
-	// halfExtent * this, floored at DefaultConeWidthMinPx and capped at the flat width.
-	//
-	// BAKED INERT, AND THE SWEEP THAT SETTLED IT IS THE INTERESTING PART. The flat width is right
-	// for SpaceDodge and wrong for CrazyGame (see DefaultConeWidthPx), so the obvious move is to
-	// scale the reach with the mover -- as ThreatFieldRange already does -- with a FLOOR so a swarm
-	// of small fast objects keeps a usable skirt. Swept k x floor, paired seeds 1-4 x2 (8 runs),
-	// deaths, with victories noted only where not 8/8:
-	//     cell          | SpaceDodge      | CrazyGame
-	//     flat (shipped)|  4.25           |  8.50
-	//     k4.5 / 60px   |  5.25 (6/8)     |  1.00
-	//     k4.5 / 120px  |  8.50 (6/8)     |  3.75
-	//     k6.4 / 60px   |  7.62           |  1.00
-	//     k6.4 / 120px  | 10.00 (7/8)     |  3.75
-	//     k8   / 60px   |  8.00           |  1.00
-	//     k8   / 120px  | 14.62 (4/8)     |  3.75
-	// So scaling really does fix CrazyGame (8.50 -> 1.00, better than no cone at all) and the floor
-	// is the axis that matters. On the FULL SpaceDodge gate (seeds 1-8 x2) k6.4/60 reads 14/16,
-	// coincidentally also at 7.62 deaths, against the flat width's 16/16 at 3.25. It then FAILED
-	// the third gate outright: SpiderBoss
-	// (standing) deaths over the same 8 runs read 12 on shipped main, 22 flat and **34** scaled.
-	// That is the mechanism below, amplified -- a standing boss sweeps nothing and so projects no
-	// cone at all, and the wider UFO skirt shoves the ship into it harder. No cell cleared, so the
-	// flat width ships and this stays a seam.
-	public const float DefaultConeSpread = 0f;
-
-	// The floor that scaling clamps to, so a swarm of small fast movers keeps a usable skirt
-	// instead of each projecting a corridor narrower than the ship.
-	public const float DefaultConeWidthMinPx = 120f;
-
-	// How the corridor narrows toward the far end: 1 is the true triangle of the design sketch
-	// (a point at full length), 0 a parallel capsule.
-	public const float DefaultConeTaper = 1f;
-
-	// THE TWO FALLOFFS ARE DIFFERENT FAMILIES ON PURPOSE, and this is the crux of the shape.
-	//   ALONG the axis: `1 - t^p`, a PLATEAU (p=2 keeps 75% at half the cone's length). The whole
-	//     point is to have authority far out along the trajectory, which is the band the radial
-	//     field abandons; a spike here would reproduce exactly the field this replaces.
-	//   ACROSS the axis: `(1-t)^p`, a SPIKE (p=3 is down to 12% at half the width). Threading a
-	//     gap between two rocks has to stay possible, so sideways clearance must get cheap fast.
-	// Note the along-axis family is the 2008 `MyMath.PowerCurve` one, which card e88e21ca measured
-	// and rejected -- but rejected as a RADIAL curve, where a plateau merely widens a circle. On a
-	// trajectory axis it is the whole idea, so that result does not carry.
-	public const float DefaultConeFallAlong = 2f;
-
-	public const float DefaultConeFallAcross = DefaultThreatFieldFalloff;
-
-	// Peak magnitude as a multiple of maxSteerStrength: 1.0 makes the corridor ahead exactly as
-	// repellent as the hull itself, which is the honest statement -- being there when it arrives
-	// and being inside it now are the same death.
-	public const float DefaultConeScale = 1f;
+	// THE MESA IS GONE (owner redesign, iterative rep 1 lap 5). The cone used to be a bespoke
+	// field -- separate along/across falloff exponents, a taper, a magnitude scale, a flat
+	// 300px skirt with an optional size-scaled variant -- seven knobs, each individually swept.
+	// It is now a SHAPE, not a field: the mover's own repulsion circle capped by a triangle to
+	// `position + velocity * lead`, and the push is the ordinary threat field evaluated on the
+	// NEAREST-FEATURE distance to that shape (the getDistanceToLine treatment the Lazer has
+	// always had, extended to one more shape). Behind the base: radial from the circle --
+	// the same push the radial branch computes, so a stationary mover degenerates to exactly
+	// the 2008 circle and there is no more circle-plus-hat double counting. Beside the
+	// triangle: normal push off the near edge. Past the apex: radial from the tip. Inside:
+	// full strength, out the near side. One curve, one reach, both the threat's own
+	// (ThreatFieldRange + the per-type family), and the only shape parameters left are the
+	// two above (lead time and length cap).
 
 	// ---- the LANE WEDGE ----
 	// A symmetric cone is WRONG for a mover whose path hugs a screen edge: it offers the gap
@@ -638,7 +573,7 @@ public class PlayerShip : AlienDrawableGameComponent
 	// The wedge's own along-axis exponent. Same plateau family as the cone's; separate because the
 	// wedge runs the full length of the play field rather than a speed-scaled cone length, so the
 	// two are shaping very different spans.
-	public const float DefaultLaneWedgeFallAlong = DefaultConeFallAlong;
+	public const float DefaultLaneWedgeFallAlong = 2f;
 
 	// Baked off in the iterative rep-1 sweep to establish the 2008 baseline, then REINTRODUCED
 	// by owner ruling the same session once the baseline was seen playing ("they will fix a
@@ -652,20 +587,6 @@ public class PlayerShip : AlienDrawableGameComponent
 	private static float ConeLeadMs => EvilAliensWeb.Compat.DebugFlags.AiConeLeadMs ?? DefaultConeLeadMs;
 
 	private static float ConeMaxLenPx => EvilAliensWeb.Compat.DebugFlags.AiConeMaxLenPx ?? DefaultConeMaxLenPx;
-
-	private static float ConeWidthPx => EvilAliensWeb.Compat.DebugFlags.AiConeWidthPx ?? DefaultConeWidthPx;
-
-	private static float ConeSpread => EvilAliensWeb.Compat.DebugFlags.AiConeSpread ?? DefaultConeSpread;
-
-	private static float ConeWidthMinPx => EvilAliensWeb.Compat.DebugFlags.AiConeWidthMinPx ?? DefaultConeWidthMinPx;
-
-	private static float ConeTaper => EvilAliensWeb.Compat.DebugFlags.AiConeTaper ?? DefaultConeTaper;
-
-	private static float ConeFallAlong => EvilAliensWeb.Compat.DebugFlags.AiConeFallAlong ?? DefaultConeFallAlong;
-
-	private static float ConeFallAcross => EvilAliensWeb.Compat.DebugFlags.AiConeFallAcross ?? DefaultConeFallAcross;
-
-	private static float ConeScale => EvilAliensWeb.Compat.DebugFlags.AiConeScale ?? DefaultConeScale;
 
 	private static float LaneWedgeStrength => EvilAliensWeb.Compat.DebugFlags.AiLaneWedgeStrength ?? DefaultLaneWedgeStrength;
 
@@ -2064,17 +1985,17 @@ public class PlayerShip : AlienDrawableGameComponent
 				// for something crossing the screen the radial term points ALONG its path, so
 				// keeping it around actively fights the evade it is supposed to back up. Anything
 				// slow, static, or not actually on a collision course falls through to the field.
-				// ?aievade=0 disables the closest-approach path entirely, so everything falls
-				// through to the radial field. A MEASUREMENT seam (card ada9e839): this special
-				// case predates the field composition and has never been measured inside it.
-				// THE DIRECTIONAL SHAPE (card e425781b), evaluated for every threat and ADDED to
-				// the radial field below rather than replacing it -- the shipped shape is a circle
-				// with a velocity-aligned hat on it, so both halves are real. Placed before the
-				// evade so a mover contributes its cone even on the ticks the evade takes over.
-				AddSweptRepellent(ref repel, baddy, dodgeAngle, maxSteerStrength);
-				// BAKED OFF with the cones (owner ruling, iterative rep 1): both prediction paths
-				// are dormant, `?aievade=1` re-arms this one. Everything falls through to the
-				// 2008-shaped radial field below.
+				// THE UNIFIED SWEPT SHAPE (owner redesign, lap 5): for a mover it IS the whole
+				// repellent -- the shape includes the body circle -- so a handled threat skips
+				// the radial branch below entirely (adding both would count the circle twice).
+				// Stationary objects, refused teleport paths and the ?aicone=0 arm return false
+				// and fall through to the plain radial field.
+				if (AddSweptRepellent(ref repel, baddy, dodgeAngle, maxSteerStrength))
+				{
+					continue;
+				}
+				// EvadeMovingThreat stays BAKED OFF (owner ruling: superseded by the shape);
+				// `?aievade=1` re-arms it for A/B.
 				if (EvilAliensWeb.Compat.DebugFlags.AiEvadeMovers == true
 					&& EvadeMovingThreat(ref repel, baddy, dodgeAngle, minSteerStrength, maxSteerStrength))
 				{
@@ -2552,18 +2473,58 @@ public class PlayerShip : AlienDrawableGameComponent
 	// it is the identical failure the radial field already has against a screen-crosser: a push
 	// ALONG the path rather than off it. So only the sideways component is taken, which is also
 	// what a player does and what EvadeMovingThreat did for the same reason.
-	private void AddSweptRepellent(ref Vector2 repel, AlienDrawableGameComponent baddy, float dodgeAngle, float maxSteerStrength)
+	// The one field parameter of the swept shape: the 2008 steerRange, verbatim.
+	private const float SweptFieldRangePx = 150f;
+
+	// The swept shape's GEOMETRY for one mover, exactly as the steering will evaluate it this
+	// tick -- the ?cones overlay draws precisely this, so the picture and the force can never
+	// drift apart. False for everything AddSweptRepellent would skip (cones off, no path,
+	// refused teleport, stationary).
+	internal static bool TryDescribeSweptShape(AlienDrawableGameComponent baddy,
+		out Vector2 anchor, out float radius, out Vector2 apex)
+	{
+		anchor = default(Vector2);
+		radius = 0f;
+		apex = default(Vector2);
+		if (!ConeEnabled)
+		{
+			return false;
+		}
+		if (!baddy.TryGetAiSweptPath(out anchor, out var velocity, out _))
+		{
+			return false;
+		}
+		float speed = (velocity).Length();
+		if (speed < 0.001f)
+		{
+			return false;
+		}
+		radius = MathHelper.Max(ThreatBodyTerm(baddy), 1f);
+		apex = anchor + velocity / speed * MathHelper.Min(speed * ConeLeadMs, ConeMaxLenPx);
+		return true;
+	}
+
+	// The unified swept repellent (owner redesign, iterative rep 1 lap 5): for a MOVER this is
+	// the WHOLE repellent -- the shape includes the body circle -- so the caller skips the
+	// radial branch when this returns true, or the circle would be counted twice. Returns false
+	// (pushing nothing) for a stationary object, a refused teleport path, or the ?aicone=0 arm,
+	// all of which fall through to the plain radial field.
+	private bool AddSweptRepellent(ref Vector2 repel, AlienDrawableGameComponent baddy, float dodgeAngle, float maxSteerStrength)
 	{
 		if (!ConeEnabled)
 		{
-			return;
+			return false;
 		}
 		if (!baddy.TryGetAiSweptPath(out var anchor, out var velocity, out var halfWidth))
 		{
-			return;
+			return false;
 		}
-		SweptShape shape = EvaluateSweptShape(base.Position, SpeedVector, anchor, velocity,
-			halfWidth, AiHalfExtent(), maxSteerStrength, LaneWedgeEnabled);
+		if ((velocity).Length() < 0.001f)
+		{
+			return false;
+		}
+		SweptShape shape = EvaluateSweptShape(base.Position, anchor, velocity,
+			ThreatBodyTerm(baddy), halfWidth, AiHalfExtent(), maxSteerStrength, LaneWedgeEnabled);
 		float typeScale = ThreatTypeScale(baddy);
 		if (shape.ConeStrength > 0f)
 		{
@@ -2579,6 +2540,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				EvilAliensWeb.Compat.AiBench.ThreatPath.Wedge, strength, shape.WedgeLength, shape.WedgeEdgeDist);
 			repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(shape.WedgeDir) + dodgeAngle);
 		}
+		return true;
 	}
 
 	// What the shape evaluates to at one point: the two terms with their directions, plus the two
@@ -2603,168 +2565,162 @@ public class PlayerShip : AlienDrawableGameComponent
 		internal float WedgeEdgeDist;
 	}
 
-	// THE SHAPE ITSELF, as a pure function of geometry -- no ship, no component, no Game. That is
-	// deliberate: it is the whole decision this card makes, and a decision is verified as DATA.
-	// `logic_probe`'s ProbeAiConeShape calls exactly this and tabulates it at FIXED distances,
-	// which is also the only honest way to compare two fields here -- see the card's warning that
-	// a mean field strength is a selection effect, not a measurement.
-	// `shipVel` is used solely to break the tie when the ship sits exactly on the centre line.
-	internal static SweptShape EvaluateSweptShape(Vector2 shipPos, Vector2 shipVel, Vector2 anchor,
-		Vector2 velocity, float halfWidth, float shipHalfExtent, float maxSteerStrength, bool wedgeEnabled)
+	// THE SHAPE (owner redesign; see the const block above). Two candidates, evaluated
+	// independently, SHORTER DISTANCE WINS -- which, because the field curve is monotone in
+	// distance, is exactly the distance field of the UNION of the two shapes:
+	//   the CIRCLE: the mover's own repulsion circle (radius = its body term, the same one the
+	//     radial branch subtracts). dist = |p - anchor| - r, push radial. This alone makes a
+	//     stationary treatment unnecessary -- wherever "behind", "inside the body" or the
+	//     flat-back sliver would need a special case, the circle's distance is simply smaller
+	//     and it wins the competition. All the bits that poke out win naturally.
+	//   the TRIANGLE: base corners on the circle's perpendicular diameter, apex at
+	//     `anchor + axis * min(speed * lead, cap)`. Inside -> dist 0, out the near flank;
+	//     outside -> nearest point on the two side edges (segment clamps), push away from it.
+	//     The base edge is skipped on proof, not oversight: it is a chord INSIDE the disk, so
+	//     the circle's distance is always <= the distance to it.
+	// Strength = THE standard field treatment, owner-ruled: flat 150px reach, 4 -> 0 on the
+	// quadratic plateau -- `PowerCurve(4, 0, 2, d/150)` verbatim, the same expression the screen
+	// edges, the beam and the powerup near-field have always used (deliberately NOT the radial
+	// branch's size-scaled range, and deliberately outside the ?aifieldcurve= family switch --
+	// the edges do not switch either). The caller adds the dodge twist. Direction is the winner's, so it flips
+	// at the union's internal watershed -- inherent to any nearest-feature field, a few degrees,
+	// invisible under the twist. Pure -- primitives in, shape out -- so logic_probe drives it
+	// directly.
+	internal static SweptShape EvaluateSweptShape(Vector2 shipPos, Vector2 anchor,
+		Vector2 velocity, float bodyRadius, float bandHalfWidth, float shipHalfExtent,
+		float maxSteerStrength, bool wedgeEnabled)
 	{
 		SweptShape result = default(SweptShape);
 		float speed = (velocity).Length();
 		if (speed < 0.001f)
 		{
-			// Not moving: it has no path to project, and its radial field already describes it.
 			return result;
 		}
 		Vector2 axis = velocity / speed;
 		float coneLen = MathHelper.Min(speed * ConeLeadMs, ConeMaxLenPx);
-		if (coneLen < 1f)
-		{
-			return result;
-		}
+		float r = MathHelper.Max(bodyRadius, 1f);
 		Vector2 d = shipPos - anchor;
+		float dlen = (d).Length();
+		// Candidate 1: the circle.
+		float circleDist = MathHelper.Max(dlen - r, 0f);
+		Vector2 circleDir = (dlen > 0.001f) ? (d / dlen) : (-axis);
+		// Candidate 2: the triangle.
+		Vector2 perp = new Vector2(0f - axis.Y, axis.X);
+		float w = Vector2.Dot(d, perp);
+		// The near flank; w == 0 resolves to +perp deterministically, not by float noise.
+		Vector2 side = (w >= 0f) ? perp : (-perp);
+		Vector2 corner = anchor + side * r;
+		Vector2 apex = anchor + axis * coneLen;
+		Vector2 edge = apex - corner;
 		float u = Vector2.Dot(d, axis);
-		if (u <= 0f)
+		// Inside test: ahead of the base, and on the inner side of the NEAR edge. (A point past
+		// the apex reads as outward of the near edge, so this needs no far bound.)
+		float cross = edge.X * (shipPos.Y - corner.Y) - edge.Y * (shipPos.X - corner.X);
+		bool outwardOfEdge = ((w >= 0f) ? cross : (0f - cross)) > 0f;
+		float triDist;
+		Vector2 triDir;
+		if (u > 0f && !outwardOfEdge)
 		{
-			// Behind the mover. Nothing is coming this way, and the body itself is the radial
-			// field's business.
-			return result;
-		}
-		Vector2 acrossVec = d - u * axis;
-		float w = (acrossVec).Length();
-		// THE ACROSS-AXIS REACH. Flat by default; ConeSpread > 0 scales it with the band this mover
-		// actually sweeps, floored so a swarm of small fast objects keeps a usable skirt and capped at
-		// the flat width so a big one never exceeds the value that was swept. See DefaultConeSpread.
-		float acrossReach = ConeWidthPx;
-		if (ConeSpread > 0f)
-		{
-			acrossReach = MathHelper.Clamp(halfWidth * ConeSpread, ConeWidthMinPx, ConeWidthPx);
-		}
-		// The unit direction OUT of the corridor, i.e. the way the cone pushes.
-		Vector2 side;
-		if (w > 0.001f)
-		{
-			side = acrossVec / w;
+			triDist = 0f;
+			triDir = side;
 		}
 		else
 		{
-			// Dead on the centre line, so the shape itself cannot pick a side -- take the one the
-			// ship is already drifting toward, so the escape never fights its own momentum. When
-			// it is not drifting either the sign is settled deterministically, rather than left
-			// to the direction of a float rounding error.
-			side = new Vector2(0f - axis.Y, axis.X);
-			if (Vector2.Dot(side, shipVel) < 0f)
-			{
-				side = -side;
-			}
+			// Nearest point on the near side edge. The far edge can never be nearer than the
+			// near one (the ship is on this side of the axis), and behind the base the clamps
+			// land on the corners, where the circle wins anyway.
+			float edgeLenSq = MathHelper.Max((edge).LengthSquared(), 0.0001f);
+			float t = MathHelper.Clamp(Vector2.Dot(shipPos - corner, edge) / edgeLenSq, 0f, 1f);
+			Vector2 q = corner + t * edge;
+			Vector2 away = shipPos - q;
+			triDist = (away).Length();
+			triDir = (triDist > 0.001f) ? (away / triDist) : side;
 		}
-		// ---- the cone ----
-		float taperedHalf = halfWidth * MathHelper.Max(0f, 1f - ConeTaper * (u / coneLen));
-		float edgeAcross = MathHelper.Max(0f, w - taperedHalf);
-		float along = 1f - (float)Math.Pow(MathHelper.Clamp(u / coneLen, 0f, 1f), ConeFallAlong);
-		if (along > 0f)
+		// The competition: shorter distance wins = the union's distance field.
+		float dist;
+		Vector2 dir;
+		if (circleDist <= triDist)
 		{
-			float across = (edgeAcross >= acrossReach)
-				? 0f
-				: (float)Math.Pow(1f - edgeAcross / acrossReach, ConeFallAcross);
-			if (across > 0f)
-			{
-				result.ConeStrength = maxSteerStrength * ConeScale * along * across;
-				result.ConeDir = side;
-				result.ConeLength = coneLen;
-				result.ConeEdgeDist = edgeAcross;
-			}
+			dist = circleDist;
+			dir = circleDir;
 		}
-		// ---- the lane wedge ----
+		else
+		{
+			dist = triDist;
+			dir = triDir;
+		}
+		if (dist <= SweptFieldRangePx)
+		{
+			result.ConeStrength = MyMath.PowerCurve(maxSteerStrength, 0f, 2f, dist / SweptFieldRangePx);
+			result.ConeDir = dir;
+			result.ConeLength = coneLen;
+			result.ConeEdgeDist = dist;
+		}
+		// ---- the lane wedge (unchanged in spirit; its outside falloff now rides the same
+		// threat-field curve as everything else instead of a private exponent) ----
 		if (!wedgeEnabled)
 		{
 			return result;
 		}
-		// A gap only counts as an escape if the ship can survive in it: its own body, plus the
-		// distance it needs to stop, on each side. Derived from the real motion constants rather
-		// than chosen, exactly as DefaultSeekArriveDeadzonePx is.
-		float stoppingDistance = 0.5f * ShipMaxSpeed * ShipMaxSpeed / ShipDeceleration;
-		float survivableGap = 2f * (shipHalfExtent + stoppingDistance);
-		// A WEDGE IS FOR A LANE, AND A LANE IS A BAND TOO WIDE TO GO AROUND. Anything narrower
-		// than the room a ship needs is an obstacle, not a corridor: the ship can simply cross its
-		// path, so offering only ONE escape direction would be a lie -- and an 18-strength shove
-		// aimed at a bullet or a small rock drifting near the ceiling out-votes the entire rest of
-		// the field. Measured before this gate existed, every UFO in SpaceDodge was wedging (3263
-		// contributions at mean 4.25) purely for entering from the top.
-		//
-		// IT IS A SIZE THRESHOLD, NOT A "ONLY THE SPIDER BOSS" TEST, and the difference is worth
-		// knowing before reading a threats= line. The bar is ~63px of half-extent, which bullets and
-		// ordinary rocks miss and which a BIG UFO or a reallyBig asteroid clears -- so those still
-		// raise a wedge when their path hugs an edge (measured on this build: UFO(wedge) 443
-		// contributions at mean 1.81 on the spider rig, Asteroid(wedge) 296 at mean 0.98 on
-		// SpaceDodge). That is the rule working rather than leaking: a 90px-wide UFO sweeping the
-		// ceiling really does leave a gap the ship cannot cross in time. What the gate removes is
-		// the population that made the term meaningless, not every non-boss.
-		if (halfWidth < survivableGap)
+		if (u <= 0f)
 		{
 			return result;
 		}
-		// Which way is "out of the lane", if either. Measured at the cross-section the SHIP is at
-		// (`anchor + u*axis`), not at the anchor -- a mover typically enters from off-screen, and
-		// an anchor outside the play field reports zero room on its near side, which would wedge
-		// everything that ever crossed a boundary.
+		float stoppingDistance = 0.5f * ShipMaxSpeed * ShipMaxSpeed / ShipDeceleration;
+		float survivableGap = 2f * (shipHalfExtent + stoppingDistance);
+		// A wedge is for a LANE, and a lane is a band too wide to go around -- an 18-strength
+		// shove on every bullet drifting near the ceiling would out-vote the whole field. The
+		// gate keeps small movers from wedging at all.
+		if (bandHalfWidth < survivableGap)
+		{
+			return result;
+		}
+		// Which way is "out of the lane", if either -- measured at the cross-section the SHIP is
+		// at, not at the anchor (a mover typically enters from off-screen).
 		Vector2 bandPoint = anchor + u * axis;
-		Vector2 across1 = new Vector2(0f - axis.Y, axis.X);
-		float room1 = PlayfieldExitDistance(bandPoint, across1) - halfWidth;
-		float room2 = PlayfieldExitDistance(bandPoint, -across1) - halfWidth;
+		float room1 = PlayfieldExitDistance(bandPoint, perp) - bandHalfWidth;
+		float room2 = PlayfieldExitDistance(bandPoint, -perp) - bandHalfWidth;
 		Vector2 outDir;
 		if (room1 < survivableGap && room1 <= room2)
 		{
-			// Side 1 is the trap, so the escape is side 2.
-			outDir = -across1;
+			outDir = -perp;
 		}
 		else if (room2 < survivableGap)
 		{
-			outDir = across1;
+			outDir = perp;
 		}
 		else
 		{
-			// Both sides are survivable: an ordinary free mover, and the symmetric cone above is
-			// the right shape. True of a mid-screen lane as much as of an asteroid.
 			return result;
 		}
-		// The wedge runs the whole remaining length of the play field rather than the cone's
-		// speed-scaled length: the lane is lethal for its entire extent, so closing only the near
-		// stretch would invite the ship to sit in the far half of a corridor it cannot leave in
-		// time -- and the boss's "Danger!" telegraph, which is the whole warning the player gets,
-		// happens while it is still a screen away.
+		// The lane is lethal for its whole extent, so the wedge runs the remaining play field.
 		float wedgeLen = MathHelper.Max(PlayfieldExitDistance(anchor, axis), coneLen);
 		float wedgeAlong = 1f - (float)Math.Pow(MathHelper.Clamp(u / wedgeLen, 0f, 1f), LaneWedgeFallAlong);
 		if (wedgeAlong <= 0f)
 		{
 			return result;
 		}
-		// FULL strength everywhere from the trapped edge across to the far side of the band, then
-		// the cone's ordinary transverse falloff beyond it -- so the only downhill direction is
-		// OUT, and a ship that has already left is nudged rather than shoved back.
+		// Full strength across the whole band, the ordinary field falloff beyond its far edge.
 		float outward = Vector2.Dot(d, outDir);
 		float wedgeAcross;
-		if (outward <= halfWidth)
+		if (outward <= bandHalfWidth)
 		{
 			wedgeAcross = 1f;
 		}
-		else if (outward - halfWidth >= acrossReach)
+		else if (outward - bandHalfWidth >= SweptFieldRangePx)
 		{
 			wedgeAcross = 0f;
 		}
 		else
 		{
-			wedgeAcross = (float)Math.Pow(1f - (outward - halfWidth) / acrossReach, ConeFallAcross);
+			wedgeAcross = MyMath.PowerCurve(1f, 0f, 2f, (outward - bandHalfWidth) / SweptFieldRangePx);
 		}
 		if (wedgeAcross > 0f)
 		{
 			result.WedgeStrength = LaneWedgeStrength * wedgeAlong * wedgeAcross;
 			result.WedgeDir = outDir;
 			result.WedgeLength = wedgeLen;
-			result.WedgeEdgeDist = MathHelper.Max(0f, outward - halfWidth);
+			result.WedgeEdgeDist = MathHelper.Max(0f, outward - bandHalfWidth);
 		}
 		return result;
 	}

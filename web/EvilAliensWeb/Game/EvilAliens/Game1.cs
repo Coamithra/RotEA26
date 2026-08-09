@@ -1701,6 +1701,14 @@ public class Game1 : Game
 			HitboxOverlay.Draw(base.GraphicsDevice, spriteBatchWrapper, collisionHandler.Collidables);
 			spriteBatchWrapper.Flush();
 		}
+		// ?cones / eaCones(): every mover's swept repulsion shape (body circle + velocity
+		// triangle), from the same geometry the AI's steering evaluates -- the overlay half of
+		// the lap-5 unified-shape redesign. Same contract as the hitbox overlay above.
+		if (DebugFlags.ShowCones)
+		{
+			ConeOverlay.Draw(base.GraphicsDevice, spriteBatchWrapper, collisionHandler.Collidables);
+			spriteBatchWrapper.Flush();
+		}
 		if (Settings.GetInstance().HideSafeArea)
 		{
 			Rectangle safeZone = General.SafeZone;

@@ -509,6 +509,17 @@ namespace EvilAliensWeb.Compat
 			Console.WriteLine("[debug] eaHitboxes " + (on ? "ON" : "OFF"));
 		}
 
+		// JS bridge for the swept-shape debug overlay (eaCones in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugCones', on). Draws every mover's body
+		// circle + velocity triangle exactly as the AI's steering evaluates it; same as
+		// booting with ?cones but flippable live.
+		[JSInvokable("debugCones")]
+		public static void Cones(bool on)
+		{
+			DebugFlags.SetShowCones(on);
+			Console.WriteLine("[debug] eaCones " + (on ? "ON" : "OFF"));
+		}
+
 		// JS bridge for the ComponentBin lifecycle scenario suite (eaBinTest in
 		// wwwroot/index.html): DotNet.invokeMethod('EvilAliensWeb', 'debugBinTest'). Runs
 		// Compat/BinTest.Run() against the live bin and returns the PASS/FAIL report.

@@ -108,6 +108,14 @@ against oracle/architect is the value of oversight itself: any quality gap
 is what plan review + ship gates were buying, since the per-agent model here
 strictly dominates the Opus fleets'.
 
+## fable-iterative
+
+**A live conversation between the owner and one Fable session, fixing the batch iteratively.** No subagents, no fan-out: the session serves a playable build of the current state (worktree + DevServer + `?aiplayer`, branch badge stamped so the build identifies itself), the owner PLAYS it and reports observations in chat, and the session root-causes each one -- including archaeology against `src_decompiled/` (the 2008 build is the null hypothesis for structure, not just numbers) -- implements, cheap-verifies, rebuilds, and hands the URL back. Repeat until the batch's complained-about behaviors pass the couch, not just the bench.
+
+Two things distinguish it beyond the loop shape. **Acceptance is the owner's eye**: a ticket closes when the behavior it complains about visibly stops, with the bench gates as regression rails rather than as the definition of done (the 2026-08-09 playtest showed a pooled metric passing +10pt while the complained-about class stayed broken). **The owner's attended time is a first-class cost**: record owner-minutes in `notes` beside the token columns -- it is the scarcest resource in the comparison and the other strategies spend ~none of it.
+
+Hypothesis: the human perception channel finds root causes the local rigs structurally cannot (the rep-1 pilot produced two port-era root causes, cards fccb7883/f58c63fe, in one evening against four strategy runs' zero), and targeted fixes at Fable rates should cost well under solo -- at the price of owner attention, N=1 reproducibility, and a scoring contamination: the owner co-authored this cell's diffs and cannot be its blind judge (recuse, or score this cell by outcome gates only).
+
 ## Rubric (blind subjective scoring, 1–5 each)
 
 Per ticket. Judges see only the ticket text and the unlabeled diff (plus

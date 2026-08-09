@@ -548,14 +548,6 @@ public class PlayerShip : AlienDrawableGameComponent
 	// project a cone longer than the world.
 	public const float DefaultConeMaxLenPx = 800f;
 
-	// The beam's near-line boost (owner ruling, lap 9): an extra plateau stacked on the standard
-	// one over the last ~UFO-width before the line -- 8 total at the line, back on the regular
-	// curve by 30px out. A beam is instant death along its whole length; the ordinary 4 can be
-	// out-voted by a coincidence of pulls, and being out-voted here means dying.
-	public const float LazerNearBoostStrength = 4f;
-
-	public const float LazerNearBoostRangePx = 30f;
-
 	// Owner ruling (lap 11): the extended tip stays, at 2x the standard lead -- the 10x
 	// experiment saturated the 800px world cap and closed the beam's entire future path the
 	// moment it started growing, which was judged "a bit silly" from the couch.
@@ -1981,15 +1973,10 @@ public class PlayerShip : AlienDrawableGameComponent
 			else if (baddy is Lazer)
 			{
 				getDistanceToLine(baddy, out var d, out var shortestpoint);
-				// The HULL CREDIT applies to the BOOST BAND ONLY (owner ruling, lap 10 refined).
-				// The beam kills when the ship's BOX crosses the line -- ~24px of centre
-				// distance -- so the boost band is anchored at that death boundary: 8 where
-				// dying begins, gone 30px later. The BASE curve stays on the raw centre
-				// distance like every other repulsor, so beyond the band a beam pushes exactly
-				// as hard as anything else at the same geometric distance -- crediting the base
-				// too made beams a uniform 24px wider than the fleet, the very global widening
-				// the owner declined.
-				float dBoost = MathHelper.Max(d - AiHalfExtent(), 0f);
+				// The near-line boost band that used to sit here (lap 9's 8-at-the-line summit
+				// over the last hull-credited 30px) was REMOVED by owner ruling (lap 11, "that's
+				// jank") -- a beam is now the plain standard treatment on the line distance, and
+				// making beams scarier is ?ailazerstrength='s job, not extra geometry's.
 				// A live beam is instant death along its whole length. The port widened this berth
 				// past the 2008 flat 150px and card 2248e5eb measured that back off again: the
 				// wider field pushed the ship off the beam and into whatever was behind it. See
@@ -2003,17 +1990,6 @@ public class PlayerShip : AlienDrawableGameComponent
 				if (lazerRange > 0f && d <= lazerRange)
 				{
 					lineStrength = FieldCurve(LazerAvoidStrength, d / lazerRange);
-					// THE NEAR-LINE BOOST (owner ruling, lap 9): a beam is guaranteed death, and
-					// flying into one is not something the bot should ever be talked into -- so
-					// the last ~30px before the line carry a SECOND summit stacked on the first:
-					// 8 at the line, blending back onto the regular curve by 30px out (the
-					// regular curve still reads ~2.56 there), identical to every other threat
-					// beyond. Same family, same arithmetic -- just a steeper summit where the
-					// cliff is.
-					if (dBoost < LazerNearBoostRangePx)
-					{
-						lineStrength += FieldCurve(LazerNearBoostStrength, dBoost / LazerNearBoostRangePx);
-					}
 					if (altSteering)
 					{
 						lineStrength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, d / lazerRange);
@@ -2669,11 +2645,6 @@ public class PlayerShip : AlienDrawableGameComponent
 			if (lazerRange > 0f && d <= lazerRange)
 			{
 				lineStrength = FieldCurve(LazerAvoidStrength, d / lazerRange);
-				float dBoost = MathHelper.Max(d - ship.AiHalfExtent(), 0f);
-				if (dBoost < LazerNearBoostRangePx)
-				{
-					lineStrength += FieldCurve(LazerNearBoostStrength, dBoost / LazerNearBoostRangePx);
-				}
 			}
 			tipVel *= LazerTipLeadScale;
 			SweptShape tipShape = EvaluateSweptShape(pos, tip, tipVel,

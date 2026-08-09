@@ -492,8 +492,6 @@ public class PlayerShip : AlienDrawableGameComponent
 	// CrazyGame deaths 6.19 -> 7.75 and SpiderBoss(standing) deaths 41 -> 53. Steeper mountains
 	// HERE, rather than a special case that stops the bot wanting the powerup at all -- threat
 	// awareness belongs in the repellent's shape, never in a gate on another force.
-	public const float DefaultAsteroidThreatScale = 1f;
-
 	// The other two axes of the SAME per-type field (card ada9e839). Magnitude alone only makes
 	// the same short mountain taller, which is what ejected the ship out of the belt into the
 	// UFO traffic around it; RANGE and FALLOFF change its SHAPE. A wider, shallower asteroid
@@ -505,10 +503,6 @@ public class PlayerShip : AlienDrawableGameComponent
 	// falloff-shaped strength with a linear Lerp, so under it ?aiasteroidfall= does nothing while
 	// ?aiasteroidscale= still bites. Harmless today -- `altSteering` is a dead 2008 local that is
 	// never set true -- but a sweep run under a revived alt path would be measuring half a config.
-	public const float DefaultAsteroidRangeScale = 1f;
-
-	public const float DefaultAsteroidFalloff = DefaultThreatFieldFalloff;
-
 	// ---- DIRECTIONAL REPELLENT SHAPES: the velocity cone and the lane wedge (card e425781b) ----
 	//
 	// WHAT PROBLEM THIS SOLVES, because three attempts at the obvious answer failed first. A
@@ -595,12 +589,6 @@ public class PlayerShip : AlienDrawableGameComponent
 	private static float LaneWedgeStrength => EvilAliensWeb.Compat.DebugFlags.AiLaneWedgeStrength ?? DefaultLaneWedgeStrength;
 
 	private static float LaneWedgeFallAlong => EvilAliensWeb.Compat.DebugFlags.AiLaneWedgeFallAlong ?? DefaultLaneWedgeFallAlong;
-
-	private static float ThreatFieldBasePx => EvilAliensWeb.Compat.DebugFlags.AiThreatFieldPx ?? Skill.FieldPx;
-
-	private static float ThreatFieldSizeScale => EvilAliensWeb.Compat.DebugFlags.AiThreatFieldSize ?? DefaultThreatFieldSizeScale;
-
-	private static float ThreatFieldFalloff => EvilAliensWeb.Compat.DebugFlags.AiThreatFieldFalloff ?? DefaultThreatFieldFalloff;
 
 	// ---- per-difficulty AI skill (card c10e3e7f) -------------------------------------------
 	// One bot drives the attract demos, the Mechanical Friends cheat and ?aiplayer, and until
@@ -724,7 +712,8 @@ public class PlayerShip : AlienDrawableGameComponent
 	// tier. This is the only non-confounded observation of it.
 	internal static void GetAiSkillReadout(out float fieldPx, out float aimRad)
 	{
-		fieldPx = ThreatFieldBasePx;
+		// The field is the flat standard 150 for everything now (owner ruling, lap 7).
+		fieldPx = SweptFieldRangePx;
 		aimRad = AimSpread;
 	}
 
@@ -1890,7 +1879,7 @@ public class PlayerShip : AlienDrawableGameComponent
 					// fading out toward the clearance edge. A flat push across the band was tried
 					// and it fights the screen bounds all the way out instead of easing off once
 					// the ship is clearly out of the way.
-					float urge = ThreatFieldStrength(Math.Abs(offLane) / VerticalLaneClearancePx, SweepLaneAvoidStrength);
+					float urge = MyMath.PowerCurve(SweepLaneAvoidStrength, 0f, 2f, Math.Abs(offLane) / VerticalLaneClearancePx);
 					repel += new Vector2(away * urge, 0f);
 				}
 			}
@@ -1914,7 +1903,7 @@ public class PlayerShip : AlienDrawableGameComponent
 					// Steep falloff, like every other field here: hardest on the centre line and
 					// easing off as the ship clears the band, so it hands over cleanly to the
 					// screen-edge terms instead of shoving all the way into them.
-					float urge = ThreatFieldStrength(Math.Abs(offLane) / SweepLaneClearancePx, SweepLaneAvoidStrength);
+					float urge = MyMath.PowerCurve(SweepLaneAvoidStrength, 0f, 2f, Math.Abs(offLane) / SweepLaneClearancePx);
 					repel += new Vector2(0f, away * urge);
 				}
 			}
@@ -1963,7 +1952,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				float lazerRange = LazerAvoidRangePx;
 				if (lazerRange > 0f && d <= lazerRange)
 				{
-					float strength = ThreatFieldStrength(d / lazerRange, LazerAvoidStrength);
+					float strength = MyMath.PowerCurve(LazerAvoidStrength, 0f, 2f, d / lazerRange);
 					if (altSteering)
 					{
 						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, d / lazerRange);
@@ -2026,21 +2015,21 @@ public class PlayerShip : AlienDrawableGameComponent
 					continue;
 				}
 				float dist = ThreatEdgeDistance(base.Position, baddy);
-				// Personal-space field, sized to the THREAT (card f4d1721f). The 2008 code gave
-				// everything the same flat 150px, which is nothing to something the size of the
-				// spider boss -- by the time it pushed at all the ship was already inside the
-				// hitbox. `dist` is edge distance, so this is clearance the AI wants BEYOND the
-				// thing's own hull, and it scales with how big the hull is.
-				float field = ThreatFieldRange(baddy);
-				if (dist <= field)
+				// THE STANDARD FIELD, FLAT (owner ruling, lap 7 -- the full return to 2008):
+				// 150px beyond the body's edge, 4 -> 0 on the quadratic plateau, for EVERY
+				// stationary threat regardless of size -- a big thing's field starts further out
+				// because its edge is further out, never because it is wider. This is the swept
+				// capsule at speed zero, so the whole threat system is one rule; the size-scaled
+				// range (150 + 1.8*half-extent) and the per-type curve/falloff switches are gone
+				// with their flags.
+				if (dist <= SweptFieldRangePx)
 				{
-					float strength = ThreatFieldStrength(dist / field, maxSteerStrength, ThreatTypeFalloff(baddy), ThreatTypeClassicCurve(baddy));
+					float strength = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, dist / SweptFieldRangePx);
 					if (altSteering)
 					{
-						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, dist / field);
+						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, dist / SweptFieldRangePx);
 					}
-					strength *= ThreatTypeScale(baddy);
-					EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy, EvilAliensWeb.Compat.AiBench.ThreatPath.Field, strength, field, dist);
+					EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy, EvilAliensWeb.Compat.AiBench.ThreatPath.Field, strength, SweptFieldRangePx, dist);
 					repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - baddy.Position) + dodgeAngle);
 				}
 			}
@@ -2120,9 +2109,8 @@ public class PlayerShip : AlienDrawableGameComponent
 			// Gun range is a CENTRE distance (it is what DoAIFire range-tests), so the body term
 			// converts it into the edge space everything here is measured in.
 			float anchorPx = bulletlifetime * BulletRangePerMs - ThreatBodyTerm(haltingBoss);
-			float pull = BossApproachWeight(bossEdgeDist, anchorPx, ThreatFieldRange(haltingBoss),
-				ThreatTypeFalloff(haltingBoss), ThreatTypeClassicCurve(haltingBoss),
-				ThreatTypeScale(haltingBoss), maxSteerStrength, SteerNoiseFloor) * BossApproachScale;
+			float pull = BossApproachWeight(bossEdgeDist, anchorPx, SweptFieldRangePx,
+				DefaultThreatFieldFalloff, classic: true, 1f, maxSteerStrength, SteerNoiseFloor) * BossApproachScale;
 			// The bench call is UNCONDITIONAL -- the term's calibration is what it measures, and a
 			// tick where the boss lost the vote is exactly the tick worth counting.
 			EvilAliensWeb.Compat.AiBench.NoteBossApproach(this, bossEdgeDist,
@@ -2471,7 +2459,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			strength = MathHelper.Max(strength, ThreatPanicStrength);
 		}
-		strength *= ThreatTypeScale(baddy);
+
 		EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy, EvilAliensWeb.Compat.AiBench.ThreatPath.Evade, strength);
 		repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(side) + dodgeAngle);
 		return true;
@@ -2581,17 +2569,16 @@ public class PlayerShip : AlienDrawableGameComponent
 		}
 		SweptShape shape = EvaluateSweptShape(base.Position, anchor, velocity,
 			ThreatBodyTerm(baddy), halfWidth, AiHalfExtent(), maxSteerStrength, LaneWedgeEnabled);
-		float typeScale = ThreatTypeScale(baddy);
 		if (shape.ConeStrength > 0f)
 		{
-			float strength = shape.ConeStrength * typeScale;
+			float strength = shape.ConeStrength;
 			EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy,
 				EvilAliensWeb.Compat.AiBench.ThreatPath.Cone, strength, shape.ConeLength, shape.ConeEdgeDist);
 			repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(shape.ConeDir) + dodgeAngle);
 		}
 		if (shape.WedgeStrength > 0f)
 		{
-			float strength = shape.WedgeStrength * typeScale;
+			float strength = shape.WedgeStrength;
 			EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy,
 				EvilAliensWeb.Compat.AiBench.ThreatPath.Wedge, strength, shape.WedgeLength, shape.WedgeEdgeDist);
 			repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(shape.WedgeDir) + dodgeAngle);
@@ -2806,50 +2793,10 @@ public class PlayerShip : AlienDrawableGameComponent
 	// Per-type repellent multiplier. One switch, applied to BOTH repulsion paths (the radial
 	// field and EvadeMovingThreat), so a type cannot end up scaled on one and not the other --
 	// which on an asteroid would be a silent half-fix, since the belt uses both.
-	private static float ThreatTypeScale(AlienDrawableGameComponent baddy)
-	{
-		if (baddy is Asteroid)
-		{
-			return EvilAliensWeb.Compat.DebugFlags.AiAsteroidThreatScale ?? DefaultAsteroidThreatScale;
-		}
-		return 1f;
-	}
-
 	// Per-type RANGE multiplier, folded into ThreatFieldRange so every caller agrees on how big
 	// the field is -- `dist <= field` and `dist / field` must be the same field or the falloff is
 	// evaluated against a range the gate never used.
-	private static float ThreatTypeRangeScale(AlienDrawableGameComponent baddy)
-	{
-		if (baddy is Asteroid)
-		{
-			return EvilAliensWeb.Compat.DebugFlags.AiAsteroidRangeScale ?? DefaultAsteroidRangeScale;
-		}
-		return 1f;
-	}
-
 	// Per-type FALLOFF exponent. Falls back to the global one for every type that has no override.
-	private static float ThreatTypeFalloff(AlienDrawableGameComponent baddy)
-	{
-		if (baddy is Asteroid)
-		{
-			return EvilAliensWeb.Compat.DebugFlags.AiAsteroidFalloff ?? DefaultAsteroidFalloff;
-		}
-		return ThreatFieldFalloff;
-	}
-
-	private static float ThreatFieldRange(AlienDrawableGameComponent baddy)
-	{
-		// A per-type ABSOLUTE range replaces the size-scaled formula outright -- that is what the
-		// 2008 field was: a flat 150px for everything, regardless of how big it is. Both are
-		// measured the same way (EDGE distance; the original subtracted Width/2*sqrt2 exactly as
-		// this port does), so the two are directly comparable.
-		float flat = (baddy is Asteroid)
-			? (EvilAliensWeb.Compat.DebugFlags.AiAsteroidFlatRangePx ?? 0f)
-			: 0f;
-		float baseRange = (flat > 0f) ? flat : (ThreatFieldBasePx + ThreatRadius(baddy) * ThreatFieldSizeScale);
-		return baseRange * ThreatTypeRangeScale(baddy);
-	}
-
 	// Strength across that field: FULL up close, dropping away fast so the outer half is
 	// effectively free. That combination is the point -- a big field with a gentle falloff would
 	// be a no-go zone the ship could never enter, and it still has to fly in close to shoot and
@@ -2858,11 +2805,6 @@ public class PlayerShip : AlienDrawableGameComponent
 	// Deliberately NOT MyMath.PowerCurve: that is `max * (1 - t^p)`, whose falloff gets SHALLOWER
 	// as p rises (p=4 still pushes at 34% strength at 90% of the range). This is `max * (1-t)^p`,
 	// which is the shape the name "falloff" implies -- p=3 is down to 12% at half range.
-	private static float ThreatFieldStrength(float t, float maxSteerStrength)
-	{
-		return ThreatFieldStrength(t, maxSteerStrength, ThreatFieldFalloff, ClassicFieldCurve);
-	}
-
 	// THE TWO CURVE FAMILIES ARE DIFFERENT SHAPES, NOT DIFFERENT EXPONENTS (card e88e21ca).
 	//   classic (2008): max * (1 - t^2)  -- MyMath.PowerCurve. A fat PLATEAU: 75% strength at half
 	//                   range, still 36% at 80%. The whole field pushes.
@@ -2885,19 +2827,7 @@ public class PlayerShip : AlienDrawableGameComponent
 	// CLASSIC IS THE DEFAULT AGAIN (owner ruling, iterative rep 1): every threat field and the
 	// beam term run 2008's plateau. The spike family stays reachable via ?aifieldcurve=port
 	// (?aifieldfall= only shapes that arm).
-	private static bool ClassicFieldCurve => EvilAliensWeb.Compat.DebugFlags.AiClassicFieldCurve ?? true;
-
 	// Per-type curve family, falling back to the global switch.
-	private static bool ThreatTypeClassicCurve(AlienDrawableGameComponent baddy)
-	{
-		if (baddy is Asteroid)
-		{
-			return EvilAliensWeb.Compat.DebugFlags.AiAsteroidClassicCurve
-				?? EvilAliensWeb.Compat.DebugFlags.AiClassicFieldCurve ?? true;
-		}
-		return ClassicFieldCurve;
-	}
-
 	// The boss-approach attractor, solved (card b56633fb). PURE -- primitives in, weight out, no
 	// ship and no component -- so logic_probe can sweep it over every difficulty tier and the whole
 	// bulletlifetime range with no game running. See BossApproachExponent for the shape argument.

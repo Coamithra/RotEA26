@@ -665,9 +665,6 @@ internal static class Program
             new { Flag = "aithreatlead",   Prop = "AiThreatLeadMs",        Good = "555", Want = (object)555f,  Baked = "700"  },
             new { Flag = "aibossbias",     Prop = "AiPriorityBias",        Good = "0.75",Want = (object)0.75f, Baked = "0.45" },
             new { Flag = "aiaim",          Prop = "AiAimSpreadRad",        Good = "2",   Want = (object)2f,    Baked = ""     },
-            new { Flag = "aifieldpx",      Prop = "AiThreatFieldPx",       Good = "321", Want = (object)321f,  Baked = ""     },
-            new { Flag = "aifieldsize",    Prop = "AiThreatFieldSize",     Good = "6",   Want = (object)6f,    Baked = "1.8"  },
-            new { Flag = "aifieldfall",    Prop = "AiThreatFieldFalloff",  Good = "8",   Want = (object)8f,    Baked = "3"    },
             new { Flag = "aiff",           Prop = "AiFastForward",         Good = "7",   Want = (object)7,     Baked = ""     },
             new { Flag = "aiseekpowerup",  Prop = "AiSeekPowerupWeight",  Good = "2.5", Want = (object)2.5f,  Baked = "0.8"  },
             new { Flag = "aiseekapproach", Prop = "AiSeekApproachWeight", Good = "2.6", Want = (object)2.6f,  Baked = "1.1"  },
@@ -766,20 +763,15 @@ internal static class Program
             negatives + "/" + (rows.Length - 1) + " (?aiff has no range guard -- it clamps)"
             + (badNeg != null ? "; " + badNeg : ""));
 
-        // ?aiaim and ?aifieldpx resolve through PlayerShip.AiSkillByDifficulty at PLAY time, off a
-        // difficulty this parse has not settled, so with no override standing there is no number to
-        // name -- and a diagnostic that can state the wrong condition is worse than one that states
-        // none. They must say which table is in force instead. (With an override standing they name
-        // it like the rest, which the table above already covered.)
+        // ?aiaim resolves through the fixed skill row at PLAY time, so with no override standing
+        // there is no number to name -- the message must say which mechanism is in force instead.
+        // (?aifieldpx died with the size-scaled range, lap 7 -- the field is the flat 150.)
         set("AiAimSpreadRad", null);
-        set("AiThreatFieldPx", null);
         string outAim = run("?aiaim=xx");
-        string outPx = run("?aifieldpx=xx");
-        Check("skill knobs name the SKILL ROW when no override stands",
-            get("AiAimSpreadRad") == null && get("AiThreatFieldPx") == null
-            && outAim.Contains("staying on the fixed skill row")
-            && outPx.Contains("staying on the fixed skill row"),
-            "aiaim said: " + FirstLine(outAim) + " | aifieldpx said: " + FirstLine(outPx));
+        Check("the aim knob names the SKILL ROW when no override stands",
+            get("AiAimSpreadRad") == null
+            && outAim.Contains("staying on the fixed skill row"),
+            "aiaim said: " + FirstLine(outAim));
 
         // Hand the process back as it was found. Parse can only ASSIGN, so a Probe* added after
         // this one would otherwise inherit fourteen overrides with no way to reach the defaults.

@@ -1458,27 +1458,15 @@ namespace EvilAliensWeb.Compat
 
 		public static float? AiPowerupReachPx { get; private set; }
 
-		public static float? AiThreatFieldPx { get; private set; }
-
-		public static float? AiThreatFieldSize { get; private set; }
-
-		public static float? AiThreatFieldFalloff { get; private set; }
-
 		// ?aiasteroidscale=<f>  per-type repellent multiplier for ASTEROIDS only (card ada9e839).
 		//                       The belt is the one place a dense field of lethal obstacles has to
 		//                       out-argue an ordinary powerup detour, and a GLOBAL falloff change
 		//                       was already measured and declined elsewhere.
-		public static float? AiAsteroidThreatScale { get; private set; }
-
 		// ?aiasteroidrange=<f>  multiplier on the asteroid field's RANGE, and
 		// ?aiasteroidfall=<p>   the asteroid field's own falloff exponent (lower = earlier and
 		//                       gentler). The shape axes to ?aiasteroidscale='s magnitude axis --
 		//                       a taller mountain of the same width shoves the ship out of the
 		//                       belt, a wider shallower one leans on it the whole way across.
-		public static float? AiAsteroidRangeScale { get; private set; }
-
-		public static float? AiAsteroidFalloff { get; private set; }
-
 		// ?aifieldcurve=classic      restore the 2008 threat-field SHAPE, max*(1-t^2), globally;
 		// ?aiasteroidcurve=classic   the same for ASTEROIDS only (wins over the global switch);
 		// ?aiasteroidflatpx=<px>     replace the asteroid field's size-scaled range with a flat
@@ -1486,12 +1474,6 @@ namespace EvilAliensWeb.Compat
 		// The port swapped a PLATEAU for a SPIKE (75% vs 12% strength at half range) and
 		// ?aifieldfall= only ever swept the exponent inside the port's family, so the original
 		// shape had never been measured. Card e88e21ca.
-		public static bool? AiClassicFieldCurve { get; private set; }
-
-		public static bool? AiAsteroidClassicCurve { get; private set; }
-
-		public static float? AiAsteroidFlatRangePx { get; private set; }
-
 		// ?aievade=0  turn OFF EvadeMovingThreat, the closest-approach path, so every threat is
 		//             handled by the radial field alone. Card ada9e839's measurement seam -- that
 		//             special case was measured under the 0.95 park and never inside the field
@@ -3105,70 +3087,6 @@ namespace EvilAliensWeb.Compat
 							InForce(AiSweptMaxSpeedPxPerMs ?? Net.NetSession.MaxObservedSpeedPxPerMs));
 					}
 					break;
-				case "aifieldcurve":
-				case "aiasteroidcurve":
-					if (val == "classic" || val == "port")
-					{
-						if (key == "aifieldcurve")
-						{
-							AiClassicFieldCurve = val == "classic";
-						}
-						else
-						{
-							AiAsteroidClassicCurve = val == "classic";
-						}
-					}
-					else
-					{
-						// The global family ships classic now (owner ruling); the asteroid
-						// override's null still means "follow the global".
-						RejectFlagValue(key, val, "classic/port",
-							((key == "aifieldcurve" ? (AiClassicFieldCurve ?? true) : (AiAsteroidClassicCurve ?? AiClassicFieldCurve ?? true))) ? "classic" : "port");
-					}
-					break;
-				case "aiasteroidflatpx":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiafp) && aiafp > 0f)
-					{
-						AiAsteroidFlatRangePx = MathHelper.Min(aiafp, 2000f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number > 0", InForce(AiAsteroidFlatRangePx));
-					}
-					break;
-				case "aiasteroidrange":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiar) && aiar > 0f)
-					{
-						AiAsteroidRangeScale = MathHelper.Min(aiar, 20f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number > 0",
-							InForce(AiAsteroidRangeScale ?? EvilAliens.PlayerShip.DefaultAsteroidRangeScale));
-					}
-					break;
-				case "aiasteroidfall":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiaf) && aiaf >= 0f)
-					{
-						AiAsteroidFalloff = MathHelper.Min(aiaf, 20f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiAsteroidFalloff ?? EvilAliens.PlayerShip.DefaultAsteroidFalloff));
-					}
-					break;
-				case "aiasteroidscale":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiast) && aiast >= 0f)
-					{
-						AiAsteroidThreatScale = MathHelper.Min(aiast, 20f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiAsteroidThreatScale ?? EvilAliens.PlayerShip.DefaultAsteroidThreatScale));
-					}
-					break;
 				case "aiseekdeadzone":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aisdz) && aisdz >= 0f)
 					{
@@ -3222,42 +3140,6 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(AiPowerupReachPx ?? EvilAliens.PlayerShip.DefaultPowerupReachPx));
-					}
-					break;
-				case "aifieldpx":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aifp) && aifp >= 0f)
-					{
-						AiThreatFieldPx = MathHelper.Min(aifp, 800f);
-					}
-					else
-					{
-						// Per-tier, like ?aiaim above (PlayerShip.ThreatFieldBasePx => Skill.FieldPx).
-						RejectFlagValue(key, val, "a number >= 0",
-							AiThreatFieldPx.HasValue ? InForce(AiThreatFieldPx.Value) : "the fixed skill row");
-					}
-					break;
-				case "aifieldsize":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aifs) && aifs >= 0f)
-					{
-						AiThreatFieldSize = MathHelper.Min(aifs, 10f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiThreatFieldSize ?? EvilAliens.PlayerShip.DefaultThreatFieldSizeScale));
-					}
-					break;
-				case "aifieldfall":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiff2) && aiff2 > 0f)
-					{
-						AiThreatFieldFalloff = MathHelper.Min(aiff2, 12f);
-					}
-					else
-					{
-						// STRICTLY > 0 (it is the exponent of a (1-t)^p falloff), so 0 is rejected
-						// here where it is a legitimate floor for most of the family.
-						RejectFlagValue(key, val, "a number > 0",
-							InForce(AiThreatFieldFalloff ?? EvilAliens.PlayerShip.DefaultThreatFieldFalloff));
 					}
 					break;
 				case "aitopedgepx":

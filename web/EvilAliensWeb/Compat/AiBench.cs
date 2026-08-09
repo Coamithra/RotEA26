@@ -747,7 +747,7 @@ internal static class AiBench
 		PlayerShip.GetAiSkillReadout(out float fieldPx, out float aimRad);
 		sb.Append("  skill effective=").Append(Settings.GetInstance().EffectiveDifficulty);
 		sb.Append(" field=").Append(Fmt(fieldPx, 0)).Append("px");
-		sb.Append((DebugFlags.AiThreatFieldPx.HasValue ? "*" : ""));
+		// (the field override flag died with the size-scaled range -- lap 7)
 		sb.Append(" aim=").Append(Fmt(MathHelper.ToDegrees(aimRad), 1)).Append("deg");
 		sb.Append((DebugFlags.AiAimSpreadRad.HasValue ? "*" : "")).Append('\n');
 		return sb.ToString();

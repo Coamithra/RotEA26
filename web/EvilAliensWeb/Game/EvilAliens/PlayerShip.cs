@@ -2511,18 +2511,16 @@ public class PlayerShip : AlienDrawableGameComponent
 			return false;
 		}
 		// THE STEERING LOOP'S OWN GATES, mirrored, so the overlay draws exactly what the AI
-		// avoids and nothing else: Wall takes the grid-nav branch (no swept shape), a beam's
-		// SEGMENT is the distance-to-line field (not drawn here) but its GROWING TIP carries the
-		// swept shape the steering now evaluates, and everything else must be collide-active AND
-		// a genuine threat. Without this the overlay drew shapes on the player's own bullets and
-		// on spent explosions -- things the steering never sees (iterative rep 1 sighting).
-		if (baddy is Wall || !baddy.Collides || !IsAiThreat(baddy))
-		{
-			return false;
-		}
+		// avoids and nothing else. ORDER MATTERS AND BIT ONCE (owner catch, iterative rep 1):
+		// the beam must be tested BEFORE the IsAiThreat gate, because the steering handles
+		// Lazer in its own dedicated branch and the predicate deliberately does not list it --
+		// gating first silently deleted every tip shape from the overlay while the steering
+		// pushed away regardless. Wall stays excluded (grid nav, no swept shape); everything
+		// generic must be collide-active AND a genuine threat, which is what keeps the player's
+		// own bullets and spent explosions dark.
 		if (baddy is Lazer beam)
 		{
-			if (!ConeEnabled || !beam.TryGetAiTipMotion(out anchor, out var tipVel))
+			if (!beam.Collides || !beam.TryGetAiTipMotion(out anchor, out var tipVel))
 			{
 				return false;
 			}
@@ -2532,6 +2530,10 @@ public class PlayerShip : AlienDrawableGameComponent
 				? anchor
 				: anchor + tipVel / tipSpeed * SweptConeLength(tipSpeed, radius);
 			return true;
+		}
+		if (baddy is Wall || !baddy.Collides || !IsAiThreat(baddy))
+		{
+			return false;
 		}
 		radius = MathHelper.Max(ThreatBodyTerm(baddy), 1f);
 		// A threat with NO swept path -- truly motionless (the scroll pauses during Level 2's

@@ -1955,6 +1955,14 @@ public class PlayerShip : AlienDrawableGameComponent
 			else if (baddy is Lazer)
 			{
 				getDistanceToLine(baddy, out var d, out var shortestpoint);
+				// THE SHIP'S OWN BODY EATS THE WARNING BAND (owner diagnosis, lap 10). The beam
+				// kills when the ship's BOX crosses the line -- at ~24px of centre distance (the
+				// 48px-wide player box) -- while `d` is measured from the CENTRE. Unshifted, the
+				// near-line boost lived almost entirely inside the death zone and the last
+				// useful decision point (24px hull + 11.3px stopping) read the plain curve.
+				// Subtracting the half-extent anchors every beam number at the DEATH BOUNDARY:
+				// the boost's 8 now exists exactly where dying begins.
+				d = MathHelper.Max(d - AiHalfExtent(), 0f);
 				// A live beam is instant death along its whole length. The port widened this berth
 				// past the 2008 flat 150px and card 2248e5eb measured that back off again: the
 				// wider field pushed the ship off the beam and into whatever was behind it. See

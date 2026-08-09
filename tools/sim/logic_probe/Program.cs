@@ -1383,7 +1383,9 @@ internal static class Program
         const float Speed = 0.38f;   // an asteroid
         const float BodyR = 30f;
         float leadMs = (float)ship.GetField("DefaultConeLeadMs", anyStatic).GetRawConstantValue();
-        float coneLen = Speed * leadMs; // 266px at the shipped 700ms
+        // Length is SIZE-SCALED (owner ruling): speed x lead x (bodyRadius / the UFO reference).
+        float refR = (float)ship.GetField("ConeLeadRefRadiusPx", anyStatic).GetRawConstantValue();
+        float coneLen = Speed * leadMs * (BodyR / refR); // ~133px at 233ms, r30 vs ref20
 
         // 1. BEHIND THE MOVER: the circle candidate wins and IS the radial field -- the standard
         // curve on |p - anchor| - r, pushing dead-radial (away from the mover, -X here).

@@ -527,14 +527,18 @@ public class PlayerShip : AlienDrawableGameComponent
 	// out of the same evaluation with no per-type code, because a fast mover automatically
 	// projects a long cone. See AddSweptRepellent.
 
-	// Cone LENGTH per unit speed, as a time horizon: length = speed * this, so it scales with
-	// speed by construction. Deliberately the SAME 700ms as DefaultThreatLeadMs rather than a new
-	// number -- that is the already-swept "how far ahead is a moving threat worth reacting to"
-	// horizon (card 21bb6849 measured a broad optimum around it on CrazyGame), and this is the
-	// same question asked by a shape instead of by a special case. At an asteroid's 0.38px/ms it
-	// is 266px of closed lane, against a ship that covers 231px in the same time -- i.e. the
-	// warning arrives while the escape is still affordable.
-	public const float DefaultConeLeadMs = DefaultThreatLeadMs;
+	// Cone LENGTH: `speed * lead * (bodyRadius / ref)` -- a time horizon SCALED BY THE MOVER'S
+	// SIZE (owner ruling, iterative rep 1 lap 5). The reference is the regular UFO's ~20px body
+	// term (bench-derived: its field range read r176 = 150 + 1.8 * 14.4 half-extent, x sqrt2),
+	// and the lead is cut from the inherited 700ms to a third so the regular UFO's cone lands at
+	// ~33% of its pre-ruling length. So: a mover the UFO's size projects `speed * 233ms`, one
+	// N times its size projects N times that, and a bullet's needle nearly vanishes (its body
+	// barely exists -- the circle and the standard field carry it). ?aiconelead= still sweeps
+	// the time constant live.
+	public const float DefaultConeLeadMs = 233f;
+
+	// The size reference the length ratio is taken against (the regular UFO's body term).
+	public const float ConeLeadRefRadiusPx = 20f;
 
 	// Ceiling on that length. 800 is the design field's own width, past which the shape is off
 	// screen and cannot describe anything; it exists so a very fast mover (a bullet) does not
@@ -2476,6 +2480,14 @@ public class PlayerShip : AlienDrawableGameComponent
 	// The one field parameter of the swept shape: the 2008 steerRange, verbatim.
 	private const float SweptFieldRangePx = 150f;
 
+	// The triangle's length, in ONE place so the steering and the ?cones overlay can never
+	// disagree: speed x lead, scaled by the mover's size against the UFO reference, capped at
+	// the world-sized ceiling. See DefaultConeLeadMs for the ruling and the numbers.
+	private static float SweptConeLength(float speed, float bodyRadius)
+	{
+		return MathHelper.Min(speed * ConeLeadMs * (bodyRadius / ConeLeadRefRadiusPx), ConeMaxLenPx);
+	}
+
 	// The swept shape's GEOMETRY for one mover, exactly as the steering will evaluate it this
 	// tick -- the ?cones overlay draws precisely this, so the picture and the force can never
 	// drift apart. False for everything AddSweptRepellent would skip (cones off, no path,
@@ -2509,7 +2521,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			return false;
 		}
 		radius = MathHelper.Max(ThreatBodyTerm(baddy), 1f);
-		apex = anchor + velocity / speed * MathHelper.Min(speed * ConeLeadMs, ConeMaxLenPx);
+		apex = anchor + velocity / speed * SweptConeLength(speed, radius);
 		return true;
 	}
 
@@ -2606,8 +2618,8 @@ public class PlayerShip : AlienDrawableGameComponent
 			return result;
 		}
 		Vector2 axis = velocity / speed;
-		float coneLen = MathHelper.Min(speed * ConeLeadMs, ConeMaxLenPx);
 		float r = MathHelper.Max(bodyRadius, 1f);
+		float coneLen = SweptConeLength(speed, r);
 		Vector2 d = shipPos - anchor;
 		float dlen = (d).Length();
 		// Candidate 1: the circle.

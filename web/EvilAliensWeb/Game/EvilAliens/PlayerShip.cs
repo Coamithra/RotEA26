@@ -539,6 +539,19 @@ public class PlayerShip : AlienDrawableGameComponent
 	// project a cone longer than the world.
 	public const float DefaultConeMaxLenPx = 800f;
 
+	// The beam's near-line boost (owner ruling, lap 9): an extra plateau stacked on the standard
+	// one over the last ~UFO-width before the line -- 8 total at the line, back on the regular
+	// curve by 30px out. A beam is instant death along its whole length; the ordinary 4 can be
+	// out-voted by a coincidence of pulls, and being out-voted here means dying.
+	public const float LazerNearBoostStrength = 4f;
+
+	public const float LazerNearBoostRangePx = 30f;
+
+	// OWNER EXPERIMENT (lap 9): the beam tip's cone projected 10x the standard lead -- at the
+	// tip's 0.4-0.8 px/ms that saturates the 800px world cap, i.e. the beam's ENTIRE future
+	// path is closed the moment it starts growing. Judged from the couch; bake to 1 to retire.
+	public const float LazerTipLeadScale = 10f;
+
 	// THE MESA IS GONE (owner redesign, iterative rep 1 lap 5). The cone used to be a bespoke
 	// field -- separate along/across falloff exponents, a taper, a magnitude scale, a flat
 	// 300px skirt with an optional size-scaled variant -- seven knobs, each individually swept.
@@ -1953,6 +1966,17 @@ public class PlayerShip : AlienDrawableGameComponent
 				if (lazerRange > 0f && d <= lazerRange)
 				{
 					float strength = MyMath.PowerCurve(LazerAvoidStrength, 0f, 2f, d / lazerRange);
+					// THE NEAR-LINE BOOST (owner ruling, lap 9): a beam is guaranteed death, and
+					// flying into one is not something the bot should ever be talked into -- so
+					// the last ~30px before the line carry a SECOND plateau stacked on the first:
+					// 8 at the line, blending back onto the regular curve by 30px out (the
+					// regular curve still reads ~3.84 there), identical to every other threat
+					// beyond. Same family, same arithmetic -- just a steeper summit where the
+					// cliff is.
+					if (d < LazerNearBoostRangePx)
+					{
+						strength += MyMath.PowerCurve(LazerNearBoostStrength, 0f, 2f, d / LazerNearBoostRangePx);
+					}
 					if (altSteering)
 					{
 						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, d / lazerRange);
@@ -1969,6 +1993,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				// does not apply to a lengthwise front).
 				if (ConeEnabled && ((Lazer)baddy).TryGetAiTipMotion(out Vector2 lazerTip, out Vector2 tipVel))
 				{
+					tipVel *= LazerTipLeadScale;
 					SweptShape tipShape = EvaluateSweptShape(base.Position, lazerTip, tipVel,
 						ConeLeadRefRadiusPx, ConeLeadRefRadiusPx, AiHalfExtent(), maxSteerStrength, wedgeEnabled: false);
 					if (tipShape.ConeStrength > 0f)
@@ -2105,7 +2130,14 @@ public class PlayerShip : AlienDrawableGameComponent
 		// Placed after the powerup pass so a boss fight outranks a pickup detour.
 		if (haltingBoss != null)
 		{
-			float bossEdgeDist = ThreatEdgeDistance(base.Position, haltingBoss, out _);
+			// The approach term's distance stays in the CENTRE-minus-body space its anchor is
+			// solved in (gun range - ThreatBodyTerm) -- feeding it the lap-8 rect-based distance
+			// mixed units and shifted the crossing off firing range (caught by
+			// ai_boss_approach.txt's bossfar bound). The true-shape field above still protects
+			// with the real rectangle; this is the seek's own 1-D solve, and both sides of a
+			// solve must measure with the same ruler.
+			Vector2 toBoss = base.Position - haltingBoss.Position;
+			float bossEdgeDist = (toBoss).Length() - ThreatBodyTerm(haltingBoss);
 			// Gun range is a CENTRE distance (it is what DoAIFire range-tests), so the body term
 			// converts it into the edge space everything here is measured in.
 			float anchorPx = bulletlifetime * BulletRangePerMs - ThreatBodyTerm(haltingBoss);
@@ -2525,10 +2557,10 @@ public class PlayerShip : AlienDrawableGameComponent
 				return false;
 			}
 			radius = ConeLeadRefRadiusPx;
-			float tipSpeed = (tipVel).Length();
+			float tipSpeed = (tipVel).Length() * LazerTipLeadScale;
 			apex = (tipSpeed < 0.001f)
 				? anchor
-				: anchor + tipVel / tipSpeed * (radius + SweptConeLength(tipSpeed, radius));
+				: anchor + tipVel / (tipVel).Length() * (radius + SweptConeLength(tipSpeed, radius));
 			return true;
 		}
 		if (baddy is Wall || !baddy.Collides || !IsAiThreat(baddy))

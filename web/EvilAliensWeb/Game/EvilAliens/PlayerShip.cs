@@ -410,8 +410,14 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private static float SeekResumePx => EvilAliensWeb.Compat.DebugFlags.AiSeekResumePx ?? DefaultSeekResumePx;
 
-	// Kept at the 2008 weight so the seek still loses to threat avoidance exactly as before.
-	private const float SeekWeight = 0.8f;
+	// DERIVED off the curve since the lap-11 statics ruling: 2008's hand-picked 0.8 sits at
+	// t = 0.55 on the baked quadratic (4 * (1-0.55)^2 = 0.81 -- the drift is accepted), so the
+	// static seek weight is read off the standard curve there and rescales under ?aifieldpow=
+	// exactly like the equilibrium floor. The relative authority is unchanged: a lone repulsor
+	// still out-pushes a seek anywhere inside ~55% of its berth, whatever the exponent.
+	private const float SeekWeightT = 0.55f;
+
+	private static float SeekWeight => FieldCurve(4f, SeekWeightT);
 
 	// ---- seek weights for a target the bot CHOSE (cards ada9e839 / 31ceb6ff) ----------------
 	//
@@ -429,7 +435,7 @@ public class PlayerShip : AlienDrawableGameComponent
 	// floored, and each attractor's anti-pingpong mechanism is its own DEADZONE). So these
 	// weights are RELATIVE authority within the sum now, and nothing here has to clear a
 	// threshold to be heard at all.
-	public const float DefaultSeekPowerupWeight = SeekWeight;
+	public static float DefaultSeekPowerupWeight => SeekWeight;
 
 	// THE LEVEL-HALTING BOSS APPROACH (cards 31ceb6ff -> b56633fb). There is no constant weight
 	// here any more -- see BossApproachExponent above for the shape that replaced

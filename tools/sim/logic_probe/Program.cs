@@ -846,7 +846,6 @@ internal static class Program
             // constant weight any more, it is solved per tick. Its two claims here (below the
             // threat field, above a detour) moved to ProbeAiBossApproach, where they are asserted
             // about the live curve instead of about a literal.
-            "SeekWeight", "DefaultSeekPowerupWeight",
             "DefaultPowerupReachPx",
             "DefaultSeekParkPx", "DefaultSeekResumePx", "ShipMaxSpeed", "ShipDeceleration",
             "SweepLaneAvoidStrength",
@@ -863,16 +862,20 @@ internal static class Program
             }
             vals[n] = (float)f.GetRawConstantValue();
         }
-        // The floor is DERIVED since the lap-11 ruling (the standard curve's own value at
-        // t=0.8), so it is a static property rather than a const -- read it live, which also
-        // means every bound below re-derives itself under a curve retune.
-        PropertyInfo floorP = ship.GetProperty("DefaultSteerNoiseFloor", anyStatic);
-        if (floorP == null)
+        // The floor and the static seek weights are DERIVED since the lap-11 rulings (the
+        // standard curve's own value at t=0.8 and t=0.55 respectively), so they are static
+        // properties rather than consts -- read them live, which also means every bound below
+        // re-derives itself under a curve retune.
+        foreach (string n in new[] { "DefaultSteerNoiseFloor", "SeekWeight", "DefaultSeekPowerupWeight" })
         {
-            Console.WriteLine("FAIL: could not reflect PlayerShip.DefaultSteerNoiseFloor -- renamed or moved?");
-            return 2;
+            PropertyInfo p = ship.GetProperty(n, anyStatic);
+            if (p == null)
+            {
+                Console.WriteLine("FAIL: could not reflect PlayerShip." + n + " -- renamed or moved?");
+                return 2;
+            }
+            vals[n] = (float)p.GetValue(null);
         }
-        vals["DefaultSteerNoiseFloor"] = (float)floorP.GetValue(null);
 
         Console.WriteLine("[logic_probe] AI steering field composition (ada9e839; hysteresis/blanket-floor rework, iterative rep 1)");
         float station = vals["SeekWeight"], powerup = vals["DefaultSeekPowerupWeight"];

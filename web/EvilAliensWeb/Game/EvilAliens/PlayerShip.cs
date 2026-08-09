@@ -103,14 +103,16 @@ public class PlayerShip : AlienDrawableGameComponent
 	// Repo convention: baked Default* consts + nullable ?ai* overrides in DebugFlags, so a
 	// shipped build with no query string is byte-identical to one with these consts inlined.
 
-	// Low-pass time constant for the AI's steering vector. THE anti-jitter lever: DoAIMove sums
-	// a dozen competing terms and Move() consumes only the resulting ANGLE, so when the big
-	// terms nearly cancel a tiny residual used to swing the heading right round -- measured at
-	// ~1050 deg/s (about three revolutions per second) inside a Level-3 wall. Smoothing the
-	// VECTOR (not the angle) is what damps that: two opposing commands blend toward zero and the
-	// ship coasts, while a sustained command still converges within a few frames. Rate-limiting
-	// the angle instead would force a genuine 180 reversal to sweep the long way round.
-	public const float DefaultSteerSmoothMs = 90f;
+	// Low-pass time constant for the AI's steering vector. BAKED OFF (0 = fly the raw sum every
+	// tick, exactly as 2008 did -- the original DoAIMove had no persistent steer state at all).
+	// The 90ms blend was a port addition against heading jitter when big terms nearly cancel
+	// (~1050 deg/s inside a Level-3 wall), but its memory works both ways: when a force
+	// DISAPPEARS -- the station pull cutting off inside its arrival deadzone -- the blended
+	// vector keeps thrusting along the stale heading for ~125ms, ~40px at full speed, which is
+	// the owner-reported veer-past-and-come-back on every level entry (iterative rep 1). Killed
+	// on the owner's ruling; `?aismooth=<ms>` (with `?aismoothurgent=`) restores the blend as
+	// the A/B arm, and the adaptive-blend machinery below is kept for exactly that.
+	public const float DefaultSteerSmoothMs = 0f;
 
 	// The player's own death is the biggest impact in the game, so it gets a real freeze frame
 	// (Compat/Juice.cs) on top of the two explosions' shake. Named rather than literal because
@@ -120,7 +122,10 @@ public class PlayerShip : AlienDrawableGameComponent
 	public const float DeathHitStopSeconds = 0.18f;
 
 	// Smoothing floor, used when the push is strong (see the adaptive blend in DoAIMove).
-	public const float DefaultSteerSmoothUrgentMs = 15f;
+	// 0 with the blend baked off above -- the adaptive lerp runs from SteerSmoothMs down to
+	// this, so a nonzero floor under a zero ceiling would turn smoothing back ON under
+	// pressure, inverted. Set both or neither; `?aismoothurgent=` is the restore arm.
+	public const float DefaultSteerSmoothUrgentMs = 0f;
 
 	// The demand either side of which smoothing is at full / at the floor.
 	private const float SteerCalmDemand = 2f;

@@ -640,13 +640,14 @@ public class PlayerShip : AlienDrawableGameComponent
 	// two are shaping very different spans.
 	public const float DefaultLaneWedgeFallAlong = DefaultConeFallAlong;
 
-	// BAKED OFF (owner ruling, iterative rep 1): the cone/wedge machinery stays and `?aicone=1` /
-	// `?aiwedge=1` re-arm it, but the shipped bot flies without velocity prediction until the
-	// shapes earn trust behind proper debugging/visualization. Probes that pin the dormant code
-	// boot with the restore flags.
-	private static bool ConeEnabled => EvilAliensWeb.Compat.DebugFlags.AiConeShapes ?? false;
+	// Baked off in the iterative rep-1 sweep to establish the 2008 baseline, then REINTRODUCED
+	// by owner ruling the same session once the baseline was seen playing ("they will fix a
+	// lot") -- the cones ride on top of the classic plateau fields now, which is a configuration
+	// no earlier measurement covered. `?aicone=0` / `?aiwedge=0` are the off arms.
+	// EvadeMovingThreat stays off (superseded by the cones per the same ruling).
+	private static bool ConeEnabled => EvilAliensWeb.Compat.DebugFlags.AiConeShapes ?? true;
 
-	private static bool LaneWedgeEnabled => EvilAliensWeb.Compat.DebugFlags.AiLaneWedge ?? false;
+	private static bool LaneWedgeEnabled => EvilAliensWeb.Compat.DebugFlags.AiLaneWedge ?? true;
 
 	private static float ConeLeadMs => EvilAliensWeb.Compat.DebugFlags.AiConeLeadMs ?? DefaultConeLeadMs;
 

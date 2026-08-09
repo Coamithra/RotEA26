@@ -3031,9 +3031,8 @@ namespace EvilAliensWeb.Compat
 						// Same hazard as ?aievade=: a typo would leave the shape ON while the run
 						// is LABELLED as having it off, i.e. a measurement seam quietly measuring
 						// the other arm.
-						// Cones and wedges ship OFF now (owner ruling); the lane escapes stay ON.
 						RejectFlagValue(key, val, "on/off",
-							((key == "aicone" ? AiConeShapes : (key == "aiwedge" ? AiLaneWedge : AiLaneEscape)) ?? (key == "ailaneescape")) ? "on" : "off");
+							((key == "aicone" ? AiConeShapes : (key == "aiwedge" ? AiLaneWedge : AiLaneEscape)) ?? true) ? "on" : "off");
 					}
 					break;
 				case "aiconelead":

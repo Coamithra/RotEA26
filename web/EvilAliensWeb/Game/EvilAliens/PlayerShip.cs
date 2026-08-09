@@ -2490,6 +2490,15 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			return false;
 		}
+		// THE STEERING LOOP'S OWN GATES, mirrored, so the overlay draws exactly what the AI
+		// avoids and nothing else: Wall and Lazer take their own dedicated branches (grid nav and
+		// distance-to-line -- never the swept shape), and everything else must be collide-active
+		// AND a genuine threat. Without this the overlay drew shapes on the player's own bullets
+		// and on spent explosions -- things the steering never sees (iterative rep 1 sighting).
+		if (baddy is Wall || baddy is Lazer || !baddy.Collides || !IsAiThreat(baddy))
+		{
+			return false;
+		}
 		if (!baddy.TryGetAiSweptPath(out anchor, out var velocity, out _))
 		{
 			return false;

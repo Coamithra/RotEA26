@@ -547,10 +547,17 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	public const float LazerNearBoostRangePx = 30f;
 
-	// OWNER EXPERIMENT (lap 9): the beam tip's cone projected 10x the standard lead -- at the
-	// tip's 0.4-0.8 px/ms that saturates the 800px world cap, i.e. the beam's ENTIRE future
-	// path is closed the moment it starts growing. Judged from the couch; bake to 1 to retire.
-	public const float LazerTipLeadScale = 10f;
+	// Owner ruling (lap 11): the extended tip stays, at 2x the standard lead -- the 10x
+	// experiment saturated the 800px world cap and closed the beam's entire future path the
+	// moment it started growing, which was judged "a bit silly" from the couch.
+	public const float LazerTipLeadScale = 2f;
+
+	// Owner ruling (lap 11): the tip's triangle is EMPTY SPACE the beam is about to claim,
+	// not a body -- being in it is survivable in a way touching a bullet is not, so its curve
+	// peaks at 1 where every real repulsor peaks at 4. With the plateau family that still
+	// reads above the 0.2 equilibrium floor until ~89% of the reach (1-t^2 = 0.2 at t=0.89),
+	// and the floor tests the summed resultant anyway, so a lone tip push survives it.
+	public const float LazerTipStrength = 1f;
 
 	// THE MESA IS GONE (owner redesign, iterative rep 1 lap 5). The cone used to be a bespoke
 	// field -- separate along/across falloff exponents, a taper, a magnitude scale, a flat
@@ -2009,7 +2016,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				{
 					tipVel *= LazerTipLeadScale;
 					tipShape = EvaluateSweptShape(base.Position, lazerTip, tipVel,
-						ConeLeadRefRadiusPx, ConeLeadRefRadiusPx, AiHalfExtent(), maxSteerStrength, wedgeEnabled: false);
+						ConeLeadRefRadiusPx, ConeLeadRefRadiusPx, AiHalfExtent(), LazerTipStrength, wedgeEnabled: false);
 					if (tipShape.ConeStrength > 0f)
 					{
 						tipStrength = tipShape.ConeStrength;

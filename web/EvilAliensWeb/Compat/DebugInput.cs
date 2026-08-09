@@ -533,7 +533,14 @@ namespace EvilAliensWeb.Compat
 				return "[debug] eaConesDump: no oracle service (game not booted yet?)";
 			}
 			var sb = new System.Text.StringBuilder();
-			sb.Append("[conesdump] type pos collides observedVel described radius apexOffset\n");
+			// The scroll on the same line as the entities: a parked UFO's observed velocity IS
+			// the scroll-carry (Position += BackgroundSpeed while landed), so vel=0.000 with a
+			// nonzero scroll here means the carry line is not running for that entity's state --
+			// while scroll=0.000 means the beat itself is stopped.
+			Microsoft.Xna.Framework.Vector2 scroll = oracle.BackgroundSpeed;
+			sb.AppendFormat(System.Globalization.CultureInfo.InvariantCulture,
+				"[conesdump] scroll={0:0.000},{1:0.000} | type pos collides observedVel described radius apexOffset\n",
+				scroll.X, scroll.Y);
 			foreach (EvilAliens.AlienDrawableGameComponent baddy in oracle.GetBaddies())
 			{
 				bool described = EvilAliens.PlayerShip.TryDescribeSweptShape(baddy,

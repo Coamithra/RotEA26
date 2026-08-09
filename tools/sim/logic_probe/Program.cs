@@ -1355,8 +1355,9 @@ internal static class Program
 
         const float MaxSteer = 4f;
         const float ShipHalf = 20f;
-        // The standard field, restated once for expected values: flat 150, 4 -> 0, quadratic.
-        float Plateau(float dist) => dist >= 150f ? 0f : MaxSteer * (1f - (dist / 150f) * (dist / 150f));
+        // The standard field, restated once for expected values: flat 150, 4 -> 0 on the lap-11
+        // curve max * (1-t)^2 -- steep at the body, whisper at the range edge.
+        float Plateau(float dist) => dist >= 150f ? 0f : MaxSteer * (1f - dist / 150f) * (1f - dist / 150f);
 
         // Mover at (0,300) travelling +X, so the frame is the identity and every row is
         // hand-checkable. `ahead`/`sideways` are the ship's offset from the anchor.
@@ -1394,7 +1395,7 @@ internal static class Program
         // nearby hull. The value is the standard curve on the CIRCLE's edge distance, even
         // though the ship is geometrically inside the triangle (triangle distance 0).
         float triPeak = (float)ship.GetField("SweptTriangleStrength", anyStatic).GetRawConstantValue();
-        float TriPlateau(float dist) => dist >= 150f ? 0f : triPeak * (1f - (dist / 150f) * (dist / 150f));
+        float TriPlateau(float dist) => dist >= 150f ? 0f : triPeak * (1f - dist / 150f) * (1f - dist / 150f);
         int Winner(object shape) =>
             (int)shapeType.GetField("ConeWinner", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
                 .GetValue(shape);
@@ -1430,7 +1431,7 @@ internal static class Program
         // carries it, pushing AWAY on the ship's own side (+Y here), never along the path.
         object beside = At(400f, 110f, 1.5f, BodyR, BodyR, false);
         Check("beside the far corridor: the triangle's edge-normal whisper",
-            Field(beside, "ConeStrength") > 0.2f && Field(beside, "ConeStrength") < triPeak
+            Field(beside, "ConeStrength") > 0.05f && Field(beside, "ConeStrength") < triPeak
                 && VY((object)VField(beside, "ConeDir")) > 0.95f && Winner(beside) == 2,
             "strength " + Field(beside, "ConeStrength").ToString("0.00") + ", dir ("
             + VX((object)VField(beside, "ConeDir")).ToString("0.00") + ","

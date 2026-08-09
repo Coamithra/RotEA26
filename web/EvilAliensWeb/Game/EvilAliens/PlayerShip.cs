@@ -555,7 +555,7 @@ public class PlayerShip : AlienDrawableGameComponent
 	// Owner ruling (lap 11): the tip's triangle is EMPTY SPACE the beam is about to claim,
 	// not a body -- being in it is survivable in a way touching a bullet is not, so its curve
 	// peaks at 1 where every real repulsor peaks at 4. With the plateau family that still
-	// reads above the 0.2 equilibrium floor until ~89% of the reach (1-t^2 = 0.2 at t=0.89),
+	// reads above the 0.2 equilibrium floor until ~55% of the reach ((1-t)^2 = 0.2 at t=0.55),
 	// and the floor tests the summed resultant anyway, so a lone tip push survives it.
 	public const float LazerTipStrength = 1f;
 
@@ -1908,7 +1908,7 @@ public class PlayerShip : AlienDrawableGameComponent
 					// fading out toward the clearance edge. A flat push across the band was tried
 					// and it fights the screen bounds all the way out instead of easing off once
 					// the ship is clearly out of the way.
-					float urge = MyMath.PowerCurve(SweepLaneAvoidStrength, 0f, 2f, Math.Abs(offLane) / VerticalLaneClearancePx);
+					float urge = FieldCurve(SweepLaneAvoidStrength, Math.Abs(offLane) / VerticalLaneClearancePx);
 					repel += new Vector2(away * urge, 0f);
 				}
 			}
@@ -1932,7 +1932,7 @@ public class PlayerShip : AlienDrawableGameComponent
 					// Steep falloff, like every other field here: hardest on the centre line and
 					// easing off as the ship clears the band, so it hands over cleanly to the
 					// screen-edge terms instead of shoving all the way into them.
-					float urge = MyMath.PowerCurve(SweepLaneAvoidStrength, 0f, 2f, Math.Abs(offLane) / SweepLaneClearancePx);
+					float urge = FieldCurve(SweepLaneAvoidStrength, Math.Abs(offLane) / SweepLaneClearancePx);
 					repel += new Vector2(0f, away * urge);
 				}
 			}
@@ -1992,17 +1992,17 @@ public class PlayerShip : AlienDrawableGameComponent
 				Vector2 lineDir = default(Vector2);
 				if (lazerRange > 0f && d <= lazerRange)
 				{
-					lineStrength = MyMath.PowerCurve(LazerAvoidStrength, 0f, 2f, d / lazerRange);
+					lineStrength = FieldCurve(LazerAvoidStrength, d / lazerRange);
 					// THE NEAR-LINE BOOST (owner ruling, lap 9): a beam is guaranteed death, and
 					// flying into one is not something the bot should ever be talked into -- so
-					// the last ~30px before the line carry a SECOND plateau stacked on the first:
+					// the last ~30px before the line carry a SECOND summit stacked on the first:
 					// 8 at the line, blending back onto the regular curve by 30px out (the
-					// regular curve still reads ~3.84 there), identical to every other threat
+					// regular curve still reads ~2.56 there), identical to every other threat
 					// beyond. Same family, same arithmetic -- just a steeper summit where the
 					// cliff is.
 					if (dBoost < LazerNearBoostRangePx)
 					{
-						lineStrength += MyMath.PowerCurve(LazerNearBoostStrength, 0f, 2f, dBoost / LazerNearBoostRangePx);
+						lineStrength += FieldCurve(LazerNearBoostStrength, dBoost / LazerNearBoostRangePx);
 					}
 					if (altSteering)
 					{
@@ -2087,7 +2087,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				}
 				float dist = ThreatEdgeDistance(base.Position, baddy, out Vector2 awayDir);
 				// THE STANDARD FIELD, FLAT (owner ruling, lap 7 -- the full return to 2008):
-				// 150px beyond the body's edge, 4 -> 0 on the quadratic plateau, for EVERY
+				// 150px beyond the body's edge, 4 -> 0 on the standard FieldCurve, for EVERY
 				// stationary threat regardless of size -- a big thing's field starts further out
 				// because its edge is further out, never because it is wider. This is the swept
 				// capsule at speed zero, so the whole threat system is one rule; the size-scaled
@@ -2095,7 +2095,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				// with their flags.
 				if (dist <= SweptFieldRangePx)
 				{
-					float strength = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, dist / SweptFieldRangePx);
+					float strength = FieldCurve(maxSteerStrength, dist / SweptFieldRangePx);
 					if (altSteering)
 					{
 						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, dist / SweptFieldRangePx);
@@ -2188,7 +2188,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			// converts it into the edge space everything here is measured in.
 			float anchorPx = bulletlifetime * BulletRangePerMs - ThreatBodyTerm(haltingBoss);
 			float pull = BossApproachWeight(bossEdgeDist, anchorPx, SweptFieldRangePx,
-				DefaultThreatFieldFalloff, classic: true, 1f, maxSteerStrength, SteerNoiseFloor) * BossApproachScale;
+				2f, classic: false, 1f, maxSteerStrength, SteerNoiseFloor) * BossApproachScale;
 			// The bench call is UNCONDITIONAL -- the term's calibration is what it measures, and a
 			// tick where the boss lost the vote is exactly the tick worth counting.
 			EvilAliensWeb.Compat.AiBench.NoteBossApproach(this, bossEdgeDist,
@@ -2319,7 +2319,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			if (base.Position.X < edgeMargin)
 			{
-				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, base.Position.X / edgeMargin);
+				float push = FieldCurve(maxSteerStrength, base.Position.X / edgeMargin);
 				if (altSteering)
 				{
 					push = MathHelper.Lerp(maxSteerStrength, minSteerStrength, base.Position.X / edgeMargin);
@@ -2328,7 +2328,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			}
 			if (base.Position.X > 800f - edgeMargin)
 			{
-				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, Math.Abs((800f - base.Position.X) / edgeMargin));
+				float push = FieldCurve(maxSteerStrength, Math.Abs((800f - base.Position.X) / edgeMargin));
 				if (altSteering)
 				{
 					push = MathHelper.Lerp(maxSteerStrength, minSteerStrength, Math.Abs((800f - base.Position.X) / edgeMargin));
@@ -2337,7 +2337,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			}
 			if (base.Position.Y < edgeMargin)
 			{
-				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, base.Position.Y / edgeMargin);
+				float push = FieldCurve(maxSteerStrength, base.Position.Y / edgeMargin);
 				if (altSteering)
 				{
 					push = MathHelper.Lerp(maxSteerStrength, minSteerStrength, base.Position.Y / edgeMargin);
@@ -2346,7 +2346,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			}
 			if (base.Position.Y > bottomEdge - edgeMargin)
 			{
-				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, Math.Abs((bottomEdge - base.Position.Y) / edgeMargin));
+				float push = FieldCurve(maxSteerStrength, Math.Abs((bottomEdge - base.Position.Y) / edgeMargin));
 				if (altSteering)
 				{
 					push = MathHelper.Lerp(maxSteerStrength, minSteerStrength, Math.Abs((bottomEdge - base.Position.Y) / edgeMargin));
@@ -2658,11 +2658,11 @@ public class PlayerShip : AlienDrawableGameComponent
 			float lazerRange = LazerAvoidRangePx;
 			if (lazerRange > 0f && d <= lazerRange)
 			{
-				lineStrength = MyMath.PowerCurve(LazerAvoidStrength, 0f, 2f, d / lazerRange);
+				lineStrength = FieldCurve(LazerAvoidStrength, d / lazerRange);
 				float dBoost = MathHelper.Max(d - ship.AiHalfExtent(), 0f);
 				if (dBoost < LazerNearBoostRangePx)
 				{
-					lineStrength += MyMath.PowerCurve(LazerNearBoostStrength, 0f, 2f, dBoost / LazerNearBoostRangePx);
+					lineStrength += FieldCurve(LazerNearBoostStrength, dBoost / LazerNearBoostRangePx);
 				}
 			}
 			tipVel *= LazerTipLeadScale;
@@ -2771,11 +2771,10 @@ public class PlayerShip : AlienDrawableGameComponent
 	//     outside -> nearest point on the two side edges (segment clamps), push away from it.
 	//     The base edge is skipped on proof, not oversight: it is a chord INSIDE the disk, so
 	//     the circle's distance is always <= the distance to it.
-	// Strength = THE standard field treatment, owner-ruled: flat 150px reach, 4 -> 0 on the
-	// quadratic plateau -- `PowerCurve(4, 0, 2, d/150)` verbatim, the same expression the screen
-	// edges, the beam and the powerup near-field have always used (deliberately NOT the radial
-	// branch's size-scaled range, and deliberately outside the ?aifieldcurve= family switch --
-	// the edges do not switch either). The caller adds the dodge twist. Direction is the winner's, so it flips
+	// Strength = THE standard field treatment, owner-ruled: flat 150px reach, 4 -> 0 on
+	// `FieldCurve` (max * (1-t)^2 since the lap-11 curve ruling -- steep at the body, whisper
+	// at the range edge), the same expression the screen edges, the beam and the lane escapes
+	// use (deliberately NOT the radial branch's size-scaled range). The caller adds the dodge twist. Direction is the winner's, so it flips
 	// at the union's internal watershed -- inherent to any nearest-feature field, a few degrees,
 	// invisible under the twist. Pure -- primitives in, shape out -- so logic_probe drives it
 	// directly.
@@ -2837,11 +2836,11 @@ public class PlayerShip : AlienDrawableGameComponent
 		// The competition is by FORCE, each candidate at its own peak; ties go to the circle
 		// (a body beats the empty space it is about to claim).
 		float circleStrength = (circleDist <= SweptFieldRangePx)
-			? MyMath.PowerCurve(maxSteerStrength, 0f, 2f, circleDist / SweptFieldRangePx)
+			? FieldCurve(maxSteerStrength, circleDist / SweptFieldRangePx)
 			: 0f;
 		float triPeak = MathHelper.Min(SweptTriangleStrength, maxSteerStrength);
 		float triStrength = (triDist <= SweptFieldRangePx)
-			? MyMath.PowerCurve(triPeak, 0f, 2f, triDist / SweptFieldRangePx)
+			? FieldCurve(triPeak, triDist / SweptFieldRangePx)
 			: 0f;
 		if (circleStrength >= triStrength && circleStrength > 0f)
 		{
@@ -2916,7 +2915,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		}
 		else
 		{
-			wedgeAcross = MyMath.PowerCurve(1f, 0f, 2f, (outward - bandHalfWidth) / SweptFieldRangePx);
+			wedgeAcross = FieldCurve(1f, (outward - bandHalfWidth) / SweptFieldRangePx);
 		}
 		if (wedgeAcross > 0f)
 		{
@@ -2962,6 +2961,21 @@ public class PlayerShip : AlienDrawableGameComponent
 	// be a no-go zone the ship could never enter, and it still has to fly in close to shoot and
 	// to weave through bullets.
 	//
+	// THE STANDARD FIELD CURVE (owner ruling, lap 11): max * (1-t)^2 -- steepest right at
+	// the body, a whisper at the range edge. Replaces the 2008 plateau max*(1-t^2), whose
+	// gradient was upside down for a force field: 75% strength still pushing at half range,
+	// and the push barely GROWING as the ship closed on the hull -- all the urgency ramp sat
+	// at the far edge of the berth. One expression so every standard-treatment consumer
+	// (screen edges, beam line + boost band, lane escapes, the swept shape's two candidates,
+	// the radial branch, the wedge skirt, and the boss-approach anchor via
+	// ThreatFieldStrength's falloff-2 branch) bends together. Attractors (the powerup's near
+	// pull) deliberately keep their own curve -- this ruling is about repulsors.
+	private static float FieldCurve(float max, float t)
+	{
+		float inv = 1f - MathHelper.Clamp(t, 0f, 1f);
+		return max * inv * inv;
+	}
+
 	// Deliberately NOT MyMath.PowerCurve: that is `max * (1 - t^p)`, whose falloff gets SHALLOWER
 	// as p rises (p=4 still pushes at 34% strength at 90% of the range). This is `max * (1-t)^p`,
 	// which is the shape the name "falloff" implies -- p=3 is down to 12% at half range.

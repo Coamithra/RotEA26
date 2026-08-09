@@ -148,7 +148,16 @@ public class PlayerShip : AlienDrawableGameComponent
 	//
 	// The boss approach deliberately fades DOWN through this floor near firing range -- that is
 	// what widens its crossing into a parked band (card b56633fb; ProbeAiBossApproach pins it).
-	public const float DefaultSteerNoiseFloor = 0.2f;
+	//
+	// DERIVED, not a constant, since the lap-11 curve ruling: the floor is the standard curve's
+	// own value at t = 0.8, i.e. "the last fifth of a lone max-strength repulsor's berth is
+	// noise". 2008's hand-picked 0.2 becomes 4*(1-0.8)^2 = 0.16 at the baked p=2 (the owner
+	// accepted the drift), and it rescales itself under ?aifieldpow=, so the floor keeps
+	// meaning the same fraction of the berth whatever the exponent.
+	public static float DefaultSteerNoiseFloor => FieldCurve(4f, SteerNoiseFloorT);
+
+	// The anchor point on the curve the floor is read from.
+	private const float SteerNoiseFloorT = 0.8f;
 
 	private static float SteerSmoothUrgentMs => EvilAliensWeb.Compat.DebugFlags.AiSteerSmoothUrgentMs ?? DefaultSteerSmoothUrgentMs;
 
@@ -559,8 +568,8 @@ public class PlayerShip : AlienDrawableGameComponent
 	// the stronger circle out-votes the triangle wherever both apply; the triangle carries
 	// only the far future path, as a whisper that a real body beats -- inside the triangle
 	// right next to a bullet, the bullet's 4 wins the shape, not the empty space's 1. The
-	// whisper still reads above the 0.2 equilibrium floor until ~55% of the reach
-	// ((1-t)^2 = 0.2 at t=0.55), and the floor tests the summed resultant anyway. The beam
+	// whisper still reads above the derived 0.16 equilibrium floor until 60% of the reach
+	// ((1-t)^2 = 0.16 at t=0.6), and the floor tests the summed resultant anyway. The beam
 	// tip's whole shape (circle included) peaks at this same value -- the tip is a front, not
 	// a hull. ?aitristrength= sweeps it live; EvaluateSweptShape still caps it at the
 	// caller's own max, so empty space never out-peaks the body it belongs to.

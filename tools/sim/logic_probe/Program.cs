@@ -847,7 +847,7 @@ internal static class Program
             // threat field, above a detour) moved to ProbeAiBossApproach, where they are asserted
             // about the live curve instead of about a literal.
             "SeekWeight", "DefaultSeekPowerupWeight",
-            "DefaultPowerupReachPx", "DefaultSteerNoiseFloor",
+            "DefaultPowerupReachPx",
             "DefaultSeekParkPx", "DefaultSeekResumePx", "ShipMaxSpeed", "ShipDeceleration",
             "SweepLaneAvoidStrength",
             "DefaultLazerAvoidStrength", "DefaultLazerDodgeStrength"
@@ -863,6 +863,16 @@ internal static class Program
             }
             vals[n] = (float)f.GetRawConstantValue();
         }
+        // The floor is DERIVED since the lap-11 ruling (the standard curve's own value at
+        // t=0.8), so it is a static property rather than a const -- read it live, which also
+        // means every bound below re-derives itself under a curve retune.
+        PropertyInfo floorP = ship.GetProperty("DefaultSteerNoiseFloor", anyStatic);
+        if (floorP == null)
+        {
+            Console.WriteLine("FAIL: could not reflect PlayerShip.DefaultSteerNoiseFloor -- renamed or moved?");
+            return 2;
+        }
+        vals["DefaultSteerNoiseFloor"] = (float)floorP.GetValue(null);
 
         Console.WriteLine("[logic_probe] AI steering field composition (ada9e839; hysteresis/blanket-floor rework, iterative rep 1)");
         float station = vals["SeekWeight"], powerup = vals["DefaultSeekPowerupWeight"];
@@ -991,7 +1001,8 @@ internal static class Program
             minAnchor = Const("BossApproachMinAnchorPx");
             maxWeight = Const("BossApproachMaxWeight");
             exponent = Const("BossApproachExponent");
-            noiseFloor = Const("DefaultSteerNoiseFloor");
+            // Derived since lap 11 (the standard curve at t=0.8) -- a property, not a const.
+            noiseFloor = (float)ship.GetProperty("DefaultSteerNoiseFloor", anyStatic).GetValue(null);
             sizeScale = Const("DefaultThreatFieldSizeScale");
             falloff = Const("DefaultThreatFieldFalloff");
             bulletPerMs = Const("BulletRangePerMs");

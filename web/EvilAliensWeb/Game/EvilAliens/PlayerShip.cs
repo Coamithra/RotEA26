@@ -1819,6 +1819,28 @@ public class PlayerShip : AlienDrawableGameComponent
 		return true;
 	}
 
+	// ?aiseeklog state: last kind printed + a tick counter for the heartbeat. Per ship, so a
+	// co-op pair logs independently.
+	private string aiSeekLogKind = "";
+	private int aiSeekLogTick;
+
+	// One [aiseek] line on every seek-kind change and a heartbeat every 30 ticks while the kind
+	// holds. The line carries where the ship IS, where the seek points, its weight and whether
+	// the deadzone has silenced it -- the attribution a position trace cannot give.
+	private void LogAiSeek(string kind, Vector2 target, float weight, float dist, bool inDeadzone)
+	{
+		aiSeekLogTick++;
+		if (kind == aiSeekLogKind && aiSeekLogTick % 30 != 0)
+		{
+			return;
+		}
+		aiSeekLogKind = kind;
+		Console.WriteLine(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+			"[aiseek] p{0} kind={1} target={2:0},{3:0} pos={4:0},{5:0} dist={6:0} w={7:0.00} dz={8}",
+			player, kind, target.X, target.Y, base.Position.X, base.Position.Y, dist, weight,
+			inDeadzone ? 1 : 0));
+	}
+
 	private void DoAIMove(ref Vector2 direction, GameTime gameTime, List<AlienDrawableGameComponent> baddies)
 	{
 		CollisionLevelMap collisionLevelMap = null;
@@ -1859,6 +1881,9 @@ public class PlayerShip : AlienDrawableGameComponent
 		// written a weight yet by then; the two station fallbacks are exempt because they run
 		// solely while steerTarget is still MaxValue.
 		float steerTargetWeight = SeekWeight;
+		// ?aiseeklog attribution: which write site owns steerTarget this tick. Set beside every
+		// assignment below; read only by LogAiSeek, so a shipped build carries a dead local.
+		string seekKind = "none";
 		float dodgeAngle = 0f;
 		if (player == 0)
 		{
@@ -1889,12 +1914,14 @@ public class PlayerShip : AlienDrawableGameComponent
 				if (distSq < (toTarget).LengthSquared())
 				{
 					steerTarget = baddy.Position;
+					seekKind = "blast";
 				}
 				continue;
 			}
 			if (baddy is JunkBoss)
 			{
 				steerTarget = baddy.Position;
+				seekKind = "junkboss";
 			}
 			// Sidestep a charging beam. A big UFO winds up for 2500ms and locks its aim at the
 			// PLAYER only at the instant it fires, so the dodge is to be somewhere else by then --
@@ -2116,6 +2143,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				steerTarget = powerup.Position;
 				steerTargetWeight = SeekPowerupWeight;
+				seekKind = "powerup";
 			}
 			// PowerupReachPx, not the 150px `steerRange` the 2008 code shared with the screen-edge
 			// margin -- see the const. Beyond this the powerup is still the steerTarget above, so
@@ -2176,6 +2204,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				steerTarget = haltingBoss.Position;
 				steerTargetWeight = pull;
+				seekKind = "boss";
 			}
 		}
 		foreach (PlayerShip ship in oracle.GetShips())
@@ -2183,6 +2212,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			if (ship.readyToConnect && ship != this && readyToConnect && !isConnectedWith(ship))
 			{
 				steerTarget = ship.Position;
+				seekKind = "connect";
 				// EVERY steerTarget write sets its own weight, including the ones that keep the
 				// station's. This one overwrites the boss approach above, so inheriting silently
 				// would fly the DETOUR at the approach's weight -- the one case where "leave it
@@ -2229,8 +2259,18 @@ public class PlayerShip : AlienDrawableGameComponent
 		}
 		if (steerTarget.X < 2000f)
 		{
+			// Only the station fallbacks above assign steerTarget without stamping a kind.
+			if (seekKind == "none")
+			{
+				seekKind = "station";
+			}
 			delta = base.Position - steerTarget;
 			float distToTarget = (delta).Length();
+			if (EvilAliensWeb.Compat.DebugFlags.AiSeekLog)
+			{
+				LogAiSeek(seekKind, steerTarget, steerTargetWeight, distToTarget,
+					distToTarget <= SeekArriveDeadzonePx);
+			}
 			if (distToTarget > SeekArriveDeadzonePx)
 			{
 				// Plain positional pull, as in 2008. THE deliberate-destination attractor: it goes
@@ -2258,9 +2298,22 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			bottomEdge = 560f;
 		}
+		// THE POWERUP YIELD (T1, card 13960838). While the bot's chosen destination is a powerup
+		// sitting INSIDE an edge band, that band's push stands down -- measured on seed 1's
+		// opening chase, the (1,51) corner powerup stalls the approach at the band boundary
+		// (pull 4*(1-t^2) decayed to ~2.9 at the hover point against a ~3.3 edge push), the
+		// chase drags past wantsToTakePowerup's progress>0.6 flip and is abandoned uncollected
+		// (pickups=0/1). Yielding is per-band and only while the powerup is inside THAT band, so
+		// edge safety is untouched the moment the pickup resolves or the target changes; the
+		// generic field principle ("steeper mountain, not a veto") loses here because the
+		// mountain IS the destination's own doorstep -- the powerup is worth briefly standing in
+		// the band, which is a policy choice, not a field-shape one. `?aipowerupyield=0` is the
+		// pre-card arm.
+		bool powerupYield = seekKind == "powerup"
+			&& EvilAliensWeb.Compat.DebugFlags.AiPowerupYield != false;
 		if (!altSteering)
 		{
-			if (base.Position.X < edgeMargin)
+			if (base.Position.X < edgeMargin && !(powerupYield && steerTarget.X < edgeMargin))
 			{
 				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, base.Position.X / edgeMargin);
 				if (altSteering)
@@ -2269,7 +2322,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				}
 				repel += push * new Vector2(1f, 0f);
 			}
-			if (base.Position.X > 800f - edgeMargin)
+			if (base.Position.X > 800f - edgeMargin && !(powerupYield && steerTarget.X > 800f - edgeMargin))
 			{
 				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, Math.Abs((800f - base.Position.X) / edgeMargin));
 				if (altSteering)
@@ -2278,7 +2331,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				}
 				repel += push * new Vector2(-1f, 0f);
 			}
-			if (base.Position.Y < edgeMargin)
+			if (base.Position.Y < edgeMargin && !(powerupYield && steerTarget.Y < edgeMargin))
 			{
 				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, base.Position.Y / edgeMargin);
 				if (altSteering)
@@ -2287,7 +2340,7 @@ public class PlayerShip : AlienDrawableGameComponent
 				}
 				repel += push * new Vector2(0f, 1f);
 			}
-			if (base.Position.Y > bottomEdge - edgeMargin)
+			if (base.Position.Y > bottomEdge - edgeMargin && !(powerupYield && steerTarget.Y > bottomEdge - edgeMargin))
 			{
 				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, Math.Abs((bottomEdge - base.Position.Y) / edgeMargin));
 				if (altSteering)
@@ -2348,7 +2401,12 @@ public class PlayerShip : AlienDrawableGameComponent
 		// passes the flag's `>= 0` range check, and relying on the position clamp to keep Y
 		// positive is an invariant three hundred lines away.
 		float topEdgePx = TopEdgeDangerPx;
-		if (topEdgePx > 0f && base.Position.Y < topEdgePx)
+		// The powerup yield (see the edge-push block above) covers this band too -- at strength
+		// 20 it out-votes any pull the powerup can ever produce, so a top-band powerup was
+		// categorically unreachable without it. This is fleet-T1's measured mechanism (+19pt
+		// pickups, deaths within SEM, the one rep-1 T1 fix that passed the owner's eye test).
+		if (topEdgePx > 0f && base.Position.Y < topEdgePx
+			&& !(powerupYield && steerTarget.Y < topEdgePx))
 		{
 			direction += new Vector2(0f, TopEdgeAvoidStrength * (1f - base.Position.Y / topEdgePx));
 		}

@@ -1332,6 +1332,12 @@ namespace EvilAliensWeb.Compat
 		// + run verdict. Pair with ?aiplayer. Console: eaAiBench(). See Compat/AiBench.cs.
 		public static bool AiBench { get; private set; }
 
+		// ?aiseeklog: per-tick attribution for the AI's ONE deliberate destination (DoAIMove's
+		// steerTarget). Prints an [aiseek] line when the seek KIND changes and a heartbeat every
+		// 30 ticks, so "which attractor owns the ship right now" is data rather than inference
+		// from a position trace. Log-only (no behaviour), so out of Active.
+		public static bool AiSeekLog { get; private set; }
+
 		// ?aiff=<2-64> (card f4d1721f): run the game's Update N times per rendered frame with the
 		// SAME dt, so an AI soak covers a whole level in a fraction of the wall-clock time without
 		// changing the sim it is measuring. Deliberately NOT Settings.Turbo, which scales dt --
@@ -1490,6 +1496,15 @@ namespace EvilAliensWeb.Compat
 		public static bool? AiLaneWedge { get; private set; }
 
 		public static bool? AiLaneEscape { get; private set; }
+
+		// ?aipowerupyield=0 (T1, card 13960838): restore the pre-card behaviour where the screen
+		// edge pushes and the top-edge danger band keep shoving while the bot is trying to grab a
+		// powerup INSIDE that band -- the measured mechanism behind "the AI won't pick up
+		// powerups at the screen edge" (an edge-hugging powerup sits behind a push the 0.8 seek +
+		// near-field pull cannot reliably out-vote, the approach stalls at the band boundary, and
+		// wantsToTakePowerup's progress>0.6 rule then abandons the chase). Default ON: the push
+		// stands down only while the CURRENT steer target is a powerup inside that specific band.
+		public static bool? AiPowerupYield { get; private set; }
 
 		// ?aiconelead=<ms>     cone length per unit speed, as a time horizon;
 		// ?aiconemaxlen=<px>   the ceiling on that length;
@@ -2863,6 +2878,9 @@ namespace EvilAliensWeb.Compat
 				case "aibench":
 					AiBench = IsOn(val);
 					break;
+				case "aiseeklog":
+					AiSeekLog = IsOn(val);
+					break;
 				case "aismooth":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aism) && aism >= 0f)
 					{
@@ -3004,6 +3022,18 @@ namespace EvilAliensWeb.Compat
 						// A typo here would leave the evade path ON while the run is LABELLED as
 						// having it off -- i.e. a measurement seam quietly measuring the other arm.
 						RejectFlagValue(key, val, "on/off", (AiEvadeMovers ?? true) ? "on" : "off");
+					}
+					break;
+				case "aipowerupyield":
+					if (IsOn(val) || IsExplicitlyOff(val))
+					{
+						AiPowerupYield = IsOn(val);
+					}
+					else
+					{
+						// Same hazard as ?aievade=: a typo would leave the yield ON while the run
+						// is LABELLED as having it off.
+						RejectFlagValue(key, val, "on/off", (AiPowerupYield ?? true) ? "on" : "off");
 					}
 					break;
 				case "aicone":

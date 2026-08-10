@@ -332,7 +332,10 @@ public class PlayerShip : AlienDrawableGameComponent
 	// (the tangent cone over the hull, widened by the aim spread), and a wanted target inside
 	// a wedge means finding a target OUTSIDE it, never holding fire outright. Hysteresis
 	// defends a slot so the set does not flip-flop between two UFOs at similar range.
-	private const int SpiderBossLaserPlatforms = 2;
+	// BAKED FROM THE COUCH (owner, lap 12): one protected platform at a 300px fair-game
+	// radius -- swept live via ?aispares=/?aisparefair= on the spiderboss rig. The 300 is a
+	// CENTRE distance, so on a big hull it reads as roughly a screen-third of standoff.
+	public const int SpiderBossLaserPlatforms = 1;
 
 	// Hard ceiling on the slot arrays; ?aispares= clamps here rather than reallocating.
 	private const int SpareSlotsMax = 4;
@@ -341,7 +344,7 @@ public class PlayerShip : AlienDrawableGameComponent
 	private static int SpareCount =>
 		Math.Min(EvilAliensWeb.Compat.DebugFlags.AiSpareCount ?? SpiderBossLaserPlatforms, SpareSlotsMax);
 
-	private const float SpareFairGameRadiusPx = 80f;
+	public const float SpareFairGameRadiusPx = 300f;
 
 	// ?aisparefair=<px> -- the fair-game radius (inside it everything may be shot).
 	private static float SpareFairGamePx =>

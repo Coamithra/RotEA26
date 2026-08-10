@@ -2888,7 +2888,7 @@ namespace EvilAliensWeb.Compat
 					else
 					{
 						RejectFlagValue(key, val, "a whole number >= 0",
-							InForce(AiSpareCount ?? 2));
+							InForce(AiSpareCount ?? EvilAliens.PlayerShip.SpiderBossLaserPlatforms));
 					}
 					break;
 				case "aisparefair":
@@ -2899,7 +2899,7 @@ namespace EvilAliensWeb.Compat
 					else
 					{
 						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiSpareFairGamePx ?? 80f));
+							InForce(AiSpareFairGamePx ?? EvilAliens.PlayerShip.SpareFairGameRadiusPx));
 					}
 					break;
 				case "aifieldpow":

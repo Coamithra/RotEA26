@@ -1647,11 +1647,14 @@ public class PlayerShip : AlienDrawableGameComponent
 					break;
 				}
 				Vector2 toBaddy = baddy.Position - base.Position;
-				// T4 addendum 2: the baited platform is NEVER a target while it charges --
-				// this outranks the fair-game circle, because interposing is what makes it
-				// nearest in the first place. AiChargingLazer re-checked here so the release
-				// is same-tick with the beam leaving.
-				if (ReferenceEquals(baddy, baitPlatform) && baddy is UFO && ((UFO)baddy).AiChargingLazer)
+				// T4 addendum 2 (owner finding, lap 12, widened on the second sighting): while
+				// the spider boss lives, ANY charging big UFO is a non-target -- its beam is
+				// the weapon being farmed, and interposing makes it nearest and dead ahead,
+				// exactly when the fair-game circle used to open fire on it. Outranks the
+				// fair-game circle; releases same-tick with the beam leaving (AiChargingLazer
+				// goes false the instant the Lazer spawns). Outside the spider fight a
+				// charging UFO stays a LEGAL target, where shooting it prevents the beam.
+				if (spiderBossAlive && baddy is UFO && ((UFO)baddy).IsBig && ((UFO)baddy).AiChargingLazer)
 				{
 					continue;
 				}

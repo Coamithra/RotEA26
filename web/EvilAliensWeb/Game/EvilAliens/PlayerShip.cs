@@ -1647,6 +1647,14 @@ public class PlayerShip : AlienDrawableGameComponent
 					break;
 				}
 				Vector2 toBaddy = baddy.Position - base.Position;
+				// T4 addendum 2: the baited platform is NEVER a target while it charges --
+				// this outranks the fair-game circle, because interposing is what makes it
+				// nearest in the first place. AiChargingLazer re-checked here so the release
+				// is same-tick with the beam leaving.
+				if (ReferenceEquals(baddy, baitPlatform) && baddy is UFO && ((UFO)baddy).AiChargingLazer)
+				{
+					continue;
+				}
 				// T4: a candidate inside a protected UFO's forbidden wedge is SKIPPED, so the
 				// selection finds a target outside the zone instead of holding fire (owner
 				// spec) -- and a protected UFO sits inside its own wedge by construction,
@@ -1951,6 +1959,13 @@ public class PlayerShip : AlienDrawableGameComponent
 	private readonly float[] spareWedgeHalf = new float[SpareSlotsMax];
 
 	private int spareWedgeCount;
+
+	// T4 addendum 2 (owner finding, lap 12): the platform currently being BAITED -- the ship
+	// interposes itself between this UFO and the boss, which puts it dead ahead and nearest,
+	// exactly when the ordinary rules would open fire on the beam being farmed. Never shot
+	// while it charges, fair-game circle included; cleared every DoAIMove tick, so once the
+	// beam is away ordinary rules resume by themselves.
+	private UFO baitPlatform;
 
 	// One [aiseek] line on every seek-kind change and a heartbeat every 30 ticks while the kind
 	// holds. The line carries where the ship IS, where the seek points, its weight and whether
@@ -2430,6 +2445,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		// there... but it'll make 'em try"), and every threat term out-votes it up close --
 		// which is exactly what the REMOVED park-behind-the-boss (see the history note above)
 		// did not have.
+		baitPlatform = (baitBoss != null) ? chargingPlatform : null;
 		if (steerTarget.X > 2000f && chargingPlatform != null && baitBoss != null)
 		{
 			steerTarget = (chargingPlatform.Position + baitBoss.Position) * 0.5f;

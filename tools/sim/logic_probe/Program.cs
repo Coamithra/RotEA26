@@ -131,6 +131,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeAiSpareWedge(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         rc = ProbeAiBossApproach(asm);
         if (rc != 0)
         {
@@ -1541,6 +1547,63 @@ internal static class Program
         Check("wedge: a mid-screen lane raises none (both sides are escapes)",
             Field(mid, "WedgeStrength") == 0f,
             "strength " + Field(mid, "WedgeStrength").ToString("0.00") + " at y=300");
+
+        return 0;
+    }
+
+    // ---- T4: the spare set's forbidden wedge (card 2c74d5b7) --------------------------------
+    //
+    // The pure geometry the fire selection leans on: the tangent cone over a protected hull,
+    // widened by the aim spread, and wrap-safe angular membership. Driven directly (the
+    // EvaluateSweptShape precedent). The slot hysteresis is stateful instance code and is
+    // couch-verified instead -- what is pinned here is the half that silently widens or
+    // narrows with a trig mistake.
+    private static int ProbeAiSpareWedge(Assembly asm)
+    {
+        Type ship = asm.GetType("EvilAliens.PlayerShip", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo half = ship.GetMethod("SpareForbiddenHalfAngle", anyStatic);
+        MethodInfo forb = ship.GetMethod("SpareAngleForbidden", anyStatic);
+        if (half == null || forb == null)
+        {
+            Console.WriteLine("FAIL: could not reflect PlayerShip.SpareForbiddenHalfAngle /"
+                + " SpareAngleForbidden -- renamed or moved?");
+            return 2;
+        }
+        float Half(float d, float r, float s) => (float)half.Invoke(null, new object[] { d, r, s });
+        bool Forb(float a, float c, float h) => (bool)forb.Invoke(null, new object[] { a, c, h });
+
+        Console.WriteLine("[logic_probe] T4 spare-set forbidden wedge (card 2c74d5b7)");
+
+        // 1. The tangent geometry, at a hand-checkable point: r/d = 0.5 -> asin = 30 degrees.
+        float bare = Half(200f, 100f, 0f);
+        Check("the bare wedge is the hull's tangent half-angle (asin r/d)",
+            Math.Abs(bare - (float)(Math.PI / 6.0)) < 0.001f,
+            "dist 200, hull 100 -> " + bare.ToString("0.0000") + " rad vs asin(0.5) = "
+            + (Math.PI / 6.0).ToString("0.0000"));
+
+        // 2. The spread widens it by EXACTLY the spread -- that is the guarantee that a shot at
+        // an allowed target cannot jitter across the hull.
+        Check("the aim spread widens the wedge by exactly the spread",
+            Math.Abs(Half(200f, 100f, 0.3f) - (bare + 0.3f)) < 0.0001f,
+            "spread 0.3 -> " + Half(200f, 100f, 0.3f).ToString("0.0000") + " vs bare + 0.3");
+
+        // 3. Inside the hull every direction is at it.
+        Check("inside the hull the wedge is the full circle",
+            Half(50f, 100f, 0f) >= (float)Math.PI - 0.001f,
+            "dist 50 inside a 100 hull -> " + Half(50f, 100f, 0f).ToString("0.00"));
+
+        // 4. Membership at the boundary: inside the half-angle forbidden, just outside allowed.
+        Check("membership: inside the half-angle forbidden, just outside allowed",
+            Forb(0.5f, 0.3f, 0.25f) && !Forb(0.6f, 0.3f, 0.25f),
+            "wedge centre 0.3 half 0.25: angle 0.5 in, 0.6 out");
+
+        // 5. Wrap-safety: a wedge centred just below +pi must catch an angle just above -pi
+        // (0.2 rad apart across the seam) -- a naive |a - c| reads that as ~2*pi and misses.
+        Check("membership is wrap-safe across the +-pi seam",
+            Forb((float)(-Math.PI + 0.1), (float)(Math.PI - 0.1), 0.25f)
+                && !Forb((float)(-Math.PI + 0.5), (float)(Math.PI - 0.1), 0.25f),
+            "centre pi-0.1, half 0.25: -pi+0.1 (0.2 away across the seam) in, -pi+0.5 out");
 
         return 0;
     }

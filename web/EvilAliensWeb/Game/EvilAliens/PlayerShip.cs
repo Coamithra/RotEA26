@@ -337,8 +337,20 @@ public class PlayerShip : AlienDrawableGameComponent
 	// of the screen is off limits while the boss is in play, and being in it is simply a death.
 	private const float SweepLaneAvoidStrength = 18f;
 
-	// How many big UFOs to leave alive during the SpiderBoss fight -- see DoAIFire.
+	// ---- T4 (card 2c74d5b7): spare the boss's laser platforms, by ANGLE ----------------------
+	// Owner design, verbatim intent: an 80px circle around the ship is fair game; outside it,
+	// the two big UFOs FURTHEST from the ship are protected; protection is a forbidden WEDGE
+	// (the tangent cone over the hull, widened by the aim spread), and a wanted target inside
+	// a wedge means finding a target OUTSIDE it, never holding fire outright. Hysteresis
+	// defends a slot so the set does not flip-flop between two UFOs at similar range.
 	private const int SpiderBossLaserPlatforms = 2;
+
+	private const float SpareFairGameRadiusPx = 80f;
+
+	// A challenger must out-distance the nearer protected UFO by this much to take its slot.
+	// The one number here the owner did not fix; sized at a few UFO-widths rather than
+	// measured -- sweep it if the set visibly churns.
+	private const float SpareSwitchMarginPx = 60f;
 
 	// THE 2008 MAGNITUDES, RESTORED ON MEASUREMENT (card 2248e5eb). The port had widened the beam
 	// field to 260px / strength 14 and added a 7-strength lateral sidestep, all three unmeasured.
@@ -1578,50 +1590,29 @@ public class PlayerShip : AlienDrawableGameComponent
 		// Compared in SQUARED space while the loop scans (and carrying the priority discount, so
 		// it is a score rather than a distance); the winner's true distance is recovered after the
 		// loop for the range test.
-		// The SpiderBoss fight is won with the ENEMY's guns: only a Lazer can hurt the boss, and a
-		// big UFO fires one at the player, so the boss walks into any beam that crosses the
-		// screen. Killing every big UFO leaves nothing but the helper mothership's slow cycle, so
-		// a couple are deliberately spared -- the surplus is still cleared.
-		// This only pays off together with the laser dodging below: the beams the AI is inviting
-		// are aimed AT IT. Sparing them without that measured 24 -> ~70 deaths.
+		// T4 (card 2c74d5b7), owner design: the SpiderBoss fight is won with the ENEMY's guns --
+		// only a Lazer hurts the boss, and a big UFO fires one at the player -- so the TWO big
+		// UFOs furthest from this ship are PROTECTED, with forbidden wedges (see UpdateSpareSet)
+		// rather than the old single per-reference exemption. The old build's fly-by suspension
+		// went with the old mechanism: wedges only gate FIRE, never movement, so sparing runs
+		// for the whole fight.
 		bool spiderBossAlive = false;
-		bool bossSweeping = false;
-		UFO sparedUfo = null;
-		float sparedRoom = -1f;
+		int bigUfosAlive = 0;
 		foreach (AlienDrawableGameComponent scan in baddies)
 		{
 			if (scan is SpiderBoss && !scan.IsDead)
 			{
 				spiderBossAlive = true;
-				bossSweeping |= ((SpiderBoss)scan).AiSweepIncoming;
 			}
 			else if (scan is UFO && ((UFO)scan).IsBig && !scan.IsDead)
 			{
-				// Spare exactly ONE, and make it the one with the most room around it -- scored by
-				// its distance to the NEAREST ship, so in co-op it is far from everybody. Keeping
-				// the beam platform at arm's length is what makes this survivable: its beam still
-				// crosses the screen for the boss to walk into, but the AI is not standing next to
-				// the thing that is aiming at it.
-				float room = float.MaxValue;
-				foreach (PlayerShip ship in oracle.GetShips())
-				{
-					Vector2 toShip = scan.Position - ship.Position;
-					room = MathHelper.Min(room, (toShip).Length());
-				}
-				if (room > sparedRoom)
-				{
-					sparedRoom = room;
-					sparedUfo = (UFO)scan;
-				}
+				bigUfosAlive++;
 			}
 		}
-		// ...but NOT during a fly-by. Dodging a screen-wide sweep and a big UFO's beam at the same
-		// time is how the bot dies, and it is worst in the upper lane where the UFOs live. The
-		// boss spends most of the fight grounded, which is plenty of time to feed it beams.
-		if (!spiderBossAlive || bossSweeping)
-		{
-			sparedUfo = null;
-		}
+		// The T4 observable: big UFOs alive while the boss lives; the value at the boss's death
+		// is the ticket's number.
+		EvilAliensWeb.Compat.AiBench.NoteSpiderFight(this, spiderBossAlive, bigUfosAlive);
+		UpdateSpareSet(baddies, spiderBossAlive, aimSpread);
 		float nearestDist = float.MaxValue;
 		AlienDrawableGameComponent nearest = null;
 		// The priority bias decides WHICH target wins, but a discounted boss can win from well
@@ -1638,13 +1629,21 @@ public class PlayerShip : AlienDrawableGameComponent
 		float priorityBiasSq = PriorityTargetBias * PriorityTargetBias;
 		foreach (AlienDrawableGameComponent baddy in baddies)
 		{
-			if (IsAiShootable(baddy) && !ReferenceEquals(baddy, sparedUfo))
+			if (IsAiShootable(baddy))
 			{
 				if (isBlastable(baddy) && blast != null && blast.Collides)
 				{
 					break;
 				}
 				Vector2 toBaddy = baddy.Position - base.Position;
+				// T4: a candidate inside a protected UFO's forbidden wedge is SKIPPED, so the
+				// selection finds a target outside the zone instead of holding fire (owner
+				// spec) -- and a protected UFO sits inside its own wedge by construction,
+				// which is what replaced the old per-reference exemption.
+				if (SpareBlocksShot(toBaddy))
+				{
+					continue;
+				}
 				float scoreSq = (toBaddy).LengthSquared();
 				if (IsAiPriorityTarget(baddy))
 				{
@@ -1752,6 +1751,164 @@ public class PlayerShip : AlienDrawableGameComponent
 		return true;
 	}
 
+	// ---- T4: the spare set (card 2c74d5b7, owner design) -------------------------------------
+	//
+	// Selection: the two big UFOs FURTHEST from this ship, excluding anything inside the
+	// fair-game circle. A slot is defended by hysteresis -- a challenger must out-distance the
+	// nearer protected UFO by SpareSwitchMarginPx -- so the set does not flip-flop between two
+	// UFOs orbiting at similar range.
+	private void UpdateSpareSet(List<AlienDrawableGameComponent> baddies, bool active, float aimSpread)
+	{
+		float fairSq = SpareFairGameRadiusPx * SpareFairGameRadiusPx;
+		for (int i = 0; i < sparedUfos.Length; i++)
+		{
+			UFO standing = sparedUfos[i];
+			if (standing == null)
+			{
+				continue;
+			}
+			Vector2 toStanding = standing.Position - base.Position;
+			if (!active || standing.IsDead || !standing.IsBig || (toStanding).LengthSquared() <= fairSq)
+			{
+				sparedUfos[i] = null;
+			}
+		}
+		if (active)
+		{
+			// The two furthest eligible candidates not already protected.
+			UFO c1 = null, c2 = null;
+			float c1Dist = -1f, c2Dist = -1f;
+			foreach (AlienDrawableGameComponent scan in baddies)
+			{
+				if (!(scan is UFO ufo) || !ufo.IsBig || ufo.IsDead)
+				{
+					continue;
+				}
+				bool alreadySpared = false;
+				for (int i = 0; i < sparedUfos.Length; i++)
+				{
+					if (ReferenceEquals(ufo, sparedUfos[i]))
+					{
+						alreadySpared = true;
+						break;
+					}
+				}
+				if (alreadySpared)
+				{
+					continue;
+				}
+				Vector2 to = ufo.Position - base.Position;
+				float dist = (to).Length();
+				if (dist <= SpareFairGameRadiusPx)
+				{
+					continue;
+				}
+				if (dist > c1Dist)
+				{
+					c2 = c1;
+					c2Dist = c1Dist;
+					c1 = ufo;
+					c1Dist = dist;
+				}
+				else if (dist > c2Dist)
+				{
+					c2 = ufo;
+					c2Dist = dist;
+				}
+			}
+			// Empty slots take the furthest candidates outright; a full set must be BEATEN.
+			for (int i = 0; i < sparedUfos.Length && c1 != null; i++)
+			{
+				if (sparedUfos[i] == null)
+				{
+					sparedUfos[i] = c1;
+					c1 = c2;
+					c1Dist = c2Dist;
+					c2 = null;
+					c2Dist = -1f;
+				}
+			}
+			if (c1 != null)
+			{
+				// The hysteresis: the strongest remaining challenger takes the NEARER slot,
+				// and only by out-distancing it by the margin.
+				int nearSlot = 0;
+				float nearDist = float.MaxValue;
+				for (int i = 0; i < sparedUfos.Length; i++)
+				{
+					Vector2 to = sparedUfos[i].Position - base.Position;
+					float dist = (to).Length();
+					if (dist < nearDist)
+					{
+						nearDist = dist;
+						nearSlot = i;
+					}
+				}
+				if (c1Dist > nearDist + SpareSwitchMarginPx)
+				{
+					sparedUfos[nearSlot] = c1;
+				}
+			}
+		}
+		// The wedges the fire selection tests against, rebuilt from whatever survived.
+		spareWedgeCount = 0;
+		for (int i = 0; i < sparedUfos.Length; i++)
+		{
+			UFO spared = sparedUfos[i];
+			if (spared == null)
+			{
+				continue;
+			}
+			Vector2 to = spared.Position - base.Position;
+			spareWedgeCentre[spareWedgeCount] = MyMath.VectorToAngle(to);
+			spareWedgeHalf[spareWedgeCount] = SpareForbiddenHalfAngle((to).Length(),
+				MathHelper.Max(ThreatBodyTerm(spared), 1f), aimSpread);
+			spareWedgeCount++;
+		}
+	}
+
+	// The forbidden wedge over one protected hull: the tangent cone of its bounding circle
+	// (the owner accepted the circle approximation of its box) widened by the aim spread, so
+	// the WORST-CASE jitter of a shot at an allowed target still cannot cross the hull. Pure
+	// -- primitives in, angle out -- so logic_probe drives it directly.
+	internal static float SpareForbiddenHalfAngle(float dist, float radius, float aimSpread)
+	{
+		if (dist <= radius)
+		{
+			return MathHelper.Pi;
+		}
+		return (float)Math.Asin(MathHelper.Clamp(radius / dist, 0f, 1f)) + aimSpread;
+	}
+
+	// Angular membership, wrap-safe (a wedge centred near +pi must catch an angle near -pi).
+	internal static bool SpareAngleForbidden(float angle, float wedgeCentre, float halfAngle)
+	{
+		return Math.Abs(MathHelper.WrapAngle(angle - wedgeCentre)) <= halfAngle;
+	}
+
+	// Fire-selection gate: is a shot TOWARD this point forbidden? The fair-game circle exempts
+	// point-blank defence -- anything within it may be shot whatever stands behind it.
+	private bool SpareBlocksShot(Vector2 toBaddy)
+	{
+		if (spareWedgeCount == 0)
+		{
+			return false;
+		}
+		if ((toBaddy).LengthSquared() <= SpareFairGameRadiusPx * SpareFairGameRadiusPx)
+		{
+			return false;
+		}
+		float angle = MyMath.VectorToAngle(toBaddy);
+		for (int i = 0; i < spareWedgeCount; i++)
+		{
+			if (SpareAngleForbidden(angle, spareWedgeCentre[i], spareWedgeHalf[i]))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
 	// ?aiseeklog state: last kind printed + a tick counter for the heartbeat. Per ship, so a
 	// co-op pair logs independently.
 	private string aiSeekLogKind = "";
@@ -1763,6 +1920,19 @@ public class PlayerShip : AlienDrawableGameComponent
 	// resume radius unparks on the first tick.
 	private bool seekParked;
 	private string seekParkedKind = "";
+
+	// T4 spare-set state (card 2c74d5b7): the protected big UFOs, persisted across ticks so
+	// the hysteresis has something to defend; re-validated against the live world every tick,
+	// so a dead, despawned or point-blank one frees its slot on its own (a stale ref on a
+	// pool-recycled ship self-heals the same way). The wedge scratch arrays are rebuilt per
+	// tick with no allocation.
+	private readonly UFO[] sparedUfos = new UFO[SpiderBossLaserPlatforms];
+
+	private readonly float[] spareWedgeCentre = new float[SpiderBossLaserPlatforms];
+
+	private readonly float[] spareWedgeHalf = new float[SpiderBossLaserPlatforms];
+
+	private int spareWedgeCount;
 
 	// One [aiseek] line on every seek-kind change and a heartbeat every 30 ticks while the kind
 	// holds. The line carries where the ship IS, where the seek points, its weight and whether
@@ -1843,6 +2013,11 @@ public class PlayerShip : AlienDrawableGameComponent
 		}
 		AlienDrawableGameComponent haltingBoss = null;
 		float haltingBossDistSq = float.MaxValue;
+		// T4 addendum (owner spec): the bait ingredients -- the nearest charging big UFO and
+		// the boss itself.
+		UFO chargingPlatform = null;
+		float chargingDistSq = float.MaxValue;
+		SpiderBoss baitBoss = null;
 		Vector2 delta;
 		foreach (AlienDrawableGameComponent baddy in baddies)
 		{
@@ -1862,6 +2037,20 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				steerTarget = baddy.Position;
 				seekKind = "junkboss";
+			}
+			if (baddy is SpiderBoss && !baddy.IsDead)
+			{
+				baitBoss = (SpiderBoss)baddy;
+			}
+			if (baddy is UFO && ((UFO)baddy).IsBig && !baddy.IsDead && ((UFO)baddy).AiChargingLazer)
+			{
+				Vector2 toCharging = baddy.Position - base.Position;
+				float chargeSq = (toCharging).LengthSquared();
+				if (chargeSq < chargingDistSq)
+				{
+					chargingDistSq = chargeSq;
+					chargingPlatform = (UFO)baddy;
+				}
 			}
 			// Sidestep a charging beam. A big UFO winds up for 2500ms and locks its aim at the
 			// PLAYER only at the instant it fires, so the dodge is to be somewhere else by then --
@@ -2214,6 +2403,20 @@ public class PlayerShip : AlienDrawableGameComponent
 				// at the default" and "leave it at whatever the last writer set" differ.
 				steerTargetWeight = SeekWeight;
 			}
+		}
+		// T4 addendum (owner spec, lap 12): while a big UFO charges its beam during the spider
+		// fight, the idle destination becomes the midpoint between that UFO and the boss -- the
+		// beam locks onto the PLAYER at fire time, so a ship standing betwixt them aims the
+		// shot through the boss. Ordinary static seek weight, and only when nothing else has
+		// chosen a destination: it is bait, not an order ("doesn't mean they'll be able to go
+		// there... but it'll make 'em try"), and every threat term out-votes it up close --
+		// which is exactly what the REMOVED park-behind-the-boss (see the history note above)
+		// did not have.
+		if (steerTarget.X > 2000f && chargingPlatform != null && baitBoss != null)
+		{
+			steerTarget = (chargingPlatform.Position + baitBoss.Position) * 0.5f;
+			steerTargetWeight = SeekWeight;
+			seekKind = "bait";
 		}
 		if (steerTarget.X > 2000f && !collection.ContainsType<Floor>() && connectors.Count == 0)
 		{

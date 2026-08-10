@@ -30,6 +30,10 @@ public class UFO : KillableAlien
 	// thing besides the helper mothership that can hurt it. See PlayerShip.DoAIMove.
 	internal bool AiChargingLazer => state == UFOState.lazor && lazer == null;
 
+	// T4 bait (owner spec, lap 12): is this UFO's beam being aimed at `ship`? The windup aims
+	// at `target` and locks at fire time, so during the charge this is who should interpose.
+	internal bool AiLazerAimedAt(PlayerShip ship) => ReferenceEquals(target, ship);
+
 	public static int Nr;
 
 	private int thisNr;
@@ -307,6 +311,23 @@ public class UFO : KillableAlien
 	public bool OffScreen()
 	{
 		return (base.Position.X < 0f) | (base.Position.X > 800f) | (base.Position.Y < 0f) | (base.Position.Y > 600f);
+	}
+
+	// A landed UFO's stationary branch breaks out of Update WITHOUT calling base.Update, so its
+	// ObservedVelocity is frozen at the per-life reset of zero even while the scroll-carry line
+	// slides it along the terrain. Announce the carry instead (the SpiderBoss idiom: the swept
+	// path is announced, not observed) so landed UFOs project drift cones like everything else
+	// that moves. StationaryBoss needs no override -- it calls base.Update before its carry.
+	internal override bool TryGetAiSweptPath(out Vector2 anchor, out Vector2 velocity, out float halfWidth)
+	{
+		if (stationary)
+		{
+			anchor = base.Position;
+			velocity = oracle.BackgroundSpeed;
+			halfWidth = AiHalfExtent();
+			return velocity.LengthSquared() > 0.000001f;
+		}
+		return base.TryGetAiSweptPath(out anchor, out velocity, out halfWidth);
 	}
 
 	public override void Update(GameTime gameTime)

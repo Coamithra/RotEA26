@@ -330,7 +330,6 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 
 	public float AddScore(float amount, bool isCombo, int player)
 	{
-		System.Console.WriteLine("[DBGADD] slot=" + player + " amt=" + amount + " at " + System.Environment.StackTrace);
 		float points = ((!isCombo) ? amount : comboModify(amount, player));
 		scores[player].SetScore(scores[player].score + points);
 		return points;

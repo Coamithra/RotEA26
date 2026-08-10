@@ -179,6 +179,24 @@ internal class Lazer : AlienDrawableGameComponent
 		lazor.Draw(WorldTime.Seconds);
 	}
 
+	// The beam's TIP as a mover for the AI's swept shape (owner ruling, iterative rep 1 lap 5):
+	// while the beam is growing, the tip advances at growthspeed * DifficultyModifier along the
+	// aim -- faster than the ship at higher tiers -- and the distance-to-line field only covers
+	// the segment that already exists. False once the beam has stopped (hit the floor): a parked
+	// tip is the line field's business.
+	internal bool TryGetAiTipMotion(out Vector2 tip, out Vector2 velocity)
+	{
+		Vector2 dir = MyMath.AngleToVector(base.Direction);
+		tip = base.Position + len * dir;
+		if (stopped)
+		{
+			velocity = Vector2.Zero;
+			return false;
+		}
+		velocity = dir * (growthspeed * Settings.GetInstance().DifficultyModifier);
+		return true;
+	}
+
 	public override void Update(GameTime gameTime)
 	{
 		base.Update(gameTime);

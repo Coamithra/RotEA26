@@ -30,7 +30,10 @@
 # MUTATION-TESTED: deleting the `if (!IsAiSweptPathPlausible(velocity))` branch turns this red
 # while ai_swept_guard.txt stays green, which is the exact hole this file closes.
 #
-# eahl: --flags "?level=OwnLevel&aiplayer&aibench&difficulty=Very_Hard&invuln&seed=1&noattract&aisweptmax=0.2"
+# NOTE: `&aicone=1&aievade=1` re-arm the velocity-prediction paths, BAKED OFF since the
+#       iterative rep-1 owner ruling -- without them the guard is never consulted and this
+#       probe would pass (or fire) vacuously. The pair pins the DORMANT code's health.
+# eahl: --flags "?level=OwnLevel&aiplayer&aibench&difficulty=Very_Hard&invuln&seed=1&noattract&aicone=1&aievade=1&aisweptmax=0.2"
 
 step 150 nodraw
 mark

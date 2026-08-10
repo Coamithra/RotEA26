@@ -103,14 +103,16 @@ public class PlayerShip : AlienDrawableGameComponent
 	// Repo convention: baked Default* consts + nullable ?ai* overrides in DebugFlags, so a
 	// shipped build with no query string is byte-identical to one with these consts inlined.
 
-	// Low-pass time constant for the AI's steering vector. THE anti-jitter lever: DoAIMove sums
-	// a dozen competing terms and Move() consumes only the resulting ANGLE, so when the big
-	// terms nearly cancel a tiny residual used to swing the heading right round -- measured at
-	// ~1050 deg/s (about three revolutions per second) inside a Level-3 wall. Smoothing the
-	// VECTOR (not the angle) is what damps that: two opposing commands blend toward zero and the
-	// ship coasts, while a sustained command still converges within a few frames. Rate-limiting
-	// the angle instead would force a genuine 180 reversal to sweep the long way round.
-	public const float DefaultSteerSmoothMs = 90f;
+	// Low-pass time constant for the AI's steering vector. BAKED OFF (0 = fly the raw sum every
+	// tick, exactly as 2008 did -- the original DoAIMove had no persistent steer state at all).
+	// The 90ms blend was a port addition against heading jitter when big terms nearly cancel
+	// (~1050 deg/s inside a Level-3 wall), but its memory works both ways: when a force
+	// DISAPPEARS -- the station pull cutting off inside its arrival deadzone -- the blended
+	// vector keeps thrusting along the stale heading for ~125ms, ~40px at full speed, which is
+	// the owner-reported veer-past-and-come-back on every level entry (iterative rep 1). Killed
+	// on the owner's ruling; `?aismooth=<ms>` (with `?aismoothurgent=`) restores the blend as
+	// the A/B arm, and the adaptive-blend machinery below is kept for exactly that.
+	public const float DefaultSteerSmoothMs = 0f;
 
 	// The player's own death is the biggest impact in the game, so it gets a real freeze frame
 	// (Compat/Juice.cs) on top of the two explosions' shake. Named rather than literal because
@@ -120,50 +122,44 @@ public class PlayerShip : AlienDrawableGameComponent
 	public const float DeathHitStopSeconds = 0.18f;
 
 	// Smoothing floor, used when the push is strong (see the adaptive blend in DoAIMove).
-	public const float DefaultSteerSmoothUrgentMs = 15f;
+	// 0 with the blend baked off above -- the adaptive lerp runs from SteerSmoothMs down to
+	// this, so a nonzero floor under a zero ceiling would turn smoothing back ON under
+	// pressure, inverted. Set both or neither; `?aismoothurgent=` is the restore arm.
+	public const float DefaultSteerSmoothUrgentMs = 0f;
 
 	// The demand either side of which smoothing is at full / at the floor.
 	private const float SteerCalmDemand = 2f;
 
 	private const float SteerUrgentDemand = 9f;
 
-	// REPULSION CANCELLATION FLOOR (card ada9e839). Repellents are summed on their own, and if
-	// that resultant comes out at or below this the ship is not pushed at all. It exists for the
-	// case the steering field cannot otherwise express: two threats shoving from opposite sides
-	// resolve to a near-zero vector whose DIRECTION is noise, and Move() discards magnitude and
-	// thrusts at full acceleration along the angle -- so "barely pushed" reads as "sprint that
-	// way" and the ship jitters between two walls instead of holding still between them.
+	// THE BLANKET EQUILIBRIUM FLOOR -- 2008's own line, at 2008's own place (the very end of
+	// DoAIMove): `if (direction.Length() <= 0.2f) direction = Vector2.Zero;`. A steer that has
+	// cancelled to noise is full throttle in an arbitrary direction, because Move() keeps only
+	// the angle; at or below the floor the ship holds still instead.
 	//
-	// 0.2 IS THE 2008 VALUE, restored. The original DoAIMove ended with
-	// `if (direction.Length() <= 0.2f) direction = Vector2.Zero;`. This port raised that to 0.95
-	// -- above the 0.8 seek -- which turned a noise floor into a VETO that deleted every
-	// deliberate destination the bot had (see the seek weights below, and the card). The number
-	// is back where it started; what changed is that it now applies to the repulsion sum ALONE
-	// rather than to the whole steer, so it can never censor an attractor again.
-	public const float DefaultRepulseCancelDelta = 0.2f;
+	// HISTORY, so nobody re-derives either dead end: the port first raised this to 0.95 -- above
+	// the 0.8 seek, a veto that deleted every deliberate destination (card ada9e839 restored
+	// 0.2) -- and then split it into a repellents-only cancellation floor plus this one, so
+	// opposing pushes could be zeroed before an attractor joined the sum. The split was retired
+	// by owner ruling (iterative rep 1, "too smart for its own good"): one floor, whole sum,
+	// exactly as shipped in 2008. Known residual: two repellents whose >0.2 resultant flips
+	// direction over a few px can still rattle the ship -- accepted; a probe-ahead scheme is
+	// logged as a someday, not built.
+	//
+	// The boss approach deliberately fades DOWN through this floor near firing range -- that is
+	// what widens its crossing into a parked band (card b56633fb; ProbeAiBossApproach pins it).
+	//
+	// DERIVED, not a constant, since the lap-11 curve ruling: the floor is the standard curve's
+	// own value at t = 0.8, i.e. "the last fifth of a lone max-strength repulsor's berth is
+	// noise". 2008's hand-picked 0.2 becomes 4*(1-0.8)^p -- 0.16 at p=2, 0.0064 at the baked
+	// p=4 -- and it rescales itself under ?aifieldpow=, so the floor keeps meaning the same
+	// fraction of the berth whatever the exponent.
+	public static float DefaultSteerNoiseFloor => FieldCurve(4f, SteerNoiseFloorT);
 
-	// WHOLE-SUM equilibrium guard, applied last (see the end of DoAIMove for the placement
-	// argument). Same 0.2, same job at a different level: a steer that has cancelled to noise is
-	// full throttle in an arbitrary direction, because Move() keeps only the angle. It is BELOW
-	// every FIXED-weight attractor by construction -- the weakest is SeekWeight 0.8 and a
-	// surviving repellent already beats DefaultRepulseCancelDelta -- so it can only ever fire on
-	// real cancellation, never censor a lone vote. That bound is the whole difference from the
-	// 0.95 this port shipped, and it is asserted by logic_probe's ProbeAiFieldComposition.
-	//
-	// THAT HAZARD IS NOW REALISED, DELIBERATELY (card b56633fb). This note used to read "an
-	// attractor that FADES with distance (there is none today) would drop under this floor and be
-	// parked exactly as the 0.95 park parked everything -- such a term must either keep its
-	// magnitude above the floor or accept being inert as a deliberate choice". The boss approach
-	// is that term and takes the second option ON PURPOSE: its weight is solved to CROSS the
-	// repellent at firing range, so this floor is what widens that crossing into a band the ship
-	// can come to rest in. It is therefore out of ProbeAiFieldComposition's weakest-attractor
-	// bound; ProbeAiBossApproach asserts the band instead. The warning still stands for any
-	// FIXED-weight attractor added later.
-	public const float DefaultSteerNoiseFloor = 0.2f;
+	// The anchor point on the curve the floor is read from.
+	private const float SteerNoiseFloorT = 0.8f;
 
 	private static float SteerSmoothUrgentMs => EvilAliensWeb.Compat.DebugFlags.AiSteerSmoothUrgentMs ?? DefaultSteerSmoothUrgentMs;
-
-	private static float RepulseCancelDelta => EvilAliensWeb.Compat.DebugFlags.AiRepelCancelDelta ?? DefaultRepulseCancelDelta;
 
 	private static float SteerNoiseFloor => EvilAliensWeb.Compat.DebugFlags.AiSteerNoiseFloor ?? DefaultSteerNoiseFloor;
 
@@ -320,23 +316,44 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private static float TopEdgeDangerPx => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeDangerPx ?? DefaultTopEdgeDangerPx;
 
-	public const float DefaultTopEdgeAvoidStrength = 20f;
+	// BAKED OFF (owner ruling, iterative rep 1 lap 3): the band's 20 was calibrated to out-vote
+	// upward shoves of up to 18 from the cone/wedge era, which is retired -- the strongest
+	// upward force left is a plateau field's 4, and 20 buried the powerup near-field's ~4.8
+	// pull five times over (it re-broke every top-edge pickup the moment the yield bandaid was
+	// reverted). The generic top-edge plateau (max 4) is the whole protection now, as in 2008.
+	// `?aitopedgestrength=<n>` restores a band for the A/B; the 170px ramp shape is unchanged.
+	public const float DefaultTopEdgeAvoidStrength = 0f;
 
 	private static float TopEdgeAvoidStrength => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeAvoidStrength ?? DefaultTopEdgeAvoidStrength;
 
-	// Same, for the descent/climb column (the boss's standing box is 240px wide).
-	private const float VerticalLaneClearancePx = 240f;
+	// ---- T4 (card 2c74d5b7): spare the boss's laser platforms, by ANGLE ----------------------
+	// Owner design, verbatim intent: an 80px circle around the ship is fair game; outside it,
+	// the two big UFOs FURTHEST from the ship are protected; protection is a forbidden WEDGE
+	// (the tangent cone over the hull, widened by the aim spread), and a wanted target inside
+	// a wedge means finding a target OUTSIDE it, never holding fire outright. Hysteresis
+	// defends a slot so the set does not flip-flop between two UFOs at similar range.
+	// BAKED FROM THE COUCH (owner, lap 12): one protected platform at a 300px fair-game
+	// radius -- swept live via ?aispares=/?aisparefair= on the spiderboss rig. The 300 is a
+	// CENTRE distance, so on a big hull it reads as roughly a screen-third of standoff.
+	public const int SpiderBossLaserPlatforms = 1;
 
-	// How far from the centre of the boss's telegraphed lane the AI wants to be. The lethal band
-	// is a ~187px third of the screen, so this clears it with room to spare.
-	private const float SweepLaneClearancePx = 210f;
+	// Hard ceiling on the slot arrays; ?aispares= clamps here rather than reallocating.
+	private const int SpareSlotsMax = 4;
 
-	// Must beat the station pull, a powerup detour and the edge pushes combined: the whole third
-	// of the screen is off limits while the boss is in play, and being in it is simply a death.
-	private const float SweepLaneAvoidStrength = 18f;
+	// ?aispares=<n> -- how many platforms to protect (0 = sparing off). Owner knob, lap 12.
+	private static int SpareCount =>
+		Math.Min(EvilAliensWeb.Compat.DebugFlags.AiSpareCount ?? SpiderBossLaserPlatforms, SpareSlotsMax);
 
-	// How many big UFOs to leave alive during the SpiderBoss fight -- see DoAIFire.
-	private const int SpiderBossLaserPlatforms = 2;
+	public const float SpareFairGameRadiusPx = 300f;
+
+	// ?aisparefair=<px> -- the fair-game radius (inside it everything may be shot).
+	private static float SpareFairGamePx =>
+		EvilAliensWeb.Compat.DebugFlags.AiSpareFairGamePx ?? SpareFairGameRadiusPx;
+
+	// A challenger must out-distance the nearer protected UFO by this much to take its slot.
+	// The one number here the owner did not fix; sized at a few UFO-widths rather than
+	// measured -- sweep it if the set visibly churns.
+	private const float SpareSwitchMarginPx = 60f;
 
 	// THE 2008 MAGNITUDES, RESTORED ON MEASUREMENT (card 2248e5eb). The port had widened the beam
 	// field to 260px / strength 14 and added a 7-strength lateral sidestep, all three unmeasured.
@@ -385,21 +402,37 @@ public class PlayerShip : AlienDrawableGameComponent
 	// which is a confounded measurement, since a lone 0.8 seek was being zeroed outright and
 	// could not fidget.
 	//
-	// 15 IS AN AUDIT RESULT AND THE 30 IT REPLACES IS REFUTED (card 05a2b818). Re-measured clean
-	// at N=60, the response is MONOTONE in this radius on CrazyGame and flat on the other four
-	// rigs -- paired against 30: 10px -3.60 deaths, 15px -2.87, 20px -1.97 (victories 36 -> 50 /
-	// 48 / 44 of 60). **10 measured BEST and was rejected anyway**, on the bound rather than on
-	// the number: it sits BELOW the 11.3px stopping distance, so the ship cannot come to rest
-	// inside it and the radius stops being a deadzone at all -- which is the idle fidget the port
-	// widened it for, and the invariant ProbeAiFieldComposition pins. 15 is the smallest value
-	// that keeps the bound intact, and it takes ~80% of the measured win.
-	// Pinned against the motion constants by logic_probe's ProbeAiFieldComposition.
-	public const float DefaultSeekArriveDeadzonePx = 15f;
+	// HYSTERESIS SINCE ITERATIVE REP 1 (owner ruling): the single radius above is replaced by the
+	// standard two-threshold arrival -- the pull PARKS once the ship is within SeekParkPx and
+	// stays parked until the distance opens past SeekResumePx (target moved, ship was shoved
+	// away, or the seek switched to a different destination, which resets the latch via its
+	// kind). Two radii, one bit of state, no per-target ids: a target swap or a moving target
+	// shows up as the distance opening past the resume radius all by itself.
+	//
+	// THE BOUND MOVES TO THE RESUME RADIUS. A ship crossing the park edge at full speed coasts
+	// the 11.3px stopping distance; with one radius that had to fit INSIDE the zone (hence the
+	// old 15). Under hysteresis the park radius may sit below it -- the ship comes to rest
+	// somewhere inside the RESUME radius, and only re-engages if pushed clear out of it. So the
+	// invariant ProbeAiFieldComposition pins is SeekResumePx > SeekParkPx + 11.3: a full-speed
+	// arrival halts at ~park+11.3, which must still be inside the resume zone or the latch
+	// re-triggers on its own momentum. 8/20 gives 0.7px of margin; watch it if either moves.
+	public const float DefaultSeekParkPx = 8f;
 
-	private static float SeekArriveDeadzonePx => EvilAliensWeb.Compat.DebugFlags.AiSeekDeadzonePx ?? DefaultSeekArriveDeadzonePx;
+	public const float DefaultSeekResumePx = 20f;
 
-	// Kept at the 2008 weight so the seek still loses to threat avoidance exactly as before.
-	private const float SeekWeight = 0.8f;
+	// ?aiseekdeadzone= keeps its name and now drives the PARK radius; ?aiseekresume= is its pair.
+	private static float SeekParkPx => EvilAliensWeb.Compat.DebugFlags.AiSeekDeadzonePx ?? DefaultSeekParkPx;
+
+	private static float SeekResumePx => EvilAliensWeb.Compat.DebugFlags.AiSeekResumePx ?? DefaultSeekResumePx;
+
+	// DERIVED off the curve since the lap-11 statics ruling: 2008's hand-picked 0.8 sits at
+	// t = 0.55 on the quadratic (4 * (1-0.55)^2 = 0.81), so the static seek weight is read off
+	// the standard curve there and rescales under ?aifieldpow= exactly like the equilibrium
+	// floor -- 0.164 at the baked p=4. The relative authority is the invariant: a lone
+	// repulsor out-pushes a seek anywhere inside ~55% of its berth, whatever the exponent.
+	private const float SeekWeightT = 0.55f;
+
+	private static float SeekWeight => FieldCurve(4f, SeekWeightT);
 
 	// ---- seek weights for a target the bot CHOSE (cards ada9e839 / 31ceb6ff) ----------------
 	//
@@ -417,7 +450,7 @@ public class PlayerShip : AlienDrawableGameComponent
 	// floored, and each attractor's anti-pingpong mechanism is its own DEADZONE). So these
 	// weights are RELATIVE authority within the sum now, and nothing here has to clear a
 	// threshold to be heard at all.
-	public const float DefaultSeekPowerupWeight = SeekWeight;
+	public static float DefaultSeekPowerupWeight => SeekWeight;
 
 	// THE LEVEL-HALTING BOSS APPROACH (cards 31ceb6ff -> b56633fb). There is no constant weight
 	// here any more -- see BossApproachExponent above for the shape that replaced
@@ -489,8 +522,6 @@ public class PlayerShip : AlienDrawableGameComponent
 	// CrazyGame deaths 6.19 -> 7.75 and SpiderBoss(standing) deaths 41 -> 53. Steeper mountains
 	// HERE, rather than a special case that stops the bot wanting the powerup at all -- threat
 	// awareness belongs in the repellent's shape, never in a gate on another force.
-	public const float DefaultAsteroidThreatScale = 1f;
-
 	// The other two axes of the SAME per-type field (card ada9e839). Magnitude alone only makes
 	// the same short mountain taller, which is what ejected the ship out of the belt into the
 	// UFO traffic around it; RANGE and FALLOFF change its SHAPE. A wider, shallower asteroid
@@ -502,10 +533,6 @@ public class PlayerShip : AlienDrawableGameComponent
 	// falloff-shaped strength with a linear Lerp, so under it ?aiasteroidfall= does nothing while
 	// ?aiasteroidscale= still bites. Harmless today -- `altSteering` is a dead 2008 local that is
 	// never set true -- but a sweep run under a revived alt path would be measuring half a config.
-	public const float DefaultAsteroidRangeScale = 1f;
-
-	public const float DefaultAsteroidFalloff = DefaultThreatFieldFalloff;
-
 	// ---- DIRECTIONAL REPELLENT SHAPES: the velocity cone and the lane wedge (card e425781b) ----
 	//
 	// WHAT PROBLEM THIS SOLVES, because three attempts at the obvious answer failed first. A
@@ -524,98 +551,60 @@ public class PlayerShip : AlienDrawableGameComponent
 	// out of the same evaluation with no per-type code, because a fast mover automatically
 	// projects a long cone. See AddSweptRepellent.
 
-	// Cone LENGTH per unit speed, as a time horizon: length = speed * this, so it scales with
-	// speed by construction. Deliberately the SAME 700ms as DefaultThreatLeadMs rather than a new
-	// number -- that is the already-swept "how far ahead is a moving threat worth reacting to"
-	// horizon (card 21bb6849 measured a broad optimum around it on CrazyGame), and this is the
-	// same question asked by a shape instead of by a special case. At an asteroid's 0.38px/ms it
-	// is 266px of closed lane, against a ship that covers 231px in the same time -- i.e. the
-	// warning arrives while the escape is still affordable.
-	public const float DefaultConeLeadMs = DefaultThreatLeadMs;
+	// Cone LENGTH: `speed * lead * (bodyRadius / ref)` -- a time horizon SCALED BY THE MOVER'S
+	// SIZE (owner ruling, iterative rep 1 lap 5). The reference is the regular UFO's ~20px body
+	// term (bench-derived: its field range read r176 = 150 + 1.8 * 14.4 half-extent, x sqrt2),
+	// and the lead is cut from the inherited 700ms to a third so the regular UFO's cone lands at
+	// ~33% of its pre-ruling length. So: a mover the UFO's size projects `speed * 233ms`, one
+	// N times its size projects N times that, and a bullet's needle nearly vanishes (its body
+	// barely exists -- the circle and the standard field carry it). ?aiconelead= still sweeps
+	// the time constant live.
+	public const float DefaultConeLeadMs = 233f;
+
+	// The size reference the length ratio is taken against (the regular UFO's body term).
+	public const float ConeLeadRefRadiusPx = 20f;
 
 	// Ceiling on that length. 800 is the design field's own width, past which the shape is off
 	// screen and cannot describe anything; it exists so a very fast mover (a bullet) does not
 	// project a cone longer than the world.
 	public const float DefaultConeMaxLenPx = 800f;
 
-	// How far OUTSIDE the swept corridor the cone still pushes -- the scale of the ACROSS-axis
-	// falloff. THE ONE VALUE HERE THAT IS NOT DERIVED FROM ANYTHING, so it was swept rather than
-	// picked, and then swept again on a second rig when the first answer proved rig-specific.
-	//
-	// SPACEDODGE, deaths / victories, paired seeds x2:
-	//     75px  21.50 (2/4)  |  150px  8.56 (12/16)  |  300px  3.44 (16/16)  |  450px  6.00 (4/4)
-	// An INTERIOR optimum -- 450 is worse than 300 -- so this is a width that fits the belt, not a
-	// "wider is better" gradient left half-walked.
-	//
-	// THE MAGNITUDE AXIS WAS SWEPT ALONGSIDE IT AND DECLINED AT EQUAL OUTCOME: `?aiconescale=2.5`
-	// also reaches 16/16, at 3.62 deaths against this shape's 3.44. Same call cards ada9e839 and
-	// e88e21ca both made -- a taller mountain is whack-a-mole across levels, ejecting the ship out
-	// of one hazard into the traffic around it, while transverse reach is a change of SHAPE.
-	//
-	// AND THE OBVIOUS GENERALISATION WAS TRIED AND IS WORSE, which is worth knowing before anyone
-	// reaches for it again. CrazyGame wants the OPPOSITE width (deaths 1.00 at 60px, 2.25 at 150,
-	// 8.50 at 300): it fields 30 simultaneous ~5px-half bullets, and a 300px skirt on each buries
-	// the ship in transverse pushes that mostly cancel. The natural fix is the one the radial
-	// field already made -- scale the reach with the mover's hull, as ThreatFieldRange does. So
-	// that was built and measured: `halfExtent * 6.4` (which reproduces 300px at an asteroid's
-	// ~47px half-extent) drops SpaceDodge to 12/16 at 10.12 deaths. Asteroid half-extents VARY,
-	// and the small rocks -- the ones the belt is mostly made of -- lose the wide skirt that is
-	// doing the work. A flat number is not elegant here; it is what measures better.
-	// The rig disagreement is real and unresolved; `?aiconewidth=` is how the next attempt reaches
-	// it, and the CrazyGame cost is stated in the card rather than hidden.
-	public const float DefaultConeWidthPx = 300f;
+	// Owner ruling (lap 11): the extended tip stays, at 2x the standard lead -- the 10x
+	// experiment saturated the 800px world cap and closed the beam's entire future path the
+	// moment it started growing, which was judged "a bit silly" from the couch.
+	public const float LazerTipLeadScale = 2f;
 
-	// Optional SIZE SCALING of that reach: 0 = off (the flat width above), otherwise the reach is
-	// halfExtent * this, floored at DefaultConeWidthMinPx and capped at the flat width.
-	//
-	// BAKED INERT, AND THE SWEEP THAT SETTLED IT IS THE INTERESTING PART. The flat width is right
-	// for SpaceDodge and wrong for CrazyGame (see DefaultConeWidthPx), so the obvious move is to
-	// scale the reach with the mover -- as ThreatFieldRange already does -- with a FLOOR so a swarm
-	// of small fast objects keeps a usable skirt. Swept k x floor, paired seeds 1-4 x2 (8 runs),
-	// deaths, with victories noted only where not 8/8:
-	//     cell          | SpaceDodge      | CrazyGame
-	//     flat (shipped)|  4.25           |  8.50
-	//     k4.5 / 60px   |  5.25 (6/8)     |  1.00
-	//     k4.5 / 120px  |  8.50 (6/8)     |  3.75
-	//     k6.4 / 60px   |  7.62           |  1.00
-	//     k6.4 / 120px  | 10.00 (7/8)     |  3.75
-	//     k8   / 60px   |  8.00           |  1.00
-	//     k8   / 120px  | 14.62 (4/8)     |  3.75
-	// So scaling really does fix CrazyGame (8.50 -> 1.00, better than no cone at all) and the floor
-	// is the axis that matters. On the FULL SpaceDodge gate (seeds 1-8 x2) k6.4/60 reads 14/16,
-	// coincidentally also at 7.62 deaths, against the flat width's 16/16 at 3.25. It then FAILED
-	// the third gate outright: SpiderBoss
-	// (standing) deaths over the same 8 runs read 12 on shipped main, 22 flat and **34** scaled.
-	// That is the mechanism below, amplified -- a standing boss sweeps nothing and so projects no
-	// cone at all, and the wider UFO skirt shoves the ship into it harder. No cell cleared, so the
-	// flat width ships and this stays a seam.
-	public const float DefaultConeSpread = 0f;
+	// Owner ruling (lap 11): a TRIANGLE is EMPTY SPACE the body (or the beam's tip) is about
+	// to claim, not a body -- being in it is survivable in a way touching a hull is not, so
+	// its curve peaks here where every real repulsor peaks at 4, and the two candidates of a
+	// shape compete by FORCE (the beam's line-vs-tip rule, inside one shape). Near the body
+	// the stronger circle out-votes the triangle wherever both apply; the triangle carries
+	// only the far future path, as a whisper that a real body beats -- inside the triangle
+	// right next to a bullet, the bullet's 4 wins the shape, not the empty space's 1. The
+	// whisper still reads above the derived 0.16 equilibrium floor until 60% of the reach
+	// ((1-t)^2 = 0.16 at t=0.6), and the floor tests the summed resultant anyway. The beam
+	// tip's whole shape (circle included) peaks at this same value -- the tip is a front, not
+	// a hull. ?aitristrength= sweeps it live; EvaluateSweptShape still caps it at the
+	// caller's own max, so empty space never out-peaks the body it belongs to.
+	// BAKED AT 2 from the same couch session as DefaultFieldCurvePower's 4.
+	public const float DefaultSweptTriangleStrength = 2f;
 
-	// The floor that scaling clamps to, so a swarm of small fast movers keeps a usable skirt
-	// instead of each projecting a corridor narrower than the ship.
-	public const float DefaultConeWidthMinPx = 120f;
+	private static float SweptTriangleStrength =>
+		EvilAliensWeb.Compat.DebugFlags.AiTriStrength ?? DefaultSweptTriangleStrength;
 
-	// How the corridor narrows toward the far end: 1 is the true triangle of the design sketch
-	// (a point at full length), 0 a parallel capsule.
-	public const float DefaultConeTaper = 1f;
-
-	// THE TWO FALLOFFS ARE DIFFERENT FAMILIES ON PURPOSE, and this is the crux of the shape.
-	//   ALONG the axis: `1 - t^p`, a PLATEAU (p=2 keeps 75% at half the cone's length). The whole
-	//     point is to have authority far out along the trajectory, which is the band the radial
-	//     field abandons; a spike here would reproduce exactly the field this replaces.
-	//   ACROSS the axis: `(1-t)^p`, a SPIKE (p=3 is down to 12% at half the width). Threading a
-	//     gap between two rocks has to stay possible, so sideways clearance must get cheap fast.
-	// Note the along-axis family is the 2008 `MyMath.PowerCurve` one, which card e88e21ca measured
-	// and rejected -- but rejected as a RADIAL curve, where a plateau merely widens a circle. On a
-	// trajectory axis it is the whole idea, so that result does not carry.
-	public const float DefaultConeFallAlong = 2f;
-
-	public const float DefaultConeFallAcross = DefaultThreatFieldFalloff;
-
-	// Peak magnitude as a multiple of maxSteerStrength: 1.0 makes the corridor ahead exactly as
-	// repellent as the hull itself, which is the honest statement -- being there when it arrives
-	// and being inside it now are the same death.
-	public const float DefaultConeScale = 1f;
+	// THE MESA IS GONE (owner redesign, iterative rep 1 lap 5). The cone used to be a bespoke
+	// field -- separate along/across falloff exponents, a taper, a magnitude scale, a flat
+	// 300px skirt with an optional size-scaled variant -- seven knobs, each individually swept.
+	// It is now a SHAPE, not a field: the mover's own repulsion circle capped by a triangle to
+	// `position + velocity * lead`, and the push is the ordinary threat field evaluated on the
+	// NEAREST-FEATURE distance to that shape (the getDistanceToLine treatment the Lazer has
+	// always had, extended to one more shape). Behind the base: radial from the circle --
+	// the same push the radial branch computes, so a stationary mover degenerates to exactly
+	// the 2008 circle and there is no more circle-plus-hat double counting. Beside the
+	// triangle: normal push off the near edge. Past the apex: radial from the tip. Inside:
+	// full strength, out the near side. One curve, one reach, both the threat's own
+	// (ThreatFieldRange + the per-type family), and the only shape parameters left are the
+	// two above (lead time and length cap).
 
 	// ---- the LANE WEDGE ----
 	// A symmetric cone is WRONG for a mover whose path hugs a screen edge: it offers the gap
@@ -635,8 +624,13 @@ public class PlayerShip : AlienDrawableGameComponent
 	// The wedge's own along-axis exponent. Same plateau family as the cone's; separate because the
 	// wedge runs the full length of the play field rather than a speed-scaled cone length, so the
 	// two are shaping very different spans.
-	public const float DefaultLaneWedgeFallAlong = DefaultConeFallAlong;
+	public const float DefaultLaneWedgeFallAlong = 2f;
 
+	// Baked off in the iterative rep-1 sweep to establish the 2008 baseline, then REINTRODUCED
+	// by owner ruling the same session once the baseline was seen playing ("they will fix a
+	// lot") -- the cones ride on top of the classic plateau fields now, which is a configuration
+	// no earlier measurement covered. `?aicone=0` / `?aiwedge=0` are the off arms.
+	// EvadeMovingThreat stays off (superseded by the cones per the same ruling).
 	private static bool ConeEnabled => EvilAliensWeb.Compat.DebugFlags.AiConeShapes ?? true;
 
 	private static bool LaneWedgeEnabled => EvilAliensWeb.Compat.DebugFlags.AiLaneWedge ?? true;
@@ -645,29 +639,9 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private static float ConeMaxLenPx => EvilAliensWeb.Compat.DebugFlags.AiConeMaxLenPx ?? DefaultConeMaxLenPx;
 
-	private static float ConeWidthPx => EvilAliensWeb.Compat.DebugFlags.AiConeWidthPx ?? DefaultConeWidthPx;
-
-	private static float ConeSpread => EvilAliensWeb.Compat.DebugFlags.AiConeSpread ?? DefaultConeSpread;
-
-	private static float ConeWidthMinPx => EvilAliensWeb.Compat.DebugFlags.AiConeWidthMinPx ?? DefaultConeWidthMinPx;
-
-	private static float ConeTaper => EvilAliensWeb.Compat.DebugFlags.AiConeTaper ?? DefaultConeTaper;
-
-	private static float ConeFallAlong => EvilAliensWeb.Compat.DebugFlags.AiConeFallAlong ?? DefaultConeFallAlong;
-
-	private static float ConeFallAcross => EvilAliensWeb.Compat.DebugFlags.AiConeFallAcross ?? DefaultConeFallAcross;
-
-	private static float ConeScale => EvilAliensWeb.Compat.DebugFlags.AiConeScale ?? DefaultConeScale;
-
 	private static float LaneWedgeStrength => EvilAliensWeb.Compat.DebugFlags.AiLaneWedgeStrength ?? DefaultLaneWedgeStrength;
 
 	private static float LaneWedgeFallAlong => EvilAliensWeb.Compat.DebugFlags.AiLaneWedgeFallAlong ?? DefaultLaneWedgeFallAlong;
-
-	private static float ThreatFieldBasePx => EvilAliensWeb.Compat.DebugFlags.AiThreatFieldPx ?? Skill.FieldPx;
-
-	private static float ThreatFieldSizeScale => EvilAliensWeb.Compat.DebugFlags.AiThreatFieldSize ?? DefaultThreatFieldSizeScale;
-
-	private static float ThreatFieldFalloff => EvilAliensWeb.Compat.DebugFlags.AiThreatFieldFalloff ?? DefaultThreatFieldFalloff;
 
 	// ---- per-difficulty AI skill (card c10e3e7f) -------------------------------------------
 	// One bot drives the attract demos, the Mechanical Friends cheat and ?aiplayer, and until
@@ -771,45 +745,18 @@ public class PlayerShip : AlienDrawableGameComponent
 	// tier-vs-tier cannot be measured end-to-end (the ENEMIES scale with the same tier, so an
 	// outcome delta between tiers is unattributable), and only the ANCHOR row has evidence behind
 	// it. So do not read the lower rows as measured values -- they are the old proportions.
-	private static readonly AiSkill[] AiSkillByDifficulty = new AiSkill[5]
-	{
-		/* Easy      */ AiSkill.Deg(118f, 22.5f),
-		/* Medium    */ AiSkill.Deg(129f, 19.5f),
-		/* Hard      */ AiSkill.Deg(139f, 17f),
-		/* Very_Hard */ new AiSkill(VeryHardThreatFieldBasePx, VeryHardAimSpreadRad),
-		/* Inzane    */ AiSkill.Deg(VeryHardThreatFieldBasePx, 11.25f)
-	};
+	// PER-TIER SKILL RETIRED (owner ruling, iterative rep 1). 2008 flew one fixed skill at every
+	// difficulty -- aim spread PI/12, field range 150 -- and the ladder below never had evidence
+	// beyond its anchor row (the file's own rescale note admitted the lower rows were
+	// proportions, not measurements). Every tier now flies the Very_Hard values; the table is
+	// kept commented for the day a measured ladder is wanted again.
+	//   Easy AiSkill.Deg(118f, 22.5f) / Medium .Deg(129f, 19.5f) / Hard .Deg(139f, 17f)
+	//   / Very_Hard (anchor) / Inzane .Deg(anchor, 11.25f)
+	private static readonly AiSkill FixedSkill = new AiSkill(VeryHardThreatFieldBasePx, VeryHardAimSpreadRad);
 
-	// EFFECTIVE difficulty, not CurrentDifficulty: the attract demos lock Hard and the tutorial
-	// locks Very_Hard, and only the lock-aware value describes the fight the bot is actually
-	// flying in. See Settings.EffectiveDifficulty.
-	//
-	// Memoised on the tier because this is read per THREAT per ship per frame (ThreatFieldRange is
-	// called inside DoAIMove's baddy loop), which with a full field and four AI friends is
-	// thousands of resolutions a frame -- the same hoist the "Perf batch 2" note above DoAIMove
-	// applies to GetBaddies(). Single-threaded WASM, so a plain non-volatile pair is safe.
-	//
-	// The clamp is NOT for the save file: XmlSerializer writes enums by NAME and throws on an
-	// unknown one (which lands in Settings.onLoadError and yields a fresh Settings), and
-	// ?difficulty= is gated by Enum.IsDefined. It guards the real hazard -- a future
-	// DifficultyLevel member added without a matching row here, which it maps to the last row.
-	private static Settings.DifficultyLevel skillTier = (Settings.DifficultyLevel)(-1);
-
-	private static AiSkill skillCached;
-
-	private static AiSkill Skill
-	{
-		get
-		{
-			Settings.DifficultyLevel tier = Settings.GetInstance().EffectiveDifficulty;
-			if (tier != skillTier)
-			{
-				skillTier = tier;
-				skillCached = AiSkillByDifficulty[MathHelper.Clamp((int)tier, 0, AiSkillByDifficulty.Length - 1)];
-			}
-			return skillCached;
-		}
-	}
+	// One skill at every tier since the ladder retired (above); the ?aiaim/?aifieldpx overrides
+	// still win downstream, which is how any future ladder would be measured.
+	private static AiSkill Skill => FixedSkill;
 
 	// For the ?aibench readout. The RESOLVED values (overrides applied), so the bench line answers
 	// "which skill row am I actually flying?" directly instead of leaving it to be inferred from
@@ -818,7 +765,8 @@ public class PlayerShip : AlienDrawableGameComponent
 	// tier. This is the only non-confounded observation of it.
 	internal static void GetAiSkillReadout(out float fieldPx, out float aimRad)
 	{
-		fieldPx = ThreatFieldBasePx;
+		// The field is the flat standard 150 for everything now (owner ruling, lap 7).
+		fieldPx = SweptFieldRangePx;
 		aimRad = AimSpread;
 	}
 
@@ -1645,50 +1593,29 @@ public class PlayerShip : AlienDrawableGameComponent
 		// Compared in SQUARED space while the loop scans (and carrying the priority discount, so
 		// it is a score rather than a distance); the winner's true distance is recovered after the
 		// loop for the range test.
-		// The SpiderBoss fight is won with the ENEMY's guns: only a Lazer can hurt the boss, and a
-		// big UFO fires one at the player, so the boss walks into any beam that crosses the
-		// screen. Killing every big UFO leaves nothing but the helper mothership's slow cycle, so
-		// a couple are deliberately spared -- the surplus is still cleared.
-		// This only pays off together with the laser dodging below: the beams the AI is inviting
-		// are aimed AT IT. Sparing them without that measured 24 -> ~70 deaths.
+		// T4 (card 2c74d5b7), owner design: the SpiderBoss fight is won with the ENEMY's guns --
+		// only a Lazer hurts the boss, and a big UFO fires one at the player -- so the TWO big
+		// UFOs furthest from this ship are PROTECTED, with forbidden wedges (see UpdateSpareSet)
+		// rather than the old single per-reference exemption. The old build's fly-by suspension
+		// went with the old mechanism: wedges only gate FIRE, never movement, so sparing runs
+		// for the whole fight.
 		bool spiderBossAlive = false;
-		bool bossSweeping = false;
-		UFO sparedUfo = null;
-		float sparedRoom = -1f;
+		int bigUfosAlive = 0;
 		foreach (AlienDrawableGameComponent scan in baddies)
 		{
 			if (scan is SpiderBoss && !scan.IsDead)
 			{
 				spiderBossAlive = true;
-				bossSweeping |= ((SpiderBoss)scan).AiSweepIncoming;
 			}
 			else if (scan is UFO && ((UFO)scan).IsBig && !scan.IsDead)
 			{
-				// Spare exactly ONE, and make it the one with the most room around it -- scored by
-				// its distance to the NEAREST ship, so in co-op it is far from everybody. Keeping
-				// the beam platform at arm's length is what makes this survivable: its beam still
-				// crosses the screen for the boss to walk into, but the AI is not standing next to
-				// the thing that is aiming at it.
-				float room = float.MaxValue;
-				foreach (PlayerShip ship in oracle.GetShips())
-				{
-					Vector2 toShip = scan.Position - ship.Position;
-					room = MathHelper.Min(room, (toShip).Length());
-				}
-				if (room > sparedRoom)
-				{
-					sparedRoom = room;
-					sparedUfo = (UFO)scan;
-				}
+				bigUfosAlive++;
 			}
 		}
-		// ...but NOT during a fly-by. Dodging a screen-wide sweep and a big UFO's beam at the same
-		// time is how the bot dies, and it is worst in the upper lane where the UFOs live. The
-		// boss spends most of the fight grounded, which is plenty of time to feed it beams.
-		if (!spiderBossAlive || bossSweeping)
-		{
-			sparedUfo = null;
-		}
+		// The T4 observable: big UFOs alive while the boss lives; the value at the boss's death
+		// is the ticket's number.
+		EvilAliensWeb.Compat.AiBench.NoteSpiderFight(this, spiderBossAlive, bigUfosAlive);
+		UpdateSpareSet(baddies, spiderBossAlive, aimSpread);
 		float nearestDist = float.MaxValue;
 		AlienDrawableGameComponent nearest = null;
 		// The priority bias decides WHICH target wins, but a discounted boss can win from well
@@ -1705,13 +1632,32 @@ public class PlayerShip : AlienDrawableGameComponent
 		float priorityBiasSq = PriorityTargetBias * PriorityTargetBias;
 		foreach (AlienDrawableGameComponent baddy in baddies)
 		{
-			if (IsAiShootable(baddy) && !ReferenceEquals(baddy, sparedUfo))
+			if (IsAiShootable(baddy))
 			{
 				if (isBlastable(baddy) && blast != null && blast.Collides)
 				{
 					break;
 				}
 				Vector2 toBaddy = baddy.Position - base.Position;
+				// T4 addendum 2 (owner finding, lap 12, widened on the second sighting): while
+				// the spider boss lives, ANY charging big UFO is a non-target -- its beam is
+				// the weapon being farmed, and interposing makes it nearest and dead ahead,
+				// exactly when the fair-game circle used to open fire on it. Outranks the
+				// fair-game circle; releases same-tick with the beam leaving (AiChargingLazer
+				// goes false the instant the Lazer spawns). Outside the spider fight a
+				// charging UFO stays a LEGAL target, where shooting it prevents the beam.
+				if (spiderBossAlive && baddy is UFO && ((UFO)baddy).IsBig && ((UFO)baddy).AiChargingLazer)
+				{
+					continue;
+				}
+				// T4: a candidate inside a protected UFO's forbidden wedge is SKIPPED, so the
+				// selection finds a target outside the zone instead of holding fire (owner
+				// spec) -- and a protected UFO sits inside its own wedge by construction,
+				// which is what replaced the old per-reference exemption.
+				if (SpareBlocksShot(toBaddy))
+				{
+					continue;
+				}
 				float scoreSq = (toBaddy).LengthSquared();
 				if (IsAiPriorityTarget(baddy))
 				{
@@ -1819,6 +1765,289 @@ public class PlayerShip : AlienDrawableGameComponent
 		return true;
 	}
 
+	// ---- T4: the spare set (card 2c74d5b7, owner design) -------------------------------------
+	//
+	// Selection: the two big UFOs FURTHEST from this ship, excluding anything inside the
+	// fair-game circle. A slot is defended by hysteresis -- a challenger must out-distance the
+	// nearer protected UFO by SpareSwitchMarginPx -- so the set does not flip-flop between two
+	// UFOs orbiting at similar range.
+	private void UpdateSpareSet(List<AlienDrawableGameComponent> baddies, bool active, float aimSpread)
+	{
+		int slots = SpareCount;
+		float fair = SpareFairGamePx;
+		float fairSq = fair * fair;
+		// Slots above the live count (the knob can shrink mid-fight) free immediately.
+		for (int i = slots; i < sparedUfos.Length; i++)
+		{
+			sparedUfos[i] = null;
+		}
+		for (int i = 0; i < slots; i++)
+		{
+			UFO standing = sparedUfos[i];
+			if (standing == null)
+			{
+				continue;
+			}
+			Vector2 toStanding = standing.Position - base.Position;
+			if (!active || standing.IsDead || !standing.IsBig || (toStanding).LengthSquared() <= fairSq)
+			{
+				sparedUfos[i] = null;
+			}
+		}
+		if (active && slots > 0)
+		{
+			// Fill EMPTY slots with the furthest eligibles; then one challenger a tick may
+			// contest the nearest occupied slot, by the hysteresis margin.
+			while (true)
+			{
+				UFO best = null;
+				float bestDist = -1f;
+				foreach (AlienDrawableGameComponent scan in baddies)
+				{
+					if (!(scan is UFO ufo) || !ufo.IsBig || ufo.IsDead)
+					{
+						continue;
+					}
+					bool alreadySpared = false;
+					for (int i = 0; i < slots; i++)
+					{
+						if (ReferenceEquals(ufo, sparedUfos[i]))
+						{
+							alreadySpared = true;
+							break;
+						}
+					}
+					if (alreadySpared)
+					{
+						continue;
+					}
+					Vector2 to = ufo.Position - base.Position;
+					float dist = (to).Length();
+					if (dist <= fair)
+					{
+						continue;
+					}
+					if (dist > bestDist)
+					{
+						bestDist = dist;
+						best = ufo;
+					}
+				}
+				if (best == null)
+				{
+					break;
+				}
+				int empty = -1;
+				for (int i = 0; i < slots; i++)
+				{
+					if (sparedUfos[i] == null)
+					{
+						empty = i;
+						break;
+					}
+				}
+				if (empty >= 0)
+				{
+					sparedUfos[empty] = best;
+					continue;
+				}
+				// Full set: the hysteresis challenge, then done for this tick.
+				int nearSlot = 0;
+				float nearDist = float.MaxValue;
+				for (int i = 0; i < slots; i++)
+				{
+					Vector2 to = sparedUfos[i].Position - base.Position;
+					float dist = (to).Length();
+					if (dist < nearDist)
+					{
+						nearDist = dist;
+						nearSlot = i;
+					}
+				}
+				if (bestDist > nearDist + SpareSwitchMarginPx)
+				{
+					sparedUfos[nearSlot] = best;
+				}
+				break;
+			}
+		}
+		// The wedges the fire selection tests against: the spared slots AND every mid-charge
+		// platform (its beam is the weapon being farmed, and a miss at something nearby must
+		// not sail into it), deduped, distances recorded for the through-shot rule.
+		spareWedgeCount = 0;
+		for (int i = 0; i < sparedUfos.Length; i++)
+		{
+			AddSpareWedge(sparedUfos[i], aimSpread);
+		}
+		if (active)
+		{
+			foreach (AlienDrawableGameComponent scan in baddies)
+			{
+				if (scan is UFO charger && charger.IsBig && !charger.IsDead && charger.AiChargingLazer)
+				{
+					bool alreadyWedged = false;
+					for (int i = 0; i < sparedUfos.Length; i++)
+					{
+						if (ReferenceEquals(charger, sparedUfos[i]))
+						{
+							alreadyWedged = true;
+							break;
+						}
+					}
+					if (!alreadyWedged)
+					{
+						AddSpareWedge(charger, aimSpread);
+					}
+				}
+			}
+		}
+	}
+
+	private void AddSpareWedge(UFO platform, float aimSpread)
+	{
+		if (platform == null || spareWedgeCount >= SpareWedgeMax)
+		{
+			return;
+		}
+		Vector2 to = platform.Position - base.Position;
+		float dist = (to).Length();
+		spareWedgeCentre[spareWedgeCount] = MyMath.VectorToAngle(to);
+		spareWedgeHalf[spareWedgeCount] = SpareForbiddenHalfAngle(dist,
+			MathHelper.Max(ThreatBodyTerm(platform), 1f), aimSpread);
+		spareWedgeDist[spareWedgeCount] = dist;
+		spareWedgeCount++;
+	}
+
+	// The forbidden wedge over one protected hull: the tangent cone of its bounding circle
+	// (the owner accepted the circle approximation of its box) widened by the aim spread, so
+	// the WORST-CASE jitter of a shot at an allowed target still cannot cross the hull. Pure
+	// -- primitives in, angle out -- so logic_probe drives it directly.
+	internal static float SpareForbiddenHalfAngle(float dist, float radius, float aimSpread)
+	{
+		if (dist <= radius)
+		{
+			return MathHelper.Pi;
+		}
+		return (float)Math.Asin(MathHelper.Clamp(radius / dist, 0f, 1f)) + aimSpread;
+	}
+
+	// Angular membership, wrap-safe (a wedge centred near +pi must catch an angle near -pi).
+	internal static bool SpareAngleForbidden(float angle, float wedgeCentre, float halfAngle)
+	{
+		return Math.Abs(MathHelper.WrapAngle(angle - wedgeCentre)) <= halfAngle;
+	}
+
+	// ?cones overlay (owner request, lap 12): is this baddy fire-protected by the T4 rules
+	// right now -- a spared slot, or a mid-charge platform during the fight? Read-only view of
+	// the same state the fire selection tests, so the X on screen and the held shot can never
+	// disagree. `radius` sizes the marker.
+	internal bool IsSpareProtected(AlienDrawableGameComponent baddy, bool spiderBossAlive, out float radius)
+	{
+		radius = 0f;
+		if (!(baddy is UFO ufo) || ufo.IsDead)
+		{
+			return false;
+		}
+		bool guarded = spiderBossAlive && ufo.IsBig && ufo.AiChargingLazer;
+		if (!guarded)
+		{
+			for (int i = 0; i < sparedUfos.Length; i++)
+			{
+				if (ReferenceEquals(ufo, sparedUfos[i]))
+				{
+					guarded = true;
+					break;
+				}
+			}
+		}
+		if (guarded)
+		{
+			radius = MathHelper.Max(ThreatBodyTerm(baddy), 1f);
+		}
+		return guarded;
+	}
+
+	// Fire-selection gate: is a shot TOWARD this point forbidden? The fair-game circle's
+	// exemption is a THROUGH-SHOT rule since the lap-12 sighting, not a blanket bypass: a
+	// point-blank target may be shot only when it sits CLOSER than the protected platform
+	// whose wedge it is in -- the bullet stops in the target -- never when it is beyond it,
+	// which is firing through the thing being protected (at a big ?aisparefair= the blanket
+	// exemption covered most of the fight and the wedges never applied at all).
+	private bool SpareBlocksShot(Vector2 toBaddy)
+	{
+		if (spareWedgeCount == 0)
+		{
+			return false;
+		}
+		float targetDistSq = (toBaddy).LengthSquared();
+		float fair = SpareFairGamePx;
+		bool pointBlank = targetDistSq <= fair * fair;
+		float targetDist = (float)Math.Sqrt(targetDistSq);
+		float angle = MyMath.VectorToAngle(toBaddy);
+		for (int i = 0; i < spareWedgeCount; i++)
+		{
+			if (!SpareAngleForbidden(angle, spareWedgeCentre[i], spareWedgeHalf[i]))
+			{
+				continue;
+			}
+			if (pointBlank && targetDist < spareWedgeDist[i])
+			{
+				continue;
+			}
+			return true;
+		}
+		return false;
+	}
+
+	// ?aiseeklog state: last kind printed + a tick counter for the heartbeat. Per ship, so a
+	// co-op pair logs independently.
+	private string aiSeekLogKind = "";
+	private int aiSeekLogTick;
+
+	// The seek-arrival hysteresis latch (see DefaultSeekParkPx): parked-in-the-zone, plus which
+	// seek kind parked it -- a kind change resets the latch so a fresh destination pulls
+	// immediately. A stale value on a pool-recycled ship self-heals: a spawn point outside the
+	// resume radius unparks on the first tick.
+	private bool seekParked;
+	private string seekParkedKind = "";
+
+	// T4 spare-set state (card 2c74d5b7): the protected big UFOs, persisted across ticks so
+	// the hysteresis has something to defend; re-validated against the live world every tick,
+	// so a dead, despawned or point-blank one frees its slot on its own (a stale ref on a
+	// pool-recycled ship self-heals the same way). The wedge scratch arrays are rebuilt per
+	// tick with no allocation.
+	private readonly UFO[] sparedUfos = new UFO[SpareSlotsMax];
+
+	// Wedges cover the spared slots AND every mid-charge platform (owner sighting, lap 12:
+	// chargers were target-gated but not angle-gated, so misses at nearby targets sailed into
+	// them), so the arrays are sized past the slot ceiling.
+	private const int SpareWedgeMax = SpareSlotsMax + 4;
+
+	private readonly float[] spareWedgeCentre = new float[SpareWedgeMax];
+
+	private readonly float[] spareWedgeHalf = new float[SpareWedgeMax];
+
+	private readonly float[] spareWedgeDist = new float[SpareWedgeMax];
+
+	private int spareWedgeCount;
+
+	// One [aiseek] line on every seek-kind change and a heartbeat every 30 ticks while the kind
+	// holds. The line carries where the ship IS, where the seek points, its weight and whether
+	// the deadzone has silenced it -- the attribution a position trace cannot give.
+	private void LogAiSeek(string kind, Vector2 target, float weight, float dist, bool inDeadzone)
+	{
+		aiSeekLogTick++;
+		if (kind == aiSeekLogKind && aiSeekLogTick % 30 != 0)
+		{
+			return;
+		}
+		aiSeekLogKind = kind;
+		Console.WriteLine(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+			"[aiseek] p{0} kind={1} target={2:0},{3:0} pos={4:0},{5:0} dist={6:0} w={7:0.00} dz={8}",
+			player, kind, target.X, target.Y, base.Position.X, base.Position.Y, dist, weight,
+			inDeadzone ? 1 : 0));
+	}
+
 	private void DoAIMove(ref Vector2 direction, GameTime gameTime, List<AlienDrawableGameComponent> baddies)
 	{
 		CollisionLevelMap collisionLevelMap = null;
@@ -1859,6 +2088,9 @@ public class PlayerShip : AlienDrawableGameComponent
 		// written a weight yet by then; the two station fallbacks are exempt because they run
 		// solely while steerTarget is still MaxValue.
 		float steerTargetWeight = SeekWeight;
+		// ?aiseeklog attribution: which write site owns steerTarget this tick. Set beside every
+		// assignment below; read only by LogAiSeek, so a shipped build carries a dead local.
+		string seekKind = "none";
 		float dodgeAngle = 0f;
 		if (player == 0)
 		{
@@ -1878,6 +2110,11 @@ public class PlayerShip : AlienDrawableGameComponent
 		}
 		AlienDrawableGameComponent haltingBoss = null;
 		float haltingBossDistSq = float.MaxValue;
+		// T4 addendum (owner spec): the bait ingredients -- the nearest charging big UFO and
+		// the boss itself.
+		UFO chargingPlatform = null;
+		float chargingDistSq = float.MaxValue;
+		SpiderBoss baitBoss = null;
 		Vector2 delta;
 		foreach (AlienDrawableGameComponent baddy in baddies)
 		{
@@ -1889,12 +2126,29 @@ public class PlayerShip : AlienDrawableGameComponent
 				if (distSq < (toTarget).LengthSquared())
 				{
 					steerTarget = baddy.Position;
+					seekKind = "blast";
 				}
 				continue;
 			}
 			if (baddy is JunkBoss)
 			{
 				steerTarget = baddy.Position;
+				seekKind = "junkboss";
+			}
+			if (baddy is SpiderBoss && !baddy.IsDead)
+			{
+				baitBoss = (SpiderBoss)baddy;
+			}
+			if (baddy is UFO && ((UFO)baddy).IsBig && !baddy.IsDead && ((UFO)baddy).AiChargingLazer
+				&& ((UFO)baddy).AiLazerAimedAt(this))
+			{
+				Vector2 toCharging = baddy.Position - base.Position;
+				float chargeSq = (toCharging).LengthSquared();
+				if (chargeSq < chargingDistSq)
+				{
+					chargingDistSq = chargeSq;
+					chargingPlatform = (UFO)baddy;
+				}
 			}
 			// Sidestep a charging beam. A big UFO winds up for 2500ms and locks its aim at the
 			// PLAYER only at the instant it fires, so the dodge is to be somewhere else by then --
@@ -1922,62 +2176,16 @@ public class PlayerShip : AlienDrawableGameComponent
 					repel += dodgeStrength * across;
 				}
 			}
-			// The vertical strips: the fixed X-600 landing column, and the climb that opens the
-			// next cycle. Same treatment as the sweep lane, on the other axis -- flat across the
-			// band, because every part of it is equally lethal.
-			// ?ailaneescape=0 drops both hand-rolled spider escapes, so the lane wedge added by
-			// card e425781b can be measured against them instead of on top of them. Built as a
-			// temporary seam for that supersession A/B, and PERMANENT because the A/B kept them:
-			// dropping the escapes doubles SpiderBoss(standing) deaths (12 -> 24 over 8 paired
-			// runs) and costs 26 points of powerup pickup. The wedge is an ADDITION, not a
-			// replacement.
-			if (EvilAliensWeb.Compat.DebugFlags.AiLaneEscape != false
-				&& baddy is SpiderBoss && ((SpiderBoss)baddy).AiVerticalLaneActive)
-			{
-				float laneX = ((SpiderBoss)baddy).AiVerticalLaneX;
-				float offLane = base.Position.X - laneX;
-				if (Math.Abs(offLane) < VerticalLaneClearancePx)
-				{
-					// ALWAYS break left out of a landing. The landing now sweeps everything from the
-					// boss to the right screen edge (see SpiderBoss's land case), so right is not
-					// an escape at all -- it is a dead end that merely looks like one. For the
-					// jump/climb, which has no such sweep, either side is fine so the ship takes
-					// whichever it is already nearer.
-					float away = ((SpiderBoss)baddy).AiLandingSweep
-						? -1f
-						: ((Math.Abs(offLane) < 1f) ? ((laneX > 400f) ? -1f : 1f) : Math.Sign(offLane));
-					// Same steep falloff as every other field here: hardest at the centre line,
-					// fading out toward the clearance edge. A flat push across the band was tried
-					// and it fights the screen bounds all the way out instead of easing off once
-					// the ship is clearly out of the way.
-					float urge = ThreatFieldStrength(Math.Abs(offLane) / VerticalLaneClearancePx, SweepLaneAvoidStrength);
-					repel += new Vector2(away * urge, 0f);
-				}
-			}
-			// Act on the boss's own telegraph. During the "Danger!" arrow the spider boss sits
-			// off-screen in the lane it is about to cross, so it is STATIONARY -- the movement
-			// prediction says nothing and the distance field is a screen away. Vacating the lane
-			// now is the whole point of the warning, and it is far cheaper than trying to escape
-			// a screen-wide sweep once it has started.
-			if (EvilAliensWeb.Compat.DebugFlags.AiLaneEscape != false
-				&& baddy is SpiderBoss && ((SpiderBoss)baddy).AiSweepIncoming)
-			{
-				float laneY = ((SpiderBoss)baddy).AiSweepLaneCentreY;
-				float offLane = base.Position.Y - laneY;
-				if (Math.Abs(offLane) < SweepLaneClearancePx)
-				{
-					// Flee DOWNWARD out of the lane unless the lane IS the bottom one. Which way
-					// to run is not symmetric: UFOs enter from the top, so the upper third is the
-					// busy half of the screen and running up out of the middle lane trades one
-					// hazard for another. Only the bottom lane forces the ship upward.
-					float away = (laneY > 400f) ? -1f : 1f;
-					// Steep falloff, like every other field here: hardest on the centre line and
-					// easing off as the ship clears the band, so it hands over cleanly to the
-					// screen-edge terms instead of shoving all the way into them.
-					float urge = ThreatFieldStrength(Math.Abs(offLane) / SweepLaneClearancePx, SweepLaneAvoidStrength);
-					repel += new Vector2(0f, away * urge);
-				}
-			}
+			// The hand-rolled spider lane/sweep escapes that lived here -- strength-18 pushes
+			// out of the landing column and the telegraphed sweep lanes, with their break-left
+			// and flee-downward special cases -- were RETIRED by owner ruling (lap 12): the
+			// boss's ANNOUNCED swept path (lanes, "Danger!" hold, landing sweep) feeds the
+			// ordinary cone + lane wedge, and that shape does the work now. Two notes from the
+			// retirement: the wedge's middle-lane rule is LIVE from here on (a mid-screen lane
+			// raises no wedge because either side is an escape, where the escapes forced it
+			// down), and the old supersession A/B numbers (12 -> 24 standing deaths without
+			// the escapes) were measured under the pre-curve-flip force system and do not
+			// carry.
 			// Card f4d1721f: track the nearest level-HALTING boss so the ship can close on it if
 			// it is out of gun range (below). The 2008 code only ever did this for JunkBoss, so
 			// against any other boss the AI hovered at its default station and fired only when the
@@ -2013,6 +2221,10 @@ public class PlayerShip : AlienDrawableGameComponent
 			else if (baddy is Lazer)
 			{
 				getDistanceToLine(baddy, out var d, out var shortestpoint);
+				// The near-line boost band that used to sit here (lap 9's 8-at-the-line summit
+				// over the last hull-credited 30px) was REMOVED by owner ruling (lap 11, "that's
+				// jank") -- a beam is now the plain standard treatment on the line distance, and
+				// making beams scarier is ?ailazerstrength='s job, not extra geometry's.
 				// A live beam is instant death along its whole length. The port widened this berth
 				// past the 2008 flat 150px and card 2248e5eb measured that back off again: the
 				// wider field pushed the ship off the beam and into whatever was behind it. See
@@ -2021,14 +2233,56 @@ public class PlayerShip : AlienDrawableGameComponent
 				// legitimate "no beam field at all" arm, and d can be exactly 0 (the ship standing
 				// on the beam), which would otherwise reach 0/0.
 				float lazerRange = LazerAvoidRangePx;
+				float lineStrength = 0f;
+				Vector2 lineDir = default(Vector2);
 				if (lazerRange > 0f && d <= lazerRange)
 				{
-					float strength = ThreatFieldStrength(d / lazerRange, LazerAvoidStrength);
+					lineStrength = FieldCurve(LazerAvoidStrength, d / lazerRange);
 					if (altSteering)
 					{
-						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, d / lazerRange);
+						lineStrength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, d / lazerRange);
 					}
-					repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - shortestpoint) + dodgeAngle);
+					lineDir = MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - shortestpoint) + dodgeAngle);
+				}
+				// THE TIP'S SWEPT SHAPE (owner ruling, lap 5): the beam GROWS -- its tip advances
+				// at growthspeed * DifficultyModifier, faster than the ship at higher tiers --
+				// and the distance-to-line above only covers the segment that already exists, so
+				// the swath about to be claimed had zero warning. The tip gets the standard
+				// swept treatment at the UFO reference radius (factor 1.0), deliberately NOT its
+				// literal ~8px half-thickness: a guaranteed-death front deserves no less warning
+				// than a UFO at the same speed just for being thin. No wedge (the LANE concept
+				// does not apply to a lengthwise front).
+				float tipStrength = 0f;
+				Vector2 tipDir = default(Vector2);
+				SweptShape tipShape = default(SweptShape);
+				if (ConeEnabled && ((Lazer)baddy).TryGetAiTipMotion(out Vector2 lazerTip, out Vector2 tipVel))
+				{
+					tipVel *= LazerTipLeadScale;
+					tipShape = EvaluateSweptShape(base.Position, lazerTip, tipVel,
+						ConeLeadRefRadiusPx, ConeLeadRefRadiusPx, AiHalfExtent(), SweptTriangleStrength, wedgeEnabled: false);
+					if (tipShape.ConeStrength > 0f)
+					{
+						tipStrength = tipShape.ConeStrength;
+						tipDir = MyMath.AngleToVector(MyMath.VectorToAngle(tipShape.ConeDir) + dodgeAngle);
+					}
+				}
+				// THE TWO BEAM TERMS COMPETE, NEVER SUM (owner ruling, lap 11) -- the same
+				// higher-force-wins rule the swept shape uses between its own circle and
+				// triangle candidates, applied across the beam's two fields. They cover
+				// complementary territory (the segment that exists vs the swath about to be
+				// claimed) and only meet around the tip, where summing stacked up to 8-12
+				// out of one object. The stronger claim carries the tick; the seam between
+				// them is force-continuous because whichever term is weaker there is weaker
+				// by construction.
+				if (tipStrength > lineStrength)
+				{
+					EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy,
+						EvilAliensWeb.Compat.AiBench.ThreatPath.Cone, tipStrength, tipShape.ConeLength, tipShape.ConeEdgeDist);
+					repel += tipStrength * tipDir;
+				}
+				else if (lineStrength > 0f)
+				{
+					repel += lineStrength * lineDir;
 				}
 			}
 			else
@@ -2049,36 +2303,39 @@ public class PlayerShip : AlienDrawableGameComponent
 				// for something crossing the screen the radial term points ALONG its path, so
 				// keeping it around actively fights the evade it is supposed to back up. Anything
 				// slow, static, or not actually on a collision course falls through to the field.
-				// ?aievade=0 disables the closest-approach path entirely, so everything falls
-				// through to the radial field. A MEASUREMENT seam (card ada9e839): this special
-				// case predates the field composition and has never been measured inside it.
-				// THE DIRECTIONAL SHAPE (card e425781b), evaluated for every threat and ADDED to
-				// the radial field below rather than replacing it -- the shipped shape is a circle
-				// with a velocity-aligned hat on it, so both halves are real. Placed before the
-				// evade so a mover contributes its cone even on the ticks the evade takes over.
-				AddSweptRepellent(ref repel, baddy, dodgeAngle, maxSteerStrength);
-				if (EvilAliensWeb.Compat.DebugFlags.AiEvadeMovers != false
+				// THE UNIFIED SWEPT SHAPE (owner redesign, lap 5): for a mover it IS the whole
+				// repellent -- the shape includes the body circle -- so a handled threat skips
+				// the radial branch below entirely (adding both would count the circle twice).
+				// Stationary objects, refused teleport paths and the ?aicone=0 arm return false
+				// and fall through to the plain radial field.
+				if (AddSweptRepellent(ref repel, baddy, dodgeAngle, maxSteerStrength))
+				{
+					continue;
+				}
+				// EvadeMovingThreat stays BAKED OFF (owner ruling: superseded by the shape);
+				// `?aievade=1` re-arms it for A/B.
+				if (EvilAliensWeb.Compat.DebugFlags.AiEvadeMovers == true
 					&& EvadeMovingThreat(ref repel, baddy, dodgeAngle, minSteerStrength, maxSteerStrength))
 				{
 					continue;
 				}
-				float dist = ThreatEdgeDistance(base.Position, baddy);
-				// Personal-space field, sized to the THREAT (card f4d1721f). The 2008 code gave
-				// everything the same flat 150px, which is nothing to something the size of the
-				// spider boss -- by the time it pushed at all the ship was already inside the
-				// hitbox. `dist` is edge distance, so this is clearance the AI wants BEYOND the
-				// thing's own hull, and it scales with how big the hull is.
-				float field = ThreatFieldRange(baddy);
-				if (dist <= field)
+				float dist = ThreatEdgeDistance(base.Position, baddy, out Vector2 awayDir);
+				// THE STANDARD FIELD, FLAT (owner ruling, lap 7 -- the full return to 2008):
+				// 150px beyond the body's edge, 4 -> 0 on the standard FieldCurve, for EVERY
+				// stationary threat regardless of size -- a big thing's field starts further out
+				// because its edge is further out, never because it is wider. This is the swept
+				// capsule at speed zero, so the whole threat system is one rule; the size-scaled
+				// range (150 + 1.8*half-extent) and the per-type curve/falloff switches are gone
+				// with their flags.
+				if (dist <= SweptFieldRangePx)
 				{
-					float strength = ThreatFieldStrength(dist / field, maxSteerStrength, ThreatTypeFalloff(baddy), ThreatTypeClassicCurve(baddy));
+					float strength = FieldCurve(maxSteerStrength, dist / SweptFieldRangePx);
 					if (altSteering)
 					{
-						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, dist / field);
+						strength = MathHelper.Lerp(maxSteerStrength, minSteerStrength, dist / SweptFieldRangePx);
 					}
-					strength *= ThreatTypeScale(baddy);
-					EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy, EvilAliensWeb.Compat.AiBench.ThreatPath.Field, strength, field, dist);
-					repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(base.Position - baddy.Position) + dodgeAngle);
+					EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy, EvilAliensWeb.Compat.AiBench.ThreatPath.Field, strength, SweptFieldRangePx, dist);
+					repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(awayDir) + dodgeAngle);
 				}
 			}
 		}
@@ -2116,6 +2373,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				steerTarget = powerup.Position;
 				steerTargetWeight = SeekPowerupWeight;
+				seekKind = "powerup";
 			}
 			// PowerupReachPx, not the 150px `steerRange` the 2008 code shared with the screen-edge
 			// margin -- see the const. Beyond this the powerup is still the steerTarget above, so
@@ -2152,13 +2410,19 @@ public class PlayerShip : AlienDrawableGameComponent
 		// Placed after the powerup pass so a boss fight outranks a pickup detour.
 		if (haltingBoss != null)
 		{
-			float bossEdgeDist = ThreatEdgeDistance(base.Position, haltingBoss);
+			// The approach term's distance stays in the CENTRE-minus-body space its anchor is
+			// solved in (gun range - ThreatBodyTerm) -- feeding it the lap-8 rect-based distance
+			// mixed units and shifted the crossing off firing range (caught by
+			// ai_boss_approach.txt's bossfar bound). The true-shape field above still protects
+			// with the real rectangle; this is the seek's own 1-D solve, and both sides of a
+			// solve must measure with the same ruler.
+			Vector2 toBoss = base.Position - haltingBoss.Position;
+			float bossEdgeDist = (toBoss).Length() - ThreatBodyTerm(haltingBoss);
 			// Gun range is a CENTRE distance (it is what DoAIFire range-tests), so the body term
 			// converts it into the edge space everything here is measured in.
 			float anchorPx = bulletlifetime * BulletRangePerMs - ThreatBodyTerm(haltingBoss);
-			float pull = BossApproachWeight(bossEdgeDist, anchorPx, ThreatFieldRange(haltingBoss),
-				ThreatTypeFalloff(haltingBoss), ThreatTypeClassicCurve(haltingBoss),
-				ThreatTypeScale(haltingBoss), maxSteerStrength, SteerNoiseFloor) * BossApproachScale;
+			float pull = BossApproachWeight(bossEdgeDist, anchorPx, SweptFieldRangePx,
+				FieldCurvePower, classic: false, 1f, maxSteerStrength, SteerNoiseFloor) * BossApproachScale;
 			// The bench call is UNCONDITIONAL -- the term's calibration is what it measures, and a
 			// tick where the boss lost the vote is exactly the tick worth counting.
 			EvilAliensWeb.Compat.AiBench.NoteBossApproach(this, bossEdgeDist,
@@ -2176,6 +2440,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				steerTarget = haltingBoss.Position;
 				steerTargetWeight = pull;
+				seekKind = "boss";
 			}
 		}
 		foreach (PlayerShip ship in oracle.GetShips())
@@ -2183,12 +2448,34 @@ public class PlayerShip : AlienDrawableGameComponent
 			if (ship.readyToConnect && ship != this && readyToConnect && !isConnectedWith(ship))
 			{
 				steerTarget = ship.Position;
+				seekKind = "connect";
 				// EVERY steerTarget write sets its own weight, including the ones that keep the
 				// station's. This one overwrites the boss approach above, so inheriting silently
 				// would fly the DETOUR at the approach's weight -- the one case where "leave it
 				// at the default" and "leave it at whatever the last writer set" differ.
 				steerTargetWeight = SeekWeight;
 			}
+		}
+		// T4 addendum (owner spec, lap 12): while a big UFO charges its beam during the spider
+		// fight, the idle destination becomes the midpoint between that UFO and the boss -- the
+		// beam locks onto the PLAYER at fire time, so a ship standing betwixt them aims the
+		// shot through the boss. Ordinary static seek weight, and only when nothing else has
+		// chosen a destination: it is bait, not an order ("doesn't mean they'll be able to go
+		// there... but it'll make 'em try"), and every threat term out-votes it up close --
+		// which is exactly what the REMOVED park-behind-the-boss (see the history note above)
+		// did not have.
+		if (steerTarget.X > 2000f && chargingPlatform != null && baitBoss != null)
+		{
+			// Owner refinement (lap 12): interposing is only meaningful against a STANDING
+			// boss -- flying or off-screen its position says nothing, so the bait point is
+			// simply mid-screen (the beam still crosses the busy middle). And only the ship
+			// the beam is actually AIMED at takes the bait -- the ingredient collect above
+			// filters on AiLazerAimedAt(this) -- so a co-op partner keeps its own business.
+			steerTarget = baitBoss.AiStanding
+				? (chargingPlatform.Position + baitBoss.Position) * 0.5f
+				: new Vector2(400f, 300f);
+			steerTargetWeight = SeekWeight;
+			seekKind = "bait";
 		}
 		if (steerTarget.X > 2000f && !collection.ContainsType<Floor>() && connectors.Count == 0)
 		{
@@ -2229,25 +2516,47 @@ public class PlayerShip : AlienDrawableGameComponent
 		}
 		if (steerTarget.X < 2000f)
 		{
+			// Only the station fallbacks above assign steerTarget without stamping a kind.
+			if (seekKind == "none")
+			{
+				seekKind = "station";
+			}
 			delta = base.Position - steerTarget;
 			float distToTarget = (delta).Length();
-			if (distToTarget > SeekArriveDeadzonePx)
+			// HYSTERESIS ARRIVAL (owner ruling, iterative rep 1; see DefaultSeekParkPx). Park the
+			// pull inside SeekParkPx, resume it only past SeekResumePx; a seek-kind change resets
+			// the latch, and a target swap or a moving target opens the distance past the resume
+			// radius on its own, so no per-target identity is needed. The single hard-edged
+			// deadzone this replaces relied on its radius covering the 11.3px stopping distance;
+			// here that bound belongs to the RESUME radius (park + 11.3 < resume), pinned by
+			// ProbeAiFieldComposition.
+			// A velocity-damped ARRIVE was tried in an earlier era and reverted -- it contains
+			// -SpeedVector, so it brakes the ship whenever it is moving relative to its station,
+			// which is most of a boss fight (coast 28% -> 59%, 24 -> 70 deaths). Don't re-derive.
+			if (seekKind != seekParkedKind)
 			{
-				// Plain positional pull, as in 2008. THE deliberate-destination attractor: it goes
-				// into `direction` and is never floored (card ada9e839), because its anti-pingpong
-				// mechanism is the deadzone above -- switched off inside it, full strength outside,
-				// a hard edge. That is sound here precisely BECAUSE the deadzone covers the ship's
-				// stopping distance: a ship crossing the edge at full speed coasts 11.3px and
-				// halts inside the zone, so it cannot cross back out under its own momentum and
-				// re-trigger. **The margin is 3.7px at the shipped 15px radius**, not the
-				// comfortable one it was at 30 -- which is exactly why card 05a2b818 stopped at
-				// 15 rather than taking the 2008 value of 10 that measured better. Anything at or
-				// below 11.3 breaks this paragraph; ProbeAiFieldComposition derives that bound
-				// from the motion constants and fails on it. See DefaultSeekArriveDeadzonePx.
-				// A velocity-damped ARRIVE was tried here instead and reverted -- it contains
-				// -SpeedVector, so it brakes the ship whenever it is moving relative to its station,
-				// which is most of a boss fight. That measured coast 28% -> 59% and 24 -> 70 deaths:
-				// the bot was being held at a standstill and could not accelerate out of trouble.
+				seekParked = false;
+				seekParkedKind = seekKind;
+			}
+			if (seekParked)
+			{
+				if (distToTarget >= SeekResumePx)
+				{
+					seekParked = false;
+				}
+			}
+			else if (distToTarget <= SeekParkPx)
+			{
+				seekParked = true;
+			}
+			if (EvilAliensWeb.Compat.DebugFlags.AiSeekLog)
+			{
+				LogAiSeek(seekKind, steerTarget, steerTargetWeight, distToTarget, seekParked);
+			}
+			if (!seekParked)
+			{
+				// Plain positional pull, as in 2008: into `direction`, never floored below the
+				// blanket 0.2 (the pull is 0.8, so the floor cannot censor it alone).
 				direction += steerTargetWeight
 					* MyMath.AngleToVector(MyMath.VectorToAngle(steerTarget - base.Position));
 			}
@@ -2258,11 +2567,14 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			bottomEdge = 560f;
 		}
+		// (An edge-band "powerup yield" briefly lived here in iterative rep 1 and was killed the
+		// same session by owner ruling -- a bandaid on a bandaid; the classic field curve is the
+		// structural fix for edge powerups. The pushes below are 2008 verbatim.)
 		if (!altSteering)
 		{
 			if (base.Position.X < edgeMargin)
 			{
-				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, base.Position.X / edgeMargin);
+				float push = FieldCurve(maxSteerStrength, base.Position.X / edgeMargin);
 				if (altSteering)
 				{
 					push = MathHelper.Lerp(maxSteerStrength, minSteerStrength, base.Position.X / edgeMargin);
@@ -2271,7 +2583,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			}
 			if (base.Position.X > 800f - edgeMargin)
 			{
-				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, Math.Abs((800f - base.Position.X) / edgeMargin));
+				float push = FieldCurve(maxSteerStrength, Math.Abs((800f - base.Position.X) / edgeMargin));
 				if (altSteering)
 				{
 					push = MathHelper.Lerp(maxSteerStrength, minSteerStrength, Math.Abs((800f - base.Position.X) / edgeMargin));
@@ -2280,7 +2592,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			}
 			if (base.Position.Y < edgeMargin)
 			{
-				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, base.Position.Y / edgeMargin);
+				float push = FieldCurve(maxSteerStrength, base.Position.Y / edgeMargin);
 				if (altSteering)
 				{
 					push = MathHelper.Lerp(maxSteerStrength, minSteerStrength, base.Position.Y / edgeMargin);
@@ -2289,7 +2601,7 @@ public class PlayerShip : AlienDrawableGameComponent
 			}
 			if (base.Position.Y > bottomEdge - edgeMargin)
 			{
-				float push = MyMath.PowerCurve(maxSteerStrength, minSteerStrength, 2f, Math.Abs((bottomEdge - base.Position.Y) / edgeMargin));
+				float push = FieldCurve(maxSteerStrength, Math.Abs((bottomEdge - base.Position.Y) / edgeMargin));
 				if (altSteering)
 				{
 					push = MathHelper.Lerp(maxSteerStrength, minSteerStrength, Math.Abs((bottomEdge - base.Position.Y) / edgeMargin));
@@ -2297,21 +2609,15 @@ public class PlayerShip : AlienDrawableGameComponent
 				repel += push * new Vector2(0f, -1f);
 			}
 		}
-		// THE REPULSION CANCELLATION FLOOR, and then the combine (card ada9e839). Everything that
-		// pushes AWAY has now had its say; if the resultant of all of it is at or below the delta,
-		// the repellents have argued each other to a standstill and the ship is not pushed at all.
-		// Applied to `repel` alone and BEFORE the low-pass, which is the only placement that means
-		// anything: the point is to stop a noise-directioned residual from ever entering the sum,
-		// and a floor downstream of the blend would be judging a lagged mixture of this tick's
-		// cancellation and the last few ticks' real pushes.
-		bool repelZeroed = (repel).Length() <= RepulseCancelDelta;
-		// Reported BEFORE the zeroing, because afterwards "two threats cancelled out" and "nothing
-		// was pushing" are the same vector.
-		EvilAliensWeb.Compat.AiBench.NoteRepel(this, repel, repelZeroed);
-		if (repelZeroed)
-		{
-			repel = Vector2.Zero;
-		}
+		// THE COMBINE. The per-family cancellation floor that used to sit here (card ada9e839:
+		// zero `repel` alone when its resultant was <= 0.2, before the low-pass) is GONE -- owner
+		// ruling, iterative rep 1: back to 2008's single blanket floor on the final sum at the
+		// end of the method, on the "too smart for its own good" grounds. The known cost is the
+		// case that floor was built for: two repellents shoving from opposite sides can still
+		// resolve to a >0.2 residual whose direction flips over a few px, which no end-of-sum
+		// floor can catch -- accepted for now (the probe-ahead idea is logged, not built).
+		// `repel` still accumulates separately so the bench can report it as its own vector.
+		EvilAliensWeb.Compat.AiBench.NoteRepel(this, repel, zeroed: false);
 		direction += repel;
 		// Low-pass the summed steer (card f4d1721f). Everything above votes with a vector, Move()
 		// consumes only the resulting ANGLE, and nothing damped how fast that angle could move --
@@ -2486,7 +2792,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			strength = MathHelper.Max(strength, ThreatPanicStrength);
 		}
-		strength *= ThreatTypeScale(baddy);
+
 		EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy, EvilAliensWeb.Compat.AiBench.ThreatPath.Evade, strength);
 		repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(side) + dodgeAngle);
 		return true;
@@ -2512,33 +2818,164 @@ public class PlayerShip : AlienDrawableGameComponent
 	// it is the identical failure the radial field already has against a screen-crosser: a push
 	// ALONG the path rather than off it. So only the sideways component is taken, which is also
 	// what a player does and what EvadeMovingThreat did for the same reason.
-	private void AddSweptRepellent(ref Vector2 repel, AlienDrawableGameComponent baddy, float dodgeAngle, float maxSteerStrength)
+	// The one field parameter of the swept shape: the 2008 steerRange, verbatim.
+	private const float SweptFieldRangePx = 150f;
+
+	// The triangle's length, in ONE place so the steering and the ?cones overlay can never
+	// disagree: speed x lead, scaled by the mover's size against the UFO reference, capped at
+	// the world-sized ceiling. See DefaultConeLeadMs for the ruling and the numbers.
+	private static float SweptConeLength(float speed, float bodyRadius)
+	{
+		return MathHelper.Min(speed * ConeLeadMs * (bodyRadius / ConeLeadRefRadiusPx), ConeMaxLenPx);
+	}
+
+	// The swept shape's GEOMETRY for one mover, exactly as the steering will evaluate it this
+	// tick -- the ?cones overlay draws precisely this, so the picture and the force can never
+	// drift apart. False for everything AddSweptRepellent would skip (cones off, no path,
+	// refused teleport, stationary).
+	internal static bool TryDescribeSweptShape(AlienDrawableGameComponent baddy,
+		out Vector2 anchor, out float radius, out Vector2 apex)
+	{
+		anchor = default(Vector2);
+		radius = 0f;
+		apex = default(Vector2);
+		if (!ConeEnabled)
+		{
+			return false;
+		}
+		// THE STEERING LOOP'S OWN GATES, mirrored, so the overlay draws exactly what the AI
+		// avoids and nothing else. ORDER MATTERS AND BIT ONCE (owner catch, iterative rep 1):
+		// the beam must be tested BEFORE the IsAiThreat gate, because the steering handles
+		// Lazer in its own dedicated branch and the predicate deliberately does not list it --
+		// gating first silently deleted every tip shape from the overlay while the steering
+		// pushed away regardless. Wall stays excluded (grid nav, no swept shape); everything
+		// generic must be collide-active AND a genuine threat, which is what keeps the player's
+		// own bullets and spent explosions dark.
+		if (baddy is Lazer beam)
+		{
+			if (!beam.Collides || !beam.TryGetAiTipMotion(out anchor, out var tipVel))
+			{
+				return false;
+			}
+			radius = ConeLeadRefRadiusPx;
+			float tipSpeed = (tipVel).Length() * LazerTipLeadScale;
+			apex = (tipSpeed < 0.001f)
+				? anchor
+				: anchor + tipVel / (tipVel).Length() * (radius + SweptConeLength(tipSpeed, radius));
+			return true;
+		}
+		if (baddy is Wall || !baddy.Collides || !IsAiThreat(baddy))
+		{
+			return false;
+		}
+		radius = MathHelper.Max(ThreatBodyTerm(baddy), 1f);
+		// A threat with NO swept path -- truly motionless (the scroll pauses during Level 2's
+		// set pieces, so parked UFOs really do read zero), or a refused teleport frame -- still
+		// describes its CIRCLE: the radial field's body is a real force and the owner wants it
+		// visible. Only the triangle needs a path. This is why the path test must not gate the
+		// whole description (iterative rep 1 sighting: landed UFOs vanishing from the overlay
+		// whenever the ground stood still).
+		if (!baddy.TryGetAiSweptPath(out anchor, out var velocity, out _))
+		{
+			anchor = baddy.Position;
+			apex = anchor;
+			return true;
+		}
+		float speed = (velocity).Length();
+		// Apex from the circle's EDGE, matching EvaluateSweptShape (owner catch, lap 8).
+		apex = (speed < 0.001f)
+			? anchor
+			: anchor + velocity / speed * (radius + SweptConeLength(speed, radius));
+		return true;
+	}
+
+	// Which element of this object's repulsion is WINNING against `ship` this tick: 0 = nothing
+	// pushes from here right now, 1 = the circle/body (for a beam, its LINE field out-voting the
+	// tip; for a pathless mover, the radial branch in reach), 2 = the triangle. Overlay-only
+	// (owner request, lap 11 -- "does the cone EVER win?"): ?cones colors the winner, so the
+	// competition becomes visible instead of inferred. Mirrors the steering's own arithmetic
+	// via the same EvaluateSweptShape / field constants; the 4f is DoAIMove's maxSteerStrength.
+	internal static int SweptShapeWinnerAt(PlayerShip ship, AlienDrawableGameComponent baddy)
+	{
+		if (ship == null || !ConeEnabled)
+		{
+			return 0;
+		}
+		Vector2 pos = ship.Position;
+		if (baddy is Lazer beam)
+		{
+			if (!beam.Collides || !beam.TryGetAiTipMotion(out Vector2 tip, out Vector2 tipVel))
+			{
+				return 0;
+			}
+			ship.getDistanceToLine(baddy, out float d, out _);
+			float lineStrength = 0f;
+			float lazerRange = LazerAvoidRangePx;
+			if (lazerRange > 0f && d <= lazerRange)
+			{
+				lineStrength = FieldCurve(LazerAvoidStrength, d / lazerRange);
+			}
+			tipVel *= LazerTipLeadScale;
+			SweptShape tipShape = EvaluateSweptShape(pos, tip, tipVel,
+				ConeLeadRefRadiusPx, ConeLeadRefRadiusPx, ship.AiHalfExtent(), SweptTriangleStrength, wedgeEnabled: false);
+			if (tipShape.ConeStrength > lineStrength)
+			{
+				return tipShape.ConeWinner;
+			}
+			return (lineStrength > 0f) ? 1 : 0;
+		}
+		if (baddy is Wall || !baddy.Collides || !IsAiThreat(baddy))
+		{
+			return 0;
+		}
+		if (!baddy.TryGetAiSweptPath(out Vector2 anchor, out Vector2 velocity, out float halfWidth)
+			|| (velocity).Length() < 0.001f)
+		{
+			// The radial branch owns a pathless mover: its circle/box lights up whenever the
+			// flat field is in reach.
+			return (ThreatEdgeDistance(pos, baddy, out _) <= SweptFieldRangePx) ? 1 : 0;
+		}
+		SweptShape shape = EvaluateSweptShape(pos, anchor, velocity,
+			ThreatBodyTerm(baddy), halfWidth, ship.AiHalfExtent(), 4f, wedgeEnabled: false);
+		return shape.ConeWinner;
+	}
+
+	// The unified swept repellent (owner redesign, iterative rep 1 lap 5): for a MOVER this is
+	// the WHOLE repellent -- the shape includes the body circle -- so the caller skips the
+	// radial branch when this returns true, or the circle would be counted twice. Returns false
+	// (pushing nothing) for a stationary object, a refused teleport path, or the ?aicone=0 arm,
+	// all of which fall through to the plain radial field.
+	private bool AddSweptRepellent(ref Vector2 repel, AlienDrawableGameComponent baddy, float dodgeAngle, float maxSteerStrength)
 	{
 		if (!ConeEnabled)
 		{
-			return;
+			return false;
 		}
 		if (!baddy.TryGetAiSweptPath(out var anchor, out var velocity, out var halfWidth))
 		{
-			return;
+			return false;
 		}
-		SweptShape shape = EvaluateSweptShape(base.Position, SpeedVector, anchor, velocity,
-			halfWidth, AiHalfExtent(), maxSteerStrength, LaneWedgeEnabled);
-		float typeScale = ThreatTypeScale(baddy);
+		if ((velocity).Length() < 0.001f)
+		{
+			return false;
+		}
+		SweptShape shape = EvaluateSweptShape(base.Position, anchor, velocity,
+			ThreatBodyTerm(baddy), halfWidth, AiHalfExtent(), maxSteerStrength, LaneWedgeEnabled);
 		if (shape.ConeStrength > 0f)
 		{
-			float strength = shape.ConeStrength * typeScale;
+			float strength = shape.ConeStrength;
 			EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy,
 				EvilAliensWeb.Compat.AiBench.ThreatPath.Cone, strength, shape.ConeLength, shape.ConeEdgeDist);
 			repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(shape.ConeDir) + dodgeAngle);
 		}
 		if (shape.WedgeStrength > 0f)
 		{
-			float strength = shape.WedgeStrength * typeScale;
+			float strength = shape.WedgeStrength;
 			EvilAliensWeb.Compat.AiBench.NoteThreatTerm(this, baddy,
 				EvilAliensWeb.Compat.AiBench.ThreatPath.Wedge, strength, shape.WedgeLength, shape.WedgeEdgeDist);
 			repel += strength * MyMath.AngleToVector(MyMath.VectorToAngle(shape.WedgeDir) + dodgeAngle);
 		}
+		return true;
 	}
 
 	// What the shape evaluates to at one point: the two terms with their directions, plus the two
@@ -2546,6 +2983,10 @@ public class PlayerShip : AlienDrawableGameComponent
 	// outside the shape the ship is).
 	internal struct SweptShape
 	{
+		// Which candidate won the force competition: 0 = neither pushes, 1 = the circle,
+		// 2 = the triangle. The ?cones overlay colors the winner off this.
+		internal int ConeWinner;
+
 		internal float ConeStrength;
 
 		internal Vector2 ConeDir;
@@ -2563,168 +3004,175 @@ public class PlayerShip : AlienDrawableGameComponent
 		internal float WedgeEdgeDist;
 	}
 
-	// THE SHAPE ITSELF, as a pure function of geometry -- no ship, no component, no Game. That is
-	// deliberate: it is the whole decision this card makes, and a decision is verified as DATA.
-	// `logic_probe`'s ProbeAiConeShape calls exactly this and tabulates it at FIXED distances,
-	// which is also the only honest way to compare two fields here -- see the card's warning that
-	// a mean field strength is a selection effect, not a measurement.
-	// `shipVel` is used solely to break the tie when the ship sits exactly on the centre line.
-	internal static SweptShape EvaluateSweptShape(Vector2 shipPos, Vector2 shipVel, Vector2 anchor,
-		Vector2 velocity, float halfWidth, float shipHalfExtent, float maxSteerStrength, bool wedgeEnabled)
+	// THE SHAPE (owner redesign; see the const block above). Two candidates, evaluated
+	// independently, and since lap 11 the HIGHER FORCE WINS -- each candidate runs the standard
+	// curve at its OWN peak (circle: the caller's full strength; triangle:
+	// SweptTriangleStrength, because the triangle is empty space about to be claimed, not a
+	// body). With equal peaks this is exactly the old shorter-distance union rule; with the
+	// weak triangle the circle out-votes it everywhere near the body and the triangle carries
+	// only the far future path as a whisper. The candidates:
+	//   the CIRCLE: the mover's own repulsion circle (radius = its body term, the same one the
+	//     radial branch subtracts). dist = |p - anchor| - r, push radial. This alone makes a
+	//     stationary treatment unnecessary -- wherever "behind", "inside the body" or the
+	//     flat-back sliver would need a special case, the circle's distance is simply smaller
+	//     and it wins the competition. All the bits that poke out win naturally.
+	//   the TRIANGLE: base corners on the circle's perpendicular diameter, apex at
+	//     `anchor + axis * min(speed * lead, cap)`. Inside -> dist 0, out the near flank;
+	//     outside -> nearest point on the two side edges (segment clamps), push away from it.
+	//     The base edge is skipped on proof, not oversight: it is a chord INSIDE the disk, so
+	//     the circle's distance is always <= the distance to it.
+	// Strength = THE standard field treatment, owner-ruled: flat 150px reach, 4 -> 0 on
+	// `FieldCurve` (max * (1-t)^2 since the lap-11 curve ruling -- steep at the body, whisper
+	// at the range edge), the same expression the screen edges, the beam and the lane escapes
+	// use (deliberately NOT the radial branch's size-scaled range). The caller adds the dodge twist. Direction is the winner's, so it flips
+	// at the union's internal watershed -- inherent to any nearest-feature field, a few degrees,
+	// invisible under the twist. Pure -- primitives in, shape out -- so logic_probe drives it
+	// directly.
+	internal static SweptShape EvaluateSweptShape(Vector2 shipPos, Vector2 anchor,
+		Vector2 velocity, float bodyRadius, float bandHalfWidth, float shipHalfExtent,
+		float maxSteerStrength, bool wedgeEnabled)
 	{
 		SweptShape result = default(SweptShape);
 		float speed = (velocity).Length();
 		if (speed < 0.001f)
 		{
-			// Not moving: it has no path to project, and its radial field already describes it.
 			return result;
 		}
 		Vector2 axis = velocity / speed;
-		float coneLen = MathHelper.Min(speed * ConeLeadMs, ConeMaxLenPx);
-		if (coneLen < 1f)
-		{
-			return result;
-		}
+		float r = MathHelper.Max(bodyRadius, 1f);
+		float coneLen = SweptConeLength(speed, r);
 		Vector2 d = shipPos - anchor;
+		float dlen = (d).Length();
+		// Candidate 1: the circle.
+		float circleDist = MathHelper.Max(dlen - r, 0f);
+		Vector2 circleDir = (dlen > 0.001f) ? (d / dlen) : (-axis);
+		// Candidate 2: the triangle.
+		Vector2 perp = new Vector2(0f - axis.Y, axis.X);
+		float w = Vector2.Dot(d, perp);
+		// The near flank; w == 0 resolves to +perp deterministically, not by float noise.
+		Vector2 side = (w >= 0f) ? perp : (-perp);
+		Vector2 corner = anchor + side * r;
+		// APEX FROM THE EDGE, not the centre (owner catch, lap 8): measured from the centre a
+		// slow drifter's size-scaled triangle lands at or inside its own circle -- poke-out
+		// requires speed > ref/lead (~0.086 px/ms), and the Mars ground scroll sits right on it,
+		// so every landed thing's cone drowned invisibly. The body sweeps forward from where its
+		// edge IS, so that is where the triangle starts counting.
+		Vector2 apex = anchor + axis * (r + coneLen);
+		Vector2 edge = apex - corner;
 		float u = Vector2.Dot(d, axis);
-		if (u <= 0f)
+		// Inside test: ahead of the base, and on the inner side of the NEAR edge. (A point past
+		// the apex reads as outward of the near edge, so this needs no far bound.)
+		float cross = edge.X * (shipPos.Y - corner.Y) - edge.Y * (shipPos.X - corner.X);
+		bool outwardOfEdge = ((w >= 0f) ? cross : (0f - cross)) > 0f;
+		float triDist;
+		Vector2 triDir;
+		if (u > 0f && !outwardOfEdge)
 		{
-			// Behind the mover. Nothing is coming this way, and the body itself is the radial
-			// field's business.
-			return result;
-		}
-		Vector2 acrossVec = d - u * axis;
-		float w = (acrossVec).Length();
-		// THE ACROSS-AXIS REACH. Flat by default; ConeSpread > 0 scales it with the band this mover
-		// actually sweeps, floored so a swarm of small fast objects keeps a usable skirt and capped at
-		// the flat width so a big one never exceeds the value that was swept. See DefaultConeSpread.
-		float acrossReach = ConeWidthPx;
-		if (ConeSpread > 0f)
-		{
-			acrossReach = MathHelper.Clamp(halfWidth * ConeSpread, ConeWidthMinPx, ConeWidthPx);
-		}
-		// The unit direction OUT of the corridor, i.e. the way the cone pushes.
-		Vector2 side;
-		if (w > 0.001f)
-		{
-			side = acrossVec / w;
+			triDist = 0f;
+			triDir = side;
 		}
 		else
 		{
-			// Dead on the centre line, so the shape itself cannot pick a side -- take the one the
-			// ship is already drifting toward, so the escape never fights its own momentum. When
-			// it is not drifting either the sign is settled deterministically, rather than left
-			// to the direction of a float rounding error.
-			side = new Vector2(0f - axis.Y, axis.X);
-			if (Vector2.Dot(side, shipVel) < 0f)
-			{
-				side = -side;
-			}
+			// Nearest point on the near side edge. The far edge can never be nearer than the
+			// near one (the ship is on this side of the axis), and behind the base the clamps
+			// land on the corners, where the circle wins anyway.
+			float edgeLenSq = MathHelper.Max((edge).LengthSquared(), 0.0001f);
+			float t = MathHelper.Clamp(Vector2.Dot(shipPos - corner, edge) / edgeLenSq, 0f, 1f);
+			Vector2 q = corner + t * edge;
+			Vector2 away = shipPos - q;
+			triDist = (away).Length();
+			triDir = (triDist > 0.001f) ? (away / triDist) : side;
 		}
-		// ---- the cone ----
-		float taperedHalf = halfWidth * MathHelper.Max(0f, 1f - ConeTaper * (u / coneLen));
-		float edgeAcross = MathHelper.Max(0f, w - taperedHalf);
-		float along = 1f - (float)Math.Pow(MathHelper.Clamp(u / coneLen, 0f, 1f), ConeFallAlong);
-		if (along > 0f)
+		// The competition is by FORCE, each candidate at its own peak; ties go to the circle
+		// (a body beats the empty space it is about to claim).
+		float circleStrength = (circleDist <= SweptFieldRangePx)
+			? FieldCurve(maxSteerStrength, circleDist / SweptFieldRangePx)
+			: 0f;
+		float triPeak = MathHelper.Min(SweptTriangleStrength, maxSteerStrength);
+		float triStrength = (triDist <= SweptFieldRangePx)
+			? FieldCurve(triPeak, triDist / SweptFieldRangePx)
+			: 0f;
+		if (circleStrength >= triStrength && circleStrength > 0f)
 		{
-			float across = (edgeAcross >= acrossReach)
-				? 0f
-				: (float)Math.Pow(1f - edgeAcross / acrossReach, ConeFallAcross);
-			if (across > 0f)
-			{
-				result.ConeStrength = maxSteerStrength * ConeScale * along * across;
-				result.ConeDir = side;
-				result.ConeLength = coneLen;
-				result.ConeEdgeDist = edgeAcross;
-			}
+			result.ConeWinner = 1;
+			result.ConeStrength = circleStrength;
+			result.ConeDir = circleDir;
+			result.ConeLength = coneLen;
+			result.ConeEdgeDist = circleDist;
 		}
-		// ---- the lane wedge ----
+		else if (triStrength > 0f)
+		{
+			result.ConeWinner = 2;
+			result.ConeStrength = triStrength;
+			result.ConeDir = triDir;
+			result.ConeLength = coneLen;
+			result.ConeEdgeDist = triDist;
+		}
+		// ---- the lane wedge (unchanged in spirit; its outside falloff now rides the same
+		// threat-field curve as everything else instead of a private exponent) ----
 		if (!wedgeEnabled)
 		{
 			return result;
 		}
-		// A gap only counts as an escape if the ship can survive in it: its own body, plus the
-		// distance it needs to stop, on each side. Derived from the real motion constants rather
-		// than chosen, exactly as DefaultSeekArriveDeadzonePx is.
-		float stoppingDistance = 0.5f * ShipMaxSpeed * ShipMaxSpeed / ShipDeceleration;
-		float survivableGap = 2f * (shipHalfExtent + stoppingDistance);
-		// A WEDGE IS FOR A LANE, AND A LANE IS A BAND TOO WIDE TO GO AROUND. Anything narrower
-		// than the room a ship needs is an obstacle, not a corridor: the ship can simply cross its
-		// path, so offering only ONE escape direction would be a lie -- and an 18-strength shove
-		// aimed at a bullet or a small rock drifting near the ceiling out-votes the entire rest of
-		// the field. Measured before this gate existed, every UFO in SpaceDodge was wedging (3263
-		// contributions at mean 4.25) purely for entering from the top.
-		//
-		// IT IS A SIZE THRESHOLD, NOT A "ONLY THE SPIDER BOSS" TEST, and the difference is worth
-		// knowing before reading a threats= line. The bar is ~63px of half-extent, which bullets and
-		// ordinary rocks miss and which a BIG UFO or a reallyBig asteroid clears -- so those still
-		// raise a wedge when their path hugs an edge (measured on this build: UFO(wedge) 443
-		// contributions at mean 1.81 on the spider rig, Asteroid(wedge) 296 at mean 0.98 on
-		// SpaceDodge). That is the rule working rather than leaking: a 90px-wide UFO sweeping the
-		// ceiling really does leave a gap the ship cannot cross in time. What the gate removes is
-		// the population that made the term meaningless, not every non-boss.
-		if (halfWidth < survivableGap)
+		if (u <= 0f)
 		{
 			return result;
 		}
-		// Which way is "out of the lane", if either. Measured at the cross-section the SHIP is at
-		// (`anchor + u*axis`), not at the anchor -- a mover typically enters from off-screen, and
-		// an anchor outside the play field reports zero room on its near side, which would wedge
-		// everything that ever crossed a boundary.
+		float stoppingDistance = 0.5f * ShipMaxSpeed * ShipMaxSpeed / ShipDeceleration;
+		float survivableGap = 2f * (shipHalfExtent + stoppingDistance);
+		// A wedge is for a LANE, and a lane is a band too wide to go around -- an 18-strength
+		// shove on every bullet drifting near the ceiling would out-vote the whole field. The
+		// gate keeps small movers from wedging at all.
+		if (bandHalfWidth < survivableGap)
+		{
+			return result;
+		}
+		// Which way is "out of the lane", if either -- measured at the cross-section the SHIP is
+		// at, not at the anchor (a mover typically enters from off-screen).
 		Vector2 bandPoint = anchor + u * axis;
-		Vector2 across1 = new Vector2(0f - axis.Y, axis.X);
-		float room1 = PlayfieldExitDistance(bandPoint, across1) - halfWidth;
-		float room2 = PlayfieldExitDistance(bandPoint, -across1) - halfWidth;
+		float room1 = PlayfieldExitDistance(bandPoint, perp) - bandHalfWidth;
+		float room2 = PlayfieldExitDistance(bandPoint, -perp) - bandHalfWidth;
 		Vector2 outDir;
 		if (room1 < survivableGap && room1 <= room2)
 		{
-			// Side 1 is the trap, so the escape is side 2.
-			outDir = -across1;
+			outDir = -perp;
 		}
 		else if (room2 < survivableGap)
 		{
-			outDir = across1;
+			outDir = perp;
 		}
 		else
 		{
-			// Both sides are survivable: an ordinary free mover, and the symmetric cone above is
-			// the right shape. True of a mid-screen lane as much as of an asteroid.
 			return result;
 		}
-		// The wedge runs the whole remaining length of the play field rather than the cone's
-		// speed-scaled length: the lane is lethal for its entire extent, so closing only the near
-		// stretch would invite the ship to sit in the far half of a corridor it cannot leave in
-		// time -- and the boss's "Danger!" telegraph, which is the whole warning the player gets,
-		// happens while it is still a screen away.
+		// The lane is lethal for its whole extent, so the wedge runs the remaining play field.
 		float wedgeLen = MathHelper.Max(PlayfieldExitDistance(anchor, axis), coneLen);
 		float wedgeAlong = 1f - (float)Math.Pow(MathHelper.Clamp(u / wedgeLen, 0f, 1f), LaneWedgeFallAlong);
 		if (wedgeAlong <= 0f)
 		{
 			return result;
 		}
-		// FULL strength everywhere from the trapped edge across to the far side of the band, then
-		// the cone's ordinary transverse falloff beyond it -- so the only downhill direction is
-		// OUT, and a ship that has already left is nudged rather than shoved back.
+		// Full strength across the whole band, the ordinary field falloff beyond its far edge.
 		float outward = Vector2.Dot(d, outDir);
 		float wedgeAcross;
-		if (outward <= halfWidth)
+		if (outward <= bandHalfWidth)
 		{
 			wedgeAcross = 1f;
 		}
-		else if (outward - halfWidth >= acrossReach)
+		else if (outward - bandHalfWidth >= SweptFieldRangePx)
 		{
 			wedgeAcross = 0f;
 		}
 		else
 		{
-			wedgeAcross = (float)Math.Pow(1f - (outward - halfWidth) / acrossReach, ConeFallAcross);
+			wedgeAcross = FieldCurve(1f, (outward - bandHalfWidth) / SweptFieldRangePx);
 		}
 		if (wedgeAcross > 0f)
 		{
 			result.WedgeStrength = LaneWedgeStrength * wedgeAlong * wedgeAcross;
 			result.WedgeDir = outDir;
 			result.WedgeLength = wedgeLen;
-			result.WedgeEdgeDist = MathHelper.Max(0f, outward - halfWidth);
+			result.WedgeEdgeDist = MathHelper.Max(0f, outward - bandHalfWidth);
 		}
 		return result;
 	}
@@ -2754,63 +3202,45 @@ public class PlayerShip : AlienDrawableGameComponent
 	// Per-type repellent multiplier. One switch, applied to BOTH repulsion paths (the radial
 	// field and EvadeMovingThreat), so a type cannot end up scaled on one and not the other --
 	// which on an asteroid would be a silent half-fix, since the belt uses both.
-	private static float ThreatTypeScale(AlienDrawableGameComponent baddy)
-	{
-		if (baddy is Asteroid)
-		{
-			return EvilAliensWeb.Compat.DebugFlags.AiAsteroidThreatScale ?? DefaultAsteroidThreatScale;
-		}
-		return 1f;
-	}
-
 	// Per-type RANGE multiplier, folded into ThreatFieldRange so every caller agrees on how big
 	// the field is -- `dist <= field` and `dist / field` must be the same field or the falloff is
 	// evaluated against a range the gate never used.
-	private static float ThreatTypeRangeScale(AlienDrawableGameComponent baddy)
-	{
-		if (baddy is Asteroid)
-		{
-			return EvilAliensWeb.Compat.DebugFlags.AiAsteroidRangeScale ?? DefaultAsteroidRangeScale;
-		}
-		return 1f;
-	}
-
 	// Per-type FALLOFF exponent. Falls back to the global one for every type that has no override.
-	private static float ThreatTypeFalloff(AlienDrawableGameComponent baddy)
-	{
-		if (baddy is Asteroid)
-		{
-			return EvilAliensWeb.Compat.DebugFlags.AiAsteroidFalloff ?? DefaultAsteroidFalloff;
-		}
-		return ThreatFieldFalloff;
-	}
-
-	private static float ThreatFieldRange(AlienDrawableGameComponent baddy)
-	{
-		// A per-type ABSOLUTE range replaces the size-scaled formula outright -- that is what the
-		// 2008 field was: a flat 150px for everything, regardless of how big it is. Both are
-		// measured the same way (EDGE distance; the original subtracted Width/2*sqrt2 exactly as
-		// this port does), so the two are directly comparable.
-		float flat = (baddy is Asteroid)
-			? (EvilAliensWeb.Compat.DebugFlags.AiAsteroidFlatRangePx ?? 0f)
-			: 0f;
-		float baseRange = (flat > 0f) ? flat : (ThreatFieldBasePx + ThreatRadius(baddy) * ThreatFieldSizeScale);
-		return baseRange * ThreatTypeRangeScale(baddy);
-	}
-
 	// Strength across that field: FULL up close, dropping away fast so the outer half is
 	// effectively free. That combination is the point -- a big field with a gentle falloff would
 	// be a no-go zone the ship could never enter, and it still has to fly in close to shoot and
 	// to weave through bullets.
 	//
+	// THE STANDARD FIELD CURVE (owner ruling, lap 11): max * (1-t)^2 -- steepest right at
+	// the body, a whisper at the range edge. Replaces the 2008 plateau max*(1-t^2), whose
+	// gradient was upside down for a force field: 75% strength still pushing at half range,
+	// and the push barely GROWING as the ship closed on the hull -- all the urgency ramp sat
+	// at the far edge of the berth. One expression so every standard-treatment consumer
+	// (screen edges, beam line + boost band, lane escapes, the swept shape's two candidates,
+	// the radial branch, the wedge skirt, and the boss-approach anchor via
+	// ThreatFieldStrength's falloff-2 branch) bends together. Attractors (the powerup's near
+	// pull) deliberately keep their own curve -- this ruling is about repulsors.
+	// ?aifieldpow= sweeps the exponent live; (1-t)^p keeps its shape for ANY p (odd or
+	// fractional included) because the base is clamped non-negative before the pow.
+	// BAKED AT 4 from the couch (owner ruling, lap 12): swept live over a full session at
+	// ?aifieldpow=4&aitristrength=2 -- "absolute game changer". The derived anchors follow:
+	// floor 0.0064, static seeks 0.164, so attractors are whispers next to a close threat
+	// and the bot commits to a destination only in genuinely quiet space.
+	public const float DefaultFieldCurvePower = 4f;
+
+	private static float FieldCurvePower =>
+		EvilAliensWeb.Compat.DebugFlags.AiFieldPow ?? DefaultFieldCurvePower;
+
+	private static float FieldCurve(float max, float t)
+	{
+		float inv = 1f - MathHelper.Clamp(t, 0f, 1f);
+		float p = FieldCurvePower;
+		return (p == 2f) ? max * inv * inv : max * (float)Math.Pow(inv, p);
+	}
+
 	// Deliberately NOT MyMath.PowerCurve: that is `max * (1 - t^p)`, whose falloff gets SHALLOWER
 	// as p rises (p=4 still pushes at 34% strength at 90% of the range). This is `max * (1-t)^p`,
 	// which is the shape the name "falloff" implies -- p=3 is down to 12% at half range.
-	private static float ThreatFieldStrength(float t, float maxSteerStrength)
-	{
-		return ThreatFieldStrength(t, maxSteerStrength, ThreatFieldFalloff, ClassicFieldCurve);
-	}
-
 	// THE TWO CURVE FAMILIES ARE DIFFERENT SHAPES, NOT DIFFERENT EXPONENTS (card e88e21ca).
 	//   classic (2008): max * (1 - t^2)  -- MyMath.PowerCurve. A fat PLATEAU: 75% strength at half
 	//                   range, still 36% at 80%. The whole field pushes.
@@ -2830,19 +3260,10 @@ public class PlayerShip : AlienDrawableGameComponent
 		return maxSteerStrength * (float)Math.Pow(u, falloff);
 	}
 
-	private static bool ClassicFieldCurve => EvilAliensWeb.Compat.DebugFlags.AiClassicFieldCurve ?? false;
-
+	// CLASSIC IS THE DEFAULT AGAIN (owner ruling, iterative rep 1): every threat field and the
+	// beam term run 2008's plateau. The spike family stays reachable via ?aifieldcurve=port
+	// (?aifieldfall= only shapes that arm).
 	// Per-type curve family, falling back to the global switch.
-	private static bool ThreatTypeClassicCurve(AlienDrawableGameComponent baddy)
-	{
-		if (baddy is Asteroid)
-		{
-			return EvilAliensWeb.Compat.DebugFlags.AiAsteroidClassicCurve
-				?? EvilAliensWeb.Compat.DebugFlags.AiClassicFieldCurve ?? false;
-		}
-		return ClassicFieldCurve;
-	}
-
 	// The boss-approach attractor, solved (card b56633fb). PURE -- primitives in, weight out, no
 	// ship and no component -- so logic_probe can sweep it over every difficulty tier and the whole
 	// bulletlifetime range with no game running. See BossApproachExponent for the shape argument.
@@ -2867,35 +3288,26 @@ public class PlayerShip : AlienDrawableGameComponent
 		float w = ThreatFieldStrength(t, maxSteerStrength, falloff, classic) * typeScale;
 		w = MathHelper.Max(w, minWeight);
 
-		// THE EXPONENT IS DAMPED SO THE PARKED BAND SURVIVES A BIG HULL UP CLOSE, and this is
-		// derived, not tuned. The band the whole-sum floor manufactures is
-		// 2*floor / (|A'| + |repel'|) wide, and |A'(r*)| = k*w/r* -- so a boss whose hull eats most
-		// of the weapon's reach has a small r* with a LARGE w sitting on it, and the linear k=1
-		// curve turns over too fast for the ship to stop inside the band.
-		//
-		// THE ONE CONFIGURATION THAT MAKES THIS BITE -- do not delete it as dead code. BrainBoss at
-		// its pulse peak on the base weapon: its hitbox is hw = 165 * scale and `scale` pulses
-		// 1.00 -> 1.10 (deeper as its HP drops), so the body term runs 233 -> 257px against a
-		// 351px gun range, leaving r* at 118 -> 94px. Undamped that bands 13.5px at scale 1.0 and
-		// 10.0px at the peak -- through the 11.3px stopping distance, i.e. the ship coasts across
-		// its own equilibrium and pingpongs while shooting the brain. Damped, k solves to 0.24 at
-		// rest and 0.09 at the peak, and the band is 22.2px at both. Every OTHER halting boss, tier and weapon in the game
-		// solves to k = 1 and is untouched (the next-tightest band is 53px), and any Range powerup
-		// removes the case entirely by growing r*.
-		//
-		// The repellent's slope is measured on the REAL curve rather than differentiated by hand,
-		// so this stays correct across both curve families and any per-type falloff.
-		float h = 1f;
-		float repelSlope = Math.Abs(ThreatFieldStrength(MathHelper.Clamp((anchor - h) / safeRange, 0f, 1f), maxSteerStrength, falloff, classic)
-			- ThreatFieldStrength(MathHelper.Clamp((anchor + h) / safeRange, 0f, 1f), maxSteerStrength, falloff, classic)) * typeScale / (2f * h);
+		// THE PARKED BAND IS EXPLICIT since the derived-floor ruling (lap 12). It used to be
+		// MANUFACTURED by the whole-sum floor -- 2*floor / (|A'| + |repel'|) wide, with an
+		// exponent-damping solve here to keep it above the ship's stopping distance -- and the
+		// lap-11/12 curve-derived floor is far too small to carve one (0.0064 at the baked p=4
+		// gives a ~0.5px band; caught by ProbeAiBossApproach's bound). So inside
+		// BossApproachBandMargin stopping distances of the crossing, the attractor simply
+		// RETURNS the repellent's own value at this distance: the net is exactly zero across
+		// the whole band, at any curve, exponent or floor, by construction. The old damping
+		// solve (BrainBoss's pulsing hull was the one configuration that made it bite) is
+		// superseded and removed with it -- the exponent runs at its ceiling again.
 		float stoppingPx = ShipMaxSpeed * ShipMaxSpeed / (2f * ShipDeceleration);
-		float slopeBudget = 2f * minWeight / (BossApproachBandMargin * stoppingPx) - repelSlope;
-		// A budget of zero means the repellent alone is steeper than the bound allows: nothing the
-		// attractor does can widen the band, so it goes FLAT (k=0, a constant w) -- the best
-		// available shape there, and the constant-weight design the card started from.
-		float k = (w > 0f)
-			? MathHelper.Clamp(MathHelper.Max(slopeBudget, 0f) * anchor / w, 0f, BossApproachExponent)
-			: BossApproachExponent;
+		float bandHalfPx = BossApproachBandMargin * stoppingPx * 0.5f;
+		if (Math.Abs(edgeDist - anchor) <= bandHalfPx)
+		{
+			float repelHere = ThreatFieldStrength(
+				MathHelper.Clamp(MathHelper.Max(edgeDist, 0f) / safeRange, 0f, 1f),
+				maxSteerStrength, falloff, classic) * typeScale;
+			return MathHelper.Clamp(repelHere, 0f, MathHelper.Max(BossApproachMaxWeight, w));
+		}
+		float k = BossApproachExponent;
 
 		float reach = MathHelper.Max(edgeDist, 0f) / anchor;
 		float pull = w * (float)Math.Pow(reach, k);
@@ -2935,15 +3347,68 @@ public class PlayerShip : AlienDrawableGameComponent
 		return 0f;
 	}
 
-	// Edge distance from a point to a threat. The circle branch CLAMPS and the others do not --
-	// that asymmetry is inherited verbatim from the 2008 code and is preserved on purpose; a box's
-	// edge distance goes negative once the ship is inside the corner radius, which the (1-t)^p
-	// falloff already saturates at full strength.
-	private static float ThreatEdgeDistance(Vector2 from, AlienDrawableGameComponent baddy)
+	// Edge distance AND escape direction from a point to a threat's REAL collision shape (owner
+	// catch, lap 8: the old form circle-approximated every box as width/2*sqrt2 around Position,
+	// which on the StationaryBoss -- wide, flat, offset left, skirt extended 100px down -- put
+	// field coverage over empty air on one side and left the box's lower-right corner
+	// unprotected; the bot walked into the uncovered kill zone believing it had clearance).
+	//   CollisionBox / Multibox -> nearest point on the actual rectangle(s): the laser's
+	//     distance-to-line treatment, one shape more. Inside -> 0, out the nearest face.
+	//   CollisionSimpleCircle   -> radial, clamped, as always.
+	//   anything else           -> the old centre-minus-body-term read, unchanged.
+	private static float ThreatEdgeDistance(Vector2 from, AlienDrawableGameComponent baddy, out Vector2 away)
 	{
+		ICollisionType type = baddy.GetCollisionType();
+		if (type is CollisionBox box)
+		{
+			return BoxEdgeDistance(from, box, out away);
+		}
+		if (type is CollisionMultibox multi)
+		{
+			float best = float.MaxValue;
+			away = Vector2.UnitY;
+			foreach (CollisionBox item in multi.Items)
+			{
+				float d = BoxEdgeDistance(from, item, out Vector2 itemAway);
+				if (d < best)
+				{
+					best = d;
+					away = itemAway;
+				}
+			}
+			return best;
+		}
 		Vector2 toBaddy = from - baddy.Position;
-		float dist = (toBaddy).Length() - ThreatBodyTerm(baddy);
-		return (baddy.GetCollisionType() is CollisionSimpleCircle) ? MathHelper.Clamp(dist, 0f, 1000f) : dist;
+		float len = (toBaddy).Length();
+		away = (len > 0.001f) ? (toBaddy / len) : Vector2.UnitY;
+		float dist = len - ThreatBodyTerm(baddy);
+		return (type is CollisionSimpleCircle) ? MathHelper.Clamp(dist, 0f, 1000f) : dist;
+	}
+
+	// Nearest-feature distance to one axis-aligned box: outside -> distance to the clamped
+	// point, push away from it; inside -> 0, push out the NEAREST FACE (the shortest door,
+	// the same rule as the swept triangle's interior).
+	private static float BoxEdgeDistance(Vector2 from, CollisionBox box, out Vector2 away)
+	{
+		float cx = MathHelper.Clamp(from.X, box.Left, box.Right);
+		float cy = MathHelper.Clamp(from.Y, box.Top, box.Bottom);
+		if (cx != from.X || cy != from.Y)
+		{
+			Vector2 d = from - new Vector2(cx, cy);
+			float len = (d).Length();
+			away = d / MathHelper.Max(len, 0.001f);
+			return len;
+		}
+		float toLeft = from.X - box.Left;
+		float toRight = box.Right - from.X;
+		float toTop = from.Y - box.Top;
+		float toBottom = box.Bottom - from.Y;
+		float min = MathHelper.Min(MathHelper.Min(toLeft, toRight), MathHelper.Min(toTop, toBottom));
+		if (min == toLeft) { away = new Vector2(-1f, 0f); }
+		else if (min == toRight) { away = new Vector2(1f, 0f); }
+		else if (min == toTop) { away = new Vector2(0f, -1f); }
+		else { away = new Vector2(0f, 1f); }
+		return 0f;
 	}
 
 	// Rough half-extent of a threat, so a boss the size of a quarter of the screen is given more

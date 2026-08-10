@@ -1867,6 +1867,14 @@ uses `Enabled=false`, not a pause layer -- so they still play here while a `shot
 
 ### The AI player (`ControlDevice.AI`) + the AI bench (card f4d1721f)
 
+**OWNER REDESIGN (fable-iterative rep 1, 2026-08-09/10) -- THIS SECTION IS PART-HISTORICAL.** The owner rebuilt the whole force system live from the couch; the code (`PlayerShip.cs` consts + comments) is ground truth and every pre-redesign number, table and knob below is history unless restated since. The shape of what changed:
+
+- **One curve family for every standard repulsor: `FieldCurve` = `max * (1-t)^p`, baked p=4** (`?aifieldpow=` sweeps it). The 2008 plateau `max*(1-t^2)` was an easing-direction slip -- 18 years of the gradient upside down -- and is gone from edges, beam, radial branch, swept shapes, wedge skirt and the boss-approach anchor alike. The derived anchors ride the curve: the single equilibrium floor is `FieldCurve(4, 0.8)` (0.0064 at p=4) and the static seeks are `FieldCurve(4, 0.55)` (0.164) -- no hand-picked 0.2/0.8 constants remain.
+- **The swept shape is a UNION with a force competition**: the body circle (full peak) vs the triangle (whisper peak `?aitristrength=`, baked 2 -- empty space about to be claimed, not a body), higher force wins, ties to the circle. The beam's line field competes with its tip cone the same way (never sums). The old mesa knob family (`?aiconewidth=` etc.), the field-shape family (`?aifieldpx=/aifieldsize=/aifieldfall=/aiasteroid*`), `?airepeldelta=`, the per-tier skill ladder (`FixedSkill` now), the steering low-pass, the 20-strength top band and the beam's 30px boost band are all DELETED.
+- **The spider fight runs on the field alone**: the hand-rolled lane escapes (`?ailaneescape=`) are deleted -- the boss's announced swept path feeds the ordinary cone + lane wedge. T4 (card 2c74d5b7) added the spare system: `?aispares=` (baked 1) big UFOs furthest from the ship are protected by forbidden WEDGES (tangent cone + aim spread, through-shot rule), `?aisparefair=` (baked 300, centre distance) is the fair-game circle, chargers are blanket non-targets during the fight, and the aimed-at ship BAITS the beam through a standing boss (mid-screen otherwise). `?aibench` reports `bossufos=` at boss death.
+- **Landed UFOs announce the scroll carry** (`UFO.TryGetAiSweptPath` override) so they cone; seek arrival is a hysteresis latch (`?aiseekdeadzone=` park 8 / `?aiseekresume=` 20); `?aiseeklog` traces the seek kind; **`?cones`** draws every swept shape (yellow = the winning element, red X = fire-protected UFOs), `eaConesDump()` reads them as data.
+
+
 One bot drives three things: the attract demos, the Mechanical-Friends cheat and `?aiplayer`.
 It lives entirely in `PlayerShip`: `DoAIFire` (target pick + `doAIBomb`), `DoAIMove` (steering),
 and the wall-navigation helpers. Two of its knobs are **difficulty-scaled** (card c10e3e7f, below);

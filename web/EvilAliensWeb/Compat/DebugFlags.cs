@@ -473,6 +473,17 @@ namespace EvilAliensWeb.Compat
 			ShowHitboxes = on;
 		}
 
+		// Draw every mover's swept repulsion shape (body circle + velocity triangle) over the
+		// frame, exactly as the AI evaluates it this tick. OFF by default; ?cones (URL) or
+		// eaCones(true) (console). The ShowHitboxes pattern: a pure overlay, OUT of Active.
+		// Drawn by ConeOverlay from Game1.DrawInner.
+		public static bool ShowCones { get; private set; }
+
+		internal static void SetShowCones(bool on)
+		{
+			ShowCones = on;
+		}
+
 		// Blast (bomb) tuning knobs for the sprite-harness lifetime visualiser (?harness=blast).
 		// All null/default => Blast.cs uses its baked-in constants, so a shipped build is unchanged.
 		//   ?blastactive=<0..1>  the blast stops dealing damage once its fade alpha drops below this
@@ -816,6 +827,10 @@ namespace EvilAliensWeb.Compat
 		// without grinding the level or being on Hard+. Pair with ?level=Level3 (+ ?invuln,
 		// ?difficulty=Hard). See Level3.PopulateBrainBossOnly.
 		public static bool BrainBoss { get; private set; }
+
+		// ?fakeboss (pair with ?level=Level3): straight into the FakeBoss fight -- otherwise
+		// gated to Easy/Medium and minutes into the level. The ?brainboss idiom.
+		public static bool FakeBoss { get; private set; }
 
 		// ?difficulty=<Easy|Medium|Hard|Very_Hard|Inzane>: pin the difficulty at boot (applied before
 		// any level Initialize runs). The helper's glide speed + aim are difficulty-scaled, so this
@@ -1332,6 +1347,12 @@ namespace EvilAliensWeb.Compat
 		// + run verdict. Pair with ?aiplayer. Console: eaAiBench(). See Compat/AiBench.cs.
 		public static bool AiBench { get; private set; }
 
+		// ?aiseeklog: per-tick attribution for the AI's ONE deliberate destination (DoAIMove's
+		// steerTarget). Prints an [aiseek] line when the seek KIND changes and a heartbeat every
+		// 30 ticks, so "which attractor owns the ship right now" is data rather than inference
+		// from a position trace. Log-only (no behaviour), so out of Active.
+		public static bool AiSeekLog { get; private set; }
+
 		// ?aiff=<2-64> (card f4d1721f): run the game's Update N times per rendered frame with the
 		// SAME dt, so an AI soak covers a whole level in a fraction of the wall-clock time without
 		// changing the sim it is measuring. Deliberately NOT Settings.Turbo, which scales dt --
@@ -1358,6 +1379,18 @@ namespace EvilAliensWeb.Compat
 		//   ?aiaim=<rad>     random error added to every shot's aim angle            [per-tier]
 		//                    (JunkBoss excepted -- it always gets exact aim)
 		public static float? AiSteerSmoothMs { get; private set; }
+
+		// ?aifieldpow=<p> the standard repulsor curve's exponent, max*(1-t)^p (owner knob, lap 11)
+		public static float? AiFieldPow { get; private set; }
+
+		// ?aispares=<n> big UFOs protected during the spider fight (T4, owner knob; 0 = off)
+		public static int? AiSpareCount { get; private set; }
+
+		// ?aisparefair=<px> the spare set's fair-game radius (T4, owner knob)
+		public static float? AiSpareFairGamePx { get; private set; }
+
+		// ?aitristrength=<s> the triangle/tip whisper peak (owner knob, lap 11)
+		public static float? AiTriStrength { get; private set; }
 
 		public static float? AiWallReactionMs { get; private set; }
 
@@ -1401,26 +1434,25 @@ namespace EvilAliensWeb.Compat
 		//                      "damp when calm, fly when not" balance in PlayerShip.DoAIMove.
 		public static float? AiSteerSmoothUrgentMs { get; private set; }
 
-		// The two cancellation floors (card ada9e839, both baked 0.2):
-		//   ?airepeldelta=<d>   the REPULSION resultant at or below which the repellents have
-		//                       argued each other to a standstill and none of them is applied.
-		//   ?ainoisefloor=<d>   the WHOLE steer at or below which the ship holds still, applied
-		//                       last. Both exist because Move() discards magnitude and thrusts at
-		//                       full acceleration along the ANGLE, so a cancelled-to-noise vector
-		//                       is a sprint in an arbitrary direction rather than a gentle nudge.
-		// `?aipark=` was the pre-card spelling of the second one, and it is GONE rather than
-		// renamed: it was baked at 0.95, i.e. ABOVE the 0.8 seek, so it did not floor noise -- it
-		// deleted every deliberate destination the bot had. A query still passing it would be
-		// asking for the bug back under a name that no longer means the same thing.
-		public static float? AiRepelCancelDelta { get; private set; }
-
+		// ?ainoisefloor=<d>  the ONE equilibrium floor (baked 0.2, 2008's own line): the whole
+		//                    steer at or below which the ship holds still, applied at the end of
+		//                    DoAIMove. Move() discards magnitude and thrusts at full acceleration
+		//                    along the ANGLE, so a cancelled-to-noise vector is a sprint in an
+		//                    arbitrary direction rather than a gentle nudge.
+		// `?airepeldelta=` (the repellents-only cancellation floor, card ada9e839) is GONE with
+		// its mechanism -- owner ruling, iterative rep 1: back to 2008's single blanket floor.
+		// `?aipark=` was the pre-ada9e839 spelling and is also gone: it was baked at 0.95, ABOVE
+		// the 0.8 seek, so it deleted every deliberate destination the bot had.
 		public static float? AiSteerNoiseFloor { get; private set; }
 
-		// ?aiseekdeadzone=<px>  the radius inside which the seek attractor stops pulling -- the
-		//                       anti-pingpong mechanism for every deliberate destination, and the
-		//                       one knob that has to stay above the ship's 11.3px stopping
-		//                       distance (PlayerShip.DefaultSeekArriveDeadzonePx).
+		// ?aiseekdeadzone=<px>  the seek arrival's PARK radius since the hysteresis rework
+		//                       (PlayerShip.DefaultSeekParkPx; the flag keeps its old name), and
+		// ?aiseekresume=<px>    its RESUME radius -- the pull re-engages only past this. The
+		//                       stopping-distance bound lives on the PAIR now: resume must exceed
+		//                       park + 11.3px (PlayerShip.DefaultSeekResumePx).
 		public static float? AiSeekDeadzonePx { get; private set; }
+
+		public static float? AiSeekResumePx { get; private set; }
 
 		// ?aiseekpowerup=<w>    the pull toward a POWERUP the bot has chosen to fetch, and
 		// ?aiseekapproach=<s>   REDEFINED BY CARD b56633fb: a SCALE on the boss approach's own
@@ -1438,27 +1470,15 @@ namespace EvilAliensWeb.Compat
 
 		public static float? AiPowerupReachPx { get; private set; }
 
-		public static float? AiThreatFieldPx { get; private set; }
-
-		public static float? AiThreatFieldSize { get; private set; }
-
-		public static float? AiThreatFieldFalloff { get; private set; }
-
 		// ?aiasteroidscale=<f>  per-type repellent multiplier for ASTEROIDS only (card ada9e839).
 		//                       The belt is the one place a dense field of lethal obstacles has to
 		//                       out-argue an ordinary powerup detour, and a GLOBAL falloff change
 		//                       was already measured and declined elsewhere.
-		public static float? AiAsteroidThreatScale { get; private set; }
-
 		// ?aiasteroidrange=<f>  multiplier on the asteroid field's RANGE, and
 		// ?aiasteroidfall=<p>   the asteroid field's own falloff exponent (lower = earlier and
 		//                       gentler). The shape axes to ?aiasteroidscale='s magnitude axis --
 		//                       a taller mountain of the same width shoves the ship out of the
 		//                       belt, a wider shallower one leans on it the whole way across.
-		public static float? AiAsteroidRangeScale { get; private set; }
-
-		public static float? AiAsteroidFalloff { get; private set; }
-
 		// ?aifieldcurve=classic      restore the 2008 threat-field SHAPE, max*(1-t^2), globally;
 		// ?aiasteroidcurve=classic   the same for ASTEROIDS only (wins over the global switch);
 		// ?aiasteroidflatpx=<px>     replace the asteroid field's size-scaled range with a flat
@@ -1466,12 +1486,6 @@ namespace EvilAliensWeb.Compat
 		// The port swapped a PLATEAU for a SPIKE (75% vs 12% strength at half range) and
 		// ?aifieldfall= only ever swept the exponent inside the port's family, so the original
 		// shape had never been measured. Card e88e21ca.
-		public static bool? AiClassicFieldCurve { get; private set; }
-
-		public static bool? AiAsteroidClassicCurve { get; private set; }
-
-		public static float? AiAsteroidFlatRangePx { get; private set; }
-
 		// ?aievade=0  turn OFF EvadeMovingThreat, the closest-approach path, so every threat is
 		//             handled by the radial field alone. Card ada9e839's measurement seam -- that
 		//             special case was measured under the 0.95 park and never inside the field
@@ -1483,13 +1497,10 @@ namespace EvilAliensWeb.Compat
 		//                  field alone -- the A/B control for everything this card measures.
 		// ?aiwedge=0       keep the cone but drop the asymmetric lane wedge, which is the only way
 		//                  to attribute a spider-boss result to one half of the shape.
-		// ?ailaneescape=0  turn off the hand-rolled spider lane/sweep escapes, so the wedge can be
-		//                  measured against them rather than on top of them.
 		public static bool? AiConeShapes { get; private set; }
 
 		public static bool? AiLaneWedge { get; private set; }
 
-		public static bool? AiLaneEscape { get; private set; }
 
 		// ?aiconelead=<ms>     cone length per unit speed, as a time horizon;
 		// ?aiconemaxlen=<px>   the ceiling on that length;
@@ -1763,6 +1774,9 @@ namespace EvilAliensWeb.Compat
 				case "hitboxes":
 				case "hitbox":
 					ShowHitboxes = IsOn(val);
+					break;
+				case "cones":
+					ShowCones = IsOn(val);
 					break;
 				case "shake":
 				case "screenshake":
@@ -2863,6 +2877,53 @@ namespace EvilAliensWeb.Compat
 				case "aibench":
 					AiBench = IsOn(val);
 					break;
+				case "aiseeklog":
+					AiSeekLog = IsOn(val);
+					break;
+				case "aispares":
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var aisn) && aisn >= 0)
+					{
+						AiSpareCount = Math.Min(aisn, 4);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a whole number >= 0",
+							InForce(AiSpareCount ?? EvilAliens.PlayerShip.SpiderBossLaserPlatforms));
+					}
+					break;
+				case "aisparefair":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aisf) && aisf >= 0f)
+					{
+						AiSpareFairGamePx = MathHelper.Min(aisf, 800f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiSpareFairGamePx ?? EvilAliens.PlayerShip.SpareFairGameRadiusPx));
+					}
+					break;
+				case "aifieldpow":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aifp) && aifp > 0f)
+					{
+						AiFieldPow = MathHelper.Min(aifp, 16f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(AiFieldPow ?? EvilAliens.PlayerShip.DefaultFieldCurvePower));
+					}
+					break;
+				case "aitristrength":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aits) && aits >= 0f)
+					{
+						AiTriStrength = MathHelper.Min(aits, 100f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiTriStrength ?? EvilAliens.PlayerShip.DefaultSweptTriangleStrength));
+					}
+					break;
 				case "aismooth":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aism) && aism >= 0f)
 					{
@@ -2900,7 +2961,7 @@ namespace EvilAliensWeb.Compat
 						// standing there is no single number to name, and the tier is not settled at
 						// parse time, so say which TABLE is in force rather than guess a row.
 						RejectFlagValue(key, val, "a number >= 0",
-							AiAimSpreadRad.HasValue ? InForce(AiAimSpreadRad.Value) : "the per-tier skill row");
+							AiAimSpreadRad.HasValue ? InForce(AiAimSpreadRad.Value) : "the fixed skill row");
 					}
 					break;
 				case "aigapmargin":
@@ -2972,17 +3033,6 @@ namespace EvilAliensWeb.Compat
 							InForce(AiSteerSmoothUrgentMs ?? EvilAliens.PlayerShip.DefaultSteerSmoothUrgentMs));
 					}
 					break;
-				case "airepeldelta":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var airpd) && airpd >= 0f)
-					{
-						AiRepelCancelDelta = MathHelper.Min(airpd, 20f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiRepelCancelDelta ?? EvilAliens.PlayerShip.DefaultRepulseCancelDelta));
-					}
-					break;
 				case "ainoisefloor":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ainf) && ainf >= 0f)
 					{
@@ -3003,25 +3053,20 @@ namespace EvilAliensWeb.Compat
 					{
 						// A typo here would leave the evade path ON while the run is LABELLED as
 						// having it off -- i.e. a measurement seam quietly measuring the other arm.
-						RejectFlagValue(key, val, "on/off", (AiEvadeMovers ?? true) ? "on" : "off");
+						RejectFlagValue(key, val, "on/off", (AiEvadeMovers ?? false) ? "on" : "off");
 					}
 					break;
 				case "aicone":
 				case "aiwedge":
-				case "ailaneescape":
 					if (IsOn(val) || IsExplicitlyOff(val))
 					{
 						if (key == "aicone")
 						{
 							AiConeShapes = IsOn(val);
 						}
-						else if (key == "aiwedge")
-						{
-							AiLaneWedge = IsOn(val);
-						}
 						else
 						{
-							AiLaneEscape = IsOn(val);
+							AiLaneWedge = IsOn(val);
 						}
 					}
 					else
@@ -3030,7 +3075,7 @@ namespace EvilAliensWeb.Compat
 						// is LABELLED as having it off, i.e. a measurement seam quietly measuring
 						// the other arm.
 						RejectFlagValue(key, val, "on/off",
-							((key == "aicone" ? AiConeShapes : (key == "aiwedge" ? AiLaneWedge : AiLaneEscape)) ?? true) ? "on" : "off");
+							((key == "aicone" ? AiConeShapes : AiLaneWedge) ?? true) ? "on" : "off");
 					}
 					break;
 				case "aiconelead":
@@ -3053,86 +3098,6 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(AiConeMaxLenPx ?? EvilAliens.PlayerShip.DefaultConeMaxLenPx));
-					}
-					break;
-				case "aiconewidth":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aicw) && aicw > 0f)
-					{
-						AiConeWidthPx = MathHelper.Min(aicw, 2000f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number > 0",
-							InForce(AiConeWidthPx ?? EvilAliens.PlayerShip.DefaultConeWidthPx));
-					}
-					break;
-				case "aiconespread":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aicsp) && aicsp >= 0f)
-					{
-						AiConeSpread = MathHelper.Min(aicsp, 200f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiConeSpread ?? EvilAliens.PlayerShip.DefaultConeSpread));
-					}
-					break;
-				case "aiconewidthmin":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aicwm) && aicwm >= 0f)
-					{
-						AiConeWidthMinPx = MathHelper.Min(aicwm, 2000f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiConeWidthMinPx ?? EvilAliens.PlayerShip.DefaultConeWidthMinPx));
-					}
-					break;
-				case "aiconetaper":
-					// REFUSED above 1 rather than clamped: 1 is the top of the taper's real range (a true
-					// triangle), not a guard rail far outside anything anyone would type, so silently
-					// clamping ?aiconetaper=2 would measure 1 under a run labelled 2.
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aict) && aict >= 0f && aict <= 1f)
-					{
-						AiConeTaper = aict;
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number 0..1",
-							InForce(AiConeTaper ?? EvilAliens.PlayerShip.DefaultConeTaper));
-					}
-					break;
-				case "aiconefallalong":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aicfa) && aicfa >= 0f)
-					{
-						AiConeFallAlong = MathHelper.Min(aicfa, 20f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiConeFallAlong ?? EvilAliens.PlayerShip.DefaultConeFallAlong));
-					}
-					break;
-				case "aiconefallacross":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aicfc) && aicfc >= 0f)
-					{
-						AiConeFallAcross = MathHelper.Min(aicfc, 20f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiConeFallAcross ?? EvilAliens.PlayerShip.DefaultConeFallAcross));
-					}
-					break;
-				case "aiconescale":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aics) && aics >= 0f)
-					{
-						AiConeScale = MathHelper.Min(aics, 20f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiConeScale ?? EvilAliens.PlayerShip.DefaultConeScale));
 					}
 					break;
 				case "aiwedgestrength":
@@ -3169,68 +3134,6 @@ namespace EvilAliensWeb.Compat
 							InForce(AiSweptMaxSpeedPxPerMs ?? Net.NetSession.MaxObservedSpeedPxPerMs));
 					}
 					break;
-				case "aifieldcurve":
-				case "aiasteroidcurve":
-					if (val == "classic" || val == "port")
-					{
-						if (key == "aifieldcurve")
-						{
-							AiClassicFieldCurve = val == "classic";
-						}
-						else
-						{
-							AiAsteroidClassicCurve = val == "classic";
-						}
-					}
-					else
-					{
-						RejectFlagValue(key, val, "classic/port",
-							((key == "aifieldcurve" ? AiClassicFieldCurve : AiAsteroidClassicCurve) ?? false) ? "classic" : "port");
-					}
-					break;
-				case "aiasteroidflatpx":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiafp) && aiafp > 0f)
-					{
-						AiAsteroidFlatRangePx = MathHelper.Min(aiafp, 2000f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number > 0", InForce(AiAsteroidFlatRangePx));
-					}
-					break;
-				case "aiasteroidrange":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiar) && aiar > 0f)
-					{
-						AiAsteroidRangeScale = MathHelper.Min(aiar, 20f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number > 0",
-							InForce(AiAsteroidRangeScale ?? EvilAliens.PlayerShip.DefaultAsteroidRangeScale));
-					}
-					break;
-				case "aiasteroidfall":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiaf) && aiaf >= 0f)
-					{
-						AiAsteroidFalloff = MathHelper.Min(aiaf, 20f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiAsteroidFalloff ?? EvilAliens.PlayerShip.DefaultAsteroidFalloff));
-					}
-					break;
-				case "aiasteroidscale":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiast) && aiast >= 0f)
-					{
-						AiAsteroidThreatScale = MathHelper.Min(aiast, 20f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiAsteroidThreatScale ?? EvilAliens.PlayerShip.DefaultAsteroidThreatScale));
-					}
-					break;
 				case "aiseekdeadzone":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aisdz) && aisdz >= 0f)
 					{
@@ -3239,7 +3142,18 @@ namespace EvilAliensWeb.Compat
 					else
 					{
 						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiSeekDeadzonePx ?? EvilAliens.PlayerShip.DefaultSeekArriveDeadzonePx));
+							InForce(AiSeekDeadzonePx ?? EvilAliens.PlayerShip.DefaultSeekParkPx));
+					}
+					break;
+				case "aiseekresume":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aisrs) && aisrs >= 0f)
+					{
+						AiSeekResumePx = MathHelper.Min(aisrs, 400f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiSeekResumePx ?? EvilAliens.PlayerShip.DefaultSeekResumePx));
 					}
 					break;
 				case "aiseekpowerup":
@@ -3273,42 +3187,6 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(AiPowerupReachPx ?? EvilAliens.PlayerShip.DefaultPowerupReachPx));
-					}
-					break;
-				case "aifieldpx":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aifp) && aifp >= 0f)
-					{
-						AiThreatFieldPx = MathHelper.Min(aifp, 800f);
-					}
-					else
-					{
-						// Per-tier, like ?aiaim above (PlayerShip.ThreatFieldBasePx => Skill.FieldPx).
-						RejectFlagValue(key, val, "a number >= 0",
-							AiThreatFieldPx.HasValue ? InForce(AiThreatFieldPx.Value) : "the per-tier skill row");
-					}
-					break;
-				case "aifieldsize":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aifs) && aifs >= 0f)
-					{
-						AiThreatFieldSize = MathHelper.Min(aifs, 10f);
-					}
-					else
-					{
-						RejectFlagValue(key, val, "a number >= 0",
-							InForce(AiThreatFieldSize ?? EvilAliens.PlayerShip.DefaultThreatFieldSizeScale));
-					}
-					break;
-				case "aifieldfall":
-					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aiff2) && aiff2 > 0f)
-					{
-						AiThreatFieldFalloff = MathHelper.Min(aiff2, 12f);
-					}
-					else
-					{
-						// STRICTLY > 0 (it is the exponent of a (1-t)^p falloff), so 0 is rejected
-						// here where it is a legitimate floor for most of the family.
-						RejectFlagValue(key, val, "a number > 0",
-							InForce(AiThreatFieldFalloff ?? EvilAliens.PlayerShip.DefaultThreatFieldFalloff));
 					}
 					break;
 				case "aitopedgepx":
@@ -3536,6 +3414,9 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "brainboss":
 					BrainBoss = IsOn(val);
+					break;
+				case "fakeboss":
+					FakeBoss = IsOn(val);
 					break;
 				case "spiders":
 					Spiders = IsOn(val);
@@ -4057,7 +3938,7 @@ namespace EvilAliensWeb.Compat
 					+ "REFUSE its own pairing (a menu session rejects while debug flags are active). "
 					+ "Add &netallowdebug.");
 			}
-			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || !NetChargeAimEase || AiWallNav2008 || AiFastForward > 1;
+			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || FakeBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || !NetChargeAimEase || AiWallNav2008 || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -4070,6 +3951,7 @@ namespace EvilAliensWeb.Compat
 							+ (WallsOnly ? " wallsonly" : "")
 							+ (NoWalls ? " nowalls" : "")
 							+ (BrainBoss ? " brainboss" : "")
+							+ (FakeBoss ? " fakeboss" : "")
 							+ (TutorialTraining ? " tutorialtraining" : "")
 							// Same class (card 3b6c12e7): ?win replaces Level 2's script with the ending
 							// unlock chain AND forces Hard, so a run that reached the credits in a

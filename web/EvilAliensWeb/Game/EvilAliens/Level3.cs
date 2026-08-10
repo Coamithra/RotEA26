@@ -104,6 +104,13 @@ internal class Level3 : GameScene
 			PopulateBrainBossOnly();
 			return;
 		}
+		if (EvilAliensWeb.Compat.DebugFlags.FakeBoss)
+		{
+			// DEBUG (?fakeboss): same idiom, straight into the FakeBoss fight -- otherwise gated
+			// to Easy/Medium and minutes into the level.
+			PopulateFakeBossOnly();
+			return;
+		}
 		WaitEvent waitEvent = new WaitEvent(base.Game, 0.1f);
 		eventList.AddEvent(waitEvent);
 		waitEvent.OnFinished += slowdown;
@@ -408,6 +415,23 @@ internal class Level3 : GameScene
 		eventList.AddEvent(brainBossSpawner);
 		eventList.MakeConditional(brainBossSpawner, Settings.DifficultyLevel.Hard, Settings.DifficultyLevel.Inzane);
 		eventList.AddHalt();
+	}
+
+	// DEBUG (?fakeboss): FakeBossEasy() with the Easy/Medium gate REMOVED -- gives lives, spawns
+	// the real FakeBoss, halts until it dies, then Victory. Built for the iterative rep-1
+	// "ship flies into the fakeship" sighting, which had no on-demand rig (the fight is
+	// otherwise minutes into an Easy/Medium Level 3). Reached only via DebugFlags.FakeBoss.
+	private void PopulateFakeBossOnly()
+	{
+		WaitEvent waitEvent = Wait(0.1f);
+		waitEvent.OnFinished += returnlives;
+		FakeBossSpawner fakeBossSpawner = new FakeBossSpawner(base.Game);
+		eventList.AddEvent(fakeBossSpawner);
+		eventList.AddHalt();
+		WaitEvent victoryEvent = new WaitEvent(base.Game, 2f);
+		eventList.AddEvent(victoryEvent, halting: true);
+		eventList.AddHalt();
+		victoryEvent.OnFinished += Victory;
 	}
 
 	// DEBUG (?brainboss): the boss tail of BrainBossHard() with the difficulty gate REMOVED --

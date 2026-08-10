@@ -35,10 +35,11 @@
 # `boss=` IS AN EDGE DISTANCE since that card, not a centre distance, so the same rig reads
 # ~130-165px where it used to read ~390. Do not compare the two across the card.
 #
-# `bossw=` is the SOLVED weight, averaged over the ticks the term ran. It reads 0.7-1.2 here. It
-# is asserted merely to be present and non-zero: a weight of zero is an inert term, which is the
-# whole failure class above, and its exact value is a function of the live weapon range (a Range
-# powerup moves it) so a tight bound would be flaky.
+# `bossw=` is the SOLVED weight, averaged over the ticks the term ran. Under the lap-12 baked
+# curve (p=4) it reads ~0.01 here BY DESIGN -- the solve equals the boss's own repellent at
+# firing range, and the spike curve is nearly zero at r*'s 118px -- so the old non-zero leg
+# (pre-curve-flip it read 0.7-1.2) was RETIRED: near-zero is the honest calibration now, and an
+# inert term is what the idle%/bossfar legs discriminate. Only presence is asserted.
 #
 # FAILURE MEANS:
 #   * `boss=` / `bossfar=` missing  -> NoteBossApproach is no longer called, i.e. the haltingBoss
@@ -84,9 +85,8 @@ expect \[aibench\].*idle=([0-9]|1[0-9]|2[0-4])%
 # ...and it got there by closing: under 45% of ticks outside firing range.
 expect \[aibench\].*bossfar=([0-9]|[1-3][0-9]|4[0-4])%
 
-# The solved weight is live and non-zero (an inert term is the failure class this card fixed).
+# The solved weight is reported (near-zero is the honest p=4 calibration -- see the header).
 expect \[aibench\].*bossw=[0-9]+\.[0-9]+
-expect-not \[aibench\].*bossw=0\.00
 
 # The powerup counters ride the same report (card ada9e839) -- if they vanish, the histogram
 # reshaped and the matrix runner's Row() contract is the next thing to check.

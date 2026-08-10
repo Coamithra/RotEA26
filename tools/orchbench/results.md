@@ -6,17 +6,17 @@ The prose ledger for the experiment [`README.md`](README.md) defines: which divi
 
 ## Rep 1 — cost and wall
 
-| | fable-solo r1 | fable-oracle r1 | fable-architect r1 | fable-fleet r1 |
-|---|---|---|---|---|
-| PRs | #315–#318 | #319–#322 | #323–#326 | #327–#330 |
-| run branch | `orchbench/run-fable-solo-rep1` | `…-fable-oracle-rep1` | `…-fable-architect-rep1` | `…-fable-fleet-rep1` |
-| cost | $91.12 | $141.37 | $101.24 | $184.53 |
-| wall | 2122s | 4860s | 3324s | 3178s |
-| Fable $ | $91.12 (all) | $20.66 | $37.94 | $176.48 |
-| Opus $ | — | $120.71 | $63.30 | $8.05 |
-| prefix re-writes | 0 | 11 ev / 1.91M tok | 11 ev / 1.41M tok | 7 ev / 1.61M tok |
-| rewrite waste | $0 | ~$10.95 | ~$8.10 | ~$18.50 |
-| cost, no-rewrite counterfactual | $91.12 | ~$130.42 | ~$93.14 | ~$166.03 |
+| | fable-solo r1 | fable-oracle r1 | fable-architect r1 | fable-fleet r1 | fable-iterative r1 |
+|---|---|---|---|---|---|
+| PRs | #315–#318 | #319–#322 | #323–#326 | #327–#330 | #331 |
+| run branch | `orchbench/run-fable-solo-rep1` | `…-fable-oracle-rep1` | `…-fable-architect-rep1` | `…-fable-fleet-rep1` | `…-fable-iterative-rep1` |
+| cost | $91.12 | $141.37 | $101.24 | $184.53 | $339.07 |
+| wall | 2122s | 4860s | 3324s | 3178s | 22161s (owner-attended) |
+| Fable $ | $91.12 (all) | $20.66 | $37.94 | $176.48 | $339.07 (all) |
+| Opus $ | — | $120.71 | $63.30 | $8.05 | — |
+| prefix re-writes | 0 | 11 ev / 1.91M tok | 11 ev / 1.41M tok | 7 ev / 1.61M tok | 2 ev / 0.73M tok |
+| rewrite waste | $0 | ~$10.95 | ~$8.10 | ~$18.50 | ~$13.91 |
+| cost, no-rewrite counterfactual | $91.12 | ~$130.42 | ~$93.14 | ~$166.03 | ~$325.16 |
 
 - **Per-model splits are NOT in `runs.csv`** (its columns are aggregate). The oracle split above was recomputed from the local transcripts by re-running `usage_snap`'s scan filtered to the run's `started_at + wall_s` window — method validated by reproducing the architect run's recorded table digit-for-digit first. Rewrite waste = `rw_tok` × the model's 5-minute cache-write rate minus cache-read rate ($5.75/MTok Opus, $11.50/MTok Fable; the farm runs' rewrite events sat in Opus subagents, the fleet's in Fable subagents).
 - **The counterfactual column is optimistic for the two farm strategies** — some agent idle is intrinsic to their checkpoint design, so $0 rewrite waste is not reachable; the honest floor is between the two cost rows. Oracle's figure also carries a known harness artifact (~1 of its 11 events was a dead-watcher stall, ~30min idle — see its `runs.csv` note). The fleet's rewrite waste is a different animal: no checkpoints exist, so all 7 events are agents ending their turn while their own background sweep/probe ran and re-paying the prefix on resume — avoidable in principle (poll in-turn), and the biggest single-run rewrite bill so far.

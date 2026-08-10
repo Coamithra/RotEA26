@@ -26,6 +26,9 @@ namespace EvilAliensWeb.Compat
         // pushing the ship this tick draws bright yellow, so circle-vs-triangle competition is
         // visible instead of inferred. Relative to the first live ship in the pass.
         private static readonly Color WinColor = new Color(1f, 0.9f, 0.15f);
+        // The T4 do-not-shoot marker (owner request, lap 12): a big X over every UFO the fire
+        // rules currently protect -- a spared slot or a mid-charge platform during the fight.
+        private static readonly Color SpareColor = new Color(1f, 0.15f, 0.15f);
         private const float Alpha = 0.85f;
         private const int Thickness = 2; // design-space px
 
@@ -48,6 +51,15 @@ namespace EvilAliensWeb.Compat
                     break;
                 }
             }
+            bool spiderBossAlive = false;
+            for (int i = 0; i < collidables.Count; i++)
+            {
+                if (collidables[i] is SpiderBoss boss && !boss.IsDead)
+                {
+                    spiderBossAlive = true;
+                    break;
+                }
+            }
             SpriteBlendMode prev = sb.BlendMode;
             sb.BlendMode = (SpriteBlendMode)1; // NonPremultiplied, like HitboxOverlay
             for (int i = 0; i < collidables.Count; i++)
@@ -55,6 +67,16 @@ namespace EvilAliensWeb.Compat
                 if (!(collidables[i] is AlienDrawableGameComponent adc))
                 {
                     continue;
+                }
+                // The do-not-shoot X, drawn whether or not the mover describes a shape -- the
+                // protection is a FIRE rule and holds for a parked platform too.
+                if (ship != null && ship.IsSpareProtected(adc, spiderBossAlive, out float xRadius))
+                {
+                    Color xCol = new Color(SpareColor, Alpha);
+                    Vector2 c = adc.Position;
+                    Vector2 arm = new Vector2(xRadius * 0.7071f, xRadius * 0.7071f);
+                    DrawLine(sb, c - arm, c + arm, xCol);
+                    DrawLine(sb, new Vector2(c.X - arm.X, c.Y + arm.Y), new Vector2(c.X + arm.X, c.Y - arm.Y), xCol);
                 }
                 if (!PlayerShip.TryDescribeSweptShape(adc, out Vector2 anchor, out float radius, out Vector2 apex))
                 {

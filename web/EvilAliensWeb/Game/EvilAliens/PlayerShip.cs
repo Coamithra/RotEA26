@@ -1915,6 +1915,36 @@ public class PlayerShip : AlienDrawableGameComponent
 		return Math.Abs(MathHelper.WrapAngle(angle - wedgeCentre)) <= halfAngle;
 	}
 
+	// ?cones overlay (owner request, lap 12): is this baddy fire-protected by the T4 rules
+	// right now -- a spared slot, or a mid-charge platform during the fight? Read-only view of
+	// the same state the fire selection tests, so the X on screen and the held shot can never
+	// disagree. `radius` sizes the marker.
+	internal bool IsSpareProtected(AlienDrawableGameComponent baddy, bool spiderBossAlive, out float radius)
+	{
+		radius = 0f;
+		if (!(baddy is UFO ufo) || ufo.IsDead)
+		{
+			return false;
+		}
+		bool guarded = spiderBossAlive && ufo.IsBig && ufo.AiChargingLazer;
+		if (!guarded)
+		{
+			for (int i = 0; i < sparedUfos.Length; i++)
+			{
+				if (ReferenceEquals(ufo, sparedUfos[i]))
+				{
+					guarded = true;
+					break;
+				}
+			}
+		}
+		if (guarded)
+		{
+			radius = MathHelper.Max(ThreatBodyTerm(baddy), 1f);
+		}
+		return guarded;
+	}
+
 	// Fire-selection gate: is a shot TOWARD this point forbidden? The fair-game circle exempts
 	// point-blank defence -- anything within it may be shot whatever stands behind it.
 	private bool SpareBlocksShot(Vector2 toBaddy)

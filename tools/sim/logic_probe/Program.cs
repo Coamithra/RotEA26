@@ -664,6 +664,10 @@ internal static class Program
             // digits 2 and 1, which occur all over the captured output, so the absence check
             // would fire on text that is not the default -- the aiff escape.
             new { Flag = "aifieldpow",     Prop = "AiFieldPow",            Good = "3.5", Want = (object)3.5f,  Baked = ""     },
+            // The T4 spare knobs (card 2c74d5b7). Baked "" on both: the defaults render as "2"
+            // and "80", which occur elsewhere in the captured output (the aiff escape).
+            new { Flag = "aispares",       Prop = "AiSpareCount",          Good = "3",   Want = (object)3,     Baked = ""     },
+            new { Flag = "aisparefair",    Prop = "AiSpareFairGamePx",     Good = "123", Want = (object)123f,  Baked = ""     },
             new { Flag = "aitristrength",  Prop = "AiTriStrength",         Good = "2.5", Want = (object)2.5f,  Baked = ""     },
             new { Flag = "aismoothurgent", Prop = "AiSteerSmoothUrgentMs", Good = "22",  Want = (object)22f,   Baked = "15"   },
             new { Flag = "ainoisefloor",   Prop = "AiSteerNoiseFloor",     Good = "4",   Want = (object)4f,    Baked = "0.2"  },

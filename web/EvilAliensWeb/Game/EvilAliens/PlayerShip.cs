@@ -345,7 +345,18 @@ public class PlayerShip : AlienDrawableGameComponent
 	// defends a slot so the set does not flip-flop between two UFOs at similar range.
 	private const int SpiderBossLaserPlatforms = 2;
 
+	// Hard ceiling on the slot arrays; ?aispares= clamps here rather than reallocating.
+	private const int SpareSlotsMax = 4;
+
+	// ?aispares=<n> -- how many platforms to protect (0 = sparing off). Owner knob, lap 12.
+	private static int SpareCount =>
+		Math.Min(EvilAliensWeb.Compat.DebugFlags.AiSpareCount ?? SpiderBossLaserPlatforms, SpareSlotsMax);
+
 	private const float SpareFairGameRadiusPx = 80f;
+
+	// ?aisparefair=<px> -- the fair-game radius (inside it everything may be shot).
+	private static float SpareFairGamePx =>
+		EvilAliensWeb.Compat.DebugFlags.AiSpareFairGamePx ?? SpareFairGameRadiusPx;
 
 	// A challenger must out-distance the nearer protected UFO by this much to take its slot.
 	// The one number here the owner did not fix; sized at a few UFO-widths rather than
@@ -1759,8 +1770,15 @@ public class PlayerShip : AlienDrawableGameComponent
 	// UFOs orbiting at similar range.
 	private void UpdateSpareSet(List<AlienDrawableGameComponent> baddies, bool active, float aimSpread)
 	{
-		float fairSq = SpareFairGameRadiusPx * SpareFairGameRadiusPx;
-		for (int i = 0; i < sparedUfos.Length; i++)
+		int slots = SpareCount;
+		float fair = SpareFairGamePx;
+		float fairSq = fair * fair;
+		// Slots above the live count (the knob can shrink mid-fight) free immediately.
+		for (int i = slots; i < sparedUfos.Length; i++)
+		{
+			sparedUfos[i] = null;
+		}
+		for (int i = 0; i < slots; i++)
 		{
 			UFO standing = sparedUfos[i];
 			if (standing == null)
@@ -1773,68 +1791,67 @@ public class PlayerShip : AlienDrawableGameComponent
 				sparedUfos[i] = null;
 			}
 		}
-		if (active)
+		if (active && slots > 0)
 		{
-			// The two furthest eligible candidates not already protected.
-			UFO c1 = null, c2 = null;
-			float c1Dist = -1f, c2Dist = -1f;
-			foreach (AlienDrawableGameComponent scan in baddies)
+			// Fill EMPTY slots with the furthest eligibles; then one challenger a tick may
+			// contest the nearest occupied slot, by the hysteresis margin.
+			while (true)
 			{
-				if (!(scan is UFO ufo) || !ufo.IsBig || ufo.IsDead)
+				UFO best = null;
+				float bestDist = -1f;
+				foreach (AlienDrawableGameComponent scan in baddies)
 				{
-					continue;
-				}
-				bool alreadySpared = false;
-				for (int i = 0; i < sparedUfos.Length; i++)
-				{
-					if (ReferenceEquals(ufo, sparedUfos[i]))
+					if (!(scan is UFO ufo) || !ufo.IsBig || ufo.IsDead)
 					{
-						alreadySpared = true;
+						continue;
+					}
+					bool alreadySpared = false;
+					for (int i = 0; i < slots; i++)
+					{
+						if (ReferenceEquals(ufo, sparedUfos[i]))
+						{
+							alreadySpared = true;
+							break;
+						}
+					}
+					if (alreadySpared)
+					{
+						continue;
+					}
+					Vector2 to = ufo.Position - base.Position;
+					float dist = (to).Length();
+					if (dist <= fair)
+					{
+						continue;
+					}
+					if (dist > bestDist)
+					{
+						bestDist = dist;
+						best = ufo;
+					}
+				}
+				if (best == null)
+				{
+					break;
+				}
+				int empty = -1;
+				for (int i = 0; i < slots; i++)
+				{
+					if (sparedUfos[i] == null)
+					{
+						empty = i;
 						break;
 					}
 				}
-				if (alreadySpared)
+				if (empty >= 0)
 				{
+					sparedUfos[empty] = best;
 					continue;
 				}
-				Vector2 to = ufo.Position - base.Position;
-				float dist = (to).Length();
-				if (dist <= SpareFairGameRadiusPx)
-				{
-					continue;
-				}
-				if (dist > c1Dist)
-				{
-					c2 = c1;
-					c2Dist = c1Dist;
-					c1 = ufo;
-					c1Dist = dist;
-				}
-				else if (dist > c2Dist)
-				{
-					c2 = ufo;
-					c2Dist = dist;
-				}
-			}
-			// Empty slots take the furthest candidates outright; a full set must be BEATEN.
-			for (int i = 0; i < sparedUfos.Length && c1 != null; i++)
-			{
-				if (sparedUfos[i] == null)
-				{
-					sparedUfos[i] = c1;
-					c1 = c2;
-					c1Dist = c2Dist;
-					c2 = null;
-					c2Dist = -1f;
-				}
-			}
-			if (c1 != null)
-			{
-				// The hysteresis: the strongest remaining challenger takes the NEARER slot,
-				// and only by out-distancing it by the margin.
+				// Full set: the hysteresis challenge, then done for this tick.
 				int nearSlot = 0;
 				float nearDist = float.MaxValue;
-				for (int i = 0; i < sparedUfos.Length; i++)
+				for (int i = 0; i < slots; i++)
 				{
 					Vector2 to = sparedUfos[i].Position - base.Position;
 					float dist = (to).Length();
@@ -1844,10 +1861,11 @@ public class PlayerShip : AlienDrawableGameComponent
 						nearSlot = i;
 					}
 				}
-				if (c1Dist > nearDist + SpareSwitchMarginPx)
+				if (bestDist > nearDist + SpareSwitchMarginPx)
 				{
-					sparedUfos[nearSlot] = c1;
+					sparedUfos[nearSlot] = best;
 				}
+				break;
 			}
 		}
 		// The wedges the fire selection tests against, rebuilt from whatever survived.
@@ -1894,7 +1912,7 @@ public class PlayerShip : AlienDrawableGameComponent
 		{
 			return false;
 		}
-		if ((toBaddy).LengthSquared() <= SpareFairGameRadiusPx * SpareFairGameRadiusPx)
+		if ((toBaddy).LengthSquared() <= SpareFairGamePx * SpareFairGamePx)
 		{
 			return false;
 		}
@@ -1926,11 +1944,11 @@ public class PlayerShip : AlienDrawableGameComponent
 	// so a dead, despawned or point-blank one frees its slot on its own (a stale ref on a
 	// pool-recycled ship self-heals the same way). The wedge scratch arrays are rebuilt per
 	// tick with no allocation.
-	private readonly UFO[] sparedUfos = new UFO[SpiderBossLaserPlatforms];
+	private readonly UFO[] sparedUfos = new UFO[SpareSlotsMax];
 
-	private readonly float[] spareWedgeCentre = new float[SpiderBossLaserPlatforms];
+	private readonly float[] spareWedgeCentre = new float[SpareSlotsMax];
 
-	private readonly float[] spareWedgeHalf = new float[SpiderBossLaserPlatforms];
+	private readonly float[] spareWedgeHalf = new float[SpareSlotsMax];
 
 	private int spareWedgeCount;
 

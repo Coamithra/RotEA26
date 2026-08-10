@@ -1383,6 +1383,12 @@ namespace EvilAliensWeb.Compat
 		// ?aifieldpow=<p> the standard repulsor curve's exponent, max*(1-t)^p (owner knob, lap 11)
 		public static float? AiFieldPow { get; private set; }
 
+		// ?aispares=<n> big UFOs protected during the spider fight (T4, owner knob; 0 = off)
+		public static int? AiSpareCount { get; private set; }
+
+		// ?aisparefair=<px> the spare set's fair-game radius (T4, owner knob)
+		public static float? AiSpareFairGamePx { get; private set; }
+
 		// ?aitristrength=<s> the triangle/tip whisper peak (owner knob, lap 11)
 		public static float? AiTriStrength { get; private set; }
 
@@ -2877,6 +2883,28 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "aiseeklog":
 					AiSeekLog = IsOn(val);
+					break;
+				case "aispares":
+					if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out var aisn) && aisn >= 0)
+					{
+						AiSpareCount = Math.Min(aisn, 4);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a whole number >= 0",
+							InForce(AiSpareCount ?? 2));
+					}
+					break;
+				case "aisparefair":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aisf) && aisf >= 0f)
+					{
+						AiSpareFairGamePx = MathHelper.Min(aisf, 800f);
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(AiSpareFairGamePx ?? 80f));
+					}
 					break;
 				case "aifieldpow":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var aifp) && aifp > 0f)

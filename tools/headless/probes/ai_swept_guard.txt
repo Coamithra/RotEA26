@@ -45,7 +45,10 @@
 # invisible the defect was). Deleting the guard's call site turns it green again -- which is what
 # the sibling probe is for.
 #
-# eahl: --flags "?level=OwnLevel&aiplayer&aibench&difficulty=Very_Hard&invuln&seed=1&noattract"
+# NOTE: `&aicone=1&aievade=1` re-arm the velocity-prediction paths, BAKED OFF since the
+#       iterative rep-1 owner ruling -- without them the guard is never consulted and this
+#       probe would pass (or fire) vacuously. The pair pins the DORMANT code's health.
+# eahl: --flags "?level=OwnLevel&aiplayer&aibench&difficulty=Very_Hard&invuln&seed=1&noattract&aicone=1&aievade=1"
 
 step 150 nodraw
 mark

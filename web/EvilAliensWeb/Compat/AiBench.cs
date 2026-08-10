@@ -59,6 +59,11 @@ internal static class AiBench
 		// standstill", and an empty field arguing with nothing is not that.
 		public long RepelTicks;
 		public long RepelZeroedTicks;
+		// T4 (card 2c74d5b7): the spider fight's laser-platform census. -1 until a boss death
+		// has been observed, so "never fought it" and "none survived" stay distinguishable.
+		public bool SpiderBossSeen;
+		public int BigUfosLastAlive;
+		public int BigUfosAtBossDeath = -1;
 		public readonly Dictionary<string, ThreatTermRec> ThreatTerms = new Dictionary<string, ThreatTermRec>();
 		public Vector2 LastPos;
 		public Vector2 LastSteer;
@@ -365,6 +370,27 @@ internal static class AiBench
 		powerupsSpawned++;
 	}
 
+	// DoAIFire, once per tick per AI ship: the spider fight's laser-platform census (T4, card
+	// 2c74d5b7). Records big UFOs alive while the boss lives; the value at the alive -> dead
+	// transition is the ticket's observable, "big UFOs alive at boss death".
+	internal static void NoteSpiderFight(PlayerShip ship, bool bossAlive, int bigUfosAlive)
+	{
+		if (!Enabled)
+		{
+			return;
+		}
+		ShipRec rec = Rec(ship);
+		if (bossAlive)
+		{
+			rec.SpiderBossSeen = true;
+			rec.BigUfosLastAlive = bigUfosAlive;
+		}
+		else if (rec.SpiderBossSeen && rec.BigUfosAtBossDeath < 0)
+		{
+			rec.BigUfosAtBossDeath = rec.BigUfosLastAlive;
+		}
+	}
+
 	// DoAIFire, once per tick per AI ship: did it have something worth shooting, and did it shoot?
 	internal static void NoteFireDecision(PlayerShip ship, bool hadTarget, bool fired)
 	{
@@ -530,6 +556,12 @@ internal static class AiBench
 				// then the first `=`, and one more field there is one more thing to keep in step
 				// with `eaAiBench.matrix`'s contract for no gain (card b56633fb).
 				sb.Append(" bossw=").Append(Fmt(r.BossWeightTotal / r.BossTicks, 2));
+			}
+			// T4: printed only once a spider-boss death was observed, so an unrelated level's
+			// line does not carry a meaningless -1.
+			if (r.BigUfosAtBossDeath >= 0)
+			{
+				sb.Append(" bossufos=").Append(r.BigUfosAtBossDeath);
 			}
 			if (r.Killers.Count > 0)
 			{
@@ -711,6 +743,7 @@ internal static class AiBench
 		sb.Append(" poffered=").Append(powerupsSpawned);
 		sb.Append(" boss=").Append(Fmt((r.BossTicks > 0L) ? (r.BossDistTotal / r.BossTicks) : 0.0, 0));
 		sb.Append(" bossfar=").Append(Fmt((r.BossTicks > 0L) ? (100.0 * r.BossOutOfRangeTicks / r.BossTicks) : 0.0, 0));
+		sb.Append(" bossufos=").Append(r.BigUfosAtBossDeath);
 		sb.Append(" killers=").Append((r.Killers.Count > 0) ? KillerHistogram(r) : "none");
 		return sb.ToString();
 	}
@@ -747,7 +780,7 @@ internal static class AiBench
 		PlayerShip.GetAiSkillReadout(out float fieldPx, out float aimRad);
 		sb.Append("  skill effective=").Append(Settings.GetInstance().EffectiveDifficulty);
 		sb.Append(" field=").Append(Fmt(fieldPx, 0)).Append("px");
-		sb.Append((DebugFlags.AiThreatFieldPx.HasValue ? "*" : ""));
+		// (the field override flag died with the size-scaled range -- lap 7)
 		sb.Append(" aim=").Append(Fmt(MathHelper.ToDegrees(aimRad), 1)).Append("deg");
 		sb.Append((DebugFlags.AiAimSpreadRad.HasValue ? "*" : "")).Append('\n');
 		return sb.ToString();

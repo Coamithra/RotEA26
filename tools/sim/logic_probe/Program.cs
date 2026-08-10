@@ -131,6 +131,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeAiSpareWedge(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         rc = ProbeAiBossApproach(asm);
         if (rc != 0)
         {
@@ -654,10 +660,19 @@ internal static class Program
         var rows = new[]
         {
             new { Flag = "aismooth",       Prop = "AiSteerSmoothMs",       Good = "111", Want = (object)111f,  Baked = "90"   },
+            // The lap-11 curve knobs. Baked "" on both: the defaults render as the single
+            // digits 2 and 1, which occur all over the captured output, so the absence check
+            // would fire on text that is not the default -- the aiff escape.
+            new { Flag = "aifieldpow",     Prop = "AiFieldPow",            Good = "3.5", Want = (object)3.5f,  Baked = ""     },
+            // The T4 spare knobs (card 2c74d5b7). Baked "" on both: the defaults render as "2"
+            // and "80", which occur elsewhere in the captured output (the aiff escape).
+            new { Flag = "aispares",       Prop = "AiSpareCount",          Good = "3",   Want = (object)3,     Baked = ""     },
+            new { Flag = "aisparefair",    Prop = "AiSpareFairGamePx",     Good = "123", Want = (object)123f,  Baked = ""     },
+            new { Flag = "aitristrength",  Prop = "AiTriStrength",         Good = "2.5", Want = (object)2.5f,  Baked = ""     },
             new { Flag = "aismoothurgent", Prop = "AiSteerSmoothUrgentMs", Good = "22",  Want = (object)22f,   Baked = "15"   },
-            new { Flag = "airepeldelta",   Prop = "AiRepelCancelDelta",    Good = "3",   Want = (object)3f,    Baked = "0.2"  },
             new { Flag = "ainoisefloor",   Prop = "AiSteerNoiseFloor",     Good = "4",   Want = (object)4f,    Baked = "0.2"  },
             new { Flag = "aiseekdeadzone", Prop = "AiSeekDeadzonePx",      Good = "77",  Want = (object)77f,   Baked = "30"   },
+            new { Flag = "aiseekresume",   Prop = "AiSeekResumePx",        Good = "88",  Want = (object)88f,   Baked = "20"   },
             new { Flag = "aireact",        Prop = "AiWallReactionMs",      Good = "333", Want = (object)333f,  Baked = "420"  },
             new { Flag = "aigapmargin",    Prop = "AiGapSwitchMargin",     Good = "7",   Want = (object)7f,    Baked = "1.5"  },
             new { Flag = "aiscanrows",     Prop = "AiWallScanRows",        Good = "9",   Want = (object)9,     Baked = ""     },
@@ -665,26 +680,16 @@ internal static class Program
             new { Flag = "aithreatlead",   Prop = "AiThreatLeadMs",        Good = "555", Want = (object)555f,  Baked = "700"  },
             new { Flag = "aibossbias",     Prop = "AiPriorityBias",        Good = "0.75",Want = (object)0.75f, Baked = "0.45" },
             new { Flag = "aiaim",          Prop = "AiAimSpreadRad",        Good = "2",   Want = (object)2f,    Baked = ""     },
-            new { Flag = "aifieldpx",      Prop = "AiThreatFieldPx",       Good = "321", Want = (object)321f,  Baked = ""     },
-            new { Flag = "aifieldsize",    Prop = "AiThreatFieldSize",     Good = "6",   Want = (object)6f,    Baked = "1.8"  },
-            new { Flag = "aifieldfall",    Prop = "AiThreatFieldFalloff",  Good = "8",   Want = (object)8f,    Baked = "3"    },
             new { Flag = "aiff",           Prop = "AiFastForward",         Good = "7",   Want = (object)7,     Baked = ""     },
             new { Flag = "aiseekpowerup",  Prop = "AiSeekPowerupWeight",  Good = "2.5", Want = (object)2.5f,  Baked = "0.8"  },
             new { Flag = "aiseekapproach", Prop = "AiSeekApproachWeight", Good = "2.6", Want = (object)2.6f,  Baked = "1.1"  },
             new { Flag = "aipowerupreach", Prop = "AiPowerupReachPx",      Good = "444", Want = (object)444f,  Baked = "150"  },
             // The directional repellent shapes (card e425781b). The three on/off members of the
-            // family -- ?aicone= ?aiwedge= ?ailaneescape= -- are deliberately absent, following
+            // family -- ?aicone= ?aiwedge= -- are deliberately absent, following
             // ?aievade=: the IsOn/IsExplicitlyOff spelling has its own convention and this table's
             // "names the value in force" leg does not describe it.
             new { Flag = "aiconelead",     Prop = "AiConeLeadMs",          Good = "456", Want = (object)456f,  Baked = "700"  },
             new { Flag = "aiconemaxlen",   Prop = "AiConeMaxLenPx",        Good = "654", Want = (object)654f,  Baked = "800"  },
-            new { Flag = "aiconewidth",    Prop = "AiConeWidthPx",         Good = "271", Want = (object)271f,  Baked = "300"  },
-            new { Flag = "aiconespread",   Prop = "AiConeSpread",          Good = "6.4", Want = (object)6.4f,  Baked = ""     },
-            new { Flag = "aiconewidthmin", Prop = "AiConeWidthMinPx",      Good = "77",  Want = (object)77f,   Baked = "120"  },
-            new { Flag = "aiconetaper",    Prop = "AiConeTaper",           Good = "0.25",Want = (object)0.25f, Baked = ""     },
-            new { Flag = "aiconefallalong",Prop = "AiConeFallAlong",       Good = "5",   Want = (object)5f,    Baked = ""     },
-            new { Flag = "aiconefallacross",Prop = "AiConeFallAcross",     Good = "6",   Want = (object)6f,    Baked = ""     },
-            new { Flag = "aiconescale",    Prop = "AiConeScale",           Good = "2.75",Want = (object)2.75f, Baked = ""     },
             new { Flag = "aiwedgestrength",Prop = "AiLaneWedgeStrength",   Good = "29",  Want = (object)29f,   Baked = "18"   },
             new { Flag = "aiwedgefall",    Prop = "AiLaneWedgeFallAlong",  Good = "7",   Want = (object)7f,    Baked = ""     },
             // The swept-path teleport guard (card c1d783ad). Good is "12" rather than anything
@@ -773,20 +778,15 @@ internal static class Program
             negatives + "/" + (rows.Length - 1) + " (?aiff has no range guard -- it clamps)"
             + (badNeg != null ? "; " + badNeg : ""));
 
-        // ?aiaim and ?aifieldpx resolve through PlayerShip.AiSkillByDifficulty at PLAY time, off a
-        // difficulty this parse has not settled, so with no override standing there is no number to
-        // name -- and a diagnostic that can state the wrong condition is worse than one that states
-        // none. They must say which table is in force instead. (With an override standing they name
-        // it like the rest, which the table above already covered.)
+        // ?aiaim resolves through the fixed skill row at PLAY time, so with no override standing
+        // there is no number to name -- the message must say which mechanism is in force instead.
+        // (?aifieldpx died with the size-scaled range, lap 7 -- the field is the flat 150.)
         set("AiAimSpreadRad", null);
-        set("AiThreatFieldPx", null);
         string outAim = run("?aiaim=xx");
-        string outPx = run("?aifieldpx=xx");
-        Check("per-tier knobs name the SKILL ROW when no override stands",
-            get("AiAimSpreadRad") == null && get("AiThreatFieldPx") == null
-            && outAim.Contains("staying on the per-tier skill row")
-            && outPx.Contains("staying on the per-tier skill row"),
-            "aiaim said: " + FirstLine(outAim) + " | aifieldpx said: " + FirstLine(outPx));
+        Check("the aim knob names the SKILL ROW when no override stands",
+            get("AiAimSpreadRad") == null
+            && outAim.Contains("staying on the fixed skill row"),
+            "aiaim said: " + FirstLine(outAim));
 
         // Hand the process back as it was found. Parse can only ASSIGN, so a Probe* added after
         // this one would otherwise inherit fourteen overrides with no way to reach the defaults.
@@ -823,16 +823,14 @@ internal static class Program
     //   leg 3  a negative value      -> the same, for the flags whose guard refuses one
     // Reading back also sidesteps every inline clamp (?holofilter caps at 2, ?aifriends at 3, ...)
     // without this file having to know a single one of them.
-    // The AI steering field's COMPOSITION rules (cards ada9e839 / 31ceb6ff / f4d1721f).
+    // The AI steering field's COMPOSITION rules (cards ada9e839 / 31ceb6ff / f4d1721f; floors
+    // and arrival restructured by owner ruling, iterative rep 1).
     //
     // WHAT THE FIELD DOES, so the assertions below read as more than arithmetic. DoAIMove sums
-    // two families of force. REPELLENTS (every threat field, the lazer terms, the spider boss's
-    // lane escapes, the screen edges) accumulate on their own and are dropped wholesale if their
-    // resultant falls to DefaultRepulseCancelDelta or below -- opposing pushes that cancel leave
-    // a vector whose DIRECTION is noise, and Move() discards magnitude and thrusts at full
-    // acceleration along the angle. ATTRACTORS (the idle station, a powerup, a halting boss's
-    // standoff) are never floored; each stops pulling inside its own DEADZONE instead. The two
-    // are then summed, and DefaultSteerNoiseFloor catches the leftover equilibrium case.
+    // every force into one vector and applies ONE blanket equilibrium floor at the end
+    // (DefaultSteerNoiseFloor, 2008's own 0.2 line). The seek's arrival is a HYSTERESIS latch:
+    // the pull parks inside DefaultSeekParkPx and resumes only past DefaultSeekResumePx, so the
+    // anti-pingpong bound lives on the pair rather than on a single radius.
     //
     // WHAT THIS PROBE IS AND IS NOT. It is a set of ORDERING properties over constants that live
     // hundreds of lines apart and are each individually plausible, not a restatement of any one
@@ -858,10 +856,8 @@ internal static class Program
             // constant weight any more, it is solved per tick. Its two claims here (below the
             // threat field, above a detour) moved to ProbeAiBossApproach, where they are asserted
             // about the live curve instead of about a literal.
-            "SeekWeight", "DefaultSeekPowerupWeight",
-            "DefaultPowerupReachPx", "DefaultRepulseCancelDelta", "DefaultSteerNoiseFloor",
-            "DefaultSeekArriveDeadzonePx", "ShipMaxSpeed", "ShipDeceleration",
-            "SweepLaneAvoidStrength",
+            "DefaultPowerupReachPx",
+            "DefaultSeekParkPx", "DefaultSeekResumePx", "ShipMaxSpeed", "ShipDeceleration",
             "DefaultLazerAvoidStrength", "DefaultLazerDodgeStrength"
         };
         var vals = new Dictionary<string, float>();
@@ -875,26 +871,44 @@ internal static class Program
             }
             vals[n] = (float)f.GetRawConstantValue();
         }
+        // The floor and the static seek weights are DERIVED since the lap-11 rulings (the
+        // standard curve's own value at t=0.8 and t=0.55 respectively), so they are static
+        // properties rather than consts -- read them live, which also means every bound below
+        // re-derives itself under a curve retune.
+        foreach (string n in new[] { "DefaultSteerNoiseFloor", "SeekWeight", "DefaultSeekPowerupWeight" })
+        {
+            PropertyInfo p = ship.GetProperty(n, anyStatic);
+            if (p == null)
+            {
+                Console.WriteLine("FAIL: could not reflect PlayerShip." + n + " -- renamed or moved?");
+                return 2;
+            }
+            vals[n] = (float)p.GetValue(null);
+        }
 
-        Console.WriteLine("[logic_probe] AI steering field composition (card ada9e839)");
+        Console.WriteLine("[logic_probe] AI steering field composition (ada9e839; hysteresis/blanket-floor rework, iterative rep 1)");
         float station = vals["SeekWeight"], powerup = vals["DefaultSeekPowerupWeight"];
-        float repelDelta = vals["DefaultRepulseCancelDelta"], noiseFloor = vals["DefaultSteerNoiseFloor"];
-        float deadzone = vals["DefaultSeekArriveDeadzonePx"];
+        float noiseFloor = vals["DefaultSteerNoiseFloor"];
+        float parkPx = vals["DefaultSeekParkPx"], resumePx = vals["DefaultSeekResumePx"];
 
-        // 1. THE DEADZONE COVERS THE STOPPING DISTANCE. This is the property that makes the
-        // attractors' hard-edged deadzone sound instead of an oscillator: `Move(null, ...)`
-        // applies deceleration alone, so a ship entering at full speed coasts v^2 / 2a further.
-        // If the deadzone is smaller than that the ship sails out the FAR side still under the
-        // attractor's pull, turns round, and pingpongs -- which is the symptom the 0.95 park was
-        // wrongly reached for. Derived from the real motion constants rather than restated, so
-        // retuning the flight model re-derives the bound instead of silently invalidating it.
+        // 1. THE HYSTERESIS PAIR COVERS THE STOPPING DISTANCE. `Move(null, ...)` applies
+        // deceleration alone, so a ship crossing the park edge at full speed coasts v^2 / 2a
+        // further before it halts. That rest point must still be INSIDE the resume radius, or
+        // the latch re-triggers on the ship's own momentum and the arrival pingpongs -- the
+        // single-radius ancestor of this bound sized its one deadzone the same way. Derived from
+        // the real motion constants rather than restated, so retuning the flight model
+        // re-derives the bound instead of silently invalidating it.
         float stoppingPx = vals["ShipMaxSpeed"] * vals["ShipMaxSpeed"] / (2f * vals["ShipDeceleration"]);
-        Check("the seek deadzone covers the ship's stopping distance",
-            deadzone > stoppingPx,
-            "DefaultSeekArriveDeadzonePx " + deadzone + " vs a stopping distance of "
-            + stoppingPx.ToString("0.0") + "px (ShipMaxSpeed " + vals["ShipMaxSpeed"]
-            + " / ShipDeceleration " + vals["ShipDeceleration"]
-            + ") -- below it the ship coasts out the far side and pingpongs about its target");
+        Check("the resume radius exceeds the park radius",
+            resumePx > parkPx,
+            "DefaultSeekResumePx " + resumePx + " vs DefaultSeekParkPx " + parkPx
+            + " -- inverted or equal thresholds make the latch a plain deadzone or a flapper");
+        Check("a full-speed arrival at the park edge halts inside the resume radius",
+            parkPx + stoppingPx < resumePx,
+            "park " + parkPx + " + stopping distance " + stoppingPx.ToString("0.0")
+            + "px (ShipMaxSpeed " + vals["ShipMaxSpeed"] + " / ShipDeceleration "
+            + vals["ShipDeceleration"] + ") vs resume " + resumePx
+            + " -- past it the ship coasts clear of the latch and re-engages on its own momentum");
 
         // 2. NO FLOOR CAN CENSOR A LONE DELIBERATE FORCE. The whole-sum floor must sit below the
         // weakest ATTRACTOR (they are never floored on their own, but they still cross this one)
@@ -920,22 +934,20 @@ internal static class Program
         // that is correct. The condition is the contract rather than a comment promising someone
         // will remember: bake the sidestep back on and the bound re-arms itself.
         const float MaxSteerStrength = 4f;
-        float weakestRepellent = Math.Min(MaxSteerStrength,
-            Math.Min(vals["SweepLaneAvoidStrength"], vals["DefaultLazerAvoidStrength"]));
+        // The spider lane escapes' 18 left this min when the owner retired them (lap 12); the
+        // lane WEDGE is not folded in for the same reason the sidestep below is conditional --
+        // it is part of the swept shape and gated with it.
+        float weakestRepellent = Math.Min(MaxSteerStrength, vals["DefaultLazerAvoidStrength"]);
         if (vals["DefaultLazerDodgeStrength"] > 0f)
         {
             weakestRepellent = Math.Min(weakestRepellent, vals["DefaultLazerDodgeStrength"]);
         }
-        Check("every REPELLENT's full strength clears the repulsion cancellation delta",
-            weakestRepellent > repelDelta,
-            "weakest repellent " + weakestRepellent + " vs DefaultRepulseCancelDelta " + repelDelta
-            + " -- at or below it a lone threat at point-blank range is dropped and the bot stops"
-            + " dodging that type entirely");
-        Check("a repellent that survives its own floor also clears the whole-sum floor",
-            repelDelta >= noiseFloor,
-            "DefaultRepulseCancelDelta " + repelDelta + " vs DefaultSteerNoiseFloor " + noiseFloor
-            + " -- otherwise a repellent can pass the first floor and be eaten by the second,"
-            + " which is a veto wearing two names");
+        Check("every REPELLENT's full strength clears the whole-sum floor",
+            weakestRepellent > noiseFloor,
+            "weakest repellent " + weakestRepellent + " vs DefaultSteerNoiseFloor " + noiseFloor
+            + " -- at or below it a lone threat at point-blank range is zeroed and the bot stops"
+            + " dodging that type entirely (the repellents-only cancellation floor this bound"
+            + " used to run against was retired with the blanket-floor rework)");
 
         // 3. The boss approach's two ordering claims (below the threat field, above a detour) are
         // ProbeAiBossApproach's now -- it has no constant to compare here since card b56633fb.
@@ -1003,22 +1015,21 @@ internal static class Program
             minAnchor = Const("BossApproachMinAnchorPx");
             maxWeight = Const("BossApproachMaxWeight");
             exponent = Const("BossApproachExponent");
-            noiseFloor = Const("DefaultSteerNoiseFloor");
+            // Derived since lap 11 (the standard curve at t=0.8) -- a property, not a const.
+            noiseFloor = (float)ship.GetProperty("DefaultSteerNoiseFloor", anyStatic).GetValue(null);
             sizeScale = Const("DefaultThreatFieldSizeScale");
             falloff = Const("DefaultThreatFieldFalloff");
             bulletPerMs = Const("BulletRangePerMs");
             stoppingPx = Const("ShipMaxSpeed") * Const("ShipMaxSpeed") / (2f * Const("ShipDeceleration"));
-            // The per-tier field radius, read out of the real ladder rather than restated -- a tier
-            // added or retuned is then swept by this probe automatically.
-            FieldInfo skillF = ship.GetField("AiSkillByDifficulty", anyStatic);
-            Array skills = (Array)skillF.GetValue(null);
-            FieldInfo fieldPxF = skills.GetType().GetElementType()
+            // The field radius, read out of the real skill rather than restated. The per-tier
+            // ladder is retired (owner ruling, iterative rep 1) -- every tier flies FixedSkill --
+            // so the sweep below runs over the one shipped radius; if a measured ladder ever
+            // returns, read it back out here so the tiers are swept automatically again.
+            FieldInfo skillF = ship.GetField("FixedSkill", anyStatic);
+            object skill = skillF.GetValue(null);
+            FieldInfo fieldPxF = skill.GetType()
                 .GetField("FieldPx", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            tierFieldPx = new float[skills.Length];
-            for (int i = 0; i < skills.Length; i++)
-            {
-                tierFieldPx[i] = (float)fieldPxF.GetValue(skills.GetValue(i));
-            }
+            tierFieldPx = new float[] { (float)fieldPxF.GetValue(skill) };
         }
         catch (Exception e)
         {
@@ -1337,14 +1348,19 @@ internal static class Program
 
     // ---- the directional repellent shapes (card e425781b) ----------------------------------
     //
-    // PlayerShip.EvaluateSweptShape is a pure function of geometry, so the whole design is
-    // checkable here with no game, no browser and no rig -- and it MUST be checked at FIXED
-    // POINTS rather than by any aggregate. The card's own readout trap says why: a field's mean
-    // strength over a run is a selection effect (far contributions stop existing rather than
-    // getting weaker), so two shapes can only be compared by evaluating both at the same places.
+    // The unified swept shape (owner redesign, iterative rep 1 lap 5). PlayerShip's
+    // EvaluateSweptShape is a pure function of geometry, so the design is checkable here with no
+    // game and no rig, at FIXED POINTS (a mean field strength is a selection effect -- two shapes
+    // compare only point by point). The design under test: TWO candidates, the mover's body
+    // circle and the velocity triangle (perpendicular-diameter corners to `pos + v*lead`),
+    // evaluated independently, SHORTER DISTANCE WINS -- the distance field of their union --
+    // with the strength being the standard 150px / 4 / quadratic-plateau treatment
+    // (PowerCurve(4,0,2,d/150), the screen-edge / beam / powerup-near-field expression).
     //
-    // Reflection rather than a mirrored formula, deliberately: a transcription of the maths here
-    // would agree with itself forever while the shipped shape drifted.
+    // Reflection rather than a mirrored formula where possible; where an expected VALUE is
+    // stated it is computed from the standard curve inline, which is a restatement -- the zone
+    // DIRECTIONS beside it are what make each row discriminating (a wrong-zone build cannot
+    // match both).
     private static int ProbeAiConeShape(Assembly asm)
     {
         Type ship = asm.GetType("EvilAliens.PlayerShip", true);
@@ -1356,8 +1372,6 @@ internal static class Program
             return 2;
         }
         Type shapeType = eval.ReturnType;
-        // Off the method signature, not by name: Vector2 lives in the KNI assembly, not in the
-        // one being probed, so a name lookup here always misses.
         Type vec2 = eval.GetParameters()[0].ParameterType;
         object V(float x, float y) => Activator.CreateInstance(vec2, x, y);
         float Field(object shape, string name) =>
@@ -1369,225 +1383,233 @@ internal static class Program
         float VX(object v) => (float)vec2.GetField("X").GetValue(v);
         float VY(object v) => (float)vec2.GetField("Y").GetValue(v);
 
-        const float MaxSteerStrength = 4f;
-        // A ship-sized half-extent, so the wedge's survivable-gap arithmetic is exercised at a
-        // realistic value rather than zero.
+        const float MaxSteer = 4f;
         const float ShipHalf = 20f;
+        // The standard field, restated once for expected values: flat 150, 4 -> 0 on the lap-11
+        // curve max * (1-t)^p, exponent read off the baked const so a rebake re-derives every
+        // expected value here instead of silently invalidating it.
+        float fieldPow = (float)ship.GetField("DefaultFieldCurvePower", anyStatic).GetRawConstantValue();
+        float Plateau(float dist) => dist >= 150f ? 0f
+            : MaxSteer * (float)Math.Pow(1f - dist / 150f, fieldPow);
 
-        // Evaluate at a point expressed in the SHAPE's own frame: `ahead` px along the travel
-        // direction, `sideways` px across it. The mover here travels +X from the origin, so the
-        // frame is the identity and a reader can check any row by hand.
-        object At(float ahead, float sideways, float speed, float halfWidth, bool wedge,
-            float anchorX = 0f, float anchorY = 300f)
+        // Mover at (0,300) travelling +X, so the frame is the identity and every row is
+        // hand-checkable. `ahead`/`sideways` are the ship's offset from the anchor.
+        object At(float ahead, float sideways, float speed, float bodyR, float bandHalf, bool wedge,
+            float anchorY = 300f)
         {
             return eval.Invoke(null, new object[]
             {
-                V(anchorX + ahead, anchorY + sideways), V(0f, 0f), V(anchorX, anchorY),
-                V(speed, 0f), halfWidth, ShipHalf, MaxSteerStrength, wedge
+                V(ahead, anchorY + sideways), V(0f, anchorY),
+                V(speed, 0f), bodyR, bandHalf, ShipHalf, MaxSteer, wedge
             });
         }
 
-        Console.WriteLine("[logic_probe] AI directional repellent shapes (card e425781b)");
+        Console.WriteLine("[logic_probe] AI unified swept shape (owner redesign, lap 5)");
 
-        // The asteroid case the card is designed around: 0.38 px/ms, a ~30px half-extent.
-        const float AsteroidSpeed = 0.38f;
-        const float AsteroidHalf = 30f;
-        float LeadMs = (float)ship.GetField("DefaultConeLeadMs", anyStatic).GetRawConstantValue();
-        float coneLen = AsteroidSpeed * LeadMs;
+        const float Speed = 0.38f;   // an asteroid
+        const float BodyR = 30f;
+        float leadMs = (float)ship.GetField("DefaultConeLeadMs", anyStatic).GetRawConstantValue();
+        // Length is SIZE-SCALED (owner ruling): speed x lead x (bodyRadius / the UFO reference).
+        float refR = (float)ship.GetField("ConeLeadRefRadiusPx", anyStatic).GetRawConstantValue();
+        float coneLen = Speed * leadMs * (BodyR / refR); // ~133px at 233ms, r30 vs ref20
 
-        // 1. THE MESA. Full strength anywhere inside the swept body, because a repellent's
-        // meaningful domain starts at the collision EDGE -- inside is death, and curve values
-        // there are wasted dynamic range. So the on-axis value and the value at the corridor's
-        // own edge must be identical, and both must be the peak.
-        object onAxis = At(1f, 0f, AsteroidSpeed, AsteroidHalf, false);
-        object atEdge = At(1f, AsteroidHalf * 0.995f, AsteroidSpeed, AsteroidHalf, false);
-        Check("the cone is a MESA: full strength on the axis and at the swept body's edge alike",
-            Math.Abs(Field(onAxis, "ConeStrength") - Field(atEdge, "ConeStrength")) < 0.05f
-                && Field(onAxis, "ConeStrength") > MaxSteerStrength * 0.98f,
-            "on-axis " + Field(onAxis, "ConeStrength").ToString("0.00") + " vs at the body edge "
-            + Field(atEdge, "ConeStrength").ToString("0.00") + " of a peak " + MaxSteerStrength);
+        // 1. BEHIND THE MOVER: the circle candidate wins and IS the radial field -- the standard
+        // curve on |p - anchor| - r, pushing dead-radial (away from the mover, -X here).
+        object behind = At(-80f, 0f, Speed, BodyR, BodyR, false);
+        Check("behind the mover: the circle's radial field, standard curve",
+            Math.Abs(Field(behind, "ConeStrength") - Plateau(80f - BodyR)) < 0.01f
+                && VX((object)VField(behind, "ConeDir")) < -0.99f,
+            "strength " + Field(behind, "ConeStrength").ToString("0.00") + " vs expected "
+            + Plateau(50f).ToString("0.00") + ", dir.X " + VX((object)VField(behind, "ConeDir")).ToString("0.00"));
 
-        // 2. THE BAND THE CARD EXISTS FOR, and it is measured against the REAL radial field
-        // rather than against a number copied out of the card. The circle falls under the 0.8
-        // seek at 199px while the bot's measured mean edge distance from an asteroid is 252px --
-        // i.e. it spends its life outside the only warning it has. The cone's whole job is to
-        // have authority out there, ALONG the trajectory, while leaving the transverse direction
-        // cheap. Note this does NOT claim the cone reaches 252px on its own: its own perimeter is
-        // ~238px, and what carries the rest is that the term is measured from a mover's PATH, so
-        // the ship meets it long before the circle grows.
-        MethodInfo fieldStrength = ship.GetMethod("ThreatFieldStrength", anyStatic, null,
-            new[] { typeof(float), typeof(float), typeof(float), typeof(bool) }, null);
-        if (fieldStrength == null)
+        // 2. INSIDE THE CORRIDOR NEAR THE BODY (owner ruling, lap 11): the candidates compete
+        // by FORCE and the triangle peaks at SweptTriangleStrength, so close to the body the
+        // CIRCLE carries it at its own curve -- the empty-space triangle never out-votes a
+        // nearby hull. The value is the standard curve on the CIRCLE's edge distance, even
+        // though the ship is geometrically inside the triangle (triangle distance 0).
+        float triPeak = (float)ship.GetField("DefaultSweptTriangleStrength", anyStatic).GetRawConstantValue();
+        float TriPlateau(float dist) => dist >= 150f ? 0f
+            : triPeak * (float)Math.Pow(1f - dist / 150f, fieldPow);
+        int Winner(object shape) =>
+            (int)shapeType.GetField("ConeWinner", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .GetValue(shape);
+        // Asserted as the MAX RULE itself rather than "the circle wins here" -- which candidate
+        // carries a given point moves with every tristrength/fieldpow rebake, and the probe must
+        // survive those; hugging the hull the circle must still beat the whisper regardless.
+        object onAxis = At(coneLen / 2f, 0f, Speed, BodyR, BodyR, false);
+        float onAxisCircle = Plateau(coneLen / 2f - BodyR);
+        float onAxisWant = Math.Max(onAxisCircle, triPeak);
+        Check("inside the corridor: the STRONGER candidate carries it (the max rule)",
+            Math.Abs(Field(onAxis, "ConeStrength") - onAxisWant) < 0.01f
+                && Winner(onAxis) == ((onAxisCircle >= triPeak) ? 1 : 2),
+            "strength " + Field(onAxis, "ConeStrength").ToString("0.00") + " vs max(circle "
+            + onAxisCircle.ToString("0.00") + ", whisper " + triPeak.ToString("0.00")
+            + "), winner " + Winner(onAxis));
+        object hullHug = At(BodyR + 5f, 0f, Speed, BodyR, BodyR, false);
+        Check("hugging the hull the circle beats the whisper at any bake",
+            Math.Abs(Field(hullHug, "ConeStrength") - Plateau(5f)) < 0.01f && Winner(hullHug) == 1,
+            "strength " + Field(hullHug, "ConeStrength").ToString("0.00") + " vs the circle curve "
+            + Plateau(5f).ToString("0.00") + ", winner " + Winner(hullHug));
+
+        // 2b. FAR DOWN A FAST MOVER'S PATH the triangle is the ONLY voice -- the circle's curve
+        // is spent (edge distance past 150) and the whisper peak carries the warning. This is
+        // where the cone genuinely WINS, and why it exists at all.
+        object deepPath = At(400f, 0f, 1.5f, BodyR, BodyR, false);
+        Check("deep in a fast mover's path: the triangle wins at its whisper peak",
+            Math.Abs(Field(deepPath, "ConeStrength") - triPeak) < 0.001f && Winner(deepPath) == 2,
+            "strength " + Field(deepPath, "ConeStrength").ToString("0.00") + " vs the triangle peak "
+            + triPeak.ToString("0.00") + ", winner " + Winner(deepPath)
+            + " -- 400px ahead at 1.5px/ms, circle edge distance 370");
+
+        // 3. THE RED SLIVER -- the poke-out competition. A point inside the BODY CIRCLE but
+        // outside the triangle's edges (just ahead of the base, nearly a radius out) must read
+        // as interior: the circle candidate's distance is 0 and it wins. A triangle-only build
+        // reads a small positive edge distance here -- the cliff the owner's max-rule removes.
+        object sliver = At(4f, BodyR * 0.98f, Speed, BodyR, BodyR, false);
+        Check("the red sliver: inside the circle but outside the triangle is still FULL strength",
+            Field(sliver, "ConeStrength") > MaxSteer * 0.999f,
+            "strength " + Field(sliver, "ConeStrength").ToString("0.00") + " of " + MaxSteer
+            + " -- the circle candidate must win wherever it pokes out of the triangle");
+
+        // 4. BESIDE THE FAR CORRIDOR: the near edge's normal push at the TRIANGLE's whisper
+        // curve -- far enough down the path that the circle is spent, so the edge genuinely
+        // carries it, pushing AWAY on the ship's own side (+Y here), never along the path.
+        object beside = At(400f, 110f, 1.5f, BodyR, BodyR, false);
+        Check("beside the far corridor: the triangle's edge-normal whisper",
+            Field(beside, "ConeStrength") > 0.005f && Field(beside, "ConeStrength") < triPeak
+                && VY((object)VField(beside, "ConeDir")) > 0.95f && Winner(beside) == 2,
+            "strength " + Field(beside, "ConeStrength").ToString("0.00") + ", dir ("
+            + VX((object)VField(beside, "ConeDir")).ToString("0.00") + ","
+            + VY((object)VField(beside, "ConeDir")).ToString("0.00") + "), winner "
+            + Winner(beside));
+
+        // 5. PAST THE APEX: radial from the tip -- the vertex zone, at the TRIANGLE's peak
+        // (lap 11: the future path is empty space, so its curve tops at SweptTriangleStrength).
+        // 60px beyond the apex on the axis must read that curve at 60 and push +X (onward, out
+        // of the path's line). The apex sits at bodyR + coneLen from the anchor: the swept
+        // length counts from the circle's EDGE (owner catch, lap 8 -- measured from the centre,
+        // a slow drifter's triangle drowned inside its own circle and every landed thing's cone
+        // was invisible).
+        object past = At(BodyR + coneLen + 60f, 0f, Speed, BodyR, BodyR, false);
+        Check("past the apex: radial from the tip at the triangle's whisper curve",
+            Math.Abs(Field(past, "ConeStrength") - TriPlateau(60f)) < 0.01f
+                && VX((object)VField(past, "ConeDir")) > 0.99f && Winner(past) == 2,
+            "strength " + Field(past, "ConeStrength").ToString("0.00") + " vs expected "
+            + TriPlateau(60f).ToString("0.00"));
+
+        // 6. THE REACH IS THE STANDARD 150: beyond it, nothing -- from any zone.
+        object far = At(-BodyR - 200f, 0f, Speed, BodyR, BodyR, false);
+        Check("beyond 150px of the shape there is no push at all",
+            Field(far, "ConeStrength") == 0f,
+            "strength " + Field(far, "ConeStrength").ToString("0.00") + " at 200px out");
+
+        // 7. LENGTH = SPEED x LEAD, CAPPED. The shape reports its own length; a bullet-fast
+        // mover must cap at DefaultConeMaxLenPx rather than projecting past the world.
+        float maxLen = (float)ship.GetField("DefaultConeMaxLenPx", anyStatic).GetRawConstantValue();
+        // Sampled INSIDE the reach (the shape only reports its length where it pushes).
+        object fast = At(100f, 120f, 42f, BodyR, BodyR, false);
+        Check("length is speed x lead, capped at the world-sized ceiling",
+            Math.Abs(Field(onAxis, "ConeLength") - coneLen) < 0.5f
+                && Field(fast, "ConeLength") == maxLen,
+            "asteroid " + Field(onAxis, "ConeLength").ToString("0") + "px (expected "
+            + coneLen.ToString("0") + "), 42px/ms mover " + Field(fast, "ConeLength").ToString("0")
+            + "px (cap " + maxLen.ToString("0") + ")");
+
+        // 8. STATIONARY: the shape stands down entirely -- the radial branch owns a non-mover,
+        // and a shape that pushed at speed 0 would double-count every parked object.
+        object still = At(40f, 0f, 0f, BodyR, BodyR, false);
+        Check("a stationary mover projects nothing (the radial branch owns it)",
+            Field(still, "ConeStrength") == 0f && Field(still, "WedgeStrength") == 0f,
+            "cone " + Field(still, "ConeStrength").ToString("0.00") + " wedge "
+            + Field(still, "WedgeStrength").ToString("0.00"));
+
+        // ---- the lane wedge (unchanged mechanism, re-pinned against the new evaluator) ----
+        // A mover hugging the top edge (anchor y=50) whose band leaves less than a survivable
+        // gap above: the only escape is DOWN (+Y), full strength across the band, the standard
+        // falloff beyond its far edge. Band half 80 clears the ~63px survivable-gap gate.
+        object laneIn = At(120f, 60f, 1.2f, 30f, 80f, true, anchorY: 50f);
+        Check("wedge: a top-hugging lane pushes DOWN at full strength inside the band",
+            Field(laneIn, "WedgeStrength") > 10f && VY((object)VField(laneIn, "WedgeDir")) > 0.99f,
+            "strength " + Field(laneIn, "WedgeStrength").ToString("0.00") + ", dir.Y "
+            + VY((object)VField(laneIn, "WedgeDir")).ToString("0.00"));
+        object laneOut = At(120f, 80f + 40f, 1.2f, 30f, 80f, true, anchorY: 50f);
+        Check("wedge: past the band's far edge it degrades instead of shoving back",
+            Field(laneOut, "WedgeStrength") > 0f
+                && Field(laneOut, "WedgeStrength") < Field(laneIn, "WedgeStrength"),
+            "inside " + Field(laneIn, "WedgeStrength").ToString("0.00") + " vs 40px past the edge "
+            + Field(laneOut, "WedgeStrength").ToString("0.00"));
+
+        // The SIZE GATE: a small mover (band narrower than the survivable gap) raises no wedge
+        // however edge-hugging its path -- without this every ceiling bullet wedged the field.
+        object small = At(120f, 60f, 1.2f, 5f, 20f, true, anchorY: 50f);
+        Check("wedge: a small mover raises none (the survivable-gap gate)",
+            Field(small, "WedgeStrength") == 0f,
+            "strength " + Field(small, "WedgeStrength").ToString("0.00") + " for a 20px-half band");
+
+        // A MID-SCREEN lane raises none either: both sides are survivable escapes, and the
+        // symmetric shape is the right answer.
+        object mid = At(120f, 60f, 1.2f, 30f, 80f, true);
+        Check("wedge: a mid-screen lane raises none (both sides are escapes)",
+            Field(mid, "WedgeStrength") == 0f,
+            "strength " + Field(mid, "WedgeStrength").ToString("0.00") + " at y=300");
+
+        return 0;
+    }
+
+    // ---- T4: the spare set's forbidden wedge (card 2c74d5b7) --------------------------------
+    //
+    // The pure geometry the fire selection leans on: the tangent cone over a protected hull,
+    // widened by the aim spread, and wrap-safe angular membership. Driven directly (the
+    // EvaluateSweptShape precedent). The slot hysteresis is stateful instance code and is
+    // couch-verified instead -- what is pinned here is the half that silently widens or
+    // narrows with a trig mistake.
+    private static int ProbeAiSpareWedge(Assembly asm)
+    {
+        Type ship = asm.GetType("EvilAliens.PlayerShip", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo half = ship.GetMethod("SpareForbiddenHalfAngle", anyStatic);
+        MethodInfo forb = ship.GetMethod("SpareAngleForbidden", anyStatic);
+        if (half == null || forb == null)
         {
-            Console.WriteLine("FAIL: could not reflect PlayerShip.ThreatFieldStrength(t, max, falloff, classic)");
+            Console.WriteLine("FAIL: could not reflect PlayerShip.SpareForbiddenHalfAngle /"
+                + " SpareAngleForbidden -- renamed or moved?");
             return 2;
         }
-        // The asteroid's shipped radial field: ThreatFieldBasePx + halfExtent * the size scale,
-        // on the (1-t)^p curve. Every term is REFLECTED rather than restated, so retuning the
-        // field re-derives the comparison instead of silently invalidating it -- which is what
-        // card 05a2b818 relied on when it moved the base 190 -> 150.
-        float fieldPx = (float)ship.GetField("VeryHardThreatFieldBasePx", anyStatic).GetRawConstantValue();
-        float sizeScale = (float)ship.GetField("DefaultThreatFieldSizeScale", anyStatic).GetRawConstantValue();
-        float falloff = (float)ship.GetField("DefaultThreatFieldFalloff", anyStatic).GetRawConstantValue();
-        float radialRange = fieldPx + AsteroidHalf * sizeScale;
-        float Radial(float edgeDist) => edgeDist >= radialRange ? 0f : (float)fieldStrength.Invoke(
-            null, new object[] { edgeDist / radialRange, MaxSteerStrength, falloff, false });
-        // Where each shape stops out-voting the seek. `Cone` is read on the axis, where its
-        // along-distance and the circle's edge-distance are the same quantity.
-        float Cone(float ahead) => Field(At(ahead, 0f, AsteroidSpeed, AsteroidHalf, false), "ConeStrength");
-        float Perimeter(Func<float, float> f)
-        {
-            float last = 0f;
-            for (float x = 1f; x < 900f; x += 1f)
-            {
-                if (f(x) >= 0.8f)
-                {
-                    last = x;
-                }
-            }
-            return last;
-        }
-        float conePerimeter = Perimeter(Cone), radialPerimeter = Perimeter(Radial);
-        Check("the cone's warning perimeter reaches FURTHER than the circle's",
-            conePerimeter > radialPerimeter,
-            "the cone holds 0.8 out to " + conePerimeter.ToString("0") + "px along the path, the"
-            + " radial field to " + radialPerimeter.ToString("0") + "px from the hull -- and the"
-            + " bot's measured mean edge distance is 252px, outside both");
-        Check("and in the 200-250px band it is worth several times the circle",
-            Cone(200f) > Radial(200f) * 2f && Cone(200f) > 0.8f,
-            "at 200px: cone " + Cone(200f).ToString("0.00") + " vs radial "
-            + Radial(200f).ToString("0.00") + "; at 250px: cone " + Cone(250f).ToString("0.00")
-            + " vs radial " + Radial(250f).ToString("0.00"));
+        float Half(float d, float r, float s) => (float)half.Invoke(null, new object[] { d, r, s });
+        bool Forb(float a, float c, float h) => (bool)forb.Invoke(null, new object[] { a, c, h });
 
-        // 3. ACROSS THE AXIS IT MUST GET CHEAP FAST, or threading a gap between two rocks stops
-        // being possible and the shape is just a wider circle -- which is the failure mode three
-        // separate radial sweeps already measured. Offsets are FRACTIONS of the across-axis
-        // width, not pixels: that width is a tunable, and a probe pinned to the value it happened
-        // to be swept to would fail on the next honest retune instead of on a broken shape.
-        float coneWidth = (float)ship.GetField("DefaultConeWidthPx", anyStatic).GetRawConstantValue();
-        // Read at 1px ahead so the corridor has not tapered yet and the offset from the body edge
-        // IS the across-axis distance -- otherwise the taper quietly shifts every reading.
-        float across0 = Field(At(1f, AsteroidHalf, AsteroidSpeed, AsteroidHalf, false), "ConeStrength");
-        float acrossHalf = Field(At(1f, AsteroidHalf + coneWidth * 0.5f, AsteroidSpeed, AsteroidHalf, false), "ConeStrength");
-        float acrossFull = Field(At(1f, AsteroidHalf + coneWidth, AsteroidSpeed, AsteroidHalf, false), "ConeStrength");
-        Check("across the axis the cone decays far faster than along it",
-            acrossHalf < across0 * 0.2f && acrossFull == 0f,
-            "at the corridor edge " + across0.ToString("0.00") + ", at half the across-axis width ("
-            + (coneWidth * 0.5f).ToString("0") + "px) " + acrossHalf.ToString("0.00")
-            + ", at the full width " + acrossFull.ToString("0.00")
-            + " -- against 75% of peak at half the cone's LENGTH");
+        Console.WriteLine("[logic_probe] T4 spare-set forbidden wedge (card 2c74d5b7)");
 
-        // 4. DIRECTION. The push is purely TRANSVERSE -- following the mesa's along-axis gradient
-        // would send the ship further down the mover's own track, and it cannot outrun an
-        // asteroid (0.38 px/ms against ShipMaxSpeed 0.33). A component along the travel direction
-        // would be that mistake.
-        object above = At(120f, -50f, AsteroidSpeed, AsteroidHalf, false);
-        object below = At(120f, 50f, AsteroidSpeed, AsteroidHalf, false);
-        object dirAbove = VField(above, "ConeDir");
-        object dirBelow = VField(below, "ConeDir");
-        Check("the cone pushes ACROSS the path, never along it",
-            Math.Abs(VX(dirAbove)) < 0.001f && Math.Abs(VX(dirBelow)) < 0.001f,
-            "push at 50px above the axis = (" + VX(dirAbove).ToString("0.00") + ", "
-            + VY(dirAbove).ToString("0.00") + "), below = (" + VX(dirBelow).ToString("0.00")
-            + ", " + VY(dirBelow).ToString("0.00") + ")");
-        Check("and it pushes AWAY from the axis on whichever side the ship is",
-            VY(dirAbove) < 0f && VY(dirBelow) > 0f, "as above");
+        // 1. The tangent geometry, at a hand-checkable point: r/d = 0.5 -> asin = 30 degrees.
+        float bare = Half(200f, 100f, 0f);
+        Check("the bare wedge is the hull's tangent half-angle (asin r/d)",
+            Math.Abs(bare - (float)(Math.PI / 6.0)) < 0.001f,
+            "dist 200, hull 100 -> " + bare.ToString("0.0000") + " rad vs asin(0.5) = "
+            + (Math.PI / 6.0).ToString("0.0000"));
 
-        // 5. BEHIND A MOVER IS SAFE. Nothing is coming that way, and the body itself is the
-        // radial field's business.
-        Check("nothing is projected behind the mover",
-            Field(At(-100f, 0f, AsteroidSpeed, AsteroidHalf, true), "ConeStrength") == 0f
-                && Field(At(-100f, 0f, AsteroidSpeed, AsteroidHalf, true), "WedgeStrength") == 0f,
-            "100px behind an asteroid on its own axis");
+        // 2. The spread widens it by EXACTLY the spread -- that is the guarantee that a shot at
+        // an allowed target cannot jitter across the hull.
+        Check("the aim spread widens the wedge by exactly the spread",
+            Math.Abs(Half(200f, 100f, 0.3f) - (bare + 0.3f)) < 0.0001f,
+            "spread 0.3 -> " + Half(200f, 100f, 0.3f).ToString("0.0000") + " vs bare + 0.3");
 
-        // 6. LENGTH SCALES WITH SPEED, which is what makes one rule cover a drifting rock and a
-        // screen-crossing boss with no per-type code.
-        float slowLen = Field(At(1f, 0f, 0.2f, AsteroidHalf, false), "ConeLength");
-        float fastLen = Field(At(1f, 0f, 0.8f, AsteroidHalf, false), "ConeLength");
-        Check("cone length scales with the mover's speed",
-            fastLen > slowLen * 3.9f && fastLen < slowLen * 4.1f,
-            "0.2px/ms -> " + slowLen.ToString("0") + "px, 0.8px/ms -> " + fastLen.ToString("0")
-            + "px (a 4x speed for a 4x length)");
+        // 3. Inside the hull every direction is at it.
+        Check("inside the hull the wedge is the full circle",
+            Half(50f, 100f, 0f) >= (float)Math.PI - 0.001f,
+            "dist 50 inside a 100 hull -> " + Half(50f, 100f, 0f).ToString("0.00"));
 
-        // ---- the LANE WEDGE ----
-        // The spider boss's top lane: a 186.67px band snapped to y=93.3, i.e. hugging the ceiling.
-        const float LaneHalf = 186.66667f / 2f;
-        const float TopLaneY = 186.66667f * 0.5f;
-        const float BossSpeed = 0.78f;
+        // 4. Membership at the boundary: inside the half-angle forbidden, just outside allowed.
+        Check("membership: inside the half-angle forbidden, just outside allowed",
+            Forb(0.5f, 0.3f, 0.25f) && !Forb(0.6f, 0.3f, 0.25f),
+            "wedge centre 0.3 half 0.25: angle 0.5 in, 0.6 out");
 
-        // 7. A LANE FLYBY IS ASYMMETRIC, and it must force the ship AWAY from the hugged edge.
-        // A symmetric cone would offer the gap between the path and the ceiling as an escape, and
-        // that gap is a trap -- the ship dodges into it and is crushed as the boss arrives.
-        object inLane = At(300f, 0f, BossSpeed, LaneHalf, true, 0f, TopLaneY);
-        object wedgeDir = VField(inLane, "WedgeDir");
-        Check("a lane flyby hugging the TOP edge forces the ship DOWN, out of the lane",
-            Field(inLane, "WedgeStrength") > 0f && VY(wedgeDir) > 0.99f,
-            "wedge " + Field(inLane, "WedgeStrength").ToString("0.00") + " pushing ("
-            + VX(wedgeDir).ToString("0.00") + ", " + VY(wedgeDir).ToString("0.00") + ")");
+        // 5. Wrap-safety: a wedge centred just below +pi must catch an angle just above -pi
+        // (0.2 rad apart across the seam) -- a naive |a - c| reads that as ~2*pi and misses.
+        Check("membership is wrap-safe across the +-pi seam",
+            Forb((float)(-Math.PI + 0.1), (float)(Math.PI - 0.1), 0.25f)
+                && !Forb((float)(-Math.PI + 0.5), (float)(Math.PI - 0.1), 0.25f),
+            "centre pi-0.1, half 0.25: -pi+0.1 (0.2 away across the seam) in, -pi+0.5 out");
 
-        // 8. THE TRAPPED SIDE IS CLOSED AT FULL STRENGTH ALL THE WAY TO THE EDGE, which is the
-        // sketch: everything between the flight path and the nearer screen edge is off limits, so
-        // the only downhill direction is out.
-        float trapped = Field(At(300f, -LaneHalf - 40f, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
-        float centre = Field(At(300f, 0f, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
-        Check("the wedge is FLAT across the whole trapped side (path to hugged edge)",
-            Math.Abs(trapped - centre) < 0.001f && trapped > 0f,
-            "40px above the band " + trapped.ToString("0.00") + " vs on the centre line "
-            + centre.ToString("0.00"));
-
-        // 9. AND IT DEGRADES ON THE FAR SIDE. This is the subtlest part of the shape and the
-        // likeliest to regress silently: a ship that has ALREADY escaped must be nudged, not
-        // shoved, or the wedge becomes a wall on the safe side too. Offsets are fractions of the
-        // across-axis width, for the reason given at check 3.
-        float justOut = Field(At(300f, LaneHalf + coneWidth * 0.05f, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
-        float wellOut = Field(At(300f, LaneHalf + coneWidth * 0.5f, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
-        float farOut = Field(At(300f, LaneHalf + coneWidth, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength");
-        Check("past the band's far edge the wedge falls off, strictly and to nothing",
-            justOut < centre && wellOut < justOut && farOut == 0f,
-            "on the centre line " + centre.ToString("0.00") + " -> just out "
-            + justOut.ToString("0.00") + " -> half the width out " + wellOut.ToString("0.00")
-            + " -> a full width out " + farOut.ToString("0.00"));
-        // The far-side falloff must BE the cone's across-axis one rather than a second rule of its
-        // own -- both read at the same fraction of the width, and the cone's at 1px ahead so its
-        // corridor has not tapered.
-        float coneRatio = acrossHalf / Math.Max(across0, 0.0001f);
-        Check("control: the far-side falloff is the CONE's across-axis one, not a second rule",
-            Math.Abs(wellOut / Math.Max(centre, 0.0001f) - coneRatio) < 0.01f,
-            "wedge decays to " + (wellOut / Math.Max(centre, 0.0001f)).ToString("0.000")
-            + " of peak half a width out, the cone to " + coneRatio.ToString("0.000"));
-
-        // 10. THE MIDDLE LANE IS NOT A LANE. It hugs neither edge, so it gets the symmetric cone
-        // and the ship may leave either way. Stating it because the hand-rolled escape this shape
-        // replaced forced the middle lane DOWNWARD unconditionally, and that difference is
-        // exactly the kind of quiet behavioural change a future reader will come hunting for.
-        const float MidLaneY = 186.66667f * 1.5f;
-        Check("the MIDDLE lane raises no wedge -- it hugs no edge, so either side is an escape",
-            Field(At(300f, 0f, BossSpeed, LaneHalf, true, 0f, MidLaneY), "WedgeStrength") == 0f,
-            "band centred at y=" + MidLaneY.ToString("0") + " leaves "
-            + (MidLaneY - LaneHalf).ToString("0") + "px above and "
-            + (600f - MidLaneY - LaneHalf).ToString("0") + "px below");
-
-        // 11. NEGATIVE CONTROL, and the one that stops the wedge eating the game. A band narrower
-        // than the room a ship needs is an OBSTACLE, not a corridor -- the ship can cross its path
-        // -- so it must raise no wedge however close to an edge it drifts. Before this gate
-        // existed every UFO in SpaceDodge wedged at mean 4.25 simply for entering from the top,
-        // which out-votes the entire rest of the field.
-        Check("control: a small mover hugging the ceiling raises NO wedge, however close",
-            Field(At(120f, 0f, AsteroidSpeed, AsteroidHalf, true, 0f, 10f), "WedgeStrength") == 0f,
-            "a " + AsteroidHalf + "px half-extent asteroid centred 10px from the top edge;"
-            + " the survivable gap is 2*(ship 20px + an 11.3px stopping distance)");
-        Check("control: the same geometry at a LANE's half-extent does raise one",
-            Field(At(120f, 0f, BossSpeed, LaneHalf, true, 0f, TopLaneY), "WedgeStrength") > 0f,
-            "so the discriminator is the band's width, not its position");
-
-        // 12. AND THE WEDGE MUST OUT-VOTE THE FIELD IT SITS IN. The whole band is simply death,
-        // so it has to beat the station pull, a powerup detour and the edge pushes combined --
-        // which is why it is held at the strength the hand-rolled escapes used.
-        float wedgeStrength = (float)ship.GetField("DefaultLaneWedgeStrength", anyStatic).GetRawConstantValue();
-        Check("the wedge out-ranks every other steering term",
-            wedgeStrength > MaxSteerStrength,
-            "DefaultLaneWedgeStrength " + wedgeStrength + " against the threat field's peak "
-            + MaxSteerStrength + " -- being in the lane is not a risk to weigh, it is a death");
         return 0;
     }
 
@@ -1724,7 +1746,7 @@ internal static class Program
                 .GetValue(shape);
         object teleportShape = eval.Invoke(null, new object[]
         {
-            V(400f, 300f), V(0f, 0f), V(0f, 300f), V(42f, 0f), 30f, 20f, 4f, false
+            V(400f, 300f), V(0f, 300f), V(42f, 0f), 30f, 30f, 20f, 4f, false
         });
         Check("WHY: at a 42 px/ms reposition the cone saturates its length cap",
             ShapeField(teleportShape, "ConeLength") == coneMaxLen
@@ -1732,12 +1754,17 @@ internal static class Program
             "42 px/ms x " + coneLeadMs.ToString("0") + "ms would be "
             + (42f * coneLeadMs).ToString("0") + "px, capped at " + coneMaxLen.ToString("0")
             + "px -- a full-screen corridor from one frame's position delta");
-        // Half the cap down that corridor the mesa is still at 75% of peak (the along-axis
-        // plateau, `1 - t^2`), i.e. the one frame does not merely reach the ship -- it shoves it.
-        Check("WHY: and 400px down that corridor it still out-votes the 0.8 seek several times over",
-            ShapeField(teleportShape, "ConeStrength") > 4f * 0.7f,
+        // 400px down that corridor the ship is INSIDE the projected shape. Since the lap-11
+        // whisper-triangle ruling the strength out there is the triangle's peak, not the full
+        // 4 -- but it still out-votes the 0.8 seek from one frame's bogus position delta, which
+        // is the shove the guard exists to refuse.
+        float whisperPeak = (float)ship.GetField("DefaultSweptTriangleStrength", anyStatic).GetRawConstantValue();
+        Check("WHY: and 400px down that corridor it still out-votes the 0.8 seek",
+            ShapeField(teleportShape, "ConeStrength") > 0.8f
+                && Math.Abs(ShapeField(teleportShape, "ConeStrength") - whisperPeak) < 0.001f,
             "cone strength " + ShapeField(teleportShape, "ConeStrength").ToString("0.00")
-            + " of a 4.00 peak, at the ship's position");
+            + " (the triangle's whisper peak " + whisperPeak.ToString("0.00")
+            + "), against the 0.8 seek, at the ship's position");
 
         // 6. THE NEGATIVE CONTROL: `?aisweptmax=0` is the A/B seam the card's measurement pass
         // runs against, so it must genuinely restore the pre-card behaviour -- every reposition

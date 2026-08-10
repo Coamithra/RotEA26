@@ -509,6 +509,55 @@ namespace EvilAliensWeb.Compat
 			Console.WriteLine("[debug] eaHitboxes " + (on ? "ON" : "OFF"));
 		}
 
+		// JS bridge for the swept-shape debug overlay (eaCones in wwwroot/index.html):
+		// DotNet.invokeMethod('EvilAliensWeb', 'debugCones', on). Draws every mover's body
+		// circle + velocity triangle exactly as the AI's steering evaluates it; same as
+		// booting with ?cones but flippable live.
+		[JSInvokable("debugCones")]
+		public static void Cones(bool on)
+		{
+			DebugFlags.SetShowCones(on);
+			Console.WriteLine("[debug] eaCones " + (on ? "ON" : "OFF"));
+		}
+
+		// eaConesDump / `eval ConesDump`: one line per baddy in the AI's world model with exactly
+		// what the swept-shape pipeline sees -- observed velocity, the path verdict, and the
+		// described geometry. Built for the iterative rep-1 landed-UFO hunt, where 'why does
+		// this thing draw no cone' had no observable at all.
+		[JSInvokable("debugConesDump")]
+		public static string ConesDump()
+		{
+			EvilAliens.Oracle oracle = EvilAliens.ServiceHelper.Get<EvilAliens.IOracleService>()?.Oracle;
+			if (oracle == null)
+			{
+				return "[debug] eaConesDump: no oracle service (game not booted yet?)";
+			}
+			var sb = new System.Text.StringBuilder();
+			// The scroll on the same line as the entities: a parked UFO's observed velocity IS
+			// the scroll-carry (Position += BackgroundSpeed while landed), so vel=0.000 with a
+			// nonzero scroll here means the carry line is not running for that entity's state --
+			// while scroll=0.000 means the beat itself is stopped.
+			Microsoft.Xna.Framework.Vector2 scroll = oracle.BackgroundSpeed;
+			sb.AppendFormat(System.Globalization.CultureInfo.InvariantCulture,
+				"[conesdump] scroll={0:0.000},{1:0.000} | type pos collides observedVel described radius apexOffset\n",
+				scroll.X, scroll.Y);
+			foreach (EvilAliens.AlienDrawableGameComponent baddy in oracle.GetBaddies())
+			{
+				bool described = EvilAliens.PlayerShip.TryDescribeSweptShape(baddy,
+					out Microsoft.Xna.Framework.Vector2 anchor, out float radius,
+					out Microsoft.Xna.Framework.Vector2 apex);
+				Microsoft.Xna.Framework.Vector2 vel = baddy.ObservedVelocity;
+				sb.AppendFormat(System.Globalization.CultureInfo.InvariantCulture,
+					"  {0} pos={1:0},{2:0} collides={3} vel={4:0.000},{5:0.000} described={6} r={7:0} apexOff={8:0}\n",
+					baddy.GetType().Name, baddy.Position.X, baddy.Position.Y,
+					baddy.Collides ? 1 : 0, vel.X, vel.Y,
+					described ? 1 : 0, radius, described ? (apex - anchor).Length() : 0f);
+			}
+			string outp = sb.ToString();
+			Console.WriteLine(outp);
+			return outp;
+		}
+
 		// JS bridge for the ComponentBin lifecycle scenario suite (eaBinTest in
 		// wwwroot/index.html): DotNet.invokeMethod('EvilAliensWeb', 'debugBinTest'). Runs
 		// Compat/BinTest.Run() against the live bin and returns the PASS/FAIL report.

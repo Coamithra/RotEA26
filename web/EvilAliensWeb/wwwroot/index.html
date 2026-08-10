@@ -207,6 +207,22 @@
             catch (e) { console.warn('[debug] eaHitboxes failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: toggle the AI swept-shape overlay (every mover's body circle + velocity
+        // triangle, exactly as the steering evaluates it). eaCones() / eaCones(true) to show,
+        // eaCones(false) to hide. Same as booting with ?cones. OFF by default.
+        window.eaCones = (on) => {
+            try { DotNet.invokeMethod('EvilAliensWeb', 'debugCones', on !== false); }
+            catch (e) { console.warn('[debug] eaCones failed (game not booted yet?): ' + e.message); }
+        };
+
+        // Debug: dump one line per baddy with exactly what the swept-shape pipeline sees
+        // (observed velocity, path verdict, described geometry). Run it at the moment a shape
+        // looks wrong or missing; pairs with ?cones.
+        window.eaConesDump = () => {
+            try { return DotNet.invokeMethod('EvilAliensWeb', 'debugConesDump'); }
+            catch (e) { console.warn('[debug] eaConesDump failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: run the ComponentBin lifecycle scenario suite (instant births, deferred
         // deaths, purge filter, pause-aware adds — card 02d9ad67). Prints PASS/FAIL per
         // scenario. Best run from the main menu (the pause scenario Push/Pops the world).

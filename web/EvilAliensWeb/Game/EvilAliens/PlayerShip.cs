@@ -326,17 +326,6 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private static float TopEdgeAvoidStrength => EvilAliensWeb.Compat.DebugFlags.AiTopEdgeAvoidStrength ?? DefaultTopEdgeAvoidStrength;
 
-	// Same, for the descent/climb column (the boss's standing box is 240px wide).
-	private const float VerticalLaneClearancePx = 240f;
-
-	// How far from the centre of the boss's telegraphed lane the AI wants to be. The lethal band
-	// is a ~187px third of the screen, so this clears it with room to spare.
-	private const float SweepLaneClearancePx = 210f;
-
-	// Must beat the station pull, a powerup detour and the edge pushes combined: the whole third
-	// of the screen is off limits while the boss is in play, and being in it is simply a death.
-	private const float SweepLaneAvoidStrength = 18f;
-
 	// ---- T4 (card 2c74d5b7): spare the boss's laser platforms, by ANGLE ----------------------
 	// Owner design, verbatim intent: an 80px circle around the ship is fair game; outside it,
 	// the two big UFOs FURTHEST from the ship are protected; protection is a forbidden WEDGE
@@ -2039,13 +2028,6 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	private int spareWedgeCount;
 
-	// T4 addendum 2 (owner finding, lap 12): the platform currently being BAITED -- the ship
-	// interposes itself between this UFO and the boss, which puts it dead ahead and nearest,
-	// exactly when the ordinary rules would open fire on the beam being farmed. Never shot
-	// while it charges, fair-game circle included; cleared every DoAIMove tick, so once the
-	// beam is away ordinary rules resume by themselves.
-	private UFO baitPlatform;
-
 	// One [aiseek] line on every seek-kind change and a heartbeat every 30 ticks while the kind
 	// holds. The line carries where the ship IS, where the seek points, its weight and whether
 	// the deadzone has silenced it -- the attribution a position trace cannot give.
@@ -2154,7 +2136,8 @@ public class PlayerShip : AlienDrawableGameComponent
 			{
 				baitBoss = (SpiderBoss)baddy;
 			}
-			if (baddy is UFO && ((UFO)baddy).IsBig && !baddy.IsDead && ((UFO)baddy).AiChargingLazer)
+			if (baddy is UFO && ((UFO)baddy).IsBig && !baddy.IsDead && ((UFO)baddy).AiChargingLazer
+				&& ((UFO)baddy).AiLazerAimedAt(this))
 			{
 				Vector2 toCharging = baddy.Position - base.Position;
 				float chargeSq = (toCharging).LengthSquared();
@@ -2190,62 +2173,16 @@ public class PlayerShip : AlienDrawableGameComponent
 					repel += dodgeStrength * across;
 				}
 			}
-			// The vertical strips: the fixed X-600 landing column, and the climb that opens the
-			// next cycle. Same treatment as the sweep lane, on the other axis -- flat across the
-			// band, because every part of it is equally lethal.
-			// ?ailaneescape=0 drops both hand-rolled spider escapes, so the lane wedge added by
-			// card e425781b can be measured against them instead of on top of them. Built as a
-			// temporary seam for that supersession A/B, and PERMANENT because the A/B kept them:
-			// dropping the escapes doubles SpiderBoss(standing) deaths (12 -> 24 over 8 paired
-			// runs) and costs 26 points of powerup pickup. The wedge is an ADDITION, not a
-			// replacement.
-			if (EvilAliensWeb.Compat.DebugFlags.AiLaneEscape != false
-				&& baddy is SpiderBoss && ((SpiderBoss)baddy).AiVerticalLaneActive)
-			{
-				float laneX = ((SpiderBoss)baddy).AiVerticalLaneX;
-				float offLane = base.Position.X - laneX;
-				if (Math.Abs(offLane) < VerticalLaneClearancePx)
-				{
-					// ALWAYS break left out of a landing. The landing now sweeps everything from the
-					// boss to the right screen edge (see SpiderBoss's land case), so right is not
-					// an escape at all -- it is a dead end that merely looks like one. For the
-					// jump/climb, which has no such sweep, either side is fine so the ship takes
-					// whichever it is already nearer.
-					float away = ((SpiderBoss)baddy).AiLandingSweep
-						? -1f
-						: ((Math.Abs(offLane) < 1f) ? ((laneX > 400f) ? -1f : 1f) : Math.Sign(offLane));
-					// Same steep falloff as every other field here: hardest at the centre line,
-					// fading out toward the clearance edge. A flat push across the band was tried
-					// and it fights the screen bounds all the way out instead of easing off once
-					// the ship is clearly out of the way.
-					float urge = FieldCurve(SweepLaneAvoidStrength, Math.Abs(offLane) / VerticalLaneClearancePx);
-					repel += new Vector2(away * urge, 0f);
-				}
-			}
-			// Act on the boss's own telegraph. During the "Danger!" arrow the spider boss sits
-			// off-screen in the lane it is about to cross, so it is STATIONARY -- the movement
-			// prediction says nothing and the distance field is a screen away. Vacating the lane
-			// now is the whole point of the warning, and it is far cheaper than trying to escape
-			// a screen-wide sweep once it has started.
-			if (EvilAliensWeb.Compat.DebugFlags.AiLaneEscape != false
-				&& baddy is SpiderBoss && ((SpiderBoss)baddy).AiSweepIncoming)
-			{
-				float laneY = ((SpiderBoss)baddy).AiSweepLaneCentreY;
-				float offLane = base.Position.Y - laneY;
-				if (Math.Abs(offLane) < SweepLaneClearancePx)
-				{
-					// Flee DOWNWARD out of the lane unless the lane IS the bottom one. Which way
-					// to run is not symmetric: UFOs enter from the top, so the upper third is the
-					// busy half of the screen and running up out of the middle lane trades one
-					// hazard for another. Only the bottom lane forces the ship upward.
-					float away = (laneY > 400f) ? -1f : 1f;
-					// Steep falloff, like every other field here: hardest on the centre line and
-					// easing off as the ship clears the band, so it hands over cleanly to the
-					// screen-edge terms instead of shoving all the way into them.
-					float urge = FieldCurve(SweepLaneAvoidStrength, Math.Abs(offLane) / SweepLaneClearancePx);
-					repel += new Vector2(0f, away * urge);
-				}
-			}
+			// The hand-rolled spider lane/sweep escapes that lived here -- strength-18 pushes
+			// out of the landing column and the telegraphed sweep lanes, with their break-left
+			// and flee-downward special cases -- were RETIRED by owner ruling (lap 12): the
+			// boss's ANNOUNCED swept path (lanes, "Danger!" hold, landing sweep) feeds the
+			// ordinary cone + lane wedge, and that shape does the work now. Two notes from the
+			// retirement: the wedge's middle-lane rule is LIVE from here on (a mid-screen lane
+			// raises no wedge because either side is an escape, where the escapes forced it
+			// down), and the old supersession A/B numbers (12 -> 24 standing deaths without
+			// the escapes) were measured under the pre-curve-flip force system and do not
+			// carry.
 			// Card f4d1721f: track the nearest level-HALTING boss so the ship can close on it if
 			// it is out of gun range (below). The 2008 code only ever did this for JunkBoss, so
 			// against any other boss the AI hovered at its default station and fired only when the
@@ -2524,10 +2461,16 @@ public class PlayerShip : AlienDrawableGameComponent
 		// there... but it'll make 'em try"), and every threat term out-votes it up close --
 		// which is exactly what the REMOVED park-behind-the-boss (see the history note above)
 		// did not have.
-		baitPlatform = (baitBoss != null) ? chargingPlatform : null;
 		if (steerTarget.X > 2000f && chargingPlatform != null && baitBoss != null)
 		{
-			steerTarget = (chargingPlatform.Position + baitBoss.Position) * 0.5f;
+			// Owner refinement (lap 12): interposing is only meaningful against a STANDING
+			// boss -- flying or off-screen its position says nothing, so the bait point is
+			// simply mid-screen (the beam still crosses the busy middle). And only the ship
+			// the beam is actually AIMED at takes the bait -- the ingredient collect above
+			// filters on AiLazerAimedAt(this) -- so a co-op partner keeps its own business.
+			steerTarget = baitBoss.AiStanding
+				? (chargingPlatform.Position + baitBoss.Position) * 0.5f
+				: new Vector2(400f, 300f);
 			steerTargetWeight = SeekWeight;
 			seekKind = "bait";
 		}

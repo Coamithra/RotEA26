@@ -30,6 +30,10 @@ public class UFO : KillableAlien
 	// thing besides the helper mothership that can hurt it. See PlayerShip.DoAIMove.
 	internal bool AiChargingLazer => state == UFOState.lazor && lazer == null;
 
+	// T4 bait (owner spec, lap 12): is this UFO's beam being aimed at `ship`? The windup aims
+	// at `target` and locks at fire time, so during the charge this is who should interpose.
+	internal bool AiLazerAimedAt(PlayerShip ship) => ReferenceEquals(target, ship);
+
 	public static int Nr;
 
 	private int thisNr;

@@ -685,7 +685,7 @@ internal static class Program
             new { Flag = "aiseekapproach", Prop = "AiSeekApproachWeight", Good = "2.6", Want = (object)2.6f,  Baked = "1.1"  },
             new { Flag = "aipowerupreach", Prop = "AiPowerupReachPx",      Good = "444", Want = (object)444f,  Baked = "150"  },
             // The directional repellent shapes (card e425781b). The three on/off members of the
-            // family -- ?aicone= ?aiwedge= ?ailaneescape= -- are deliberately absent, following
+            // family -- ?aicone= ?aiwedge= -- are deliberately absent, following
             // ?aievade=: the IsOn/IsExplicitlyOff spelling has its own convention and this table's
             // "names the value in force" leg does not describe it.
             new { Flag = "aiconelead",     Prop = "AiConeLeadMs",          Good = "456", Want = (object)456f,  Baked = "700"  },
@@ -858,7 +858,6 @@ internal static class Program
             // about the live curve instead of about a literal.
             "DefaultPowerupReachPx",
             "DefaultSeekParkPx", "DefaultSeekResumePx", "ShipMaxSpeed", "ShipDeceleration",
-            "SweepLaneAvoidStrength",
             "DefaultLazerAvoidStrength", "DefaultLazerDodgeStrength"
         };
         var vals = new Dictionary<string, float>();
@@ -935,8 +934,10 @@ internal static class Program
         // that is correct. The condition is the contract rather than a comment promising someone
         // will remember: bake the sidestep back on and the bound re-arms itself.
         const float MaxSteerStrength = 4f;
-        float weakestRepellent = Math.Min(MaxSteerStrength,
-            Math.Min(vals["SweepLaneAvoidStrength"], vals["DefaultLazerAvoidStrength"]));
+        // The spider lane escapes' 18 left this min when the owner retired them (lap 12); the
+        // lane WEDGE is not folded in for the same reason the sidestep below is conditional --
+        // it is part of the swept shape and gated with it.
+        float weakestRepellent = Math.Min(MaxSteerStrength, vals["DefaultLazerAvoidStrength"]);
         if (vals["DefaultLazerDodgeStrength"] > 0f)
         {
             weakestRepellent = Math.Min(weakestRepellent, vals["DefaultLazerDodgeStrength"]);

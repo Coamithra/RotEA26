@@ -1497,13 +1497,9 @@ namespace EvilAliensWeb.Compat
 		//                  field alone -- the A/B control for everything this card measures.
 		// ?aiwedge=0       keep the cone but drop the asymmetric lane wedge, which is the only way
 		//                  to attribute a spider-boss result to one half of the shape.
-		// ?ailaneescape=0  turn off the hand-rolled spider lane/sweep escapes, so the wedge can be
-		//                  measured against them rather than on top of them.
 		public static bool? AiConeShapes { get; private set; }
 
 		public static bool? AiLaneWedge { get; private set; }
-
-		public static bool? AiLaneEscape { get; private set; }
 
 
 		// ?aiconelead=<ms>     cone length per unit speed, as a time horizon;
@@ -3062,20 +3058,15 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "aicone":
 				case "aiwedge":
-				case "ailaneescape":
 					if (IsOn(val) || IsExplicitlyOff(val))
 					{
 						if (key == "aicone")
 						{
 							AiConeShapes = IsOn(val);
 						}
-						else if (key == "aiwedge")
-						{
-							AiLaneWedge = IsOn(val);
-						}
 						else
 						{
-							AiLaneEscape = IsOn(val);
+							AiLaneWedge = IsOn(val);
 						}
 					}
 					else
@@ -3084,7 +3075,7 @@ namespace EvilAliensWeb.Compat
 						// is LABELLED as having it off, i.e. a measurement seam quietly measuring
 						// the other arm.
 						RejectFlagValue(key, val, "on/off",
-							((key == "aicone" ? AiConeShapes : (key == "aiwedge" ? AiLaneWedge : AiLaneEscape)) ?? true) ? "on" : "off");
+							((key == "aicone" ? AiConeShapes : AiLaneWedge) ?? true) ? "on" : "off");
 					}
 					break;
 				case "aiconelead":

@@ -1879,21 +1879,51 @@ public class PlayerShip : AlienDrawableGameComponent
 				break;
 			}
 		}
-		// The wedges the fire selection tests against, rebuilt from whatever survived.
+		// The wedges the fire selection tests against: the spared slots AND every mid-charge
+		// platform (its beam is the weapon being farmed, and a miss at something nearby must
+		// not sail into it), deduped, distances recorded for the through-shot rule.
 		spareWedgeCount = 0;
 		for (int i = 0; i < sparedUfos.Length; i++)
 		{
-			UFO spared = sparedUfos[i];
-			if (spared == null)
-			{
-				continue;
-			}
-			Vector2 to = spared.Position - base.Position;
-			spareWedgeCentre[spareWedgeCount] = MyMath.VectorToAngle(to);
-			spareWedgeHalf[spareWedgeCount] = SpareForbiddenHalfAngle((to).Length(),
-				MathHelper.Max(ThreatBodyTerm(spared), 1f), aimSpread);
-			spareWedgeCount++;
+			AddSpareWedge(sparedUfos[i], aimSpread);
 		}
+		if (active)
+		{
+			foreach (AlienDrawableGameComponent scan in baddies)
+			{
+				if (scan is UFO charger && charger.IsBig && !charger.IsDead && charger.AiChargingLazer)
+				{
+					bool alreadyWedged = false;
+					for (int i = 0; i < sparedUfos.Length; i++)
+					{
+						if (ReferenceEquals(charger, sparedUfos[i]))
+						{
+							alreadyWedged = true;
+							break;
+						}
+					}
+					if (!alreadyWedged)
+					{
+						AddSpareWedge(charger, aimSpread);
+					}
+				}
+			}
+		}
+	}
+
+	private void AddSpareWedge(UFO platform, float aimSpread)
+	{
+		if (platform == null || spareWedgeCount >= SpareWedgeMax)
+		{
+			return;
+		}
+		Vector2 to = platform.Position - base.Position;
+		float dist = (to).Length();
+		spareWedgeCentre[spareWedgeCount] = MyMath.VectorToAngle(to);
+		spareWedgeHalf[spareWedgeCount] = SpareForbiddenHalfAngle(dist,
+			MathHelper.Max(ThreatBodyTerm(platform), 1f), aimSpread);
+		spareWedgeDist[spareWedgeCount] = dist;
+		spareWedgeCount++;
 	}
 
 	// The forbidden wedge over one protected hull: the tangent cone of its bounding circle
@@ -1945,25 +1975,34 @@ public class PlayerShip : AlienDrawableGameComponent
 		return guarded;
 	}
 
-	// Fire-selection gate: is a shot TOWARD this point forbidden? The fair-game circle exempts
-	// point-blank defence -- anything within it may be shot whatever stands behind it.
+	// Fire-selection gate: is a shot TOWARD this point forbidden? The fair-game circle's
+	// exemption is a THROUGH-SHOT rule since the lap-12 sighting, not a blanket bypass: a
+	// point-blank target may be shot only when it sits CLOSER than the protected platform
+	// whose wedge it is in -- the bullet stops in the target -- never when it is beyond it,
+	// which is firing through the thing being protected (at a big ?aisparefair= the blanket
+	// exemption covered most of the fight and the wedges never applied at all).
 	private bool SpareBlocksShot(Vector2 toBaddy)
 	{
 		if (spareWedgeCount == 0)
 		{
 			return false;
 		}
-		if ((toBaddy).LengthSquared() <= SpareFairGamePx * SpareFairGamePx)
-		{
-			return false;
-		}
+		float targetDistSq = (toBaddy).LengthSquared();
+		float fair = SpareFairGamePx;
+		bool pointBlank = targetDistSq <= fair * fair;
+		float targetDist = (float)Math.Sqrt(targetDistSq);
 		float angle = MyMath.VectorToAngle(toBaddy);
 		for (int i = 0; i < spareWedgeCount; i++)
 		{
-			if (SpareAngleForbidden(angle, spareWedgeCentre[i], spareWedgeHalf[i]))
+			if (!SpareAngleForbidden(angle, spareWedgeCentre[i], spareWedgeHalf[i]))
 			{
-				return true;
+				continue;
 			}
+			if (pointBlank && targetDist < spareWedgeDist[i])
+			{
+				continue;
+			}
+			return true;
 		}
 		return false;
 	}
@@ -1987,9 +2026,16 @@ public class PlayerShip : AlienDrawableGameComponent
 	// tick with no allocation.
 	private readonly UFO[] sparedUfos = new UFO[SpareSlotsMax];
 
-	private readonly float[] spareWedgeCentre = new float[SpareSlotsMax];
+	// Wedges cover the spared slots AND every mid-charge platform (owner sighting, lap 12:
+	// chargers were target-gated but not angle-gated, so misses at nearby targets sailed into
+	// them), so the arrays are sized past the slot ceiling.
+	private const int SpareWedgeMax = SpareSlotsMax + 4;
 
-	private readonly float[] spareWedgeHalf = new float[SpareSlotsMax];
+	private readonly float[] spareWedgeCentre = new float[SpareWedgeMax];
+
+	private readonly float[] spareWedgeHalf = new float[SpareWedgeMax];
+
+	private readonly float[] spareWedgeDist = new float[SpareWedgeMax];
 
 	private int spareWedgeCount;
 

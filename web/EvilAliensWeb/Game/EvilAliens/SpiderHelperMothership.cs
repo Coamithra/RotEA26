@@ -675,7 +675,9 @@ internal class SpiderHelperMothership : KillableAlien
 
 	private void NetSpawnDeathBooms(float dtMs)
 	{
-		if (netBoomRandom.NextDouble() * 1000.0 >= (double)(DeathBoomRate * dtMs))
+		// Same law as the host leg's RandomHelper.RandomFromAverage(DeathBoomRate, gameTime),
+		// on the private RNG: hit with probability rate * dtSeconds per tick.
+		if (netBoomRandom.NextDouble() > (double)(DeathBoomRate * dtMs / 1000f))
 		{
 			return;
 		}
@@ -691,12 +693,13 @@ internal class SpiderHelperMothership : KillableAlien
 	// releasing a deferred killable). The host has just run CrashImpact, and the crash arc was
 	// already mirrored by snapshots -- so the local death is the impact itself, at the
 	// replicated crash-end position. Die() inside CrashImpact queues the removal, so the caller
-	// releases nothing. Idempotent: a second beat finds IsDead and does nothing.
+	// releases nothing. Idempotent: a second beat finds IsDead and does nothing. (`dying` is
+	// deliberately not touched here -- nothing on a frozen puppet reads it, and the booms run
+	// off `netDying`.)
 	private protected override bool NetBeginDeferredDeathSelf()
 	{
 		if (!IsDead)
 		{
-			dying = true;
 			CrashImpact();
 		}
 		return true;

@@ -1351,7 +1351,7 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
       longer force-removes a killable whose `NetKill` deferred** -- the old `bin.Remove` deleted
       a claimed helper mid-mission where the host's own kill let it finish; `NetKill`'s
       `NoteDeathBegan` already announces `EvDying` to the claimant.
-  - **Verify with `eaNetDeathFx()`** (`Compat/Net/NetDeathFxTest.cs`, 183 assertions;
+  - **Verify with `eaNetDeathFx()`** (`Compat/Net/NetDeathFxTest.cs`, 187 assertions;
     `tools/headless/probes/net_death_fx.txt`). MENU-ONLY and leave-no-trace, the `eaNetSnap`
     shape -- section 2 runs a real HOST session over a `NetWire` and reads the frames the peer
     RECEIVED (including the `EvDying` trigger-latency legs: the beat is on the wire while no

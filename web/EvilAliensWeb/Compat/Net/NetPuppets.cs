@@ -678,6 +678,20 @@ namespace EvilAliensWeb.Compat.Net
                 // state machine restarts from Setup (the HelperState is not replicated), i.e.
                 // it teleports off-screen and REPLAYS its entrance. Keep it frozen and
                 // tracking; the final EvDeath ends it (OnRemoteDeath -> NetBeginDeferredDeath).
+                //
+                // MIRROR THE HOST'S OWN DEAD-LATCH FIRST, though: the puppet stays collidable
+                // (bullets stop on the host's dying copy too), so continued local fire could
+                // whittle its local hp to zero, re-enter HitBy's kill path, and have
+                // OnClientDeferredKill file a spurious claim -- whose NoteKillSlot then
+                // overwrites the REAL killer's attribution on the host. NetKill closes that
+                // gate exactly as the release path does (the helper's KilledBy only flags);
+                // skipped when this peer's own blow already ran it.
+                if (killable != null && killable.NetHitPoints > 0)
+                {
+                    remoteDeaths.Add((GameComponent)info.Comp); // never echo this as a claim
+                    killable.NetKill(KillerAgent(NetProtocol.KillerNone, info.Comp.Position),
+                        isComboGenerator: false);
+                }
                 return;
             }
             if (killable == null)

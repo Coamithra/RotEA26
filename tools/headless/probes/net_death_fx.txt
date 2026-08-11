@@ -136,8 +136,13 @@
 #     claim leg, whose failure message shows the mechanism: 1 EvDeath = removed)
 #   * the OnClientDeferredKill call dropped from KillableAlien.HitBy       -> 2  (section 7's
 #     claim-at-death-began legs; the instant-kill control stays green)
+#   * the keep-frozen branch's dead-latch NetKill removed (a dying tracked
+#     puppet becomes re-killable, the review finding)                       -> 1  (section 7's
+#     continued-fire negative; a spurious claim would overwrite the real killer on the host)
 #   (the dying bit's APPLY+booms side fails section 7's boom leg trivially if broken -- the
-#   suite drives it directly -- and its ENCODE side has its own leg in section 2's claim leg)
+#   suite drives it directly -- and its ENCODE side has its own leg in section 2's claim leg;
+#   section 7f pins that the other deferred types claim exactly ONCE across death-began,
+#   release and self-removal)
 # (The two NetSuppressAward mutation rows retired with the member itself -- card af96bcc2
 # deleted award suppression outright; the "nothing was credited" zeroes now discriminate via
 # the empty menu roster + the released scripted-peer seat, asserted in section 2's teardown.)
@@ -222,7 +227,7 @@ expect this peer's own killing blow FILED ITS CLAIM at death-began
 expect NEGATIVE an INSTANT kill claims nothing at death-began
 
 expect 10\. teardown
-expect \[netdeathfx\] 183 passed, 0 failed
+expect \[netdeathfx\] 187 passed, 0 failed
 
 # LEAVE-NO-TRACE: two more runs in the SAME process, which is what makes the teardown's own
 # claims mean something. A leaked Explosion, BloodExplosion or BrainAura, an unrestored score

@@ -107,6 +107,7 @@ namespace EvilAliensWeb.Compat.Net
         private const ushort IdHelper = 61016;
         private const ushort IdHelper2 = 61017;
         private const ushort IdMine3 = 61018;
+        private const ushort IdSkull6 = 61019;
 
         public static string Run()
         {
@@ -956,6 +957,20 @@ namespace EvilAliensWeb.Compat.Net
                 Check("...as does the hp==0 snapshot fallback, twice over",
                     !helper.Enabled && NetPuppets.LiveCount == liveBefore);
 
+                // Continued fire on the dying, tracked puppet must be INERT: without the
+                // dead-latch, a joiner who kept shooting could whittle the local hp to zero,
+                // re-enter HitBy's kill path, and file a spurious claim whose NoteKillSlot
+                // overwrote the real killer's attribution on the host. The EvDying now mirrors
+                // the host's own dead-latch (NetKill, no release), which NetApplyHp respects --
+                // so this hp write is refused and the shot below cannot become a kill.
+                helper.NetApplyHp(1); // model the puppet already whittled to one hit from zero
+                helper.CollidesWith(NetPuppets.KillerAgent(0,
+                    ((AlienDrawableGameComponent)(object)helper).Position));
+                wire.Pump();
+                Check("NEGATIVE continued fire on the dying puppet files no claim ("
+                    + claims.Count + ") -- the EvDying mirrored the host's dead-latch",
+                    claims.Count == 0);
+
                 // 7b. The replicated dying bit drives the local death booms in NetDriveExtras.
                 // NEGATIVE first: without the bit, no booms however long the driver runs -- and
                 // 180 ticks (3 s at ~6 booms/s) makes a silent run astronomically unlikely to be
@@ -1052,6 +1067,30 @@ namespace EvilAliensWeb.Compat.Net
                     wire.Pump();
                     Check("...and files exactly ONE claim at the removal, as before ("
                         + claims.Count + ")", claims.Count == 1);
+                }
+
+                // 7f. The OTHER deferred types claim exactly ONCE too: a locally-killed
+                // BattleSkull claims at death-began, and its later release + self-removal must
+                // not claim again (the removal seam sees an unmapped component).
+                claims.Clear();
+                BattleSkull skull = (BattleSkull)BuildPuppet<BattleSkull>(game, IdSkull6,
+                    TypeIdxOf(new BattleSkull(game)), planted);
+                Check("PRECONDITION a BattleSkull puppet was built for the one-claim leg",
+                    skull != null);
+                if (skull != null)
+                {
+                    skull.NetApplyHp(1);
+                    skull.CollidesWith(NetPuppets.KillerAgent(0,
+                        ((AlienDrawableGameComponent)(object)skull).Position));
+                    wire.Pump();
+                    Check("a locally-killed BattleSkull claims at death-began too ("
+                        + claims.Count + ")", claims.Count == 1);
+                    NetPuppets.OnDeathBegan(IdSkull6); // the host's echo releases it
+                    int took = TickUntilGone((GameComponent)(object)skull, bin, game, 400);
+                    wire.Pump();
+                    Check("...and its release + own removal claims NOTHING more ("
+                        + claims.Count + " after " + took + " ticks)",
+                        claims.Count == 1 && !InWorld(game, (GameComponent)(object)skull));
                 }
             }
             finally

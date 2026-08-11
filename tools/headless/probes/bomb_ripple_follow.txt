@@ -33,7 +33,9 @@ step 5
 eval RippleState
 expect \[ripple\] blast spawned at 200,300 power=2
 expect \[ripple\] visible=True
-expect r[0-3]=\(200,300 e=0\.0[0-9]/3\.00
+# The load-bearing half is the /3.00 (the blast's own lifetime); the elapsed digits are
+# whatever the boot frames cost and are deliberately not pinned.
+expect r[0-3]=\(200,300 e=0\.\d\d/3\.00
 
 # Drag the blast the way PlayerShip.Update drags it; the ring must be re-centred on the
 # blast's next tick. Fresh window so the spawn-point line above cannot satisfy anything here.

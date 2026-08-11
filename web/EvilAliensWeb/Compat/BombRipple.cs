@@ -22,7 +22,10 @@ namespace EvilAliensWeb.Compat
 	// position back through MoveRing(token, pos). A stale token (ring evicted by a
 	// fifth bomb, or a pool-recycled Blast) no-ops rather than dragging someone
 	// else's ring — the push is the only coupling, so Compat still references no
-	// game type.
+	// game type. Consequence to know: the wavefront's SPEED is now a function of
+	// bomb power (radius is unchanged while the life it is crossed in is 1..5 s),
+	// so a maxed bomb's ring travels ~6.7x slower than the old fixed 0.75 s one —
+	// flagged for the owner's taste pass, all knobs still live.
 	//
 	// Four slots, so overlapping bombs each get their own ring; a fifth evicts the
 	// oldest. Every knob the tuner exposes is a baked Default* const read through a
@@ -100,7 +103,8 @@ namespace EvilAliensWeb.Compat
 
 		// Monotone per-Fire stamp folded into every token, so a token outlives neither its ring
 		// nor its slot: an evicted slot's next ring gets a new generation and the old token stops
-		// matching. Starts at 1 because 0 is the "no ring was fired" sentinel Fire returns.
+		// matching. The first Fire pre-increments it to 1, so no real token can collide with the
+		// 0 "no ring was fired" sentinel.
 		private static int generation;
 
 		// The resolved knobs. All public so DebugInput.RippleState can REPORT the values the
@@ -194,7 +198,10 @@ namespace EvilAliensWeb.Compat
 			{
 				return;
 			}
-			int slot = token % MaxRings;
+			// The double-mod keeps the index in range even for a negative token (generation
+			// overflow after ~2^29 Fires -- unreachable in practice, but free to make safe;
+			// the Token equality below still decides whether anything moves).
+			int slot = (token % MaxRings + MaxRings) % MaxRings;
 			if (rings[slot].Alive && rings[slot].Token == token)
 			{
 				rings[slot].Centre = designPosition;

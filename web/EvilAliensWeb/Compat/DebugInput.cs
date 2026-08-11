@@ -1549,9 +1549,18 @@ namespace EvilAliensWeb.Compat
 		[JSInvokable("debugRippleBlastMove")]
 		public static void RippleBlastMove(double x, double y)
 		{
-			if (rippleTestBlast == null)
+			// Liveness is checked against the bin, not just for null: Blast is POOL-RECYCLED,
+			// so once the spawned blast's 1-5 s lifetime expires this static can point at an
+			// object the pool has re-issued to a real detonation -- moving that would teleport
+			// a live blast (and, via the follow, drag its ring).
+			EvilAliens.ComponentBin liveBin =
+				EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>()?.ComponentBin;
+			if (rippleTestBlast == null
+				|| liveBin == null
+				|| !(liveBin.InCollection<EvilAliens.Blast>()?.Contains(rippleTestBlast) ?? false))
 			{
-				Console.WriteLine("[ripple] blastMove: no RippleBlast spawned");
+				rippleTestBlast = null;
+				Console.WriteLine("[ripple] blastMove: no live RippleBlast -- spawn one first");
 				return;
 			}
 			rippleTestBlast.SetPosition(new Microsoft.Xna.Framework.Vector2((float)x, (float)y));
@@ -1584,7 +1593,13 @@ namespace EvilAliensWeb.Compat
 				+ " master=" + BombRipple.Master
 				+ " amp=" + BombRipple.Amplitude
 				+ " radius=" + BombRipple.Radius
+				// With no override in force this value is only the no-lifetime FALLBACK -- a
+				// real ring runs on its blast's own duration (see the r<i>= fields) -- and a
+				// bare number here would read as what the rings use, i.e. a readout that lies.
+				// The suffix only appears un-overridden, so bomb_ripple.txt's
+				// `duration=0\.5` window (always under ?rippleduration=) is untouched.
 				+ " duration=" + BombRipple.Duration
+					+ (DebugFlags.RippleDuration.HasValue ? "" : "(fallback)")
 				+ " width=" + BombRipple.Width
 				+ " falloff=" + BombRipple.Falloff
 				+ " rim=" + BombRipple.Rim

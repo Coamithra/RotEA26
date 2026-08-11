@@ -3636,14 +3636,24 @@ internal static class Program
         Move2(0, 1f, 1f);
         SetFlag("Ripple", null);
 
-        // The ?ripplephase= parked scrub ring is EnsureParked's alone: while parked, MoveRing is
-        // inert even with a live-looking token, so a stray blast cannot drag the screenshot rig.
+        // The ?ripplephase= parked scrub rig is MoveRing-proof: while parked, MoveRing is inert
+        // even for a REAL live token, so a stray blast cannot drag the screenshot rig. The token
+        // must be genuine -- a Move2(0) would pass on the token==0 short-circuit alone and prove
+        // nothing about the phase guard -- and the SAME move must succeed once un-parked, or
+        // "inert while parked" would be indistinguishable from "inert".
         SetFlag("RipplePhase", (float?)0.5f);
         Step(0f);
-        int parkedProbe = 0;
-        Move2(parkedProbe, 9f, 9f);
         Check("parked ring holds the rig centre", Rep().Contains("(400,300"), Rep());
+        int tp = Fire4(300f, 300f, 0, 1f);
+        Move2(tp, 9f, 9f);
+        object rp = Rings().GetValue(tp % 4);
+        Check("a live token cannot drag anything while parked",
+            Math.Abs(Fld(rp, "X") - 300f / 800f) < 1e-5, "uv=" + Fld(rp, "X"));
         SetFlag("RipplePhase", null);
+        Move2(tp, 9f, 9f);
+        rp = Rings().GetValue(tp % 4);
+        Check("...and the same move bites once un-parked (positive control)",
+            Math.Abs(Fld(rp, "X") - 9f / 800f) < 1e-5, "uv=" + Fld(rp, "X"));
 
         // Leave nothing live for whatever runs after.
         Step(999f);

@@ -56,41 +56,48 @@ internal class CreditsScene : Scene
 
 	private bool terminated;
 
-	// Card bee8f0e0: the crawl tapers like a Star Wars opening -- larger at the bottom of the
-	// screen, smaller at the top, easing linearly through 1.0 at mid screen. DRAW-TIME ONLY:
-	// every line keeps its nominal grid row (textpos + i*LineSpacing), so Update's scroll, its
-	// line-index math, the Cast handoff and the fade timers are untouched. Override with
-	// ?crawlskew=<f>; ?crawlskew=0 restores the flat 2008 crawl exactly (the Draw path
-	// short-circuits back to the original two DrawString calls).
+	// Card bee8f0e0 (reworked by card eac38cae): the crawl is a true one-point PERSPECTIVE like
+	// a Star Wars opening. Each line is CENTRED on the screen's vertical axis and the whole
+	// block draws through a projective matrix (see CrawlPerspectiveMatrix), so the block's two
+	// edges converge symmetrically -- the "triangle" -- line spacing compresses toward the top,
+	// and every glyph quad keystones toward the vanishing point (the "letters more slanted"
+	// half of the card, which the old per-line uniform scale could not produce). DRAW-TIME
+	// ONLY: every line keeps its nominal grid row (textpos + i*LineSpacing), so Update's
+	// scroll, its line-index math, the Cast handoff and the fade timers are untouched.
+	// Override with ?crawlskew=<f>; ?crawlskew=0 restores the flat left-aligned 2008 crawl
+	// exactly (the Draw path short-circuits back to the original two DrawString calls).
 	//
-	// The card asked for +-20%; the request is CLAMPED to what fits the screen and the shipped
-	// text saturates it at ~+-0.08, so this constant is the ask, not the result (mid-screen
-	// stays pixel-identical to the pre-card crawl either way). See EnsureCrawlGeometry.
+	// bee8f0e0 asked for +-20%; the request is CLAMPED to what fits the screen. Centring the
+	// lines (card eac38cae) roughly doubled the headroom -- the widest line now grows into
+	// both margins -- so the shipped text saturates at ~+-0.18 instead of the old ~+-0.08.
+	// See EnsureCrawlGeometry.
 	private const float DefaultCrawlSkew = 0.2f;
 
-	// Nominal Y at which the taper is 1.0 (mid screen), and the half-band it eases over --
-	// so y=600 (screen bottom) reads 1+skew and y=0 (screen top) reads 1-skew, clamped
-	// outside. A line scrolling in from y=650 therefore enters at the same scale it has at
-	// the bottom edge rather than growing without bound.
+	// Screen Y at which the perspective scale is exactly 1.0 (mid screen), and the half-band
+	// the on-screen scale ramps over: the mapping is built so a line DRAWN at the bottom edge
+	// reads 1+skew and one at the top edge 1-skew, linear in SCREEN Y (the projective map
+	// with W = 1 - k*(y-mid) has exactly that property, so the visible taper keeps the shape
+	// the bee8f0e0 probes pinned).
 	private const float CrawlSkewMidY = 300f;
 
 	private const float CrawlSkewHalfBand = 300f;
+
+	// Horizontal centre every crawl line is centred on (and the perspective vanishing axis).
+	private const float CrawlCenterX = 400f;
 
 	// Slack left at the design-space edges when working out how much taper fits: MeasureString
 	// returns advance widths, and a glyph's ink can sit a hair beyond its advance.
 	private const float CrawlEdgeMargin = 4f;
 
-	// Horizontal pivot of the taper: the crawl block's own centre, so the trapezoid is
-	// symmetric about the text instead of sliding sideways off the left margin. Cached
-	// because it needs a MeasureString over every line; SetupCredits appends mid-scene, so
-	// the cache is invalidated on the line count it was measured at.
-	private float crawlPivotX;
+	// Per-line advance widths, measured once per line set so Draw can centre each line
+	// without a MeasureString per line per frame. SetupCredits appends mid-scene, so the
+	// cache is invalidated on the line count it was measured at.
+	private float[] crawlLineWidths;
 
-	// The taper actually applied, = min(requested, what fits). The crawl's widest line is
-	// ~669 of the 800 design px, so the card's requested +-20% would push its right end
-	// ~36px off screen and eat the last character; the amount is therefore CLAMPED to the
-	// largest that keeps the widest line inside the screen (~+-0.08 with the shipped text).
-	// Dynamic, off the measured text: any ?crawlskew= value is safe, it just saturates.
+	// The taper actually applied, = min(requested, what fits). The amount is CLAMPED to the
+	// largest that keeps the widest line inside the screen at the bottom-edge scale 1+skew
+	// (~+-0.18 with the shipped text now the lines are centred). Dynamic, off the measured
+	// text: any ?crawlskew= value is safe, it just saturates.
 	private float crawlEffectiveSkew;
 
 	// Cache key for BOTH values above (and for the one-shot `[crawl]` line): the line count
@@ -538,26 +545,31 @@ internal class CreditsScene : Scene
 	// parse time.
 	private static float RequestedCrawlSkew => DebugFlags.CrawlSkew ?? DefaultCrawlSkew;
 
-	// Uniform per-line scale at a nominal design Y: 1+skew at the screen bottom, 1-skew at
-	// the top, 1.0 at mid screen, clamped outside the band.
-	private static float CrawlScaleAt(float y, float skew)
+	// The one-point perspective, as a projective matrix over DESIGN space (row-vector
+	// convention, applied by SpriteBatchWrapper.BeginPerspective ahead of the design->render
+	// scale). W = 1 - k*(y - midY) with k = skew/halfBand; X and Y are built so the divide
+	// lands on X/W = (x - cx)/W + cx and Y/W = (y - midY)/W + midY -- i.e. the screen centre
+	// column and the mid-screen row are fixed points, everything else scales by 1/W about
+	// them. Two properties fall out that the drawing leans on: the ON-SCREEN scale is exactly
+	// linear in screen Y (s = 1 + k*(screenY - midY), the same shape bee8f0e0's probes pin),
+	// and every glyph quad's four corners map independently, which is what makes the letters
+	// themselves lean toward the vanishing point.
+	private static Matrix CrawlPerspectiveMatrix(float skew)
 	{
-		return 1f + skew * MathHelper.Clamp((y - CrawlSkewMidY) / CrawlSkewHalfBand, -1f, 1f);
+		float k = skew / CrawlSkewHalfBand;
+		Matrix m = Matrix.Identity;
+		m.M24 = 0f - k;                                     // W = 1 - k*(y - midY)
+		m.M44 = 1f + CrawlSkewMidY * k;
+		m.M21 = (0f - CrawlCenterX) * k;                    // X = x - cx*k*y + cx*midY*k
+		m.M41 = CrawlCenterX * CrawlSkewMidY * k;
+		m.M22 = 1f - CrawlSkewMidY * k;                     // Y = y*(1 - midY*k) + midY^2*k
+		m.M42 = CrawlSkewMidY * CrawlSkewMidY * k;
+		return m;
 	}
 
-	// Draw one crawl line scaled about (anchorX, anchorY) instead of its own top-left corner:
-	// the world position works out as `anchor - (anchor - pos) * scale`, which is `pos` exactly
-	// at scale 1 and keeps the block centred (and the shadow's 2px offset proportional) at any
-	// other scale. `pos` is the position the un-skewed 2008 code drew at.
-	private void DrawCrawlLine(string text, Vector2 pos, float anchorX, float anchorY, float scale, Color lineColor)
-	{
-		base.SpriteBatch.DrawString(font, text, new Vector2(anchorX, anchorY), lineColor, 0f,
-			new Vector2(anchorX - pos.X, anchorY - pos.Y), scale, (SpriteEffects)0, 1f);
-	}
-
-	// Measure the taper's geometry for the current line set: the pivot (centre of the widest
-	// line, so the trapezoid is symmetric about the text block) and how much taper actually
-	// fits. Recomputed only when the line set changes (SetupCredits appends mid-scene).
+	// Measure the taper's geometry for the current line set: each line's width (Draw centres
+	// every line on CrawlCenterX) and how much taper actually fits. Recomputed only when the
+	// line set changes (SetupCredits appends mid-scene).
 	private void EnsureCrawlGeometry(float requestedSkew)
 	{
 		if (crawlGeometryLineCount == lines.Count)
@@ -565,23 +577,24 @@ internal class CreditsScene : Scene
 			return;
 		}
 		crawlGeometryLineCount = lines.Count;
+		crawlLineWidths = new float[lines.Count];
 		float widest = 0f;
 		for (int i = 0; i < lines.Count; i++)
 		{
-			widest = Math.Max(widest, font.MeasureString(lines[i]).X);
+			// TrimEnd: ~20 credits lines carry a trailing space, whose advance would push
+			// the line ~half a space left of centre while its neighbours sit exactly on it
+			// -- the very asymmetry this card removes (and it would inflate the clamp too).
+			crawlLineWidths[i] = font.MeasureString(lines[i].TrimEnd()).X;
+			widest = Math.Max(widest, crawlLineWidths[i]);
 		}
-		crawlPivotX = 100f + widest / 2f;
-		// Scaling about the block centre moves EACH end out by half the added width, so the
-		// widest line stays on screen while 100 + (w/2)*(1 + s) <= 800 - margin (right) and
-		// 100 - (w/2)*(s - 1) >= margin (left). Solve both for the largest s and clamp the
-		// request to the tighter: over-asking saturates instead of pushing text off an edge.
-		// The right edge binds for the shipped text (which tops out around +-0.08 to +-0.10,
-		// its widest lines being ~665 design px); the left edge would bind for any line set
-		// narrower than ~596 px, which is the case that makes this re-derive honestly when
-		// the credits text is edited.
-		// (the -2 / -1 turn the solved max SCALE into a skew: skew = maxScale - 1)
+		// A centred line spans cx +- w/2 (the shadow reaches 2px further left) and the
+		// on-screen scale peaks at 1+skew at the bottom edge, so the widest line stays on
+		// screen while (w/2 + 2) * (1 + s) <= cx - margin. Solve for the largest s and clamp
+		// the request: over-asking saturates instead of pushing text off an edge. Centring
+		// bought the headroom -- the shipped text saturates at ~0.18 against the old
+		// left-aligned layout's ~0.08 -- and the clamp still re-derives if the text is edited.
 		float fits = ((widest > 0f)
-			? Math.Min(2f * (700f - CrawlEdgeMargin) / widest - 2f, 2f * (100f - CrawlEdgeMargin) / widest)
+			? (CrawlCenterX - CrawlEdgeMargin) / (widest / 2f + 2f) - 1f
 			: requestedSkew);
 		crawlEffectiveSkew = Math.Max(0f, Math.Min(requestedSkew, fits));
 		// The widest line at the largest scale is the whole crawl's horizontal extent -- the
@@ -589,14 +602,14 @@ internal class CreditsScene : Scene
 		// pushed off the 800px design width). Report requested AND effective so the clamp is
 		// visible rather than a mystery; a probe asserts both.
 		float maxScale = 1f + crawlEffectiveSkew;
-		// From the SHADOW's x (98) -- it is the leftmost thing drawn, and fit= is asserted as
-		// the screen-fit verdict, so it must judge what is actually on screen.
-		float left = crawlPivotX - (crawlPivotX - 98f) * maxScale;
-		float right = left + (widest + 2f) * maxScale;
+		// From the SHADOW's left edge -- it is the leftmost thing drawn, and fit= is asserted
+		// as the screen-fit verdict, so it must judge what is actually on screen.
+		float left = CrawlCenterX - (widest / 2f + 2f) * maxScale;
+		float right = CrawlCenterX + (widest / 2f) * maxScale;
 		// fit= is the invariant a probe can assert without pinning font metrics: whatever the
 		// text and the requested amount, the widest line stays inside the 800px design width.
 		string fit = ((left >= 0f && right <= 800f) ? "ok" : "OVERFLOW");
-		Console.WriteLine($"[crawl] skew={requestedSkew:0.000} effective={crawlEffectiveSkew:0.000} fits={Math.Max(0f, fits):0.000} fit={fit} pivot={crawlPivotX:0.0} lines={lines.Count} maxline={widest:0.0} span=[{left:0.0},{right:0.0}]");
+		Console.WriteLine($"[crawl] skew={requestedSkew:0.000} effective={crawlEffectiveSkew:0.000} fits={Math.Max(0f, fits):0.000} fit={fit} lines={lines.Count} maxline={widest:0.0} span=[{left:0.0},{right:0.0}]");
 	}
 
 	public override void Draw(GameTime gameTime)
@@ -611,25 +624,54 @@ internal class CreditsScene : Scene
 			EnsureCrawlGeometry(RequestedCrawlSkew);
 			skew = crawlEffectiveSkew;
 		}
-		float num = 0f;
-		for (int i = 0; i < lines.Count; i++)
+		if (skew > 0f)
 		{
-			if (skew > 0f)
+			// The whole crawl in one perspective batch: lines centred on CrawlCenterX at
+			// their NOMINAL grid rows, the matrix owning the taper, the row compression and
+			// the glyph keystone alike. A line is culled by mapping its ROW BOUNDS through
+			// the same W the matrix uses: row top at or below the screen bottom, or row
+			// bottom above the top, means no visible ink. The bounds cull is also what keeps
+			// fit= exact -- every visible scanline sits at screen Y < 600, where the scale is
+			// under the 1+skew the clamp was solved at. The guard on W is a division-safety
+			// backstop for the credits tail, which sits thousands of design px below the
+			// screen where W crosses zero and the projective map stops meaning anything
+			// (such lines are culled by their mapped row top long before W matters).
+			float k = skew / CrawlSkewHalfBand;
+			base.SpriteBatch.BeginPerspective(CrawlPerspectiveMatrix(skew));
+			float num = 0f;
+			for (int i = 0; i < lines.Count; i++)
 			{
-				// Anchor on the line's own grid row centre so it grows symmetrically into the
-				// gap above and below rather than drifting off its row (LineSpacing 45 over
-				// ~30px of ink leaves headroom for the +20% end).
-				float anchorY = textpos + num + half;
-				float scale = CrawlScaleAt(anchorY, skew);
-				DrawCrawlLine(lines[i], new Vector2(100f, textpos + num), crawlPivotX, anchorY, scale, Color.Blue);
-				DrawCrawlLine(lines[i], new Vector2(98f, textpos - 2f + num), crawlPivotX, anchorY, scale, Color.LightBlue);
+				float rowTop = textpos + num;
+				float wTop = 1f - k * (rowTop - CrawlSkewMidY);
+				if (wTop > 0.1f)
+				{
+					float mappedTop = CrawlSkewMidY + (rowTop - CrawlSkewMidY) / wTop;
+					if (mappedTop < 600f)
+					{
+						float rowBottom = rowTop + (float)font.LineSpacing;
+						float wBottom = 1f - k * (rowBottom - CrawlSkewMidY);
+						float mappedBottom = CrawlSkewMidY + (rowBottom - CrawlSkewMidY) / wBottom;
+						if (mappedBottom > 0f)
+						{
+							float x = CrawlCenterX - crawlLineWidths[i] / 2f;
+							base.SpriteBatch.DrawStringPerspective(font, lines[i], new Vector2(x, rowTop), Color.Blue);
+							base.SpriteBatch.DrawStringPerspective(font, lines[i], new Vector2(x - 2f, rowTop - 2f), Color.LightBlue);
+						}
+					}
+				}
+				num += (float)font.LineSpacing;
 			}
-			else
+			base.SpriteBatch.EndPerspective();
+		}
+		else
+		{
+			float num = 0f;
+			for (int i = 0; i < lines.Count; i++)
 			{
 				base.SpriteBatch.DrawString(font, lines[i], new Vector2(100f, textpos + num), Color.Blue, 0f, new Vector2(0f, 0f), 1f, (SpriteEffects)0, 1f);
 				base.SpriteBatch.DrawString(font, lines[i], new Vector2(98f, textpos - 2f + num), Color.LightBlue, 0f, new Vector2(0f, 0f), 1f, (SpriteEffects)0, 1f);
+				num += (float)font.LineSpacing;
 			}
-			num += (float)font.LineSpacing;
 		}
 		base.Draw(gameTime);
 		fadeBackBufferToWhite((int)(fadetimer.Normalized * 255f));

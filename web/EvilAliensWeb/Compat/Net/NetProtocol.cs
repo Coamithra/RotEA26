@@ -352,7 +352,8 @@ namespace EvilAliensWeb.Compat.Net
         // ---- ship stream --------------------------------------------------------------
 
         // [type][flags][shotsPerSec][bulletLife/10][seq:2][senderMs:4][posX:4][posY:4]
-        // [velX:4][velY:4][aim:4][shotCount:1] = 31 bytes. Velocity is design px per MILLISECOND
+        // [velX:4][velY:4][aim:4][shotCount:1][asplodeBits:1][bounceBits:1] = 33 bytes.
+        // Velocity is design px per MILLISECOND
         // (the component system's native unit, see AlienDrawableGameComponent.Update).
         // senderMs is SESSION-RELATIVE (uint ms since the sender's NetSession.Start) --
         // an absolute machine-uptime tick in float32 loses ms precision within hours.
@@ -364,9 +365,17 @@ namespace EvilAliensWeb.Compat.Net
         // last count it applied, so a lost or reordered stream packet costs nothing (the next
         // one carries the total) and two taps inside one cadence period are one increment,
         // exactly as they are one bullet for the owner.
-        public static byte[] EncodeShipState(ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, bool alive, byte shotCount, int shotsPerSec, float bulletLife, bool scriptGate = false)
+        //
+        // asplodeBits/bounceBits (card 950bb70a, protocol v21) are ROLL RINGS riding beside the
+        // count they describe: bit i = the owner's asplode / bounce roll for the shot whose
+        // cumulative count is shotCount-i (bit 0 = the newest counted shot). The receiver spends
+        // an owed shot with the owner's OUTCOME instead of re-rolling its own percentage, which
+        // is what puts the mini-blasts on the SAME bullets on both screens. Eight bits cover
+        // every owed shot by construction (NetMaxCatchUpShots is 6; a bigger delta is a resync
+        // that fires nothing).
+        public static byte[] EncodeShipState(ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, bool alive, byte shotCount, int shotsPerSec, float bulletLife, bool scriptGate = false, byte asplodeBits = 0, byte bounceBits = 0)
         {
-            byte[] b = new byte[31];
+            byte[] b = new byte[33];
             b[0] = MsgShipState;
             b[1] = (byte)((alive ? ShipFlagAlive : 0) | (scriptGate ? ShipFlagScriptGate : 0));
             b[2] = (byte)Math.Clamp(shotsPerSec, 1, 255);
@@ -379,6 +388,8 @@ namespace EvilAliensWeb.Compat.Net
             WriteF32(b, 22, vel.Y);
             WriteF32(b, 26, aim);
             b[30] = shotCount;
+            b[31] = asplodeBits;
+            b[32] = bounceBits;
             return b;
         }
 
@@ -388,7 +399,7 @@ namespace EvilAliensWeb.Compat.Net
             sample = default;
             shotsPerSec = 8;
             bulletLife = 450f;
-            if (b.Length < 31 || b[0] != MsgShipState)
+            if (b.Length < 33 || b[0] != MsgShipState)
             {
                 return false;
             }
@@ -402,6 +413,8 @@ namespace EvilAliensWeb.Compat.Net
             sample.Alive = (b[1] & ShipFlagAlive) != 0;
             sample.ScriptGate = (b[1] & ShipFlagScriptGate) != 0;
             sample.ShotCount = b[30];
+            sample.AsplodeBits = b[31];
+            sample.BounceBits = b[32];
             return true;
         }
 
@@ -410,9 +423,12 @@ namespace EvilAliensWeb.Compat.Net
         // being sent, and the client's per-slot timeout explodes its puppet), so no alive flag --
         // and since card a45b78f6 no flags byte at all, the firing level having been the only bit
         // it ever carried.
-        public static byte[] EncodeFriendState(byte slot, ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, byte shotCount, int shotsPerSec, float bulletLife)
+        // The v21 roll rings ride at the same trailing offsets as MsgShipState's -- see
+        // EncodeShipState; DriveFriendShip feeds the identical NetApplyRemoteState, so a couch
+        // player's and an AI friend's asploding bullets sync the same way the primary's do.
+        public static byte[] EncodeFriendState(byte slot, ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, byte shotCount, int shotsPerSec, float bulletLife, byte asplodeBits = 0, byte bounceBits = 0)
         {
-            byte[] b = new byte[31];
+            byte[] b = new byte[33];
             b[0] = MsgFriendState;
             b[1] = slot;
             b[2] = shotCount;
@@ -425,6 +441,8 @@ namespace EvilAliensWeb.Compat.Net
             WriteF32(b, 19, vel.X);
             WriteF32(b, 23, vel.Y);
             WriteF32(b, 27, aim);
+            b[31] = asplodeBits;
+            b[32] = bounceBits;
             return b;
         }
 
@@ -435,7 +453,7 @@ namespace EvilAliensWeb.Compat.Net
             sample = default;
             shotsPerSec = 8;
             bulletLife = 450f;
-            if (b.Length < 31 || b[0] != MsgFriendState)
+            if (b.Length < 33 || b[0] != MsgFriendState)
             {
                 return false;
             }
@@ -449,6 +467,8 @@ namespace EvilAliensWeb.Compat.Net
             sample.Aim = ReadF32(b, 27);
             sample.Alive = true;
             sample.ShotCount = b[2];
+            sample.AsplodeBits = b[31];
+            sample.BounceBits = b[32];
             return true;
         }
 
@@ -1536,5 +1556,11 @@ namespace EvilAliensWeb.Compat.Net
         // a45b78f6). The receiver fires the wrapped delta; it is not a rate and never resets
         // except with the ship itself.
         public byte ShotCount;
+        // Roll rings (card 950bb70a, protocol v21): bit i = the owner's asplode / bounce roll
+        // for the shot whose cumulative count is ShotCount-i. Read when an owed shot is spent
+        // (PlayerShip.NetApplyRemoteState) so the puppet's bullets carry the owner's outcomes
+        // instead of a second, independent roll.
+        public byte AsplodeBits;
+        public byte BounceBits;
     }
 }

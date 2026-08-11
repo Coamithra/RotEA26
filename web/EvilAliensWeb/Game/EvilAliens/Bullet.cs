@@ -280,6 +280,13 @@ public class Bullet : AlienDrawableGameComponent, IAlienKiller
 		asplodingsize = size;
 	}
 
+	// Read seams for eaNetFire()'s roll legs (card 950bb70a): whether this bullet carries the
+	// asplode / bounce outcome. Neither is visible in any frame until the bullet dies, which is
+	// exactly why the sync defect read as "seems random".
+	internal bool NetAsploding => asploding;
+
+	internal bool NetBouncing => bouncing > 0;
+
 	public bool CausesCombo()
 	{
 		return true;

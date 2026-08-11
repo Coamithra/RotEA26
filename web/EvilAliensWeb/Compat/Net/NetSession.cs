@@ -110,7 +110,14 @@ namespace EvilAliensWeb.Compat.Net
         // degrades to exactly the pre-card behaviour (an ownerless beam) rather than
         // mis-parsing: the bump is the parallel batch's convention, not a forced
         // incompatibility.
-        public const byte ProtocolVersion = 20;
+        // v21 (card 950bb70a): MsgShipState / MsgFriendState grow two trailing roll-ring bytes
+        // (31 -> 33) -- bit i = the owner's asplode / bounce roll for the shot whose cumulative
+        // count is ShotCount-i, so the puppet applies the owner's per-bullet outcome instead of
+        // re-rolling and the mini-blasts land on the SAME bullets on both screens. Both layouts
+        // are length-guarded and the bytes are appended, so an older peer degrades to exactly
+        // the pre-card behaviour (its own re-roll): the bump is the batch convention, not a
+        // forced incompatibility.
+        public const byte ProtocolVersion = 21;
         public const float InterpDelayMs = 100f;
 
         // ~30 Hz ship stream. INTERNAL because NetFireTest scripts its packet cadence against it.
@@ -1200,6 +1207,11 @@ namespace EvilAliensWeb.Compat.Net
             byte shotCount = lastTxShotCount;
             int shots = 8;
             float bulletLife = 450f;
+            // The roll rings travel beside the count they describe (card 950bb70a). A dead
+            // ship's packet carries zeros: its count has not moved, so the receiver owes no
+            // shots and never reads them.
+            byte asplodeBits = 0;
+            byte bounceBits = 0;
             if (alive)
             {
                 pos = local.GetPosition();
@@ -1210,6 +1222,8 @@ namespace EvilAliensWeb.Compat.Net
                 shotCount = AdvanceTxShots(local, ref lastTxShip, ref lastTxShipShots, ref lastTxShotCount);
                 shots = local.NetShotsPerSec;
                 bulletLife = local.NetBulletLife;
+                asplodeBits = local.NetAsplodeBits;
+                bounceBits = local.NetBounceBits;
                 lastTxPos = pos;
                 lastTxAim = aim;
                 lastTxShotCount = shotCount;
@@ -1221,7 +1235,7 @@ namespace EvilAliensWeb.Compat.Net
             // HandleShipState latches it only from a non-host peer; encoded unconditionally
             // rather than gated on the role so there is one expression, not two.
             bool scriptGate = NetScene.Current?.NetScriptHoldsShipSpawn ?? false;
-            transport.SendStream(NetProtocol.EncodeShipState(txSeq++, (uint)(now - sessionStartAt), pos, vel, aim, alive, shotCount, shots, bulletLife, scriptGate));
+            transport.SendStream(NetProtocol.EncodeShipState(txSeq++, (uint)(now - sessionStartAt), pos, vel, aim, alive, shotCount, shots, bulletLife, scriptGate, asplodeBits, bounceBits));
             metrics.StreamTx++;
         }
 
@@ -4354,7 +4368,7 @@ namespace EvilAliensWeb.Compat.Net
             hasLastPuppetPos = true;
             metrics.BufferDepthMs = (float)(buffer.NewestMs - renderMs);
             ShipSample newest = buffer.Newest;
-            ship.NetApplyRemoteState(pos, newest.Aim, newest.ShotCount, remoteShotsPerSec, remoteBulletLife);
+            ship.NetApplyRemoteState(pos, newest.Aim, newest.ShotCount, remoteShotsPerSec, remoteBulletLife, newest.AsplodeBits, newest.BounceBits);
         }
     }
 }

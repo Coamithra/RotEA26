@@ -776,6 +776,12 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   trailing `[score:f32]` (`HudSlotBytes` 12 -> 16) carrying the owner's declared TOTAL, and
   `EvScoreSync` shrinks to `[lives:1]`. Three layouts moved at once, so a v19 peer would
   mis-parse all of them: a forced bump, not a convention one.
+  **v21** appends two ROLL-RING bytes to `MsgShipState` AND `MsgFriendState` (31 -> 33) -- card
+  950bb70a, see the roll-ring bullet under the remote ship's shot counter. Bit i = the owner's
+  asplode / bounce roll for the shot whose cumulative count is `ShotCount-i`, so the puppet
+  spends the owner's per-bullet OUTCOME instead of re-rolling its own percentage. Both layouts
+  are length-guarded and the bytes are appended, so an older peer degrades to exactly the
+  pre-card behaviour (its own re-roll): the bump is the batch convention.
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -2041,7 +2047,34 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
       the old stamp read `Environment.TickCount64`, so driving it end to end would have needed a
       clock seam on `FireAt` whose only reader was the test -- the call card d53431b4 declined for
       the same reason.
-    - **Verify with `eaNetFire()`** (`Compat/Net/NetFireTest.cs`, 29 assertions;
+    - **THE PER-SHOT ROLLS RIDE THE SAME STREAM AS ROLL RINGS (card 950bb70a, protocol v21).**
+      `PlayerShip.SpawnShot` decides per bullet whether it asplodes (a mini `Blast` on death /
+      per bounce; FirePower levels set 15/30/60/75%) and whether it bounces+splits (Range
+      levels), by rolling the shared unseeded RNG -- and the puppet path re-runs that same
+      construction, so each peer used to roll its OWN dice: the RATE matched (the levels
+      replicate via `MsgHudState`) but WHICH bullets popped a mini-blast was an independent
+      coin flip per screen, which is exactly "are mini-explosions synced properly? Seems
+      random". `MsgShipState`/`MsgFriendState` now carry two 8-bit rings beside the count
+      (bit i = the roll of shot `ShotCount-i`, shifted in `SpawnShot` beside the rolls they
+      record, reset with `NetShotCount` per life -- a pooled ship must not hand its successor's
+      shots the previous life's bits); the receiver spends an owed shot with the owner's
+      outcome through `SpawnShotForced`, its distance back from the packet's newest shot being
+      exactly the backlog still in front of it. Eight bits cover every owed shot by
+      construction (`NetMaxCatchUpShots` is 6). The quiet packets between shots repeat the same
+      count and ring, so still-owed shots keep their bits under loss. Both `Next(100)` draws in
+      `SpawnShot` stay unconditional and ordered, so the offline RNG stream is byte-identical.
+      RESIDUALS, stated: the observer's mini lands where ITS re-fired bullet's own collision
+      does (~100 ms interpolated world -- same bullet, near-same place, not pixel-identical);
+      post-first-bounce trajectories still diverge (the bounce angle re-roll and clone split
+      angles stay local); and `asplodingbulletssize`/`bounceamount`/`bulletsSplit` derive from
+      the replicated levels, worst case one HUD packet stale. Verified by `eaNetFire()` legs
+      2 (sender: every tap's ring bit 0 equals its own bullet's flags, with Range's 100%
+      bounce as the deterministic row) and 7 (puppet: single-shot asplode/bounce, a +3 step
+      spending bits 2/1/0 in spawn order, and a dropped packet whose successor's ring covers
+      both shots -- the puppet's local percentages are ZERO in the rig, so an asploding puppet
+      bullet can only have come off the wire, which is what discriminates against the pre-card
+      re-roll).
+    - **Verify with `eaNetFire()`** (`Compat/Net/NetFireTest.cs`, 36 assertions;
       `tools/headless/probes/net_single_tap.txt`). **DESTRUCTIVE** like `eaNetPickup` -- it pairs a
       real host session onto the live level, fires real bullets into it AND drives the local
       player's ship through scripted input, so use a throwaway `?level=Level2&invuln` boot. Six

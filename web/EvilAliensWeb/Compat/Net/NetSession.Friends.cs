@@ -91,7 +91,8 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 byte shotCount = AdvanceTxShots(s, ref tx.Ship, ref tx.ShipShots, ref tx.WireCount);
                 transport.SendStream(NetProtocol.EncodeFriendState((byte)slot, friendTxSeq++, (uint)(now - sessionStartAt),
-                    s.GetPosition(), s.NetVelocity, s.NetLastFireAim, shotCount, s.NetShotsPerSec, s.NetBulletLife));
+                    s.GetPosition(), s.NetVelocity, s.NetLastFireAim, shotCount, s.NetShotsPerSec, s.NetBulletLife,
+                    s.NetAsplodeBits, s.NetBounceBits));
             }
         }
 
@@ -313,7 +314,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             Vector2 pos = ch.Buffer.Sample(ch.RenderMs, out _);
             ShipSample newest = ch.Buffer.Newest;
-            ship.NetApplyRemoteState(pos, newest.Aim, newest.ShotCount, ch.ShotsPerSec, ch.BulletLife);
+            ship.NetApplyRemoteState(pos, newest.Aim, newest.ShotCount, ch.ShotsPerSec, ch.BulletLife, newest.AsplodeBits, newest.BounceBits);
         }
 
         // Peer loss in a LISTED session (card 4d904410): the host keeps playing its own level, so

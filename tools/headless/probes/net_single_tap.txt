@@ -39,6 +39,17 @@
 #      all ten. This is the leg the old design could not have passed.
 #   6. Sustained fire at the OWNER'S cadence, as an EXACT number (8 shots over 32 packets) rather
 #      than the band the old hold-window design could only claim.
+#   7. THE ROLL RINGS (card 950bb70a, protocol v21): which bullets asplode/bounce is a per-bullet
+#      roll, and the puppet used to re-roll it with its own dice -- so the mini-blasts landed on
+#      DIFFERENT bullets on the two screens ("seems random"). MsgShipState/MsgFriendState carry
+#      two 8-bit rings (bit i = the roll of shot ShotCount-i) and the puppet spends the owner's
+#      outcome. The legs: a single asplode shot, a single bounce shot, a +3 step whose three
+#      bullets must come out oldest-first carrying bits 2/1/0 (the positional property), and a
+#      dropped packet whose surviving successor's ring still covers both shots. The puppet's own
+#      percentages are ZERO in this rig, so an asploding puppet bullet can ONLY have come off the
+#      wire -- a pre-card build (the local re-roll) fails every "carries the asplode" leg here.
+#      Leg 2 gains the SENDER half: thirty taps with a deterministic 100% bounce roll and a 60%
+#      asplode mix, every tap's ring bit 0 equal to its own bullet's flags.
 #
 # THE NEGATIVE CONTROL IS A REFERENCE IMPLEMENTATION, not the old code, which is deleted:
 # `PreCardTapBullets` / `PreCardLossBullets` mirror the firing-LEVEL rule and are asserted to give
@@ -58,6 +69,11 @@
 #     only leg 1's two tx assertions fail, reporting `252 -> 0` where the slot's count must not
 #     move. That is the respawn hazard the per-slot counter exists for, and nothing else can see
 #     it: a respawn's wrapped delta can land inside the catch-up bound and look like real fire.
+#   * the puppet restored to the pre-card RE-ROLL (SpawnShot(aim) in place of SpawnShotForced) ->
+#     exactly leg 7's four roll assertions fail (the +3 leg reporting `asplode 000 want 101`)
+#     and every sender leg passes -- the two halves are disjoint (card 950bb70a).
+#   * the sender's ring never shifted -> exactly leg 2's three ring assertions fail (the
+#     deterministic bounce row reading 0) and every puppet leg passes.
 #
 # IT USED TO FLAKE, AND THE CAUSE WAS NOT IN THIS FILE (card 83054936). Leg 2 drives the real ship
 # through the real input path with DebugInput.Hold("Mouse1", ...), and eahl was reading the
@@ -77,9 +93,11 @@
 # ?level=Level2 for a level that just runs with one keyboard player and a live ship (the suite's
 # rig precondition -- a partner-seating level would seat a second slot and it would report rather
 # than assert), ?invuln so the settle cannot lose that ship, ?noattract because the suite needs
-# the LEVEL and not a demo.
+# the LEVEL and not a demo. ?seed=1 pins RandomHelper for leg 2's 60%-asplode mix -- "both
+# outcomes appeared over 30 taps" is otherwise a (vanishingly small, ~2e-7) coin flip, and a
+# probe's precondition must be pinned, not waited out (card af4c3694).
 #
-# eahl: --flags "?level=Level2&invuln&noattract"
+# eahl: --flags "?level=Level2&invuln&noattract&seed=1"
 
 step 400 nodraw
 mark
@@ -104,7 +122,8 @@ expect 3\. rig -- a real HOST session, a scripted peer and its ship puppet
 expect 4\. the maxed fire rate
 expect 5\. PACKET LOSS mid-burst
 expect 6\. sustained fire runs at the OWNER'S cadence
-expect 7\. teardown
+expect 7\. the ROLL RINGS
+expect 8\. teardown
 # The counts themselves, not just the leg headings -- a bullet count is the whole subject here.
 # The sender's double-tap pair and the loss leg's exact ten are the two assertions the card is
 # about; the reference implementation's wrong answers are asserted just as hard, because a control
@@ -118,10 +137,16 @@ expect the pre-card firing-LEVEL rule spawns 2 bullets for ONE tap
 expect the pre-card firing LEVEL would have spawned only 6 over the same loss
 expect a ship SWAP contributes no shots to the slot's wire count
 expect the raw ship count would have read as 4 spendable shots across that respawn
+# The roll rings (card 950bb70a): every tap's ring bit pairs with its own bullet on the sender,
+# and the puppet spends the owner's outcomes -- positionally, and across a dropped packet.
+expect every tap's ring bit 0 equals its own bullet's flags over 30 mixed rolls
+expect a shot the owner rolled ASPLODE spawns an asploding, non-bouncing bullet
+expect a \+3 step spends bits 2/1/0 onto the three bullets in spawn order
+expect under LOSS the surviving packet's ring covers the dropped shot too
 # A TALLY, never a bare `expect-not FAIL`: an absence assertion passes on a run where the eval
 # never happened, and this suite skips its live legs on a bad precondition. Raise the count when
 # checks are added.
-expect \[netfire\] 29 passed, 0 failed
+expect \[netfire\] 36 passed, 0 failed
 expect-not FAIL
 expect-not SKIP
 quit

@@ -361,9 +361,12 @@ namespace EvilAliensWeb.Compat.Net
 
             // MsgShipState (stream lane, ~30 Hz). senderMs is the sample time the jitter buffer
             // sorts on, so it is part of the layout that matters most.
+            // The v21 roll rings ride as two ASYMMETRIC bytes, so a swap between them (or either
+            // landing on the neighbouring field) cannot pass.
             byte[] ship = Round(NetProtocol.EncodeShipState(
                 4242, 1234567u, new Vector2(123.5f, -45.25f), new Vector2(0.125f, -0.5f),
-                1.75f, alive: true, shotCount: 200, shotsPerSec: 17, bulletLife: 640f), reliable: false);
+                1.75f, alive: true, shotCount: 200, shotsPerSec: 17, bulletLife: 640f,
+                scriptGate: false, asplodeBits: 0xA5, bounceBits: 0x3C), reliable: false);
             bool shipOk = false;
             if (ship != null && NetProtocol.TryDecodeShipState(ship, out ushort shipSeq,
                 out ShipSample s, out int sps, out float blife))
@@ -372,7 +375,8 @@ namespace EvilAliensWeb.Compat.Net
                     && Near(s.Pos.X, 123.5f) && Near(s.Pos.Y, -45.25f)
                     && Near(s.Vel.X, 0.125f) && Near(s.Vel.Y, -0.5f)
                     && Near(s.Aim, 1.75f) && s.Alive && s.ShotCount == 200 && !s.ScriptGate
-                    && sps == 17 && Near(blife, 640f);
+                    && sps == 17 && Near(blife, 640f)
+                    && s.AsplodeBits == 0xA5 && s.BounceBits == 0x3C;
             }
             check("MsgShipState round-trips every field", shipOk);
 
@@ -421,7 +425,8 @@ namespace EvilAliensWeb.Compat.Net
             // still decodes, so both are pinned.
             byte[] friend = Round(NetProtocol.EncodeFriendState(
                 3, 77, 999u, new Vector2(-8f, 16f), new Vector2(-0.25f, 0.75f),
-                -2.5f, shotCount: 137, shotsPerSec: 5, bulletLife: 300f), reliable: false);
+                -2.5f, shotCount: 137, shotsPerSec: 5, bulletLife: 300f,
+                asplodeBits: 0x81, bounceBits: 0x42), reliable: false);
             bool friendOk = false;
             if (friend != null && NetProtocol.TryDecodeFriendState(friend, out byte fslot,
                 out ushort fseq, out ShipSample fs, out int fsps, out float fblife))
@@ -430,7 +435,8 @@ namespace EvilAliensWeb.Compat.Net
                     && Near(fs.Pos.X, -8f) && Near(fs.Pos.Y, 16f)
                     && Near(fs.Vel.X, -0.25f) && Near(fs.Vel.Y, 0.75f)
                     && Near(fs.Aim, -2.5f) && fs.Alive && fs.ShotCount == 137
-                    && fsps == 5 && Near(fblife, 300f);
+                    && fsps == 5 && Near(fblife, 300f)
+                    && fs.AsplodeBits == 0x81 && fs.BounceBits == 0x42;
             }
             check("MsgFriendState round-trips every field (slot-shifted body)", friendOk);
 

@@ -280,6 +280,15 @@ public class Bullet : AlienDrawableGameComponent, IAlienKiller
 		asplodingsize = size;
 	}
 
+	// Read seams for eaNetFire()'s roll legs (card 950bb70a): the LIVE flags at this instant,
+	// not a record of the roll -- `asploding` is spent at the first bounce-blast and `bouncing`
+	// counts DOWN, so both only equal the rolled outcome when read straight after spawn, which
+	// is how the suite reads them. Neither is visible in any frame until the bullet dies, which
+	// is exactly why the sync defect read as "seems random".
+	internal bool NetAsploding => asploding;
+
+	internal bool NetBouncing => bouncing > 0;
+
 	public bool CausesCombo()
 	{
 		return true;

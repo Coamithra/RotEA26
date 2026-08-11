@@ -53,6 +53,14 @@ budget is global — one pull per second across all rooms, round-robin by
 `last_pull_seq` (oldest first). More rooms therefore means staler thumbnails,
 never more load. Shots live in memory on the `Room` and die with it.
 
+Card 97b31562 gates when that schedule runs at all: **no pull is sent while no
+browser socket is connected** (nobody is looking at the carousel, so no host
+pays for a capture — on the game side a pull costs a GPU readback plus a JPEG
+encode), and **no single room is re-pulled within
+`SHOT_ROOM_MIN_INTERVAL_SECONDS` (15 s)** — without the floor, the global
+budget at ONE listed room degenerated into pulling that room every second,
+which was reported as a visible once-a-second stutter on the host.
+
 **The thumbnail is a picture of the game field only** — the resolved scene
 render target, never a camera, a canvas or a page (`Compat/Net/NetRoomShot.cs`;
 `WebcamAliens` is not a listable level in the first place).

@@ -3333,12 +3333,27 @@ GAME FIELD only** -- the resolved scene render target, never a camera, a canvas 
 
 - **THE SERVER OWNS THE SCHEDULE, and that is the whole design.** Clients never upload
   unsolicited: the matchmaker PULLS (`{"t":"shot"}` on the room's existing signaling socket) on a
-  **global** budget of one pull per second across ALL rooms, round-robin by oldest-pulled. At <=15
-  listed rooms that is the ~15 s per-room refresh; beyond it the per-room interval stretches by
-  itself. **Degradation is staleness, never load** -- do not scale the budget with the room count.
+  **global** budget of one pull per second across ALL rooms, round-robin by oldest-pulled; beyond
+  ~15 listed rooms the per-room interval stretches by itself. **Degradation is staleness, never
+  load** -- do not scale the budget with the room count.
   The rotation is keyed on a COUNTER stamped when a pull is SENT, so a host that never answers
   forfeits its own turn and can never starve anyone; `server/signal/main.py` says why it is not a
   clock.
+  - **The schedule is GATED twice (card 97b31562), and both gates answer the "screenshots stutter
+    the game" report.** (a) **No pull is ever sent while no browser socket is connected** -- the
+    thumbnails exist only for the browse carousel, so an idle listed game pays for no captures at
+    all; the rotation resumes on the next 1 s tick once someone browses. (b) **No single room is
+    re-pulled within a 15 s floor** (`SHOT_ROOM_MIN_INTERVAL_SECONDS`). Without the floor the
+    "~15 s per-room refresh" only emerged at 15+ rooms: a LONE listed room -- the reported
+    configuration, one host + one browsing peer on one machine -- was round-robined to EVERY 1 s
+    budget tick, and each pull is a `ResolveBackBuffer` + synchronous GPU readback in
+    `NetRoomShot.Capture` plus a `toDataURL` JPEG encode in JS, i.e. a visible 1 Hz hitch. With
+    both gates a capture is at most one frame's cost per 15 s, only while someone is actually
+    browsing -- so no threading of the capture is needed, and none was added. A PAIRED session was
+    never pulled either way (`listable()` requires an empty joiner slot). Server-side only, no
+    protocol change; both gates are mutation-tested in `server/signal/test_signal.py` (a case per
+    gate). **Deploying it is manual** -- `server/signal/README.md`'s update recipe; merging ships
+    nothing.
 - **CAPTURE IS C#, ENCODE IS JS, and the split is what makes it verifiable.**
   `Compat/Net/NetRoomShot` books one `Game1.onPostDraw`, `ResolveBackBuffer`s the scene,
   `DrawPresent`s it into a 200x150 RT (the `ScreenshotSaver.SaveScreenShot` recipe, alpha seal

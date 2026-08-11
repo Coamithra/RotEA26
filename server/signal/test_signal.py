@@ -16,9 +16,16 @@ the interval shortened at startup), and then the loop is parked at an
 hour so every later case can drive `main.pull_once()` by hand and assert
 an exact rotation. Every room used after that point is created after the
 parking, so no stray automatic pull can reach it.
+
+Card 97b31562 gates the schedule twice: no pull at all while no browser
+is connected, and no single room re-pulled within the per-room floor.
+The gates get their own cases; the by-hand rotation half keeps a browser
+socket open and zeroes the floor, so its exact-rotation assertions still
+mean what they always did.
 """
 
 import asyncio
+import contextlib
 import json
 import sys
 import time
@@ -380,11 +387,40 @@ async def run_tests(url: str) -> None:
 
     # ---- card e7404647: server-pulled room thumbnails -----------------------
 
-    # 17. the background schedule pulls with nobody driving it. Runs FIRST, while
-    #     SHOT_PULL_INTERVAL_SECONDS is still the short test value; everything
-    #     below then parks the loop and drives pull_once() by hand.
-    live_host = None
+    # 16b. NO BROWSER, NO PULL (card 97b31562). Runs first, while the live loop
+    #      is still ticking at the short interval and before any browser socket
+    #      of this section exists: an eligible listed host must hear nothing,
+    #      and a by-hand tick must decline. Earlier cases' browser sockets are
+    #      waited out of the registry first -- their disconnects are processed
+    #      asynchronously, and one still registered would make this vacuous the
+    #      other way (a pull WOULD be legal).
+    idle_host = None
     try:
+        for _ in range(40):
+            if not main.browsers:
+                break
+            await asyncio.sleep(0.05)
+        assert not main.browsers, f"browser sockets still registered: {len(main.browsers)}"
+        idle_host, _ = await listed_host(url, shots=True)
+        picked = await main.pull_once()
+        pulled = None
+        with contextlib.suppress(asyncio.TimeoutError):
+            pulled = await asyncio.wait_for(idle_host.recv(), SHORT_PULL_INTERVAL * 4)
+        record("no pull is sent while nobody is browsing",
+               picked is None and pulled is None, f"picked={picked and picked.code} pulled={pulled!r}")
+    except Exception as e:
+        record("no pull is sent while nobody is browsing", False, repr(e))
+    if idle_host is not None:
+        await idle_host.close()
+
+    # 17. the background schedule pulls with nobody driving it -- once someone
+    #     is browsing. Runs while SHOT_PULL_INTERVAL_SECONDS is still the short
+    #     test value; everything below then parks the loop and drives
+    #     pull_once() by hand.
+    live_host = None
+    live_bws = None
+    try:
+        live_bws, _ = await browse(url, proto="4", hash="h1")
         # Listed WITHOUT the barrier helper: an automatic pull may land between
         # the list and any barrier reply, and the arriving pull is itself the
         # proof that the list was applied.
@@ -392,16 +428,25 @@ async def run_tests(url: str) -> None:
         await send(live_host, {"t": "list", "level": 1, "difficulty": 0,
                                "players": 1, "proto": "4", "hash": "h1", "shots": 1})
         msg = await recv_json(live_host)
-        record("the pull loop asks a listed host unattended",
+        record("the pull loop asks a listed host while a browser is connected",
                msg == {"t": "shot"}, repr(msg))
     except Exception as e:
-        record("the pull loop asks a listed host unattended", False, repr(e))
+        record("the pull loop asks a listed host while a browser is connected", False, repr(e))
     # Park the automatic loop for the rest of the run, then let it reach the long
     # sleep. Every room below is created afterwards, so no stray pull can reach it.
     main.SHOT_PULL_INTERVAL_SECONDS = 3600
     await asyncio.sleep(SHORT_PULL_INTERVAL * 3)
     if live_host is not None:
         await live_host.close()
+    if live_bws is not None:
+        await live_bws.close()
+
+    # The by-hand half below asserts EXACT rotations, which the per-room floor
+    # would veto (a re-pull inside 15 s is precisely what it exists to refuse),
+    # so it runs with the floor zeroed and one browser socket held open to
+    # satisfy the browser gate. The floor gets its own case (19b).
+    main.SHOT_ROOM_MIN_INTERVAL_SECONDS = 0.0
+    pull_bws, _ = await browse(url, proto="4", hash="h1")
 
     # 18. a host that does not declare `shots` is never pulled
     try:
@@ -430,6 +475,27 @@ async def run_tests(url: str) -> None:
         await hb.close()
     except Exception as e:
         record("a non-answering host does not starve the rotation", False, repr(e))
+
+    # 19b. THE PER-ROOM FLOOR (card 97b31562): a just-pulled room is not a
+    #      candidate again until SHOT_ROOM_MIN_INTERVAL_SECONDS has passed --
+    #      driven by backdating the stamp rather than sleeping the floor out.
+    try:
+        main.SHOT_ROOM_MIN_INTERVAL_SECONDS = 3600.0
+        fh, fc = await listed_host(url, shots=True)
+        first = await main.pull_once()
+        second = await main.pull_once()
+        main.rooms[fc].last_pull_at = time.monotonic() - 3601.0
+        third = await main.pull_once()
+        record("a just-pulled room is not re-pulled inside the floor",
+               first is not None and first.code == fc and second is None
+               and third is not None and third.code == fc,
+               f"first={first and first.code} second={second and second.code} "
+               f"third={third and third.code}")
+        await fh.close()
+    except Exception as e:
+        record("a just-pulled room is not re-pulled inside the floor", False, repr(e))
+    finally:
+        main.SHOT_ROOM_MIN_INTERVAL_SECONDS = 0.0
 
     # 20. answer a pull -> the shot is advertised and servable
     host = None
@@ -517,6 +583,9 @@ async def run_tests(url: str) -> None:
     except Exception as e:
         main.SHOTGET_RATE_MAX = saved
         record("a rate-limited shotget still gets an answer", False, repr(e))
+
+    # The browser socket the by-hand half held open for the card-97b31562 gate.
+    await pull_bws.close()
 
 
 async def main_async() -> int:

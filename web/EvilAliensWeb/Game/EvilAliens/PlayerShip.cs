@@ -1472,7 +1472,7 @@ public class PlayerShip : AlienDrawableGameComponent
 	// local ones. The count is what paces them (card a45b78f6) -- NOT a local cadence gate,
 	// which would re-derive a rate the owner has already measured for us and get it wrong
 	// whenever a packet was lost, late or early.
-	internal void NetApplyRemoteState(Vector2 pos, float aim, byte shotCount, int shotsPerSec, float bulletLife, byte asplodeBits = 0, byte bounceBits = 0)
+	internal void NetApplyRemoteState(Vector2 pos, float aim, byte shotCount, int shotsPerSec, float bulletLife, byte asplodeBits, byte bounceBits)
 	{
 		base.Position = pos;
 		Speed = 0f;
@@ -1510,9 +1510,12 @@ public class PlayerShip : AlienDrawableGameComponent
 			netShotsPending--;
 			// This shot's distance back from the packet's newest counted shot is exactly the
 			// backlog still in front of it, so its rolls are that bit of the rings (card
-			// 950bb70a). A backlog deeper than the ring (unreachable at 18 shots/s against a
-			// 60 Hz spend, and bounded per packet by NetMaxCatchUpShots) reads as no-roll
-			// rather than someone else's bit.
+			// 950bb70a). A backlog deeper than the ring reads as no-roll rather than someone
+			// else's bit -- and is genuinely unreachable, not merely unlikely: the delta is
+			// computed once per TICK against the buffer's newest sample (bunched packets
+			// collapse into one delta, bounded by NetMaxCatchUpShots = 6), the drain is one
+			// per tick, and refilling faster than it drains would take > 60 shots/s against
+			// the 18/s fire-rate cap.
 			int back = netShotsPending;
 			bool bounce = back < 8 && ((bounceBits >> back) & 1) != 0;
 			bool asplode = back < 8 && ((asplodeBits >> back) & 1) != 0;

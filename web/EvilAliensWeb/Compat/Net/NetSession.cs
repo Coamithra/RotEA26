@@ -113,10 +113,11 @@ namespace EvilAliensWeb.Compat.Net
         // v21 (card 950bb70a): MsgShipState / MsgFriendState grow two trailing roll-ring bytes
         // (31 -> 33) -- bit i = the owner's asplode / bounce roll for the shot whose cumulative
         // count is ShotCount-i, so the puppet applies the owner's per-bullet outcome instead of
-        // re-rolling and the mini-blasts land on the SAME bullets on both screens. Both layouts
-        // are length-guarded and the bytes are appended, so an older peer degrades to exactly
-        // the pre-card behaviour (its own re-roll): the bump is the batch convention, not a
-        // forced incompatibility.
+        // re-rolling and the mini-blasts land on the SAME bullets on both screens. Like v12 this
+        // is a fixed-width per-tick layout, and the decoders' length gates moved 31 -> 33 with
+        // it -- so a v20 peer's ship frames would be REFUSED wholesale (a frozen puppet, not a
+        // graceful re-roll). A real bump, not a courtesy one; only the other direction (a v20
+        // peer receiving our 33-byte frames) tolerates the extra bytes.
         public const byte ProtocolVersion = 21;
         public const float InterpDelayMs = 100f;
 

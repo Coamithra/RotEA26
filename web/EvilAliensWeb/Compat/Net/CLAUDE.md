@@ -779,9 +779,11 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   **v21** appends two ROLL-RING bytes to `MsgShipState` AND `MsgFriendState` (31 -> 33) -- card
   950bb70a, see the roll-ring bullet under the remote ship's shot counter. Bit i = the owner's
   asplode / bounce roll for the shot whose cumulative count is `ShotCount-i`, so the puppet
-  spends the owner's per-bullet OUTCOME instead of re-rolling its own percentage. Both layouts
-  are length-guarded and the bytes are appended, so an older peer degrades to exactly the
-  pre-card behaviour (its own re-roll): the bump is the batch convention.
+  spends the owner's per-bullet OUTCOME instead of re-rolling its own percentage. Like v12 the
+  two ship layouts are FIXED WIDTH and their decoders' length gates moved 31 -> 33 with them,
+  so a v20 peer's ship frames would be refused wholesale (a frozen puppet, not a graceful
+  re-roll) -- a real bump, not a convention one; only the reverse direction tolerates the
+  extra bytes.
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).

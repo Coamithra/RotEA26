@@ -93,9 +93,11 @@
 # ?level=Level2 for a level that just runs with one keyboard player and a live ship (the suite's
 # rig precondition -- a partner-seating level would seat a second slot and it would report rather
 # than assert), ?invuln so the settle cannot lose that ship, ?noattract because the suite needs
-# the LEVEL and not a demo.
+# the LEVEL and not a demo. ?seed=1 pins RandomHelper for leg 2's 60%-asplode mix -- "both
+# outcomes appeared over 30 taps" is otherwise a (vanishingly small, ~2e-7) coin flip, and a
+# probe's precondition must be pinned, not waited out (card af4c3694).
 #
-# eahl: --flags "?level=Level2&invuln&noattract"
+# eahl: --flags "?level=Level2&invuln&noattract&seed=1"
 
 step 400 nodraw
 mark

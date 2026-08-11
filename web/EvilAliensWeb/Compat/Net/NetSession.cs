@@ -1795,10 +1795,12 @@ namespace EvilAliensWeb.Compat.Net
         // the readout and none of the ship-side effect -- see PlayerShip.NetApplyRemotePickup for
         // which types that costs and which are already covered elsewhere.
         //
-        // Card d53431b4: it is SILENT. The pickup used to play the "powerup" cue here, i.e. every
-        // powerup the other player picked up made a noise on this screen; a remote pickup is
-        // visual-only now. Local pickups and local co-op are untouched -- both go through
-        // PlayerShip.CollidesWith, which still plays it.
+        // Card 06ac5df2: it is AUDIBLE again -- the other player's pickup plays the "powerup" cue
+        // on this screen too, reversing card d53431b4's mute (which was itself the user's ruling;
+        // so is this). Gated on !OwnsSlot below with the ship-side mirror, so the host settling a
+        // claim for its OWN slot -- whose ship already played the cue in CollidesWith -- never
+        // doubles it. Local pickups and local co-op are untouched either way; both go through
+        // PlayerShip.CollidesWith.
         internal static void ApplyRemotePowerup(INetPickup powerup, byte slot)
         {
             // Bound against the SCORE PANELS (4), not the 8 of the claim ledgers' PaidMask --
@@ -1816,6 +1818,10 @@ namespace EvilAliensWeb.Compat.Net
             if (!OwnsSlot(slot))
             {
                 FindShipForSlot(slot)?.NetApplyRemotePickup(powerup.NetPickupType);
+                // Outside the ship lookup on purpose: the cue reports the pickup, not the puppet,
+                // and the collector's puppet can be dead-or-lagging between packets without that
+                // making their pickup silent.
+                sound.PlayCue("powerup");
             }
             if (NetHost.Current.NetLog)
             {
@@ -1844,8 +1850,9 @@ namespace EvilAliensWeb.Compat.Net
             case NetFxKind.EnemyLazerFire:
                 // Entity-free: the beam itself already replicates as its own Lazer puppet, built
                 // sound-free by LazerDescriptor; this is only its report. An ENEMY telegraph is a
-                // world event both players are dodging, unlike a remote PLAYER's own pickups and
-                // summons, which stay silent (card d53431b4).
+                // world event both players are dodging, unlike a remote PLAYER's own summon glow,
+                // which stays silent. (The remote pickup cue moved sides of that line twice:
+                // muted by card d53431b4, audible again by card 06ac5df2 -- ApplyRemotePowerup.)
                 sound.PlayCue("lazershotnoloop");
                 break;
             }

@@ -51,9 +51,12 @@ namespace EvilAliensWeb.Compat.Net
     // never in a game you care about. Teardown stops the session, sweeps what it planted and frees
     // the Remote seat; it does NOT unwind the powerup levels or combo it spent.
     //
-    // NOT COVERED, on purpose: card d53431b4's MUTE half (a remote pickup no longer plays the
-    // "powerup" cue). SoundManager exposes no cue counter, and adding one for a test would be a
-    // production field for no other reader -- see the card's closing comment.
+    // NOT COVERED, on purpose: the SOUND half (a remote pickup plays the "powerup" cue again --
+    // card 06ac5df2, reversing card d53431b4's mute). SoundManager exposes no cue counter, and
+    // adding one for a test would be a production field for no other reader -- the ruling card
+    // d53431b4 already made, and the reversal does not change it. Note the suite's own legs DO
+    // drive ApplyRemotePowerup's !OwnsSlot branch, so the cue audibly fires during a run; it is
+    // just not asserted.
     internal static class NetPickupTest
     {
         private const string Room = "netpickup";

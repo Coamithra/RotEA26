@@ -227,6 +227,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeBombRippleFollow(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         // LAST ON PURPOSE -- it is the only set that seeds RandomHelper, and it cannot unseed
         // afterwards (there is no un-seed API and adding one for a probe would be a production
         // change made for a test). Nothing above draws from RandomHelper, so the order costs
@@ -3522,6 +3528,136 @@ internal static class Program
         Check("?seed= does not set Active", (bool)activeProp.GetValue(null) == activeUnseeded,
             "Active=" + activeProp.GetValue(null) + " unseeded=" + activeUnseeded);
 
+        return 0;
+    }
+
+    // Card 03c379f2 -- the bomb ripple follows its blast in location and duration. BombRipple is
+    // pure statics over consts (RenderScale.Design* are consts, DebugFlags are plain properties),
+    // so the whole decision layer runs here for real: Fire seeds a per-ring duration and returns a
+    // generation token, MoveRing re-centres only an exact token match, Update/PackedRings resolve
+    // each ring against its OWN duration with ?rippleduration= still winning. The negative
+    // controls are the stale-token and evicted-slot moves (the pre-card behaviour had no token at
+    // all, so any build that re-centres on a mismatched token fails them) and the master-off Fire.
+    // The WIRING (Blast.Initialize fires, Blast.Update pushes) is a live question --
+    // tools/headless/probes/bomb_ripple_follow.txt covers it via the RippleBlast eval seams.
+    private static int ProbeBombRippleFollow(Assembly asm)
+    {
+        Type ripple = asm.GetType("EvilAliensWeb.Compat.BombRipple", true);
+        Type flags = asm.GetType("EvilAliensWeb.Compat.DebugFlags", true);
+        MethodInfo fire = ripple.GetMethod("Fire", BindingFlags.Public | BindingFlags.Static);
+        MethodInfo move = ripple.GetMethod("MoveRing", BindingFlags.Public | BindingFlags.Static);
+        MethodInfo update = ripple.GetMethod("Update", BindingFlags.Public | BindingFlags.Static);
+        MethodInfo packed = ripple.GetMethod("PackedRings", BindingFlags.Public | BindingFlags.Static);
+        MethodInfo describe = ripple.GetMethod("DescribeRings", BindingFlags.Public | BindingFlags.Static);
+        if (fire == null || move == null || update == null || packed == null || describe == null)
+        {
+            Console.WriteLine("FAIL: BombRipple.Fire/MoveRing/Update/PackedRings/DescribeRings not found");
+            return 2;
+        }
+        Type vec2 = fire.GetParameters()[0].ParameterType;
+        object V2(float x, float y) => Activator.CreateInstance(vec2, x, y);
+        // Vector4 packed entry: xy = centre in target UV (design / 800x600), z = radius, w = amp.
+        float Fld(object v4, string name) => (float)v4.GetType().GetField(name).GetValue(v4);
+        Array Rings() => (Array)packed.Invoke(null, null);
+        string Rep() => (string)describe.Invoke(null, null);
+        void Step(float dt) => update.Invoke(null, new object[] { dt });
+        int Fire4(float x, float y, int power, float dur) =>
+            (int)fire.Invoke(null, new object[] { V2(x, y), power, false, dur });
+        void Move2(int token, float x, float y) => move.Invoke(null, new object[] { token, V2(x, y) });
+        PropertyInfo P(string name) => flags.GetProperty(name, BindingFlags.Public | BindingFlags.Static);
+        void SetFlag(string name, object v) => P(name).SetValue(null, v);
+
+        Console.WriteLine("ProbeBombRippleFollow (card 03c379f2):");
+
+        // Baseline: earlier case sets (the flag-rejection sweep in particular) legitimately leave
+        // ripple overrides in force, and rings may be live. Null the ones this set resolves
+        // through and expire everything -- null IS the shipped default, so nothing to restore.
+        foreach (string f in new[] { "Ripple", "RippleDuration", "RipplePhase", "RipplePower", "RippleCenter" })
+        {
+            SetFlag(f, null);
+        }
+        Step(999f);
+        Check("baseline: no live rings", Rep() == " rings=none", Rep());
+
+        // Fire with the blast's duration; the packed centre must be the design point in UV.
+        int tok = Fire4(100f, 100f, 2, 3f);
+        Check("Fire returns a token", tok > 0, "token=" + tok);
+        object r0 = Rings().GetValue(tok % 4);
+        Check("fired ring at 100,100 uv", Math.Abs(Fld(r0, "X") - 100f / 800f) < 1e-5
+            && Math.Abs(Fld(r0, "Y") - 100f / 600f) < 1e-5, "uv=" + Fld(r0, "X") + "," + Fld(r0, "Y"));
+        Check("ring carries the blast's duration", Rep().Contains("/3.00"), Rep());
+
+        // Follow: an exact-token move re-centres the ring.
+        Move2(tok, 500f, 400f);
+        r0 = Rings().GetValue(tok % 4);
+        Check("MoveRing re-centres the ring", Math.Abs(Fld(r0, "X") - 500f / 800f) < 1e-5
+            && Math.Abs(Fld(r0, "Y") - 400f / 600f) < 1e-5, "uv=" + Fld(r0, "X") + "," + Fld(r0, "Y"));
+
+        // NEGATIVE CONTROL -- a stale token (same slot, wrong generation, i.e. what a recycled
+        // Blast would hold) must not drag the ring. The pre-card code had no token, so a build
+        // that re-centres on slot alone fails here.
+        Move2(tok + 4, 50f, 50f);
+        r0 = Rings().GetValue(tok % 4);
+        Check("stale token is a no-op", Math.Abs(Fld(r0, "X") - 500f / 800f) < 1e-5, "uv=" + Fld(r0, "X"));
+
+        // Eviction: four more rings recycle the slot; the ORIGINAL token must no longer move it.
+        int t1 = Fire4(10f, 10f, 0, 1f);
+        Fire4(20f, 20f, 0, 1f);
+        Fire4(30f, 30f, 0, 1f);
+        int t4 = Fire4(640f, 60f, 0, 1f);
+        Check("slot recycled by the fifth ring", t4 % 4 == tok % 4, "t4slot=" + t4 % 4 + " tokslot=" + tok % 4);
+        Move2(tok, 50f, 50f);
+        r0 = Rings().GetValue(tok % 4);
+        Check("evicted ring's token cannot drag its successor",
+            Math.Abs(Fld(r0, "X") - 640f / 800f) < 1e-5, "uv=" + Fld(r0, "X"));
+
+        // Per-ring expiry: a 0.5 s ring and a 2 s ring part ways at t=1.
+        Step(999f);
+        int ta = Fire4(100f, 100f, 0, 0.5f);
+        int tb = Fire4(200f, 200f, 0, 2f);
+        Step(1f);
+        object ra = Rings().GetValue(ta % 4);
+        object rb = Rings().GetValue(tb % 4);
+        Check("short ring expired at its own duration", Fld(ra, "W") == 0f, "w=" + Fld(ra, "W"));
+        Check("long ring still live at its own duration", Fld(rb, "W") > 0f, Rep());
+        Check("long ring reports its own clock", Rep().Contains("e=1.00/2.00"), Rep());
+
+        // ?rippleduration= still wins over the per-ring value -- the tuner slider and the
+        // committed probe's pinned expiry window depend on it.
+        SetFlag("RippleDuration", (float?)0.2f);
+        Check("override rewrites the resolved duration", Rep().Contains("/0.20"), Rep());
+        Step(0.05f);
+        Check("override retires the ring in flight", Rep() == " rings=none", Rep());
+        SetFlag("RippleDuration", null);
+
+        // Master off: Fire returns the no-ring sentinel, and MoveRing(0) must not throw.
+        SetFlag("Ripple", (float?)0f);
+        Check("master off => no token", Fire4(1f, 1f, 0, 1f) == 0, null);
+        Move2(0, 1f, 1f);
+        SetFlag("Ripple", null);
+
+        // The ?ripplephase= parked scrub rig is MoveRing-proof: while parked, MoveRing is inert
+        // even for a REAL live token, so a stray blast cannot drag the screenshot rig. The token
+        // must be genuine -- a Move2(0) would pass on the token==0 short-circuit alone and prove
+        // nothing about the phase guard -- and the SAME move must succeed once un-parked, or
+        // "inert while parked" would be indistinguishable from "inert".
+        SetFlag("RipplePhase", (float?)0.5f);
+        Step(0f);
+        Check("parked ring holds the rig centre", Rep().Contains("(400,300"), Rep());
+        int tp = Fire4(300f, 300f, 0, 1f);
+        Move2(tp, 9f, 9f);
+        object rp = Rings().GetValue(tp % 4);
+        Check("a live token cannot drag anything while parked",
+            Math.Abs(Fld(rp, "X") - 300f / 800f) < 1e-5, "uv=" + Fld(rp, "X"));
+        SetFlag("RipplePhase", null);
+        Move2(tp, 9f, 9f);
+        rp = Rings().GetValue(tp % 4);
+        Check("...and the same move bites once un-parked (positive control)",
+            Math.Abs(Fld(rp, "X") - 9f / 800f) < 1e-5, "uv=" + Fld(rp, "X"));
+
+        // Leave nothing live for whatever runs after.
+        Step(999f);
+        Check("teardown: no live rings", Rep() == " rings=none", Rep());
         return 0;
     }
 }

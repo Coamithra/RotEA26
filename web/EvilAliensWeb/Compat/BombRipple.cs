@@ -13,6 +13,20 @@ namespace EvilAliensWeb.Compat
 	// with no extra plumbing and no net traffic — the effect is Draw-time only, so
 	// co-op determinism (and the build-hash compatibility key) is untouched.
 	//
+	// The ring FOLLOWS its blast in both location and duration (card 03c379f2):
+	// PlayerShip.Update drags the live Blast with the ship every tick, so a ring
+	// parked at the detonation point was left behind the explosion it decorates,
+	// and its fixed 0.75 s life ended 0.25..4.25 s before the blast's own
+	// 1000ms*(power+1). Fire therefore returns a generation TOKEN and seeds the
+	// ring's duration from the blast's real lifetime; Blast.Update pushes its live
+	// position back through MoveRing(token, pos). A stale token (ring evicted by a
+	// fifth bomb, or a pool-recycled Blast) no-ops rather than dragging someone
+	// else's ring — the push is the only coupling, so Compat still references no
+	// game type. Consequence to know: the wavefront's SPEED is now a function of
+	// bomb power (radius is unchanged while the life it is crossed in is 1..5 s),
+	// so a maxed bomb's ring travels ~6.7x slower than the old fixed 0.75 s one —
+	// flagged for the owner's taste pass, all knobs still live.
+	//
 	// Four slots, so overlapping bombs each get their own ring; a fifth evicts the
 	// oldest. Every knob the tuner exposes is a baked Default* const read through a
 	// `?ripple*` override, so a shipped build with no flags is byte-identical to the
@@ -36,8 +50,9 @@ namespace EvilAliensWeb.Compat
 		// is where it has already faded out. ?rippleradius=
 		public const float DefaultRadius = 0.55f;
 
-		// Life of one ring in seconds. Short: the ring is a punctuation mark on the
-		// detonation, not a weather system. ?rippleduration=
+		// FALLBACK life of one ring in seconds — since card 03c379f2 every real ring
+		// carries its OWN duration (its blast's lifetime, seeded at Fire), so this is
+		// only what a ring fired without one gets. ?rippleduration= overrides both.
 		public const float DefaultDuration = 0.75f;
 
 		// Gaussian half-width of the wavefront, same units as the radius. Narrow =>
@@ -73,16 +88,24 @@ namespace EvilAliensWeb.Compat
 		// until the next bomb.
 		private struct Ring
 		{
-			public Vector2 Centre;   // design-space (800x600) detonation point
+			public Vector2 Centre;   // design-space (800x600) blast position, pushed live via MoveRing
 			public float Elapsed;    // seconds since it fired
+			public float Duration;   // this ring's own life in seconds (the blast's lifetime); <= 0 => DefaultDuration
 			public float SizeScale;  // 1 for a bomb, MiniScale for an asploding bullet
 			public float Power;      // bomb powerup level 0..4, clamped at Fire
+			public int Token;        // the handle Fire returned; MoveRing must match it exactly
 			public bool Alive;
 		}
 
 		private static readonly Ring[] rings = new Ring[MaxRings];
 		private static readonly Vector4[] packed = new Vector4[MaxRings];
 		private static int nextSlot;
+
+		// Monotone per-Fire stamp folded into every token, so a token outlives neither its ring
+		// nor its slot: an evicted slot's next ring gets a new generation and the old token stops
+		// matching. The first Fire pre-increments it to 1, so no real token can collide with the
+		// 0 "no ring was fired" sentinel.
+		private static int generation;
 
 		// The resolved knobs. All public so DebugInput.RippleState can REPORT the values the
 		// renderer actually uses rather than re-deriving the `?? Default` fallbacks (and
@@ -96,6 +119,19 @@ namespace EvilAliensWeb.Compat
 		public static float Radius => DebugFlags.RippleRadius ?? DefaultRadius;
 		public static float Duration => Math.Max(0.01f, DebugFlags.RippleDuration ?? DefaultDuration);
 		public static float Falloff => DebugFlags.RippleFalloff ?? DefaultFalloff;
+
+		// The duration one specific ring actually runs on: the ?rippleduration= override (live,
+		// so the slider still retunes rings in flight and the committed probe's expiry window
+		// stays pinned by the flag) beats the ring's own blast-seeded life, which beats the
+		// baked fallback. Same 0.01 s floor as Duration, for the same reason.
+		private static float RingDuration(in Ring r)
+		{
+			if (DebugFlags.RippleDuration.HasValue)
+			{
+				return Math.Max(0.01f, DebugFlags.RippleDuration.Value);
+			}
+			return r.Duration > 0f ? r.Duration : DefaultDuration;
+		}
 		public static float Width => Math.Max(0.001f, DebugFlags.RippleWidth ?? DefaultWidth);
 		public static float Rim => DebugFlags.RippleRim ?? DefaultRim;
 
@@ -125,23 +161,51 @@ namespace EvilAliensWeb.Compat
 
 		// Fire a ring at a design-space position. `power` is the bomb's powerup level
 		// (Blast's own `power` is that + 1; callers pass the level). Minis are gated on
-		// ?ripplemini and ripple at MiniScale.
-		public static void Fire(Vector2 designPosition, int power, bool mini = false)
+		// ?ripplemini and ripple at MiniScale. `durationSeconds` is the blast's own
+		// lifetime so the ring expires when the explosion does (<= 0 keeps the baked
+		// fallback). Returns the token MoveRing needs; 0 = no ring fired.
+		public static int Fire(Vector2 designPosition, int power, bool mini = false,
+			float durationSeconds = 0f)
 		{
 			if (Master <= 0f || (mini && !DebugFlags.RippleMini))
 			{
-				return;
+				return 0;
 			}
 			int slot = nextSlot;
 			nextSlot = (nextSlot + 1) % MaxRings;
+			int token = MaxRings * ++generation + slot;
 			rings[slot] = new Ring
 			{
 				Centre = designPosition,
 				Elapsed = 0f,
+				Duration = durationSeconds,
 				SizeScale = mini ? MiniScale : 1f,
 				Power = MathHelper.Clamp(power, 0, 4),
+				Token = token,
 				Alive = true
 			};
+			return token;
+		}
+
+		// Re-centre a live ring on its blast's current position -- called from Blast.Update
+		// every tick, which is what makes the ring ride the ship exactly as the blast does
+		// (PlayerShip.Update drags the blast; the blast drags its ring). A token that no
+		// longer matches (evicted slot, recycled Blast, master off at Fire) is a no-op, and
+		// the parked scrub ring (?ripplephase=) is EnsureParked's alone.
+		public static void MoveRing(int token, Vector2 designPosition)
+		{
+			if (token == 0 || DebugFlags.RipplePhase.HasValue)
+			{
+				return;
+			}
+			// The double-mod keeps the index in range even for a negative token (generation
+			// overflow after ~2^29 Fires -- unreachable in practice, but free to make safe;
+			// the Token equality below still decides whether anything moves).
+			int slot = (token % MaxRings + MaxRings) % MaxRings;
+			if (rings[slot].Alive && rings[slot].Token == token)
+			{
+				rings[slot].Centre = designPosition;
+			}
 		}
 
 		// Advance every live ring. Called from Game1.ApplyBombRipple on RAW (unscaled)
@@ -163,9 +227,9 @@ namespace EvilAliensWeb.Compat
 					continue;
 				}
 				rings[i].Elapsed += dtSeconds;
-				// Against the LIVE Duration, so shortening it on the tuner retires the rings
-				// already in flight instead of leaving them stuck past their own end.
-				if (rings[i].Elapsed >= Duration)
+				// Against the LIVE resolved duration, so shortening it on the tuner retires
+				// the rings already in flight instead of leaving them stuck past their own end.
+				if (rings[i].Elapsed >= RingDuration(in rings[i]))
 				{
 					rings[i].Alive = false;
 				}
@@ -186,7 +250,7 @@ namespace EvilAliensWeb.Compat
 					packed[i] = Vector4.Zero;
 					continue;
 				}
-				float t = MathHelper.Clamp(rings[i].Elapsed / Duration, 0f, 1f);
+				float t = MathHelper.Clamp(rings[i].Elapsed / RingDuration(in rings[i]), 0f, 1f);
 				float decay = (float)Math.Pow(1f - t, Falloff);
 				float amp = Amplitude * Master * rings[i].SizeScale
 					* (1f + AmplitudePerPower * rings[i].Power);
@@ -220,15 +284,44 @@ namespace EvilAliensWeb.Compat
 			{
 				rings[i].Alive = false;
 			}
+			float power = MathHelper.Clamp(DebugFlags.RipplePower ?? 0f, 0f, 4f);
+			// The parked ring carries the duration a real bomb of that power would seed
+			// (Blast.Setup: 1000ms * (power+1)), so the scrubbed phase maps onto the same
+			// point of a real detonation's life. ?rippleduration= still wins inside
+			// RingDuration, exactly as it does for a live ring.
+			float duration = 1f + power;
 			rings[0] = new Ring
 			{
 				Centre = centre,
-				Elapsed = phase * Duration,
+				Elapsed = phase * Math.Max(0.01f, DebugFlags.RippleDuration ?? duration),
+				Duration = duration,
 				SizeScale = 1f,
-				Power = MathHelper.Clamp(DebugFlags.RipplePower ?? 0f, 0f, 4f),
+				Power = power,
+				Token = 0,
 				Alive = true
 			};
 			nextSlot = 1 % MaxRings;
+		}
+
+		// Per-ring readout for eaRipple.state() / `eval RippleState` -- centre, elapsed and
+		// the RESOLVED duration each live ring is actually running on. The follow behaviour
+		// (card 03c379f2) moves no counter and changes pixels only mid-motion, so this line
+		// is what the committed probe asserts a moving blast against.
+		public static string DescribeRings()
+		{
+			string s = "";
+			for (int i = 0; i < MaxRings; i++)
+			{
+				if (!rings[i].Alive)
+				{
+					continue;
+				}
+				s += " r" + i + "=(" + rings[i].Centre.X.ToString("0.#") + ","
+					+ rings[i].Centre.Y.ToString("0.#")
+					+ " e=" + rings[i].Elapsed.ToString("0.00")
+					+ "/" + RingDuration(in rings[i]).ToString("0.00") + ")";
+			}
+			return s.Length == 0 ? " rings=none" : s;
 		}
 	}
 }

@@ -1378,6 +1378,26 @@ site now lives under:
     remote peer's (`PlayerShip.NetDoBlast`) go Setup -> `Add` -> `Initialize`, so the puppet
     ripples too with zero net plumbing. It is Draw-time only: no gameplay state, no new traffic,
     co-op determinism and the build-hash compat key untouched.
+  - **The ring FOLLOWS its blast, in location and duration (card 03c379f2).** `PlayerShip.Update`
+    drags the live `Blast` with the ship every tick, so a ring parked at the detonation point was
+    left behind the explosion it decorates -- and its fixed 0.75 s life ended 0.25..4.25 s before
+    the blast's own `1000ms * (power+1)`. `Fire` now returns a generation TOKEN and seeds the
+    ring's duration from the blast's real lifetime; `Blast.Update` pushes its live position
+    through `BombRipple.MoveRing(token, pos)` -- so the local bomb, a remote peer's bomb (same
+    `blast` field) and the respawn pop all follow with no per-caller code, and a stale token (ring
+    evicted by a fifth bomb, pool-recycled Blast) no-ops instead of dragging someone else's ring.
+    `DefaultDuration` 0.75 s is only the FALLBACK for a ring fired without a lifetime;
+    `?rippleduration=` (and the slider) still overrides everything, which is what keeps the tuner
+    and `bomb_ripple.txt`'s pinned expiry window valid. The `?ripplephase=` parked ring carries
+    the duration a real bomb of `?ripplepower=` would (`(1+power)` s), so the scrub maps phase
+    like a real detonation. Verify as DATA: `eaRipple.state()` now reports each live ring's
+    centre + elapsed/resolved-duration; **`eaRipple.blast(x,y,power)` / `.blastMove(x,y)`**
+    (`eval RippleBlast` / `RippleBlastMove`) spawn and drag a REAL `Blast` through the
+    ComponentBin -- the wiring rig, because `eaRipple.fire` never touches `Blast` (menu or
+    throwaway boot only; the blast is genuine and collides). Decision layer pinned by
+    `logic_probe`'s `ProbeBombRippleFollow`, wiring by
+    `tools/headless/probes/bomb_ripple_follow.txt`; a ring at the wrong place moves no counter
+    and draws a plausible frame, so the probes are the only thing that would say so.
   - **Four slots** (a fifth ring evicts the oldest), each a separate `float4` uniform rather than
     a `float4[4]` array -- a plain uniform is the form MojoShader -> BlazorGL GLSL is guaranteed
     to handle. Distances are **aspect-corrected** (`Aspect` = target W/H) so the front is a circle
@@ -1394,7 +1414,8 @@ site now lives under:
   - **Known property, not a bug: as a post pass it distorts the HUD/score where the ring reaches
     them.** The radius is bounded and the HUD sits in the corners; `?rippleradius=` limits reach.
     A pre-HUD seam would need a new hook inside `DrawInner` and is deliberately out of scope.
-  - Baked defaults (`BombRipple.Default*`): amplitude 0.018, radius 0.55, duration 0.75 s, width
+  - Baked defaults (`BombRipple.Default*`): amplitude 0.018, radius 0.55, duration 0.75 s (the
+    no-lifetime FALLBACK -- a real ring runs on its blast's lifetime, see the follow bullet), width
     0.055, falloff 1.6, rim 0.10; amplitude/radius scale mildly with the bomb's powerup level.
     Minis (asploding bullets) are OFF by default behind `?ripplemini` -- a dozen at once strobes.
   - **Verify with `?ripplephase=<0..1>`** (+ `?ripplecenter=x,y`), which parks one ring and stops

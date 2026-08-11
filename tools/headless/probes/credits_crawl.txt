@@ -1,13 +1,13 @@
 # PROBE: the post-level text crawl still tapers, and the taper still fits the screen.
 #
-# PINS: CreditsScene's Star Wars-style crawl taper (card bee8f0e0). Each line is drawn at a
-# uniform scale that eases from 1+skew at the screen bottom through 1.0 at mid screen to
-# 1-skew at the top, scaled about the crawl block's own centre. The card asked for +-20%, but
-# the widest line of every crawl is ~661-669 of the 800 design px, so +20% would push its right
-# end ~36 px off screen and eat the last character -- measured, and visible in the first
-# screenshot of the card. The requested amount is therefore CLAMPED to the largest that still
-# fits: 0.081 for this crawl, 0.095 for the level-3 one, i.e. the clamp is derived from the
-# measured text rather than being a second baked constant.
+# PINS: CreditsScene's Star Wars-style crawl taper (card bee8f0e0, reworked into a centred
+# one-point perspective by card eac38cae). Lines are centred on x=400 and drawn through a
+# projective matrix whose on-screen scale runs 1+skew at the screen bottom to 1-skew at the
+# top, linear in screen Y. The card asked for +-20%, but the widest line of every crawl is
+# ~661-669 of the 800 design px, so the full amount still does not quite fit even centred.
+# The requested amount is therefore CLAMPED to the largest that fits: ~0.177 for this crawl,
+# ~0.185 for the level-3 one, i.e. the clamp is derived from the measured text rather than
+# being a second baked constant.
 #
 # So there are two things to defend and they pull in opposite directions:
 #   1. the taper is still THERE (effective > 0) and still asked for at the card's 0.2, and

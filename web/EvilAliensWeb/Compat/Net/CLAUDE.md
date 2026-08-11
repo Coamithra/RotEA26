@@ -1322,7 +1322,36 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
         join-in-progress case, so the fallback is not missed.
       - **`SpiderBoss.NetState` still clamps a wire `dead` back to `standing`, and must**: the
         wire only ever describes a live boss and the death arrives as the beat.
-  - **Verify with `eaNetDeathFx()`** (`Compat/Net/NetDeathFxTest.cs`, 144 assertions;
+  - **A DEFERRED DEATH THAT STAYS FUNCTIONALLY ALIVE: the SpiderHelperMothership (card
+    1878b321), and the `NetDyingStaysReplicated` seam it needed.** The helper's `KilledBy` only
+    FLAGS the death -- the ship keeps flying its charge/fire mission for seconds, erupting booms,
+    and `Die()`s at `CrashImpact` -- so "release and finish dying locally" was wrong for it twice
+    over: its `HelperState` is not replicated, so a released puppet restarted at Setup's `enter`
+    and TELEPORTED off-screen left to REPLAY the whole entrance/charge/fire (the joiner's "hangs
+    around when dead"), and the host's copy is still a live, laser-firing world entity for the
+    whole remnant, which a released local crash cannot mirror. Three parts, no protocol bump:
+    - **`INetEntity.NetDyingStaysReplicated` (helper only): the death-began beat does NOT
+      release.** The host streams the id for the whole dying remnant, so the frozen puppet keeps
+      tracking it -- position, charge glow and hp-redden already ride the wire, and a replicated
+      DYING BIT (the descriptor's flags byte, bit2) drives the same death booms locally through
+      `NetDriveExtras` (private RNG, the PlasmaBall rule). The hp==0 snapshot fallback declines
+      the release the same way.
+    - **The final `EvDeath` plays the CRASH IMPACT locally**: `OnRemoteDeath` consults
+      `NetBeginDeferredDeath` before releasing a deferred killable, and the helper's override
+      runs `CrashImpact()` -- three explosions + `expl2` at the replicated crash-end position,
+      `Die()` included, so nothing is released. A `true` that did not die still releases (the
+      safe default); base types answer false and release exactly as before.
+    - **A CLIENT's own kill of ANY deferred-death type now files its claim at death-began**
+      (`KillableAlien.HitBy` -> `NetSession.OnClientDeferredKill`): the claim normally rides the
+      removal seam, which a frozen puppet's deferred `KilledBy` never reaches, so the kill was
+      PHANTOM -- the joiner's 50-hp investment left a red, unresponsive zombie while the host's
+      copy flew on untouched. Ordinary types are untouched (`IsDead` is already true at the call
+      site), and no double claim is possible (the puppet is only ever removed after
+      `ReleaseDyingPuppet` unmapped it or `OnRemoteDeath` guarded it). **`HandleClaim` in turn no
+      longer force-removes a killable whose `NetKill` deferred** -- the old `bin.Remove` deleted
+      a claimed helper mid-mission where the host's own kill let it finish; `NetKill`'s
+      `NoteDeathBegan` already announces `EvDying` to the claimant.
+  - **Verify with `eaNetDeathFx()`** (`Compat/Net/NetDeathFxTest.cs`, 183 assertions;
     `tools/headless/probes/net_death_fx.txt`). MENU-ONLY and leave-no-trace, the `eaNetSnap`
     shape -- section 2 runs a real HOST session over a `NetWire` and reads the frames the peer
     RECEIVED (including the `EvDying` trigger-latency legs: the beat is on the wire while no

@@ -497,6 +497,16 @@ namespace EvilAliensWeb.Compat.Net
                     + " and crashes on its own (" + deaths.Count + " EvDeath)",
                     InWorld(game, (GameComponent)(object)claimed) && !claimed.IsDead
                     && ((INetEntity)claimed).NetIsDying && deaths.Count == 0);
+                // The ENCODE half of the dying bit -- section 7 drives the APPLY side with a
+                // hand-written byte, so this is the only leg that fails if the host's descriptor
+                // stops putting NetDying on the wire.
+                byte[] extraBuf = new byte[16];
+                int extraLen = gotClaimId
+                    ? claimedEntry.Descriptor.EncodeStateExtra(
+                        (AlienDrawableGameComponent)(object)claimed, extraBuf, 0)
+                    : 0;
+                Check("...and its state extras now carry the dying bit (bit2) for the joiner's"
+                    + " booms", extraLen >= 1 && (extraBuf[0] & 4) != 0);
 
                 // 2i. The three KillableAlien bosses. They reach NoteDeathBegan like the
                 // BattleSkull in 2d, so this is coverage rather than a new mechanism -- but the

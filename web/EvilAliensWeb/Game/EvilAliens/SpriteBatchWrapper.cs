@@ -326,8 +326,10 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 	public void BeginPerspective(Matrix design)
 	{
 		Flush();
+		// No WorldCensus.NoteBatch here: the census counts CONTENT batches at _beginDrawing
+		// only (its documented invariant); the special-Begin sites (BeginCustom, DrawPresent,
+		// SealAlpha, ...) are all uncounted and this one follows them.
 		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, null, design * RenderScale.Matrix);
-		EvilAliensWeb.Compat.WorldCensus.NoteBatch();
 	}
 
 	// layerDepth 0, NOT the crawl's usual 1: the quad's z rides the perspective divide too

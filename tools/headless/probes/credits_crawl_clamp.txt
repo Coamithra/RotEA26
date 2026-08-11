@@ -25,13 +25,15 @@
 # NOT NODRAW / ANTI-VACUITY: as credits_crawl.txt -- the line comes from CreditsScene.Draw and
 # only exists once the crawl is on screen, so a run that never got there fails the `expect`.
 #
-# MUTATION-TESTED, both measured: dropping the clamp (`crawlEffectiveSkew = requestedSkew`)
-# prints `effective=5.000 ... fit=OVERFLOW span=[-1561.3,2425.8]`. Omitting the
-# scale-to-skew conversion (`- 1f` instead of `- 2f` -- the off-by-one this was actually
-# written with, and the reason to test rather than reason about it) prints
-# `effective=1.095 fits=1.095 fit=OVERFLOW span=[-263.8,1128.3]`: a clamp that is visibly
-# DOING something and is still 13x too generous. `effective < requested` alone would have
-# called that a pass, which is why fit= is a verdict the game computes and asserts here.
+# MUTATION-TESTED, both re-measured against card eac38cae's centred formula: dropping the
+# clamp (`crawlEffectiveSkew = requestedSkew`) prints
+# `effective=5.000 fits=0.185 fit=OVERFLOW span=[-1605.5,2393.5]`. Omitting the
+# scale-to-skew conversion (dropping the trailing `- 1f` -- the same off-by-one class the
+# bee8f0e0 formula was actually first written with, and the reason to test rather than
+# reason about it) prints `effective=1.185 fits=1.185 fit=OVERFLOW span=[-330.3,1125.9]`:
+# a clamp that is visibly DOING something and is still 6x too generous.
+# `effective < requested` alone would have called that a pass, which is why fit= is a
+# verdict the game computes and asserts here.
 # Rebuild tools/headless after either mutation -- eahl links the game sources in.
 #
 # eahl: --flags "?creditsshot=3&crawlskew=5&crawlpos=100&mute"

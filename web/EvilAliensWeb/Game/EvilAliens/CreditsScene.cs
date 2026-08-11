@@ -581,7 +581,10 @@ internal class CreditsScene : Scene
 		float widest = 0f;
 		for (int i = 0; i < lines.Count; i++)
 		{
-			crawlLineWidths[i] = font.MeasureString(lines[i]).X;
+			// TrimEnd: ~20 credits lines carry a trailing space, whose advance would push
+			// the line ~half a space left of centre while its neighbours sit exactly on it
+			// -- the very asymmetry this card removes (and it would inflate the clamp too).
+			crawlLineWidths[i] = font.MeasureString(lines[i].TrimEnd()).X;
 			widest = Math.Max(widest, crawlLineWidths[i]);
 		}
 		// A centred line spans cx +- w/2 (the shadow reaches 2px further left) and the
@@ -606,7 +609,7 @@ internal class CreditsScene : Scene
 		// fit= is the invariant a probe can assert without pinning font metrics: whatever the
 		// text and the requested amount, the widest line stays inside the 800px design width.
 		string fit = ((left >= 0f && right <= 800f) ? "ok" : "OVERFLOW");
-		Console.WriteLine($"[crawl] skew={requestedSkew:0.000} effective={crawlEffectiveSkew:0.000} fits={Math.Max(0f, fits):0.000} fit={fit} pivot={CrawlCenterX:0.0} lines={lines.Count} maxline={widest:0.0} span=[{left:0.0},{right:0.0}]");
+		Console.WriteLine($"[crawl] skew={requestedSkew:0.000} effective={crawlEffectiveSkew:0.000} fits={Math.Max(0f, fits):0.000} fit={fit} lines={lines.Count} maxline={widest:0.0} span=[{left:0.0},{right:0.0}]");
 	}
 
 	public override void Draw(GameTime gameTime)
@@ -625,25 +628,35 @@ internal class CreditsScene : Scene
 		{
 			// The whole crawl in one perspective batch: lines centred on CrawlCenterX at
 			// their NOMINAL grid rows, the matrix owning the taper, the row compression and
-			// the glyph keystone alike. Lines are culled by their MAPPED row centre -- the
-			// credits tail sits thousands of design px below the screen, where W crosses
-			// zero and the projective map stops meaning anything, so the guard on W is a
-			// division-safety backstop as much as a cull.
+			// the glyph keystone alike. A line is culled by mapping its ROW BOUNDS through
+			// the same W the matrix uses: row top at or below the screen bottom, or row
+			// bottom above the top, means no visible ink. The bounds cull is also what keeps
+			// fit= exact -- every visible scanline sits at screen Y < 600, where the scale is
+			// under the 1+skew the clamp was solved at. The guard on W is a division-safety
+			// backstop for the credits tail, which sits thousands of design px below the
+			// screen where W crosses zero and the projective map stops meaning anything
+			// (such lines are culled by their mapped row top long before W matters).
 			float k = skew / CrawlSkewHalfBand;
 			base.SpriteBatch.BeginPerspective(CrawlPerspectiveMatrix(skew));
 			float num = 0f;
 			for (int i = 0; i < lines.Count; i++)
 			{
-				float anchorY = textpos + num + half;
-				float w = 1f - k * (anchorY - CrawlSkewMidY);
-				if (w > 0.1f)
+				float rowTop = textpos + num;
+				float wTop = 1f - k * (rowTop - CrawlSkewMidY);
+				if (wTop > 0.1f)
 				{
-					float mappedY = CrawlSkewMidY + (anchorY - CrawlSkewMidY) / w;
-					if (mappedY > -60f && mappedY < 640f)
+					float mappedTop = CrawlSkewMidY + (rowTop - CrawlSkewMidY) / wTop;
+					if (mappedTop < 600f)
 					{
-						float x = CrawlCenterX - crawlLineWidths[i] / 2f;
-						base.SpriteBatch.DrawStringPerspective(font, lines[i], new Vector2(x, textpos + num), Color.Blue);
-						base.SpriteBatch.DrawStringPerspective(font, lines[i], new Vector2(x - 2f, textpos - 2f + num), Color.LightBlue);
+						float rowBottom = rowTop + (float)font.LineSpacing;
+						float wBottom = 1f - k * (rowBottom - CrawlSkewMidY);
+						float mappedBottom = CrawlSkewMidY + (rowBottom - CrawlSkewMidY) / wBottom;
+						if (mappedBottom > 0f)
+						{
+							float x = CrawlCenterX - crawlLineWidths[i] / 2f;
+							base.SpriteBatch.DrawStringPerspective(font, lines[i], new Vector2(x, rowTop), Color.Blue);
+							base.SpriteBatch.DrawStringPerspective(font, lines[i], new Vector2(x - 2f, rowTop - 2f), Color.LightBlue);
+						}
 					}
 				}
 				num += (float)font.LineSpacing;

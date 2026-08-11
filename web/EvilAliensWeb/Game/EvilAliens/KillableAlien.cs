@@ -176,6 +176,14 @@ public abstract class KillableAlien : AlienDrawableGameComponent, EvilAliensWeb.
 			KilledBy(other, isComboGenerator);
 			dead = true;
 			NoteDeathBegan();
+			// (card 1878b321) A DEFERRED death on a CLIENT never reaches the removal seam --
+			// the puppet is frozen, so the dying animation/mission KilledBy started cannot run
+			// its own Die() -- and the kill claim normally files at that seam. File it here
+			// instead, or the host never learns the kill happened at all: the joiner's 50-hp
+			// investment in the SpiderHelperMothership left a red, unresponsive zombie while
+			// the host's copy flew on untouched. A no-op for ordinary types (IsDead is already
+			// true here, and the removal seam still owns their claim), on the host, and offline.
+			EvilAliensWeb.Compat.Net.NetSession.OnClientDeferredKill(this);
 		}
 	}
 

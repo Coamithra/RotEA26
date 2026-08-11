@@ -103,6 +103,11 @@ namespace EvilAliensWeb.Compat.Net
         private const ushort IdSpiderBoss = 61013;
         private const ushort IdBullet2 = 61014;
         private const ushort IdSpiderBoss2 = 61015;
+        // Section 7's SpiderHelperMothership legs (card 1878b321).
+        private const ushort IdHelper = 61016;
+        private const ushort IdHelper2 = 61017;
+        private const ushort IdMine3 = 61018;
+        private const ushort IdSkull6 = 61019;
 
         public static string Run()
         {
@@ -156,6 +161,7 @@ namespace EvilAliensWeb.Compat.Net
                 Section4DeferredFromSnapshot(sb, Check, bin, game, score, planted);
                 Section5DeferredFromEvDeath(sb, Check, bin, game, score, planted);
                 Section6DeferredFromEvDying(sb, Check, bin, game, score, planted);
+                Section7HelperMothership(sb, Check, bin, game, score, planted);
                 Section8BossChoreography(sb, Check, bin, game, score, planted);
                 Section9SpiderBoss(sb, Check, bin, game, score, planted);
             }
@@ -445,6 +451,63 @@ namespace EvilAliensWeb.Compat.Net
                 Check("a catch-up replay re-announces the dying SpiderBoss (" + dyings.Count
                     + " dying entities, skull + spider)",
                     replayHasSpider && dyings.Count == 2);
+
+                // 2i-helper (card 1878b321). The SpiderHelperMothership is the fourth deferred
+                // KillableAlien: its KilledBy only FLAGS the death -- the ship keeps flying its
+                // charge/fire mission, erupting booms, and Die()s at CrashImpact seconds later.
+                // Same wire shape as 2d, so the shared leg covers its EvDying announcement.
+                HostDeferredLeg(Check, bin, game, planted, deaths, dyings, wire,
+                    "SpiderHelperMothership",
+                    () =>
+                    {
+                        SpiderHelperMothership h = SpiderHelperMothership.NewHelper(bin, game);
+                        h.Setup(10f, 0.3f, 4500f, 150f, 2500f, null);
+                        return (AlienDrawableGameComponent)(object)h;
+                    });
+
+                // 2i-claim (card 1878b321). A peer's CLAIMED kill of a deferred-death type must
+                // let the host's copy FINISH its dying animation/mission -- HandleClaim used to
+                // follow NetKill with a bare `bin.Remove` whenever the entity was still alive,
+                // which force-deleted a claimed helper mid-mission where the host's own kill let
+                // it complete the charge/fire and crash. NetKill's own NoteDeathBegan is what
+                // announces EvDying to the claimant.
+                deaths.Clear();
+                dyings.Clear();
+                SpiderHelperMothership claimed = SpiderHelperMothership.NewHelper(bin, game);
+                claimed.Setup(10f, 0.3f, 4500f, 150f, 2500f, null);
+                claimed.Position = Nowhere;
+                bin.Add((GameComponent)(object)claimed);
+                planted.Add((GameComponent)(object)claimed);
+                claimed.Position = Nowhere;
+                bool gotClaimId = NetIdRegistry.TryGetByComp((GameComponent)(object)claimed,
+                    out NetIdRegistry.Entry claimedEntry);
+                Check("PRECONDITION the claim-leg helper got a netId", gotClaimId);
+                long honoredBefore = NetSession.Metrics.ClaimsHonored;
+                peer.SendReliable(NetProtocol.EncodeClaimEvent(1,
+                    gotClaimId ? claimedEntry.Id : (ushort)0, PeerSlot));
+                wire.Pump();
+                NetSession.Update();
+                wire.Pump(); // deliver the EvDying HandleClaim's NetKill just queued
+                Check("a claimed kill of the helper was honored live",
+                    NetSession.Metrics.ClaimsHonored == honoredBefore + 1);
+                Check("...announcing EvDying to the claimant (" + dyings.Count + ")",
+                    dyings.Count == 1);
+                bin.Update();
+                wire.Pump();
+                Check("...and the host's copy was NOT force-removed mid-mission -- it finishes"
+                    + " and crashes on its own (" + deaths.Count + " EvDeath)",
+                    InWorld(game, (GameComponent)(object)claimed) && !claimed.IsDead
+                    && ((INetEntity)claimed).NetIsDying && deaths.Count == 0);
+                // The ENCODE half of the dying bit -- section 7 drives the APPLY side with a
+                // hand-written byte, so this is the only leg that fails if the host's descriptor
+                // stops putting NetDying on the wire.
+                byte[] extraBuf = new byte[16];
+                int extraLen = gotClaimId
+                    ? claimedEntry.Descriptor.EncodeStateExtra(
+                        (AlienDrawableGameComponent)(object)claimed, extraBuf, 0)
+                    : 0;
+                Check("...and its state extras now carry the dying bit (bit2) for the joiner's"
+                    + " booms", extraLen >= 1 && (extraBuf[0] & 4) != 0);
 
                 // 2i. The three KillableAlien bosses. They reach NoteDeathBegan like the
                 // BattleSkull in 2d, so this is coverage rather than a new mechanism -- but the
@@ -803,6 +866,244 @@ namespace EvilAliensWeb.Compat.Net
                 NetPuppets.OnDeathBegan(IdSkull4);
                 Check("NEGATIVE a bystander puppet stays frozen and registered",
                     !bystander.Enabled && NetPuppets.LiveCount == liveBefore);
+            }
+        }
+
+        // ---- 7. SpiderHelperMothership -- the deferred death that stays ALIVE (card 1878b321) --
+        //
+        // The helper's KilledBy only FLAGS the death: the ship keeps flying its charge/fire
+        // mission for seconds, erupting booms, and Die()s at CrashImpact. That broke the generic
+        // deferred-death handling twice over on a join peer:
+        //   * releasing the puppet (EvDying, the hp fallback, or the final EvDeath) restarted its
+        //     UNREPLICATED HelperState at Setup's `enter` -- the released puppet teleported
+        //     off-screen left and REPLAYED the whole entrance/charge/fire before crashing, which
+        //     is the card's "hangs around when dead";
+        //   * a joiner's own killing blow never reached the host at all -- the claim files at the
+        //     removal seam, and a frozen puppet's deferred KilledBy never removes -- so the kill
+        //     was PHANTOM: a red, unresponsive helper tracking the host's untouched copy.
+        //
+        // The fix this section pins: the dying mission stays TRACKED frozen
+        // (NetDyingStaysReplicated -- the host streams the id for the whole remnant), the
+        // replicated dying bit drives local booms through NetDriveExtras, the final EvDeath plays
+        // the CRASH IMPACT locally (NetBeginDeferredDeath -> CrashImpact, nothing released), and
+        // a client's own deferred kill files its claim at death-began
+        // (KillableAlien.HitBy -> NetSession.OnClientDeferredKill).
+        //
+        // A real CLIENT session over a NetWire, because the claim legs need one (SendClaim guards
+        // on Active + PeerUp); the beats are driven directly like sections 3-6.
+        private static void Section7HelperMothership(StringBuilder sb, Action<string, bool> Check,
+            ComponentBin bin, Game game, ScoreVisualiser score, List<GameComponent> planted)
+        {
+            sb.Append(" 7. CLIENT -- SpiderHelperMothership: the dying mission stays TRACKED,"
+                + " the impact is local, a local kill claims at death-began (card 1878b321)\n");
+            byte helperType = TypeIdxOf(new SpiderHelperMothership(game));
+            byte mineType = TypeIdxOf(new StarMine(game));
+
+            NetWire wire = new NetWire(2);
+            InMemoryTransport ours = wire[0];
+            InMemoryTransport peer = wire[1];
+            List<byte[]> claims = new List<byte[]>();
+            void Sniff(byte[] payload, bool reliable, string from)
+            {
+                if (payload.Length >= 7 && payload[0] == NetProtocol.MsgEvent
+                    && payload[1] == NetProtocol.EvClaim)
+                {
+                    claims.Add(payload);
+                }
+            }
+            try
+            {
+                NetSession.StartForTest(game, host: false, ours, Room);
+                peer.Open(Room);
+                peer.OnData += Sniff;
+                peer.SendReliable(NetProtocol.EncodeHello(NetSession.ProtocolVersion, true,
+                    NetSession.LocalBuildHash, 0, 1, PeerToken, 0));
+                wire.Pump();
+                NetSession.Update();
+                Check("PRECONDITION a real CLIENT session paired with the scripted host",
+                    NetSession.IsClient && NetSession.PeerUp);
+
+                // 7a. The death-began beat KEEPS the puppet -- the host is still flying its
+                // mission and still streaming the id, so a release here is the mission replay.
+                int boom = CountType<Explosion>(game);
+                SpiderHelperMothership helper = (SpiderHelperMothership)
+                    BuildPuppet<SpiderHelperMothership>(game, IdHelper, helperType, planted);
+                Check("PRECONDITION a helper puppet was built", helper != null);
+                if (helper == null)
+                {
+                    return;
+                }
+                Check("PRECONDITION the puppet starts FROZEN", !helper.Enabled);
+                Vector2 parked = ((AlienDrawableGameComponent)(object)helper).Position;
+                int liveBefore = NetPuppets.LiveCount;
+
+                NetPuppets.OnDeathBegan(IdHelper);
+
+                Check("EvDying does NOT release the helper -- it stays frozen and tracked while"
+                    + " the host flies the dying mission (enabled=" + helper.Enabled + ", live "
+                    + liveBefore + "->" + NetPuppets.LiveCount + ")",
+                    !helper.Enabled && NetPuppets.LiveCount == liveBefore
+                    && InWorld(game, (GameComponent)(object)helper));
+                Check("...spawning no FX yet (+" + (CountType<Explosion>(game) - boom) + ")",
+                    CountType<Explosion>(game) == boom);
+                Check("...and holding its replicated position -- no restart of the unreplicated"
+                    + " HelperState at `enter`",
+                    ((AlienDrawableGameComponent)(object)helper).Position == parked);
+
+                // The hp==0 snapshot fallback re-offers the same release on the entity's every
+                // remaining turn; it must decline every time too.
+                Snapshot(IdHelper, helperType, hp: 0);
+                Snapshot(IdHelper, helperType, hp: 0);
+                Check("...as does the hp==0 snapshot fallback, twice over",
+                    !helper.Enabled && NetPuppets.LiveCount == liveBefore);
+
+                // Continued fire on the dying, tracked puppet must be INERT: without the
+                // dead-latch, a joiner who kept shooting could whittle the local hp to zero,
+                // re-enter HitBy's kill path, and file a spurious claim whose NoteKillSlot
+                // overwrote the real killer's attribution on the host. The EvDying now mirrors
+                // the host's own dead-latch (NetKill, no release), which NetApplyHp respects --
+                // so this hp write is refused and the shot below cannot become a kill.
+                helper.NetApplyHp(1); // model the puppet already whittled to one hit from zero
+                helper.CollidesWith(NetPuppets.KillerAgent(0,
+                    ((AlienDrawableGameComponent)(object)helper).Position));
+                wire.Pump();
+                Check("NEGATIVE continued fire on the dying puppet files no claim ("
+                    + claims.Count + ") -- the EvDying mirrored the host's dead-latch",
+                    claims.Count == 0);
+
+                // 7b. The replicated dying bit drives the local death booms in NetDriveExtras.
+                // NEGATIVE first: without the bit, no booms however long the driver runs -- and
+                // 180 ticks (3 s at ~6 booms/s) makes a silent run astronomically unlikely to be
+                // luck when the bit IS set (P(no boom) ~ 3e-9).
+                GameTime dt = new GameTime(TimeSpan.Zero, TimeSpan.FromTicks(166667));
+                for (int i = 0; i < 180; i++)
+                {
+                    ((INetEntity)helper).NetDriveExtras(dt);
+                }
+                Check("NEGATIVE no death booms while the dying bit is off (+"
+                    + (CountType<Explosion>(game) - boom) + " over 3s of driving)",
+                    CountType<Explosion>(game) == boom);
+                SnapshotWithExtra(IdHelper, helperType, hp: 0, new byte[] { 4 }); // bit2 = dying
+                for (int i = 0; i < 180; i++)
+                {
+                    ((INetEntity)helper).NetDriveExtras(dt);
+                }
+                Check("the replicated dying bit erupts the death booms the host is showing (+"
+                    + (CountType<Explosion>(game) - boom) + " over 3s at ~6/s)",
+                    CountType<Explosion>(game) > boom);
+
+                // 7c. The final EvDeath plays the CRASH IMPACT locally. By this moment the crash
+                // arc has already been mirrored by snapshots, so the local death is the impact
+                // itself: CrashImpact() Die()s and nothing is released to replay the mission.
+                boom = CountType<Explosion>(game);
+                float[] before = Scores(score);
+                NetPuppets.OnRemoteDeath(IdHelper, PeerSlot, Nowhere);
+                Check("the final EvDeath plays the crash impact locally (+"
+                    + (CountType<Explosion>(game) - boom) + " explosions, CrashImpact makes 3)",
+                    CountType<Explosion>(game) - boom >= 3);
+                Check("...Die()ing in place -- nothing was released to replay the mission",
+                    helper.IsDead && !helper.Enabled);
+                bin.Update();
+                Check("...and the helper leaves the world",
+                    !InWorld(game, (GameComponent)(object)helper));
+                Check("...crediting nobody and echoing no claim (" + claims.Count + " EvClaim)",
+                    SameScores(score, before) && claims.Count == 0);
+
+                // 7d. A LOCAL kill claims at death-began. The claim normally files at the
+                // removal seam, which a frozen deferred death never reaches -- so this peer's
+                // 50-hp investment used to be phantom damage the host never heard about.
+                claims.Clear();
+                SpiderHelperMothership local = (SpiderHelperMothership)
+                    BuildPuppet<SpiderHelperMothership>(game, IdHelper2, helperType, planted);
+                Check("PRECONDITION a second helper puppet was built", local != null);
+                if (local != null)
+                {
+                    liveBefore = NetPuppets.LiveCount;
+                    local.NetApplyHp(1); // one hit from dead -- HitBy's 35ms blink gate allows one
+                    local.CollidesWith(NetPuppets.KillerAgent(0,
+                        ((AlienDrawableGameComponent)(object)local).Position));
+                    wire.Pump();
+                    Check("this peer's own killing blow FILED ITS CLAIM at death-began ("
+                        + claims.Count + " EvClaim)", claims.Count == 1);
+                    Check("...naming the helper's netId and the killer's slot",
+                        claims.Count == 1 && NetProtocol.ReadU16(claims[0], 4) == IdHelper2
+                        && claims[0][6] == 0);
+                    Check("...and the puppet stays FROZEN AND TRACKED while the host finishes"
+                        + " the mission", !local.Enabled && NetPuppets.LiveCount == liveBefore
+                        && InWorld(game, (GameComponent)(object)local));
+                    Check("...reporting itself dying", ((INetEntity)local).NetIsDying);
+
+                    // The host's EvDying comes back at RTT; it must keep declining the release.
+                    NetPuppets.OnDeathBegan(IdHelper2);
+                    Check("the host's EvDying after our own kill still keeps it frozen",
+                        !local.Enabled && NetPuppets.LiveCount == liveBefore);
+
+                    // And the final EvDeath still ends it with the impact, even though the
+                    // NetKill inside OnRemoteDeath is a no-op on an entity we already killed.
+                    boom = CountType<Explosion>(game);
+                    NetPuppets.OnRemoteDeath(IdHelper2, PeerSlot, Nowhere);
+                    Check("the final EvDeath still plays the impact on a puppet WE killed (+"
+                        + (CountType<Explosion>(game) - boom) + ")",
+                        CountType<Explosion>(game) - boom >= 3 && local.IsDead);
+                    bin.Update();
+                }
+
+                // 7e. NEGATIVE: an INSTANT kill still claims at the removal seam, exactly once.
+                // Without this, a death-began hook that fired for every kill would double-claim
+                // the whole game.
+                claims.Clear();
+                StarMine mine = (StarMine)BuildPuppet<StarMine>(game, IdMine3, mineType, planted);
+                Check("PRECONDITION a StarMine puppet was built for the instant-kill control",
+                    mine != null);
+                if (mine != null)
+                {
+                    mine.NetApplyHp(1);
+                    mine.CollidesWith(NetPuppets.KillerAgent(0,
+                        ((AlienDrawableGameComponent)(object)mine).Position));
+                    wire.Pump();
+                    Check("NEGATIVE an INSTANT kill claims nothing at death-began ("
+                        + claims.Count + ")", claims.Count == 0);
+                    bin.Update();
+                    wire.Pump();
+                    Check("...and files exactly ONE claim at the removal, as before ("
+                        + claims.Count + ")", claims.Count == 1);
+                }
+
+                // 7f. The OTHER deferred types claim exactly ONCE too: a locally-killed
+                // BattleSkull claims at death-began, and its later release + self-removal must
+                // not claim again (the removal seam sees an unmapped component).
+                claims.Clear();
+                BattleSkull skull = (BattleSkull)BuildPuppet<BattleSkull>(game, IdSkull6,
+                    TypeIdxOf(new BattleSkull(game)), planted);
+                Check("PRECONDITION a BattleSkull puppet was built for the one-claim leg",
+                    skull != null);
+                if (skull != null)
+                {
+                    skull.NetApplyHp(1);
+                    skull.CollidesWith(NetPuppets.KillerAgent(0,
+                        ((AlienDrawableGameComponent)(object)skull).Position));
+                    wire.Pump();
+                    Check("a locally-killed BattleSkull claims at death-began too ("
+                        + claims.Count + ")", claims.Count == 1);
+                    NetPuppets.OnDeathBegan(IdSkull6); // the host's echo releases it
+                    int took = TickUntilGone((GameComponent)(object)skull, bin, game, 400);
+                    wire.Pump();
+                    Check("...and its release + own removal claims NOTHING more ("
+                        + claims.Count + " after " + took + " ticks)",
+                        claims.Count == 1 && !InWorld(game, (GameComponent)(object)skull));
+                }
+            }
+            finally
+            {
+                peer.OnData -= Sniff;
+                NetSession.Stop("helper death harness finished");
+                bin.TopOfTickFlush();
+                Check("the client session was stopped and left nothing Active", !NetSession.Active);
+                // Stop() disables the puppet layer with the session; sections 8 and 9 still
+                // need it, exactly as Run() enabled it after section 2's host session.
+                NetPuppets.Enable(game);
+                // The scripted host's granted seat, as in section 2's teardown.
+                NetHost.Current.Oracle.ResetPlayers();
             }
         }
 

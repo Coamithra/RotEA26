@@ -416,7 +416,12 @@ namespace EvilAliensWeb.Compat.Net
             public Vector2 Pos;
             public ushort Points;
             public byte PaidMask;
-            public bool OneUp; // extra-life powerup: a late claim must still AddLife (lives are host-authoritative)
+            // Pickup TYPE, null for anything that is not a powerup (06ac5df2 follow-up; was a
+            // bare OneUp bool). Carrying the type is what lets a claim landing AFTER the removal
+            // flush still run the full remote-pickup apply -- AddLife for a OneUp, and
+            // ApplyRemotePowerup (HUD icon, ship mirror, cue) for every type -- instead of the
+            // flushed side of the window silently dropping everything but the extra life.
+            public Powerup.PowerupType? Pickup;
         }
 
         private static readonly Dictionary<ushort, DeathRecord> recentDeaths = new Dictionary<ushort, DeathRecord>();
@@ -1818,6 +1823,13 @@ namespace EvilAliensWeb.Compat.Net
         // PlayerShip.CollidesWith.
         internal static void ApplyRemotePowerup(INetPickup powerup, byte slot)
         {
+            ApplyRemotePowerup(powerup.NetPickupType, slot);
+        }
+
+        // The TYPE-keyed half (06ac5df2 follow-up): PayDeadClaim reaches here off the death
+        // record, where the entity itself is already out of the world.
+        internal static void ApplyRemotePowerup(Powerup.PowerupType type, byte slot)
+        {
             // Bound against the SCORE PANELS (4), not the 8 of the claim ledgers' PaidMask --
             // slot is a raw wire byte, so a corrupt or mismatched peer must not index past
             // ScoreVisualiser's fixed 4-slot list.
@@ -1825,14 +1837,14 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            score.SetPowerup(powerup.NetPickupType, slot);
+            score.SetPowerup(type, slot);
             // OwnsSlot is the double-apply guard, not a formality: the host runs this for a
             // CLIENT's claim too, so a claim naming a slot we own would otherwise re-run the
             // pickup on a ship that already took it -- a second batch of Options every time.
             // (The HUD SetPowerup above is idempotent and stays ungated.)
             if (!OwnsSlot(slot))
             {
-                FindShipForSlot(slot)?.NetApplyRemotePickup(powerup.NetPickupType);
+                FindShipForSlot(slot)?.NetApplyRemotePickup(type);
                 // Outside the ship lookup on purpose: the cue reports the pickup, not the puppet,
                 // and the collector's puppet can be dead-or-lagging between packets without that
                 // making their pickup silent.
@@ -1840,7 +1852,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             if (NetHost.Current.NetLog)
             {
-                Console.WriteLine("[net] remote powerup " + powerup.NetPickupType + " -> slot " + slot);
+                Console.WriteLine("[net] remote powerup " + type + " -> slot " + slot);
             }
         }
 
@@ -1969,7 +1981,7 @@ namespace EvilAliensWeb.Compat.Net
             // a replay of the award below.
             ushort points = (ushort)MathHelper.Clamp(e.Comp.NetPointValue, 0f, 65535f);
             RecordDeath(e.Id, pos, points, killer,
-                e.Comp.NetPickup is INetPickup pu && pu.NetPickupType == Powerup.PowerupType.OneUp,
+                e.Comp.NetPickup is INetPickup pu ? pu.NetPickupType : (Powerup.PowerupType?)null,
                 e.ClaimPaidMask);
             if (!PeerUp)
             {
@@ -1990,14 +2002,14 @@ namespace EvilAliensWeb.Compat.Net
         // whatever recentDeaths already holds for the id, so the write below stays a straight
         // assignment and a wrapped netId can never inherit a stale mask from a previous entity.
         private static void RecordDeath(ushort id, Vector2 pos, ushort points, byte killerSlot,
-            bool oneUp, byte prepaidMask)
+            Powerup.PowerupType? pickup, byte prepaidMask)
         {
             DeathRecord rec = new DeathRecord
             {
                 Pos = pos,
                 Points = points,
                 PaidMask = (byte)(prepaidMask | (killerSlot < NetProtocol.PayableSlots ? 1 << killerSlot : 0)),
-                OneUp = oneUp,
+                Pickup = pickup,
             };
             if (!recentDeaths.ContainsKey(id))
             {
@@ -2316,6 +2328,31 @@ namespace EvilAliensWeb.Compat.Net
             {
                 Console.WriteLine("[net] tx claim id=" + netId + " killer=" + killerSlot);
             }
+        }
+
+        // (card 1878b321) A CLIENT's own killing blow on a type whose KilledBy DEFERS -- the
+        // SpiderHelperMothership's crash-after-the-mission, BattleSkull's 2.5 s shrink, the
+        // surviving MarsBoss's 5 s crash. The claim normally rides NetPuppets' removal seam,
+        // but a frozen puppet's deferred death never runs its own Die(), so nothing was ever
+        // sent and the kill was PHANTOM: the host's copy flew on untouched while the joiner
+        // kept a red, unresponsive zombie. Send the claim at death-began instead, consuming
+        // the kill note HitBy just wrote (killNotes is keyed on the pooled entity, so an
+        // unconsumed one could attribute a later death). No double claim: the puppet is only
+        // ever removed after ReleaseDyingPuppet has unmapped it or OnRemoteDeath has guarded
+        // it, and both make the removal seam's own send a no-op. A no-op for ordinary types
+        // (their KilledBy ended in Die(), so IsDead is already true here), on the host (its
+        // kills are authoritative, announced by EvDying/EvDeath) and offline.
+        public static void OnClientDeferredKill(KillableAlien comp)
+        {
+            if (!Active || IsHost || comp == null || comp.IsDead)
+            {
+                return;
+            }
+            if (!NetPuppets.TryGetId((GameComponent)(object)comp, out ushort netId))
+            {
+                return;
+            }
+            SendClaim(netId, TakeKillNote(comp));
         }
 
         // ---- wire -> state ----------------------------------------------------------------
@@ -4009,17 +4046,17 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     // Settled, but the removal has not flushed, so there is no record yet.
                     // Settle from the Entry, off the very fields OnHostDeath will read a flush
-                    // later. No ApplyRemotePowerup even though the pickup is right here on
-                    // e.Comp -- the death record carries no pickup type, so doing it here would
-                    // make a claim behave differently on the two sides of a ComponentBin flush,
-                    // for a difference the claimant cannot observe. (Score never moves on any
-                    // claim branch since v20 -- one writer per slot, card af96bcc2.)
+                    // later -- the pickup TYPE included (06ac5df2 follow-up): the death record
+                    // carries it now, so PayDeadClaim runs the same remote-pickup apply on both
+                    // sides of a ComponentBin flush and the claimant cannot observe which side
+                    // its claim landed on. (Score never moves on any claim branch since v20 --
+                    // one writer per slot, card af96bcc2.)
                     if (payable)
                     {
                         e.ClaimPaidMask |= (byte)(1 << killerSlot);
                         PayDeadClaim(netId, killerSlot, e.Comp.Position,
                             (ushort)MathHelper.Clamp(e.Comp.NetPointValue, 0f, 65535f),
-                            e.Comp.NetPickup is INetPickup dead && dead.NetPickupType == Powerup.PowerupType.OneUp);
+                            e.Comp.NetPickup is INetPickup dead ? dead.NetPickupType : (Powerup.PowerupType?)null);
                     }
                     return;
                 }
@@ -4068,10 +4105,14 @@ namespace EvilAliensWeb.Compat.Net
                 if (e.Comp.NetKillable is INetKillable killable && payable)
                 {
                     killable.NetKill(NetPuppets.KillerAgent(killerSlot, e.Comp.Position), isComboGenerator: true);
-                    if (!e.Comp.IsDead)
-                    {
-                        bin.Remove((GameComponent)e.Comp);
-                    }
+                    // A killable still in the world after NetKill DEFERRED its death (card
+                    // 1878b321): its own Update finishes the dying animation/mission and Die()s
+                    // itself -- the SpiderHelperMothership completes its charge/fire before
+                    // crashing, exactly as an offline kill would. NetKill's own NoteDeathBegan
+                    // has already announced EvDying to the claimant. The `bin.Remove` that used
+                    // to sit here force-deleted the host's copy mid-animation -- a claimed kill
+                    // ended a helper's "sacred mission" on the spot where the host's own kill
+                    // let it finish.
                 }
                 else
                 {
@@ -4125,7 +4166,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 rec.PaidMask |= (byte)(1 << killerSlot);
                 recentDeaths[netId] = rec;
-                PayDeadClaim(netId, killerSlot, rec.Pos, rec.Points, rec.OneUp);
+                PayDeadClaim(netId, killerSlot, rec.Pos, rec.Points, rec.Pickup);
             }
         }
 
@@ -4134,14 +4175,22 @@ namespace EvilAliensWeb.Compat.Net
         // 1bfcd705): the two ledgers cover consecutive halves of the same window, so a claim's
         // effect must not depend on which side of a ComponentBin flush it landed. Since v20
         // (card af96bcc2) no SCORE moves here -- the claimant's slot has one writer, its owner,
-        // and the owner credited itself at its own kill -- so what is left is the two things the
-        // host really does own: the shared lives pool and the paid-once bookkeeping the caller
-        // keeps for it.
-        private static void PayDeadClaim(ushort netId, byte killerSlot, Vector2 pos, ushort points, bool oneUp)
+        // and the owner credited itself at its own kill -- so what is left is the shared lives
+        // pool, the paid-once bookkeeping the caller keeps for it, and (06ac5df2 follow-up) the
+        // remote-pickup apply, now that both ledgers carry the pickup type.
+        private static void PayDeadClaim(ushort netId, byte killerSlot, Vector2 pos, ushort points,
+            Powerup.PowerupType? pickup)
         {
-            if (oneUp)
+            if (pickup == Powerup.PowerupType.OneUp)
             {
                 score.AddLife(); // overlapping collectors inside the RTT window each add one
+            }
+            if (pickup != null)
+            {
+                // The full remote-pickup apply -- HUD icon, ship-side mirror, cue -- exactly what
+                // the live branch runs (06ac5df2 follow-up). Both callers guarantee `payable`, so
+                // the slot is already inside the overload's own bound.
+                ApplyRemotePowerup(pickup.Value, killerSlot);
             }
             metrics.ClaimsPaidDead++;
             if (NetHost.Current.NetLog)

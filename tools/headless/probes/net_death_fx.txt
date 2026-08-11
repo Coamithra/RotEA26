@@ -30,6 +30,18 @@
 #     one-tick-early residual on ordinary kills), and the late EvDeath. A peer JOINING IN
 #     PROGRESS mid-animation is on the fast path too -- NetIdRegistry.ReplayLive re-announces
 #     any live entity that is already dying, beside its catch-up spawn (section 2f).
+#   * Card 1878b321 is the SpiderHelperMothership, the deferred death that stays functionally
+#     ALIVE: its KilledBy only flags the death -- the ship finishes its charge/fire mission and
+#     Die()s at CrashImpact seconds later. Three holes, all pinned by section 7 plus two host
+#     legs in section 2: releasing its puppet restarted the UNREPLICATED HelperState at `enter`
+#     (a teleport off-screen and a full mission REPLAY -- the joiner's "hangs around when dead"),
+#     a joiner's own kill never filed a claim at all (the claim rides the removal seam, which a
+#     frozen deferred death never reaches -- phantom damage), and HandleClaim force-removed a
+#     claimed deferred death mid-mission on the host. Now: the dying mission stays TRACKED frozen
+#     (INetEntity.NetDyingStaysReplicated), a replicated dying bit (descriptor flags bit2, no
+#     protocol bump) drives local booms via NetDriveExtras, the final EvDeath plays the crash
+#     impact locally (NetBeginDeferredDeath -> CrashImpact), and KillableAlien.HitBy files the
+#     claim at death-began on a client (NetSession.OnClientDeferredKill).
 #   * Card ad9c8f8b is the COVERAGE half and the newest: sections 8 and 9. The mechanism above is
 #     type-agnostic by construction, so the multi-phase boss deaths were "covered" and nobody had
 #     ever WATCHED one -- the net CLAUDE.md's known-limits bullet said exactly that. Section 8
@@ -116,6 +128,22 @@
 #     snapshot-clobber legs; the second reports +32, i.e. a whole second debris burst)
 #   * a killable deferred death deleted mid-animation (pre-PR#267)        -> 9  (sections 4, 6
 #     and all three of section 8's bosses)
+#   * (card 1878b321) the keep-frozen early return deleted from
+#     NetPuppets.BeginDeferredDeath (release at EvDying is back)           -> 8  (section 7)
+#   * OnRemoteDeath releases without consulting NetBeginDeferredDeath      -> 4  (section 7's
+#     crash-impact legs -- the mission replay at the final EvDeath)
+#   * HandleClaim's force-remove of a live deferred death restored         -> 1  (section 2's
+#     claim leg, whose failure message shows the mechanism: 1 EvDeath = removed)
+#   * the OnClientDeferredKill call dropped from KillableAlien.HitBy       -> 2  (section 7's
+#     claim-at-death-began legs; the instant-kill control stays green)
+#   * the keep-frozen branch's dead-latch NetKill removed (a dying tracked
+#     puppet becomes re-killable, the review finding)                       -> 2  (section 7's
+#     continued-fire negative + the no-claim-echo check downstream of it; the spurious claim
+#     would overwrite the real killer's attribution on the host)
+#   (the dying bit's APPLY+booms side fails section 7's boom leg trivially if broken -- the
+#   suite drives it directly -- and its ENCODE side has its own leg in section 2's claim leg;
+#   section 7f pins that the other deferred types claim exactly ONCE across death-began,
+#   release and self-removal)
 # (The two NetSuppressAward mutation rows retired with the member itself -- card af96bcc2
 # deleted award suppression outright; the "nothing was credited" zeroes now discriminate via
 # the empty menu roster + the released scripted-peer seat, asserted in section 2's teardown.)
@@ -152,6 +180,7 @@ expect 3\. CLIENT -- EvDeath\(KillerSelf\) runs the mine's real self-destruct
 expect 4\. CLIENT -- hp==0 in TWO snapshot turns releases the puppet \(the fallback\)
 expect 5\. CLIENT -- an ATTRIBUTED EvDeath on a deferred-death type releases too
 expect 6\. CLIENT -- an EvDying beat releases the puppet on the EVENT tick
+expect 7\. CLIENT -- SpiderHelperMothership: the dying mission stays TRACKED
 expect 8\. CLIENT -- the multi-phase BOSS deaths run to completion on the released puppet
 expect 9\. CLIENT -- SpiderBoss, whose death does NOT run through KillableAlien
 
@@ -179,8 +208,27 @@ expect SpiderBoss: the fall ENDED on its own and the boss left the world
 expect SpiderBoss: a snapshot turn does NOT un-do the local death
 expect SpiderBoss: \.\.\.so the host's beat after it fires NO second burst
 
+# Card 1878b321's SpiderHelperMothership legs -- the deferred death whose entity stays ALIVE on
+# the host (it finishes its charge/fire mission before crashing). Individually named because each
+# is a different way the join peer's "hangs around when dead" comes back:
+#  * the keep-frozen legs failing = the release is back, and a released puppet's UNREPLICATED
+#    HelperState restarts at `enter` -- it teleports off-screen and replays its whole mission;
+#  * the crash-impact leg failing = the final EvDeath either releases (mission replay) or
+#    silently despawns (no impact where the host showed three explosions);
+#  * the claim legs failing = a joiner's kill of the helper is phantom again (no claim ever
+#    files for a deferred death that never reaches the removal seam), or the host force-removes
+#    a claimed helper mid-mission (HandleClaim's old bin.Remove).
+expect a claimed kill of the helper was honored live
+expect \.\.\.and the host's copy was NOT force-removed mid-mission
+expect SpiderHelperMothership: a deferred death broadcast exactly one EvDying
+expect EvDying does NOT release the helper
+expect the replicated dying bit erupts the death booms the host is showing
+expect the final EvDeath plays the crash impact locally
+expect this peer's own killing blow FILED ITS CLAIM at death-began
+expect NEGATIVE an INSTANT kill claims nothing at death-began
+
 expect 10\. teardown
-expect \[netdeathfx\] 149 passed, 0 failed
+expect \[netdeathfx\] 187 passed, 0 failed
 
 # LEAVE-NO-TRACE: two more runs in the SAME process, which is what makes the teardown's own
 # claims mean something. A leaked Explosion, BloodExplosion or BrainAura, an unrestored score

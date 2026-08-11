@@ -152,6 +152,7 @@ expect 3\. CLIENT -- EvDeath\(KillerSelf\) runs the mine's real self-destruct
 expect 4\. CLIENT -- hp==0 in TWO snapshot turns releases the puppet \(the fallback\)
 expect 5\. CLIENT -- an ATTRIBUTED EvDeath on a deferred-death type releases too
 expect 6\. CLIENT -- an EvDying beat releases the puppet on the EVENT tick
+expect 7\. CLIENT -- SpiderHelperMothership: the dying mission stays TRACKED
 expect 8\. CLIENT -- the multi-phase BOSS deaths run to completion on the released puppet
 expect 9\. CLIENT -- SpiderBoss, whose death does NOT run through KillableAlien
 
@@ -179,8 +180,27 @@ expect SpiderBoss: the fall ENDED on its own and the boss left the world
 expect SpiderBoss: a snapshot turn does NOT un-do the local death
 expect SpiderBoss: \.\.\.so the host's beat after it fires NO second burst
 
+# Card 1878b321's SpiderHelperMothership legs -- the deferred death whose entity stays ALIVE on
+# the host (it finishes its charge/fire mission before crashing). Individually named because each
+# is a different way the join peer's "hangs around when dead" comes back:
+#  * the keep-frozen legs failing = the release is back, and a released puppet's UNREPLICATED
+#    HelperState restarts at `enter` -- it teleports off-screen and replays its whole mission;
+#  * the crash-impact leg failing = the final EvDeath either releases (mission replay) or
+#    silently despawns (no impact where the host showed three explosions);
+#  * the claim legs failing = a joiner's kill of the helper is phantom again (no claim ever
+#    files for a deferred death that never reaches the removal seam), or the host force-removes
+#    a claimed helper mid-mission (HandleClaim's old bin.Remove).
+expect a claimed kill of the helper was honored live
+expect \.\.\.and the host's copy was NOT force-removed mid-mission
+expect SpiderHelperMothership: a deferred death broadcast exactly one EvDying
+expect EvDying does NOT release the helper
+expect the replicated dying bit erupts the death booms the host is showing
+expect the final EvDeath plays the crash impact locally
+expect this peer's own killing blow FILED ITS CLAIM at death-began
+expect NEGATIVE an INSTANT kill claims nothing at death-began
+
 expect 10\. teardown
-expect \[netdeathfx\] 149 passed, 0 failed
+expect \[netdeathfx\] 182 passed, 0 failed
 
 # LEAVE-NO-TRACE: two more runs in the SAME process, which is what makes the teardown's own
 # claims mean something. A leaked Explosion, BloodExplosion or BrainAura, an unrestored score

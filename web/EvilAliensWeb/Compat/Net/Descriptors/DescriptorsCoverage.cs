@@ -124,14 +124,22 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     //   (NetApplyHp); the pool is difficulty-scaled but the client shares the session difficulty, so
     //   it matches. Setup's many args only steer the Update-only movement/aim (inert on a frozen
     //   puppet) -- Position rides the base block -- so a benign default Setup reconstructs it.
-    // Spawn extras: none. State extras: [flags:1] (bit0 = second/mothershipB half, bit1 = charging)
-    //   followed by the 7-byte NetChargeWire block while charging.
+    // Spawn extras: none. State extras: [flags:1] (bit0 = second/mothershipB half, bit1 = charging,
+    //   bit2 = dying) followed by the 7-byte NetChargeWire block while charging.
     // The charge-swarm windup glow is a child LazerGenerator the host draws by hand; it is rebuilt on
     // the client from the replicated charge state (Compat/Net/NetChargeGlow), not a separate wire type.
-    // Best-effort: the crash-land death sequence does not play (an attributed remote death removes it).
+    // The DEFERRED death (card 1878b321): KilledBy only flags it -- the ship finishes its charge/fire
+    //   mission, erupting booms, and Die()s at CrashImpact seconds later. The dying mission is TRACKED
+    //   frozen (NetDyingStaysReplicated, so the death-began beat does NOT release the puppet), the
+    //   dying bit here drives the client's local booms (NetDriveExtras), and the final EvDeath plays
+    //   the crash impact locally (NetBeginDeferredDeath). No protocol bump: an older peer ignores the
+    //   bit and simply shows no booms, i.e. the pre-card look.
     internal sealed class SpiderHelperMothershipDescriptor : NetTypeDescriptor<SpiderHelperMothership>
     {
         private const byte FlagSecondHalf = 1;
+
+        // bit1 is NetChargeWire.FlagChargingBit1 (= 2)
+        private const byte FlagDying = 4;
 
         public override AlienDrawableGameComponent CreatePuppet(ComponentBin bin, Game game, in NetBaseState state, byte[] buf, int off, int len)
         {
@@ -154,6 +162,10 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             {
                 flags |= NetChargeWire.FlagChargingBit1;
             }
+            if (h.NetDying)
+            {
+                flags |= FlagDying;
+            }
             buf[off++] = flags;
             if (h.NetCharging)
             {
@@ -170,6 +182,7 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             }
             SpiderHelperMothership h = C(c);
             h.NetSetSpritesheetHalf((buf[off] & FlagSecondHalf) != 0);
+            h.NetSetDying((buf[off] & FlagDying) != 0);
             if ((buf[off] & NetChargeWire.FlagChargingBit1) != 0 && len >= 1 + NetChargeWire.Bytes)
             {
                 NetChargeWire.Decode(buf, off + 1, out Vector2 chargeOffset, out float windup, out float size);

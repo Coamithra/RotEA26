@@ -240,6 +240,7 @@ internal class SpiderHelperMothership : KillableAlien
 		windup = null;
 		aimTarget = null;
 		dying = false;
+		netDying = false;
 		crashProgress = 0f;
 		crashVelX = 0f;
 		color = Color.White;
@@ -530,6 +531,11 @@ internal class SpiderHelperMothership : KillableAlien
 			return;
 		}
 		Vector2 pos = base.Position + new Vector2(RandomHelper.RandomNextFloat(-90f, 90f), RandomHelper.RandomNextFloat(-20f, 120f));
+		SpawnDeathBoomAt(pos);
+	}
+
+	private void SpawnDeathBoomAt(Vector2 pos)
+	{
 		Vector2 v = oracle.BackgroundSpeed + new Vector2(0f, -DeathBoomRise);
 		Explosion explosion = Explosion.NewExplosion(collection, base.Game);
 		explosion.Setup(pos, 1f, 1f, (v).Length(), MyMath.VectorToAngle(v));
@@ -566,8 +572,9 @@ internal class SpiderHelperMothership : KillableAlien
 
 	// ---- Online co-op replication seams (Compat/Net/Descriptors/DescriptorsCoverage) --------
 	// Mirrors MarsBoss/Boss: the 4x4 mothershipB sheet ALTERNATES between the mothershipA/mothershipB
-	// halves each animation wrap in Update; that A/B choice is the one bit of Draw state the base
-	// fields (curframe/Hp) don't carry, so it is streamed. The HP-redden colorize rides the base Hp
+	// halves each animation wrap in Update; that A/B choice is a bit of Draw state the base
+	// fields (curframe/Hp) don't carry, so it is streamed (alongside the dying bit -- see the
+	// deferred-death region below). The HP-redden colorize rides the base Hp
 	// (NetApplyHp); initialhitpoints is difficulty-scaled but the client shares the session
 	// difficulty (TeamChallenge locks it), so the redden matches. The charge-swarm windup glow is a
 	// child LazerGenerator that replicates separately (see LazerGeneratorDescriptor); the fired Lazer
@@ -628,5 +635,70 @@ internal class SpiderHelperMothership : KillableAlien
 		EvilAliensWeb.Compat.Net.NetChargeGlow.Drive(ref windup, ref netChargeAim, netCharging,
 			netChargeOffset, netChargeWindup, netChargeSize, 1f, collection, base.Game,
 			base.Position, (float)gameTime.ElapsedGameTime.TotalMilliseconds);
+		if (netDying)
+		{
+			NetSpawnDeathBooms((float)gameTime.ElapsedGameTime.TotalMilliseconds);
+		}
+	}
+
+	// ---- Online co-op deferred death (card 1878b321) -----------------------------------------
+	// The helper's KilledBy only FLAGS the death -- the ship keeps flying its charge/fire mission
+	// and Die() waits for CrashImpact -- so on a join peer the generic deferred-death handling was
+	// wrong twice over: releasing the puppet at the death-began beat restarted its (unreplicated)
+	// HelperState at `enter`, teleporting it off-screen left to REPLAY the whole entrance/charge/
+	// fire before crashing -- the card's "hangs around when dead". So instead:
+	//   - the dying mission is TRACKED frozen (NetDyingStaysReplicated): the host keeps streaming
+	//     the id for the whole remnant, and position / charge glow / hp-redden all already ride
+	//     the wire. The `dying` flag itself replicates as a state-extra bit (the descriptor's
+	//     flags byte) so the frozen puppet can erupt the same death booms the host shows;
+	//   - the FINAL EvDeath (the host's CrashImpact) then ends it through NetBeginDeferredDeath:
+	//     by that point the crash arc has already been mirrored by snapshots, so the local death
+	//     IS the impact -- CrashImpact() Die()s, and NetPuppets skips the release.
+
+	// The host's `dying` flag, for the descriptor's state extras.
+	internal bool NetDying => dying;
+
+	// The replicated copy on a frozen puppet. Kept apart from `dying` on purpose: `dying` drives
+	// the frozen Update's boom spawner (never runs on a puppet) and the mission's crash branches,
+	// while this one only feeds NetSpawnDeathBooms in NetDriveExtras.
+	private bool netDying;
+
+	internal void NetSetDying(bool value)
+	{
+		netDying = value;
+	}
+
+	// Client-side copy of SpawnDeathBooms for a frozen dying puppet. Private RNG, never
+	// RandomHelper -- the Quad/ShipConnector rule: a per-puppet-per-tick cosmetic must not pull
+	// the shared gameplay generator out from under this peer's other consumers.
+	private static readonly System.Random netBoomRandom = new System.Random();
+
+	private void NetSpawnDeathBooms(float dtMs)
+	{
+		if (netBoomRandom.NextDouble() * 1000.0 >= (double)(DeathBoomRate * dtMs))
+		{
+			return;
+		}
+		Vector2 pos = base.Position + new Vector2(
+			(float)netBoomRandom.NextDouble() * 180f - 90f,
+			(float)netBoomRandom.NextDouble() * 140f - 20f);
+		SpawnDeathBoomAt(pos);
+	}
+
+	private protected override bool NetDyingStaysReplicatedSelf => true;
+
+	// Reached from the FINAL EvDeath (NetPuppets.OnRemoteDeath consults the seam before
+	// releasing a deferred killable). The host has just run CrashImpact, and the crash arc was
+	// already mirrored by snapshots -- so the local death is the impact itself, at the
+	// replicated crash-end position. Die() inside CrashImpact queues the removal, so the caller
+	// releases nothing. Idempotent: a second beat finds IsDead and does nothing.
+	private protected override bool NetBeginDeferredDeathSelf()
+	{
+		if (!IsDead)
+		{
+			dying = true;
+			CrashImpact();
+		}
+		return true;
 	}
 }

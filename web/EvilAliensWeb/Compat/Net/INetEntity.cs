@@ -142,13 +142,29 @@ namespace EvilAliensWeb.Compat.Net
 
         // The client half of the same: run this type's own multi-phase death locally, so the
         // released puppet's Update has something to finish. Return false for "I have no deferred
-        // death of my own", which is the base answer and the answer for every KillableAlien
-        // (NetPuppets reaches those through INetKillable.NetKill instead). The caller has
-        // already claimed the award slot, so an implementation may run its real death path
-        // verbatim, AwardScoreToAll included. It must be IDEMPOTENT -- this peer may already
-        // have run the same death off its own collision -- and must not remove the component,
-        // or there is nothing left to release.
+        // death of my own", which is the base answer and the answer for almost every
+        // KillableAlien (NetPuppets reaches those through INetKillable.NetKill instead). The
+        // caller has already claimed the award slot, so an implementation may run its real death
+        // path verbatim, AwardScoreToAll included. It must be IDEMPOTENT -- this peer may
+        // already have run the same death off its own collision. An implementation reached from
+        // the death-began beat must not remove the component, or there is nothing left to
+        // release; one reached from the FINAL EvDeath (OnRemoteDeath consults this before
+        // releasing a deferred killable -- card 1878b321) may finish the death outright, Die()
+        // included, and no release then happens (the SpiderHelperMothership's crash impact).
         bool NetBeginDeferredDeath();
+
+        // (card 1878b321) A deferred death whose entity stays functionally ALIVE on the host:
+        // the SpiderHelperMothership keeps flying its charge/fire mission for seconds after the
+        // killing blow and only crashes at the END of it, so the death-began beat must NOT
+        // release its puppet -- the host keeps streaming the id for the whole remnant, and a
+        // release would strand a puppet whose own state machine restarts from Setup (the
+        // HelperState is not replicated: it teleported off-screen left and replayed the whole
+        // entrance/charge/fire, the card's "hangs around when dead"). True = keep the frozen
+        // puppet tracking (position, charge glow, the replicated dying flag's booms); the final
+        // EvDeath then ends it through NetBeginDeferredDeath. Default false: for every other
+        // type death-began means the entity is functionally gone and only its animation
+        // remains, which is what the release is for.
+        bool NetDyingStaysReplicated { get; }
 
         // ---- the two discriminants an interface cannot carry as a type test --------------
         //

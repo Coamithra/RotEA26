@@ -1113,6 +1113,8 @@ public class PlayerShip : AlienDrawableGameComponent
 		// used to substitute for a ship that had never fired.
 		NetShotCount = 0;
 		NetLastFireAim = 4.712389f;
+		netAsplodeBits = 0;
+		netBounceBits = 0;
 		netAppliedShotCount = 0;
 		netShotBaselineSet = false;
 		netShotsPending = 0;
@@ -1331,6 +1333,20 @@ public class PlayerShip : AlienDrawableGameComponent
 
 	internal float NetLastFireAim { get; private set; }
 
+	// Roll rings (card 950bb70a, protocol v21): bit i = this ship's asplode / bounce roll for
+	// the shot NetShotCount-i (bit 0 = the newest counted shot), shifted in SpawnShot beside
+	// the rolls they record. They ride the ship/friend stream so the peer's puppet spends the
+	// owner's OUTCOME per bullet instead of re-rolling its own percentage. Reset with
+	// NetShotCount in the per-life block: a pooled ship inheriting the previous life's ring
+	// would hand its first owed shots someone else's rolls.
+	private byte netAsplodeBits;
+
+	private byte netBounceBits;
+
+	internal byte NetAsplodeBits => netAsplodeBits;
+
+	internal byte NetBounceBits => netBounceBits;
+
 	// Receive side, for a Remote / RemoteFriend puppet: the last count we have acted on, whether
 	// we have one at all yet, and the shots still owed (a lossy or bursty link can deliver a
 	// delta > 1, which drains one per tick rather than stacking bullets on one point).
@@ -1456,7 +1472,7 @@ public class PlayerShip : AlienDrawableGameComponent
 	// local ones. The count is what paces them (card a45b78f6) -- NOT a local cadence gate,
 	// which would re-derive a rate the owner has already measured for us and get it wrong
 	// whenever a packet was lost, late or early.
-	internal void NetApplyRemoteState(Vector2 pos, float aim, byte shotCount, int shotsPerSec, float bulletLife)
+	internal void NetApplyRemoteState(Vector2 pos, float aim, byte shotCount, int shotsPerSec, float bulletLife, byte asplodeBits, byte bounceBits)
 	{
 		base.Position = pos;
 		Speed = 0f;
@@ -1492,7 +1508,18 @@ public class PlayerShip : AlienDrawableGameComponent
 		if (netShotsPending > 0)
 		{
 			netShotsPending--;
-			SpawnShot(aim);
+			// This shot's distance back from the packet's newest counted shot is exactly the
+			// backlog still in front of it, so its rolls are that bit of the rings (card
+			// 950bb70a). A backlog deeper than the ring reads as no-roll rather than someone
+			// else's bit -- and is genuinely unreachable, not merely unlikely: the delta is
+			// computed once per TICK against the buffer's newest sample (bunched packets
+			// collapse into one delta, bounded by NetMaxCatchUpShots = 6), the drain is one
+			// per tick, and refilling faster than it drains would take > 60 shots/s against
+			// the 18/s fire-rate cap.
+			int back = netShotsPending;
+			bool bounce = back < 8 && ((bounceBits >> back) & 1) != 0;
+			bool asplode = back < 8 && ((asplodeBits >> back) & 1) != 0;
+			SpawnShotForced(aim, bounce, asplode);
 		}
 	}
 
@@ -3911,19 +3938,36 @@ public class PlayerShip : AlienDrawableGameComponent
 	}
 
 	// The shot itself, factored out of FireAt so the co-op puppet path can spawn a replicated
-	// shot through the REAL construction (bounce/asplode rolls, cue and all) without also
-	// inheriting the local cadence gate -- the receiver is paced by the owner's counter, and
-	// gating it a second time here is the arithmetic card a45b78f6 deleted.
+	// shot through the REAL construction (cue and all) without also inheriting the local
+	// cadence gate -- the receiver is paced by the owner's counter, and gating it a second time
+	// here is the arithmetic card a45b78f6 deleted.
+	//
+	// The bounce/asplode ROLLS live only on this locally-driven path (card 950bb70a): each
+	// outcome is recorded into an 8-bit ring beside the shot it belongs to (bit 0 = the shot
+	// FireAt just counted) and rides MsgShipState/MsgFriendState, so the puppet spends the
+	// owner's outcome (SpawnShotForced) instead of re-rolling -- which bullets pop a mini-blast
+	// used to be an independent coin flip per screen. Both Next(100) draws stay unconditional
+	// and in this order, so the offline RNG stream is byte-identical to the pre-card build.
 	private void SpawnShot(float direction)
+	{
+		bool bounce = (float)RandomHelper.Random.Next(100) < bouncebulletspercentage;
+		bool asplode = (float)RandomHelper.Random.Next(100) < asplodingbulletspercentage;
+		netBounceBits = (byte)((netBounceBits << 1) | (bounce ? 1 : 0));
+		netAsplodeBits = (byte)((netAsplodeBits << 1) | (asplode ? 1 : 0));
+		SpawnShotForced(direction, bounce, asplode);
+	}
+
+	// The roll-free half: the puppet path enters here with the OWNER's outcomes off the wire.
+	private void SpawnShotForced(float direction, bool bounce, bool asplode)
 	{
 		Bullet bullet = Bullet.NewBullet(collection, base.Game);
 		bullet.Setup(base.Position, direction, bulletlifetime, player);
-		if ((float)RandomHelper.Random.Next(100) < bouncebulletspercentage)
+		if (bounce)
 		{
 			bullet.SetBouncing(bounceamount);
 			bullet.SetSplit(bulletsSplit);
 		}
-		if ((float)RandomHelper.Random.Next(100) < asplodingbulletspercentage)
+		if (asplode)
 		{
 			bullet.SetAsploding(asplodingbulletssize);
 		}

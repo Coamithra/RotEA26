@@ -1252,27 +1252,35 @@ site now lives under:
   GOTCHA: the shared `groupRT` is **grow-only** and `BeginGroupFlatten`'s `Clear` is whole-RT, so
   the largest group ever flattened in a session sets the clear cost of every later one. Compare box
   sizes on FRESH page loads, and don't mix a swarm-sized group with per-sprite ones in one scene.
-- **The post-level text crawl has a Star Wars taper, and it is CLAMPED, not the card's number**
-  (card bee8f0e0, `CreditsScene`). Each line draws at a uniform scale easing from `1+skew` at the
-  screen bottom through 1.0 at mid screen to `1-skew` at the top, scaled about the crawl block's
-  own centre (`position = pivot`, `origin = pivot - x`, so it is `pos` exactly at scale 1) and
-  about each line's own grid-row centre vertically. **DRAW-TIME ONLY** -- lines keep their nominal
-  `textpos + i*LineSpacing` rows, so the scroll, the line-index math, the Cast handoff and the
-  fade timers are untouched, and `?crawlskew=0` short-circuits to the original two `DrawString`s.
-  - **The card asked for +-20% and that DOES NOT FIT.** The widest line of all three crawls is
-    ~661-669 of the 800 design px, so +20% is ~803 px -- wider than the screen, at any pivot --
-    and it ate the last characters of "...upon the solar system." The requested amount is
-    therefore clamped to the largest that keeps the widest line inside the design width, which
-    the shipped crawls saturate at **0.081 (levels 1-2) / 0.095 (level 3)** -- different values
-    off different text, which is what a derived clamp looks like. So `DefaultCrawlSkew = 0.2f`
-    (kept on the file-wide `Default*` naming convention) is the ASK; read the
-    `[crawl] skew=... effective=... fit=ok` line for what is drawn. The clamp is derived from the
-    measured text, so any `?crawlskew=` value is safe and simply saturates -- and if the credits
-    text is ever edited, it re-derives.
-  - **Do not "fix" the clamp by making the crawl smaller.** Re-baselining the whole crawl by
-    ~0.92 so the full +-20% fits was considered and declined (it shrinks mid-screen text by 8%
-    and the top by 26%, against a card that said "fairly minimal"); mid-screen staying
-    pixel-identical to the 2008 crawl is the property that was chosen instead.
+- **The post-level text crawl is a true one-point PERSPECTIVE, centred, and the amount is
+  CLAMPED** (card bee8f0e0's taper, reworked by card eac38cae, `CreditsScene`). Every line is
+  CENTRED on x=400 and the whole crawl draws in ONE batch through a projective matrix
+  (`CrawlPerspectiveMatrix` -> `SpriteBatchWrapper.BeginPerspective`, which premultiplies it
+  onto `RenderScale.Matrix`): the block's edges converge symmetrically (the card's "triangle"),
+  line spacing compresses toward the top, and each glyph quad keystones toward the vanishing
+  point -- the "letters more slanted" half, which the old per-line uniform scale could not do.
+  The on-screen scale is exactly LINEAR in screen Y (`s = 1 + skew*(screenY-300)/300` falls out
+  of the `W = 1 - k*(y-300)` map), so the visible taper keeps the shape the probes always
+  pinned. **DRAW-TIME ONLY** -- lines keep their nominal `textpos + i*LineSpacing` rows, so the
+  scroll, the line-index math, the Cast handoff and the fade timers are untouched, and
+  `?crawlskew=0` short-circuits to the original flat LEFT-ALIGNED 2008 `DrawString`s.
+  - **KNI really does GPU perspective through a SpriteBatch Begin matrix** -- `SpriteEffect.
+    OnApply` folds the matrix as a full 4x4 product (the M14/M24/M44 column survives) into the
+    shader uniform, so the divide is per-vertex and UVs interpolate perspective-correct.
+    **GOTCHA: layerDepth rides the divide too** (`z' = z/W`), so a draw at the crawl's usual
+    depth 1 crosses the far clip plane wherever `W < 1` and the BOTTOM HALF of the screen
+    silently vanishes -- `DrawStringPerspective` pins depth 0 for that reason. Lines whose
+    nominal row sits far below the screen cross `W <= 0` (the credits tail is thousands of px
+    down), so the Draw loop culls on mapped Y with a `W > 0.1` backstop.
+  - **The +-20% ask still does not QUITE fit, but centring nearly closed the gap.** The widest
+    line is ~661-669 of the 800 design px; centred, it grows into both margins, so the clamp
+    saturates at **~0.177-0.185** (per crawl, off its own text) instead of the old left-aligned
+    layout's 0.081/0.095. `DefaultCrawlSkew = 0.2f` is the ASK; read the
+    `[crawl] skew=... effective=... fit=ok` line for what is drawn. Any `?crawlskew=` value is
+    safe and simply saturates; if the credits text is edited, the clamp re-derives.
+  - **Centring supersedes bee8f0e0's "mid-screen pixel-identical to 2008" property** -- card
+    eac38cae (owner) explicitly asked for equal left/right margins, which left-aligned text
+    cannot give. The 2008-identical crawl survives intact behind `?crawlskew=0`.
   - Rig: **`?creditsshot=<1|2|3>`** boots straight into the crawl for that level (the only other
     route is finishing a level, or `?level=Level2&win` -- `?win` is LEVEL-2-ONLY, see "Debug flags"),
     **`?crawlpos=<designY>`** parks the scroll so
@@ -1375,6 +1383,26 @@ site now lives under:
     remote peer's (`PlayerShip.NetDoBlast`) go Setup -> `Add` -> `Initialize`, so the puppet
     ripples too with zero net plumbing. It is Draw-time only: no gameplay state, no new traffic,
     co-op determinism and the build-hash compat key untouched.
+  - **The ring FOLLOWS its blast, in location and duration (card 03c379f2).** `PlayerShip.Update`
+    drags the live `Blast` with the ship every tick, so a ring parked at the detonation point was
+    left behind the explosion it decorates -- and its fixed 0.75 s life ended 0.25..4.25 s before
+    the blast's own `1000ms * (power+1)`. `Fire` now returns a generation TOKEN and seeds the
+    ring's duration from the blast's real lifetime; `Blast.Update` pushes its live position
+    through `BombRipple.MoveRing(token, pos)` -- so the local bomb, a remote peer's bomb (same
+    `blast` field) and the respawn pop all follow with no per-caller code, and a stale token (ring
+    evicted by a fifth bomb, pool-recycled Blast) no-ops instead of dragging someone else's ring.
+    `DefaultDuration` 0.75 s is only the FALLBACK for a ring fired without a lifetime;
+    `?rippleduration=` (and the slider) still overrides everything, which is what keeps the tuner
+    and `bomb_ripple.txt`'s pinned expiry window valid. The `?ripplephase=` parked ring carries
+    the duration a real bomb of `?ripplepower=` would (`(1+power)` s), so the scrub maps phase
+    like a real detonation. Verify as DATA: `eaRipple.state()` now reports each live ring's
+    centre + elapsed/resolved-duration; **`eaRipple.blast(x,y,power)` / `.blastMove(x,y)`**
+    (`eval RippleBlast` / `RippleBlastMove`) spawn and drag a REAL `Blast` through the
+    ComponentBin -- the wiring rig, because `eaRipple.fire` never touches `Blast` (menu or
+    throwaway boot only; the blast is genuine and collides). Decision layer pinned by
+    `logic_probe`'s `ProbeBombRippleFollow`, wiring by
+    `tools/headless/probes/bomb_ripple_follow.txt`; a ring at the wrong place moves no counter
+    and draws a plausible frame, so the probes are the only thing that would say so.
   - **Four slots** (a fifth ring evicts the oldest), each a separate `float4` uniform rather than
     a `float4[4]` array -- a plain uniform is the form MojoShader -> BlazorGL GLSL is guaranteed
     to handle. Distances are **aspect-corrected** (`Aspect` = target W/H) so the front is a circle
@@ -1391,7 +1419,8 @@ site now lives under:
   - **Known property, not a bug: as a post pass it distorts the HUD/score where the ring reaches
     them.** The radius is bounded and the HUD sits in the corners; `?rippleradius=` limits reach.
     A pre-HUD seam would need a new hook inside `DrawInner` and is deliberately out of scope.
-  - Baked defaults (`BombRipple.Default*`): amplitude 0.018, radius 0.55, duration 0.75 s, width
+  - Baked defaults (`BombRipple.Default*`): amplitude 0.018, radius 0.55, duration 0.75 s (the
+    no-lifetime FALLBACK -- a real ring runs on its blast's lifetime, see the follow bullet), width
     0.055, falloff 1.6, rim 0.10; amplitude/radius scale mildly with the bomb's powerup level.
     Minis (asploding bullets) are OFF by default behind `?ripplemini` -- a dozen at once strobes.
   - **Verify with `?ripplephase=<0..1>`** (+ `?ripplecenter=x,y`), which parks one ring and stops

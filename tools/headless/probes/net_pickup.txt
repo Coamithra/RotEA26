@@ -16,6 +16,12 @@
 #   2. The OwnsSlot gate: the HOST also runs this path for a CLIENT's claim, so a claim naming a
 #      slot we own must run no ship effect (the HUD half still lands -- the positive control that
 #      keeps the gate from being an early return).
+#  2b. THE LATE CLAIM (06ac5df2 follow-up): a claim landing after the pickup has settled AND its
+#      removal has flushed pays out of the recentDeaths record -- which carries the pickup TYPE
+#      now, so PayDeadClaim runs the same remote-pickup apply (HUD icon, ship mirror, cue) the
+#      live branch does. Pre-fix that record held only a OneUp bool, so this claim paid an extra
+#      life at most and silently dropped everything else -- reachable whenever both ships grab
+#      the same powerup inside the RTT window.
 #   3. With both armed the connector forms, and the peer's EvTetherBreak breaks it HERE too. That
 #      second half is the base GameScene.NetApplyTetherBreak body this card added: it used to be
 #      empty outside TeamChallenge, so a Linker tether hit only one screen saw left the other
@@ -66,9 +72,9 @@
 # second slot and it would report rather than assert), ?invuln so the settle cannot lose that
 # ship, ?noattract because the suite needs the LEVEL and not a demo.
 #
-# NOT COVERED HERE: card d53431b4's mute half (a remote pickup no longer plays the "powerup"
-# cue). SoundManager exposes no cue counter and adding one solely for a test would be a
-# production field with no other reader.
+# NOT COVERED HERE: the sound half (a remote pickup plays the "powerup" cue again -- card
+# 06ac5df2, reversing card d53431b4's mute). SoundManager exposes no cue counter and adding one
+# solely for a test would be a production field with no other reader (d53431b4's ruling, kept).
 #
 # eahl: --flags "?level=Level2&invuln&noattract"
 
@@ -80,6 +86,7 @@ expect \[net\] session start role=host .* transport=InMemory
 expect \[netpickup\] remote powerup pickups
 expect 1\. Linker -- the "2" powerup arms the collector's ship
 expect 2\. the OwnsSlot gate
+expect 2b\. late claim -- a pickup already settled AND flushed still applies
 expect 3\. with both ships armed the connector forms
 expect 4\. option count -- owner vs observer over the FULL remote sequence
 expect 5\. the sparkle
@@ -90,7 +97,7 @@ expect 9\. teardown
 # A TALLY, never a bare `expect-not FAIL`: an absence assertion passes on a run where the eval
 # never happened, and this suite short-circuits its own legs on a bad precondition. Raise the
 # count when checks are added.
-expect \[netpickup\] 33 passed, 0 failed
+expect \[netpickup\] 35 passed, 0 failed
 expect-not FAIL
 expect-not SKIP
 quit

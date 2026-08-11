@@ -132,7 +132,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             finally
             {
-                sb.Append(" 7. teardown\n");
+                sb.Append(" 8. teardown\n");
                 Teardown(sb, Check, oracle, bin, playersBefore);
                 NetHost.Current = hostBefore;
                 Check("the injected clock is handed back", ReferenceEquals(NetHost.Current, hostBefore));
@@ -309,6 +309,40 @@ namespace EvilAliensWeb.Compat.Net
                 Check("a held trigger increments once per bullet over a full second (bullets="
                     + fired + " counter+" + (byte)(after - before) + ")",
                     fired > 1 && (byte)(after - before) == fired);
+
+                // The roll RING records each outcome beside the bullet it belongs to (card
+                // 950bb70a). Range level 2 makes the bounce roll DETERMINISTIC (100%), and
+                // FirePower level 3 gives the asplode roll a 60% mix, so thirty taps see both
+                // outcomes (P of a one-sided run ~ 2e-7) while every tap's ring bit 0 must equal
+                // its own bullet's flag. This buffs the live ship's loadout for the rest of its
+                // life -- the suite is destructive-throwaway, and a respawn's Setup resets it.
+                local.PowerUp(Powerup.PowerupType.FirePower, 3, doEffect: false);
+                local.PowerUp(Powerup.PowerupType.Range, 2, doEffect: false);
+                bool paired = true;
+                bool sawAsplode = false;
+                bool sawPlain = false;
+                bool bounceAll = true;
+                for (int i = 0; i < 30 && paired; i++)
+                {
+                    SweepBullets(bin, game, 0);
+                    DebugInput.Hold("Mouse1", down: true);
+                    SenderTicks(input, local, bin, 1);
+                    DebugInput.Hold("Mouse1", down: false);
+                    Bullet b = FindBullet(game, 0);
+                    bool ringA = (local.NetAsplodeBits & 1) != 0;
+                    bool ringB = (local.NetBounceBits & 1) != 0;
+                    paired = Census(game, 0) == 1 && b != null
+                        && b.NetAsploding == ringA && b.NetBouncing == ringB;
+                    sawAsplode |= ringA;
+                    sawPlain |= !ringA;
+                    bounceAll &= ringB;
+                    SenderTicks(input, local, bin, 12);
+                }
+                Check("every tap's ring bit 0 equals its own bullet's flags over 30 mixed rolls",
+                    paired);
+                Check("the deterministic 100% bounce roll reads 1 on every tap", bounceAll);
+                Check("both asplode outcomes appeared at 60% (asplode=" + sawAsplode
+                    + " plain=" + sawPlain + ")", sawAsplode && sawPlain);
             }
             finally
             {
@@ -476,6 +510,116 @@ namespace EvilAliensWeb.Compat.Net
             Check("~1 s of held fire spawns the owner's " + shotsSoFar + " shots exactly, not one"
                 + " per packet (got " + fired + " over " + sustained.Length + " packets)",
                 fired == shotsSoFar && shotsSoFar > 1);
+
+            // ---- 7. the roll rings (card 950bb70a) --------------------------------------------
+            sb.Append(" 7. the ROLL RINGS -- the puppet spends the owner's outcomes, not its own dice\n");
+            // The puppet's own percentages are ZERO here (nothing set them), so before this card
+            // NO bullet it spawned could ever asplode or bounce -- an asploding puppet bullet
+            // below can only have come off the wire, which is what makes these legs the
+            // discriminator against the pre-card re-roll (a pre-card build fails every "carries
+            // the asplode" assertion and passes every "does not").
+            List<RollFlags> flags = BurstRolls(peer, wire, bin, game, clock, puppet, peerSlot,
+                ref shipSeq, ref shipMs, ref clockCarry, ref shotCount, inc: 1,
+                asplodeBits: 0x01, bounceBits: 0x00, dropFirst: false);
+            Check("a shot the owner rolled ASPLODE spawns an asploding, non-bouncing bullet",
+                flags.Count == 1 && flags[0].Asplode && !flags[0].Bounce);
+            flags = BurstRolls(peer, wire, bin, game, clock, puppet, peerSlot,
+                ref shipSeq, ref shipMs, ref clockCarry, ref shotCount, inc: 1,
+                asplodeBits: 0x00, bounceBits: 0x01, dropFirst: false);
+            Check("a shot the owner rolled BOUNCE spawns a bouncing, non-asploding bullet",
+                flags.Count == 1 && !flags[0].Asplode && flags[0].Bounce);
+            // A +3 step in ONE packet: the ring is POSITIONAL (bit i = shot ShotCount-i), so the
+            // three bullets must come out oldest-first carrying bits 2,1,0 -- a ring read off the
+            // wrong end, or off the packet's arrival rather than the shot's distance from the
+            // newest, scrambles this pattern.
+            flags = BurstRolls(peer, wire, bin, game, clock, puppet, peerSlot,
+                ref shipSeq, ref shipMs, ref clockCarry, ref shotCount, inc: 3,
+                asplodeBits: 0x05, bounceBits: 0x02, dropFirst: false);
+            Check("a +3 step spends bits 2/1/0 onto the three bullets in spawn order"
+                + " (asplode " + Pattern(flags, asplode: true) + " want 101,"
+                + " bounce " + Pattern(flags, asplode: false) + " want 010)",
+                flags.Count == 3
+                && flags[0].Asplode && !flags[1].Asplode && flags[2].Asplode
+                && !flags[0].Bounce && flags[1].Bounce && !flags[2].Bounce);
+            // LOSS: the packet that announced the first shot never arrives, and the next one's
+            // ring still hands BOTH bullets their own roll -- the cumulative-count property,
+            // extended to the outcomes.
+            flags = BurstRolls(peer, wire, bin, game, clock, puppet, peerSlot,
+                ref shipSeq, ref shipMs, ref clockCarry, ref shotCount, inc: 1,
+                asplodeBits: 0x02, bounceBits: 0x01, dropFirst: true);
+            Check("under LOSS the surviving packet's ring covers the dropped shot too"
+                + " (older asplodes, newest bounces)",
+                flags.Count == 2
+                && flags[0].Asplode && !flags[0].Bounce
+                && !flags[1].Asplode && flags[1].Bounce);
+        }
+
+        private struct RollFlags
+        {
+            public bool Asplode;
+            public bool Bounce;
+        }
+
+        private static string Pattern(List<RollFlags> flags, bool asplode)
+        {
+            StringBuilder p = new StringBuilder();
+            // Printed newest-first so it reads like the ring's own bit order.
+            for (int i = flags.Count - 1; i >= 0; i--)
+            {
+                RollFlags f = flags[i];
+                p.Append((asplode ? f.Asplode : f.Bounce) ? '1' : '0');
+            }
+            return p.ToString();
+        }
+
+        // Script one roll burst and return the puppet's new bullets' flags IN SPAWN ORDER --
+        // the puppet spends one owed shot per tick, so ticking one send interval at a time and
+        // scanning for the newcomer after each is what recovers the order the ring is keyed on.
+        // The quiet drain packets repeat the SAME count and rings: the count has not moved, so
+        // the bit positions of the still-owed shots are unchanged -- exactly what a real owner's
+        // stream does between shots (the ring only shifts when a shot is counted).
+        private static List<RollFlags> BurstRolls(InMemoryTransport peer, NetWire wire,
+            ComponentBin bin, Game game, PinnedNetHost clock, PlayerShip puppet, int peerSlot,
+            ref ushort shipSeq, ref uint shipMs, ref float clockCarry, ref byte shotCount,
+            int inc, byte asplodeBits, byte bounceBits, bool dropFirst)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                Deliver(peer, wire, clock, ref shipSeq, ref shipMs, ref clockCarry, shotCount, 8);
+                DriveTicks(puppet, bin);
+            }
+            SweepBullets(bin, game, peerSlot);
+            List<RollFlags> flags = new List<RollFlags>();
+            HashSet<Bullet> seen = new HashSet<Bullet>();
+            int expected = inc + (dropFirst ? 1 : 0);
+            if (dropFirst)
+            {
+                shotCount = (byte)(shotCount + 1);
+                Skip(clock, ref shipSeq, ref shipMs, ref clockCarry);
+            }
+            shotCount = (byte)(shotCount + inc);
+            Deliver(peer, wire, clock, ref shipSeq, ref shipMs, ref clockCarry, shotCount, 8,
+                asplodeBits, bounceBits);
+            GameTime gt = new GameTime(TimeSpan.Zero, TimeSpan.FromMilliseconds(TickMs));
+            for (int p = 0; p < 10 && flags.Count < expected; p++)
+            {
+                for (int t = 0; t < TicksPerSend; t++)
+                {
+                    puppet.Update(gt);
+                    bin.TopOfTickFlush();
+                    foreach (GameComponent item in (Collection<IGameComponent>)(object)game.Components)
+                    {
+                        if (item is Bullet b && b.Player() == peerSlot && seen.Add(b))
+                        {
+                            flags.Add(new RollFlags { Asplode = b.NetAsploding, Bounce = b.NetBouncing });
+                        }
+                    }
+                }
+                Deliver(peer, wire, clock, ref shipSeq, ref shipMs, ref clockCarry, shotCount, 8,
+                    asplodeBits, bounceBits);
+            }
+            SweepBullets(bin, game, peerSlot);
+            return flags;
         }
 
         // Script a burst: one packet per entry of `increments`, each advancing the peer's
@@ -531,11 +675,13 @@ namespace EvilAliensWeb.Compat.Net
         // TicksPerSend ticks = 33.33 ms at 60 Hz -- NOT the nominal 33. The clock is whole ms, so
         // the fraction is carried rather than truncated per packet.
         private static void Deliver(InMemoryTransport peer, NetWire wire, PinnedNetHost clock,
-            ref ushort shipSeq, ref uint shipMs, ref float clockCarry, byte shotCount, int shotsPerSec)
+            ref ushort shipSeq, ref uint shipMs, ref float clockCarry, byte shotCount, int shotsPerSec,
+            byte asplodeBits = 0, byte bounceBits = 0)
         {
             long step = AdvanceClock(ref shipMs, ref clockCarry);
             peer.SendStream(NetProtocol.EncodeShipState(shipSeq++, shipMs, PeerAt, Vector2.Zero,
-                4.712389f, alive: true, shotCount: shotCount, shotsPerSec, 450f));
+                4.712389f, alive: true, shotCount: shotCount, shotsPerSec, 450f,
+                scriptGate: false, asplodeBits: asplodeBits, bounceBits: bounceBits));
             wire.Pump();
             clock.Advance(step);
             NetSession.Update();
@@ -601,6 +747,18 @@ namespace EvilAliensWeb.Compat.Net
                 bin.Remove(comp);
             }
             bin.TopOfTickFlush();
+        }
+
+        private static Bullet FindBullet(Game game, int slot)
+        {
+            foreach (GameComponent item in (Collection<IGameComponent>)(object)game.Components)
+            {
+                if (item is Bullet b && b.Player() == slot)
+                {
+                    return b;
+                }
+            }
+            return null;
         }
 
         private static PlayerShip FindShip(Oracle oracle, int slot)

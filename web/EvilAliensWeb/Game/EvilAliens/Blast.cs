@@ -18,6 +18,12 @@ internal class Blast : AlienDrawableGameComponent, IAlienKiller
 
 	private int player;
 
+	// Handle on this blast's ripple ring (Compat/BombRipple, card 03c379f2): Initialize
+	// stores what Fire returned, Update pushes the live position through it so the ring
+	// follows the blast wherever PlayerShip.Update drags it. 0 = no ring (master off,
+	// mini gated); a stale one (ring evicted, this instance recycled) no-ops in MoveRing.
+	private int rippleToken;
+
 	private CollisionSimpleCircle c = new CollisionSimpleCircle(Vector2.Zero, 1f);
 
 	// Default fraction of the visible radius that deals damage, and the fade-alpha floor below
@@ -101,8 +107,10 @@ internal class Blast : AlienDrawableGameComponent, IAlienKiller
 		// both paths Setup() then Add(), and KNI runs Initialize inside the Add. Draw-time
 		// only: nothing here touches gameplay, so co-op stays deterministic. `power` is the
 		// bomb's powerup level + 1 (Setup), so hand the level back; minis have no level and
-		// are gated on ?ripplemini inside Fire.
-		EvilAliensWeb.Compat.BombRipple.Fire(base.Position, mini ? 0 : (int)power - 1, mini);
+		// are gated on ?ripplemini inside Fire. The ring is seeded with THIS blast's real
+		// lifetime and the returned token lets Update drag it along (card 03c379f2).
+		rippleToken = EvilAliensWeb.Compat.BombRipple.Fire(base.Position,
+			mini ? 0 : (int)power - 1, mini, lifetime.Duration / 1000f);
 		scale = 0f;
 		// Update() overwrites scale + color from the lifetime curve before the first Draw,
 		// so in-game this 0 baseline is never seen. The sprite harness freezes Update, though,
@@ -142,6 +150,10 @@ internal class Blast : AlienDrawableGameComponent, IAlienKiller
 	public override void Update(GameTime gameTime)
 	{
 		ApplyLifecycle(1f - lifetime.Normalized);
+		// The ripple ring follows the blast, which PlayerShip.Update drags with the ship
+		// (card 03c379f2). Pushed every tick rather than read back lazily so the ring can
+		// never track a pool-recycled instance; a dead/evicted ring makes this a no-op.
+		EvilAliensWeb.Compat.BombRipple.MoveRing(rippleToken, base.Position);
 		if (lifetime.Finished)
 		{
 			Die();

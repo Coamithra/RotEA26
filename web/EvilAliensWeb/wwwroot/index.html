@@ -641,6 +641,18 @@
             catch (e) { console.warn('[debug] eaNetFire failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: co-op respawn puppet position (card df72b051). The other player's ship used to
+        // reappear at the spot it DIED and slide fast across the screen to its real spawn point,
+        // because the dead peer's heartbeat packets carry the death position and they bridged the
+        // interpolation across the respawn. A scripted peer lives, dies and respawns across the
+        // screen; the real puppet must never be driven near the death spot again.
+        // DESTRUCTIVE: needs a live level and explodes a real Remote puppet in it, so run it in a
+        // throwaway ?level=Level2&invuln boot. Prints PASS/FAIL.
+        window.eaNetRespawnPos = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetRespawnPosTest')); }
+            catch (e) { console.warn('[debug] eaNetRespawnPos failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: co-op per-slot combo + powerup self-test (card 1a3ad45a). Round-trips the real
         // MsgHudState wire format, then drives the real PowerupData exp curve over two divergent
         // combo streams — running the OLD ungated behaviour over the identical stream first, so
@@ -1151,7 +1163,13 @@
         //                                 reaches the effect). Defaults to centre, full power.
         //   eaRipple.park(phase)        — park one ring at 0..1 of its life for a screenshot; pass
         //                                 nothing (or a negative) to un-park and go live again.
-        //   eaRipple.state()            — print the knobs + whether a ring is live.
+        //   eaRipple.state()            — print the knobs + whether a ring is live (incl. each
+        //                                 live ring's centre and elapsed/duration).
+        //   eaRipple.blast(x, y, power) — spawn a REAL Blast through the ComponentBin (draws,
+        //                                 collides, dies at its own 1..5 s lifetime), then
+        //   eaRipple.blastMove(x, y)    — reposition it the way the ship drags its blast; the
+        //                                 ring must follow (card 03c379f2). Wiring rig — use at
+        //                                 the menu or in a throwaway boot, not mid-run.
         // Every knob is resolved per frame, so a call here retunes rings already in flight.
         window.eaRipple = (master, amp, radius, duration, width, falloff, rim) => {
             const or = (v, d) => (v === undefined || v === null || isNaN(Number(v))) ? d : Number(v);
@@ -1181,6 +1199,23 @@
         window.eaRipple.state = () => {
             try { DotNet.invokeMethod('EvilAliensWeb', 'debugRippleState'); }
             catch (e) { console.warn('[debug] eaRipple.state failed (game not booted yet?): ' + e.message); }
+        };
+        // Same null/NaN-tolerant defaulting as the eaRipple(...) panel entry point above --
+        // a bare Number(x) || 0 would turn eaRipple.blast(null) into a blast at (0,0).
+        const eaRippleOr = (v, d) => (v === undefined || v === null || isNaN(Number(v))) ? d : Number(v);
+        window.eaRipple.blast = (x, y, power) => {
+            try {
+                DotNet.invokeMethod('EvilAliensWeb', 'debugRippleBlast',
+                    eaRippleOr(x, 200), eaRippleOr(y, 300), eaRippleOr(power, 2));
+            }
+            catch (e) { console.warn('[debug] eaRipple.blast failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaRipple.blastMove = (x, y) => {
+            try {
+                DotNet.invokeMethod('EvilAliensWeb', 'debugRippleBlastMove',
+                    eaRippleOr(x, 500), eaRippleOr(y, 400));
+            }
+            catch (e) { console.warn('[debug] eaRipple.blastMove failed (game not booted yet?): ' + e.message); }
         };
 
         // Debug: the respawn clock ring (card 37f3a663).

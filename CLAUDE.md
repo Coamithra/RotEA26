@@ -433,8 +433,11 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   plus `?ripplemini` to let the asploding-bullet minis ripple too (off by default). Live panel
   `eaRipple` on `?rippletune`; console `eaRipple.fire(x,y,power)` / `.park(phase)` / `.state()`
   (`eval RippleFire` / `RipplePark` / `RippleState` under `eahl`). `?ripplepower=<0..4>` gives
-  the parked ring a bomb powerup level (a maxed bomb is 1.88x the amplitude). Details: web
-  CLAUDE.md.
+  the parked ring a bomb powerup level (a maxed bomb is 1.88x the amplitude). **The ring follows
+  its blast in location and duration** (card 03c379f2 -- the blast rides the ship, so the ring
+  rides the blast, and it lives the blast's own 1-5 s life; 0.75 s is only the no-blast
+  fallback); `eaRipple.blast(x,y,power)` / `.blastMove(x,y)` are the wiring rig for that.
+  Details: web CLAUDE.md.
 - **Respawn clock ring** (card 37f3a663): the respawn countdown is a clock ring that fills, pulses
   near full and POPS into a free level-4 bomb as the ship returns (`Game/EvilAliens/
   PlayerShipSummon.cs`). **`?respawnphase=<0..1>` parks the fill at a chosen point** -- negative =
@@ -455,14 +458,15 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   without it. **`?brainhitflash`** forces the hit-flash brighten on (draw-side only, nothing is
   damaged), which no rig can time inside the real 35 ms hittimer window. e.g.
   `?harness=brainboss&brainoverlayphase=0.5&brainhitflash`.
-- **Post-level text crawl** (card bee8f0e0): the crawl now tapers like a Star Wars opening.
+- **Post-level text crawl** (cards bee8f0e0 + eac38cae): the crawl is a centred one-point
+  PERSPECTIVE like a Star Wars opening (symmetric triangle, keystone-slanted letters).
   **`?creditsshot=<1|2|3>`** boots straight into it for that level (otherwise reachable only by
   finishing a level or `?level=Level2&win` -- `?win` is LEVEL-2-ONLY, see `Compat/DebugFlags.cs`),
   **`?crawlpos=<designY>`** parks the scroll for a
-  screenshot, **`?crawlskew=<f>`** dials the taper (`0` = the flat pre-card crawl). **The amount
-  is CLAMPED to what keeps the widest line on screen and the shipped crawls saturate it at
-  0.081-0.095, not the card's 0.2** -- +20% of a 669px line does not fit 800px at any pivot. Read
-  `[crawl] skew= effective= fit=` for what is actually drawn; details in web CLAUDE.md.
+  screenshot, **`?crawlskew=<f>`** dials the taper (`0` = the flat left-aligned 2008 crawl).
+  **The amount is CLAMPED to what keeps the widest line on screen; the shipped crawls saturate
+  at ~0.177-0.185 of the 0.2 ask** (centring the lines nearly closed bee8f0e0's old 0.081-0.095
+  gap). Read `[crawl] skew= effective= fit=` for what is actually drawn; details in web CLAUDE.md.
 - **`?skullvolley`** (card d8344c17): make every `EvilSkull` (the "evil grinning face of death")
   report each beat of its volley on a `[skull]` line -- `shot=<i>/<cap>`, the fade state, whether
   a bullet actually left, and a per-rearm line whose `fired=` must always be 0. The volley length

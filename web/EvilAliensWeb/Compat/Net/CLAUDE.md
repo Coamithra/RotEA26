@@ -262,9 +262,10 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     Full re-plan, including what a second-collection `ComponentBin` would cost, in
     `plans/net-headless-sim.md`.
   - **`NetSession.HandleClaim` reads NO scene** -- it reaches `NetIdRegistry` / `bin` / `score` /
-    `Explosion` / `NetPuppets.KillerAgent`, and since card d53431b4 muted the remote pickup, no
-    longer `sound` on the pickup branch (`killable.NetKill` below still plays its own cues). So
-    the claim scenarios are MENU-runnable and leave-no-trace-able (the `eaNetSnap` shape), NOT
+    `Explosion` / `NetPuppets.KillerAgent`, and `sound` on the pickup branch (card 06ac5df2 put
+    the remote pickup cue back; `killable.NetKill` below plays its own cues besides). Sound is
+    not a scene, so the claim scenarios stay MENU-runnable and leave-no-trace-able (the
+    `eaNetSnap` shape -- audible now, like `eaNetDeathFx`'s cues), NOT
     destructive like `eaNetResetSpawn`. **That is about the transitive closure, so it was checked
     one level deeper**: `killable.NetKill` runs the real per-type `KilledBy` (explosions, cues,
     `AwardScoreToAll`), and `Boss.KilledBy` is scene-free -- but check the specific types a new
@@ -776,6 +777,14 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   trailing `[score:f32]` (`HudSlotBytes` 12 -> 16) carrying the owner's declared TOTAL, and
   `EvScoreSync` shrinks to `[lives:1]`. Three layouts moved at once, so a v19 peer would
   mis-parse all of them: a forced bump, not a convention one.
+  **v21** appends two ROLL-RING bytes to `MsgShipState` AND `MsgFriendState` (31 -> 33) -- card
+  950bb70a, see the roll-ring bullet under the remote ship's shot counter. Bit i = the owner's
+  asplode / bounce roll for the shot whose cumulative count is `ShotCount-i`, so the puppet
+  spends the owner's per-bullet OUTCOME instead of re-rolling its own percentage. Like v12 the
+  two ship layouts are FIXED WIDTH and their decoders' length gates moved 31 -> 33 with them,
+  so a v20 peer's ship frames would be refused wholesale (a frozen puppet, not a graceful
+  re-roll) -- a real bump, not a convention one; only the reverse direction tolerates the
+  extra bytes.
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -849,7 +858,10 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   - **ENEMY TELEGRAPHS ARE AUDIBLE ON THE JOINER NOW**, reversing `NetChargeGlow`'s `SetupSilent`
     and the intent behind `LazerDescriptor`'s `playSound:false`. **The rule that replaced them is
     PLAYER-vs-WORLD, and it is the line to hold:** silence is for a remote PLAYER's private
-    business (their pickups -- card d53431b4), sound is for WORLD events both players are dodging.
+    business (their summon glow), sound is for WORLD events both players are dodging. (The
+    pickup cue sat on the silent side of that line for one card -- muted by d53431b4, reversed
+    by the user in 06ac5df2 -- so treat the rule as a default the user overrides per effect,
+    not a law.)
     An inaudible windup or beam is a gameplay DISADVANTAGE for the joiner, not politeness. All four
     enemy charge glows and the enemy single-shot beam are audible; the player-ship summon glow
     (`PlayerShipSummon`, and `GameScene`'s preload prime) never went through this seam and stays
@@ -1580,10 +1592,19 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     (`EvTetherBreak` carries no connector identity, being the or-of-either-peer event
     TeamChallenge's single tether was designed around, so one peer breaking one of two live
     connectors breaks both here); fixing that means putting endpoint slots on the wire.
-  - **A remote pickup is SILENT (card d53431b4, the user's ruling).** The `"powerup"` cue is gone
-    from this path -- every powerup the other player collected used to make a noise on your
-    screen. Local pickups and local co-op are untouched; both go through `PlayerShip.CollidesWith`,
-    which still plays it.
+  - **A remote pickup is AUDIBLE (card 06ac5df2, the user's ruling -- reversing card d53431b4,
+    which was also the user's ruling).** `ApplyRemotePowerup` plays the `"powerup"` cue inside its
+    `!OwnsSlot` branch, so the other player's pickup makes the same noise on your screen a local
+    one does, on both settle paths (host `HandleClaim`, client `NetPuppets.OnRemoteDeath`). The
+    gate is what keeps the host settling a claim for its OWN slot from doubling the cue its ship
+    already played in `CollidesWith`. **The LATE claim is covered too (06ac5df2 follow-up)**: the
+    `recentDeaths` record carries the pickup TYPE now (it was a bare `OneUp` bool), so a claim
+    landing after the removal flush -- both ships grabbing one powerup inside the RTT window is
+    the ordinary route -- runs the same remote-pickup apply through `PayDeadClaim` (HUD icon,
+    ship mirror, cue) instead of paying an extra life at most and silently dropping the rest.
+    That closes a pre-existing gap the HUD icon and the Linker ship mirror shared; pinned by
+    `eaNetPickup` leg 2b. The cue itself is still NOT asserted anywhere -- `SoundManager` has no
+    cue counter, the ruling d53431b4 made and this card keeps.
   - **A remote LEVEL-UP now shows the `PowerupEffect` sparkle**, which
     `ScoreVisualiser.NetSetPowerupLevel` deliberately suppressed. `doEffect` is true **only on a
     climb of exactly ONE step**: a multi-step climb is a CATCH-UP (a JIP peer adopting a slot
@@ -2001,6 +2022,43 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
       other headless trace (two `Explosion`s and a cue into a live world). Counts `ExplodePuppet`
       only; `ExplodeFriend` is a different lifecycle and is not folded in. Not on the `[net]`
       line: it is a per-death event, not a health rate.
+- **A RESPAWN STARTS THE PUPPET FROM ITS OWN SAMPLES -- the ship buffer is CLEARED on the
+  dead->alive rising edge (card df72b051).** While a peer's ship is dead, `SendShipState` keeps
+  streaming as the heartbeat with `alive=false` and `pos = lastTxPos` -- the position the ship
+  DIED at, repeated every send interval for the whole death -- and every one of those samples
+  landed in the interpolation buffer. On the respawn the render clock (~`InterpDelayMs` behind
+  the newest sample) read the dead-period samples FIRST, so the puppet materialised at the old
+  death spot and lerped fast across the screen to the real spawn point: "the other player appears
+  on the wrong position, then gets sync'd". A both-players-die reset makes the gap seconds long
+  and the two points arbitrarily far apart. `HandleShipState` now clears the buffer (+ render
+  clock + the pop-metric baseline) on the rising edge, BEFORE adding the first alive sample.
+  - **Skipping the dead `Add`s instead is NOT enough** -- `ShipStateBuffer.Add`'s trim always
+    keeps the last two samples, so the bracketing pair straddling the death gap survives whatever
+    the gap length and the bridge remains. The edge clear is the whole fix.
+  - **Both the edge and the `remoteAlive` latch are gated on the sample being IN-ORDER** (the
+    same `T > NewestMs` test `buffer.Add` applies). The stream lane is unordered, so a stale dead
+    heartbeat delivered after the respawn's first alive packets would otherwise read as a fake
+    falling edge -- exploding the healthy puppet -- and the next alive packet's fake rising edge
+    would wipe the fresh buffer. Pre-card the raw latch merely flickered a bool; with an edge
+    CLEAR hanging off it, the gate is load-bearing.
+  - **The friend/couch channel is unreachable at its normal timeout, but NOT immune**: a dead
+    extra ship simply stops being streamed, and any real death gap exceeds the 500 ms
+    `FriendTimeoutMs`, which destroys the whole channel -- buffer included -- before the respawn
+    stream rebuilds a fresh one. HOWEVER, while the peer is STALLED or either side holds a PAUSE,
+    `TickFriends` runs the 8 s / 120 s timeouts instead, so a couch ship that dies AND respawns
+    inside such a window keeps its channel and its pre-death samples: the identical bridge, on
+    the identical code shape. Filed as its own follow-up card rather than fixed here -- a friend
+    stream has no alive edge (death = the stream stopping), so the fix is a resume-gap detection
+    with its own live-ship catch-up semantics to decide.
+  - Receiver-side only, both roles, no wire change, offline byte-identical. Verify with
+    **`eaNetRespawnPos()`** / `eval NetRespawnPos` (`Compat/Net/NetRespawnPosTest.cs`, 15
+    assertions) -- **DESTRUCTIVE** (it seats and explodes a real Remote puppet), so run it in a
+    throwaway `?level=Level2&invuln` boot; committed as
+    `tools/headless/probes/net_respawn_pos.txt`. Its section 1 models the bridge on a scratch
+    buffer through the real codec as the negative control; mutation-tested two ways failing
+    disjoint legs (disabling the clear flips exactly the two distance legs, with the puppet
+    driven straight back to A; dropping the in-order gate flips exactly the reorder leg, with
+    the stale heartbeat exploding the healthy puppet).
 - **Remote ship:** `ControlDevice.Remote` (APPEND-ONLY enum position). Joins via
   `oracle.AddPlayer(Remote)` on the first alive stream. (It used to be spawned by the GameScene's
   own SpawnAllPlayers reset flow as well, with NetSession adopting either -- that is what card
@@ -2070,7 +2128,34 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
       the old stamp read `Environment.TickCount64`, so driving it end to end would have needed a
       clock seam on `FireAt` whose only reader was the test -- the call card d53431b4 declined for
       the same reason.
-    - **Verify with `eaNetFire()`** (`Compat/Net/NetFireTest.cs`, 29 assertions;
+    - **THE PER-SHOT ROLLS RIDE THE SAME STREAM AS ROLL RINGS (card 950bb70a, protocol v21).**
+      `PlayerShip.SpawnShot` decides per bullet whether it asplodes (a mini `Blast` on death /
+      per bounce; FirePower levels set 15/30/60/75%) and whether it bounces+splits (Range
+      levels), by rolling the shared unseeded RNG -- and the puppet path re-runs that same
+      construction, so each peer used to roll its OWN dice: the RATE matched (the levels
+      replicate via `MsgHudState`) but WHICH bullets popped a mini-blast was an independent
+      coin flip per screen, which is exactly "are mini-explosions synced properly? Seems
+      random". `MsgShipState`/`MsgFriendState` now carry two 8-bit rings beside the count
+      (bit i = the roll of shot `ShotCount-i`, shifted in `SpawnShot` beside the rolls they
+      record, reset with `NetShotCount` per life -- a pooled ship must not hand its successor's
+      shots the previous life's bits); the receiver spends an owed shot with the owner's
+      outcome through `SpawnShotForced`, its distance back from the packet's newest shot being
+      exactly the backlog still in front of it. Eight bits cover every owed shot by
+      construction (`NetMaxCatchUpShots` is 6). The quiet packets between shots repeat the same
+      count and ring, so still-owed shots keep their bits under loss. Both `Next(100)` draws in
+      `SpawnShot` stay unconditional and ordered, so the offline RNG stream is byte-identical.
+      RESIDUALS, stated: the observer's mini lands where ITS re-fired bullet's own collision
+      does (~100 ms interpolated world -- same bullet, near-same place, not pixel-identical);
+      post-first-bounce trajectories still diverge (the bounce angle re-roll and clone split
+      angles stay local); and `asplodingbulletssize`/`bounceamount`/`bulletsSplit` derive from
+      the replicated levels, worst case one HUD packet stale. Verified by `eaNetFire()` legs
+      2 (sender: every tap's ring bit 0 equals its own bullet's flags, with Range's 100%
+      bounce as the deterministic row) and 7 (puppet: single-shot asplode/bounce, a +3 step
+      spending bits 2/1/0 in spawn order, and a dropped packet whose successor's ring covers
+      both shots -- the puppet's local percentages are ZERO in the rig, so an asploding puppet
+      bullet can only have come off the wire, which is what discriminates against the pre-card
+      re-roll).
+    - **Verify with `eaNetFire()`** (`Compat/Net/NetFireTest.cs`, 36 assertions;
       `tools/headless/probes/net_single_tap.txt`). **DESTRUCTIVE** like `eaNetPickup` -- it pairs a
       real host session onto the live level, fires real bullets into it AND drives the local
       player's ship through scripted input, so use a throwaway `?level=Level2&invuln` boot. Six
@@ -3362,12 +3447,29 @@ GAME FIELD only** -- the resolved scene render target, never a camera, a canvas 
 
 - **THE SERVER OWNS THE SCHEDULE, and that is the whole design.** Clients never upload
   unsolicited: the matchmaker PULLS (`{"t":"shot"}` on the room's existing signaling socket) on a
-  **global** budget of one pull per second across ALL rooms, round-robin by oldest-pulled. At <=15
-  listed rooms that is the ~15 s per-room refresh; beyond it the per-room interval stretches by
-  itself. **Degradation is staleness, never load** -- do not scale the budget with the room count.
+  **global** budget of one pull per second across ALL rooms, round-robin by oldest-pulled; beyond
+  ~15 listed rooms the per-room interval stretches by itself. **Degradation is staleness, never
+  load** -- do not scale the budget with the room count.
   The rotation is keyed on a COUNTER stamped when a pull is SENT, so a host that never answers
   forfeits its own turn and can never starve anyone; `server/signal/main.py` says why it is not a
   clock.
+  - **The schedule is GATED twice (card 97b31562), and both gates answer the "screenshots stutter
+    the game" report.** (a) **No pull is ever sent while no browser socket is connected** -- the
+    thumbnails exist only for the browse carousel, so an idle listed game pays for no captures at
+    all; once someone browses the rotation resumes on the next 1 s tick, though a room still
+    inside its floor waits the floor out first (deliberately not reset on the transition -- a
+    flapping browser socket could otherwise re-arm the every-second pulls). (b) **No single room
+    is re-pulled within a 15 s floor** (`SHOT_ROOM_MIN_INTERVAL_SECONDS`). Without the floor the
+    "~15 s per-room refresh" only emerged at 15+ rooms: a LONE listed room -- the reported
+    configuration, one host + one browsing peer on one machine -- was round-robined to EVERY 1 s
+    budget tick, and each pull is a `ResolveBackBuffer` + synchronous GPU readback in
+    `NetRoomShot.Capture` plus a `toDataURL` JPEG encode in JS, i.e. a visible 1 Hz hitch. With
+    both gates a capture is at most one frame's cost per 15 s, only while someone is actually
+    browsing -- so no threading of the capture is needed, and none was added. A PAIRED session was
+    never pulled either way (`listable()` requires an empty joiner slot). Server-side only, no
+    protocol change; both gates are mutation-tested in `server/signal/test_signal.py` (a case per
+    gate). **Deploying it is manual** -- `server/signal/README.md`'s update recipe; merging ships
+    nothing.
 - **CAPTURE IS C#, ENCODE IS JS, and the split is what makes it verifiable.**
   `Compat/Net/NetRoomShot` books one `Game1.onPostDraw`, `ResolveBackBuffer`s the scene,
   `DrawPresent`s it into a 200x150 RT (the `ScreenshotSaver.SaveScreenShot` recipe, alpha seal

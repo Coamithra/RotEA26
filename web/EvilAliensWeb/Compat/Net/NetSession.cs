@@ -110,7 +110,15 @@ namespace EvilAliensWeb.Compat.Net
         // degrades to exactly the pre-card behaviour (an ownerless beam) rather than
         // mis-parsing: the bump is the parallel batch's convention, not a forced
         // incompatibility.
-        public const byte ProtocolVersion = 20;
+        // v21 (card 950bb70a): MsgShipState / MsgFriendState grow two trailing roll-ring bytes
+        // (31 -> 33) -- bit i = the owner's asplode / bounce roll for the shot whose cumulative
+        // count is ShotCount-i, so the puppet applies the owner's per-bullet outcome instead of
+        // re-rolling and the mini-blasts land on the SAME bullets on both screens. Like v12 this
+        // is a fixed-width per-tick layout, and the decoders' length gates moved 31 -> 33 with
+        // it -- so a v20 peer's ship frames would be REFUSED wholesale (a frozen puppet, not a
+        // graceful re-roll). A real bump, not a courtesy one; only the other direction (a v20
+        // peer receiving our 33-byte frames) tolerates the extra bytes.
+        public const byte ProtocolVersion = 21;
         public const float InterpDelayMs = 100f;
 
         // ~30 Hz ship stream. INTERNAL because NetFireTest scripts its packet cadence against it.
@@ -408,7 +416,12 @@ namespace EvilAliensWeb.Compat.Net
             public Vector2 Pos;
             public ushort Points;
             public byte PaidMask;
-            public bool OneUp; // extra-life powerup: a late claim must still AddLife (lives are host-authoritative)
+            // Pickup TYPE, null for anything that is not a powerup (06ac5df2 follow-up; was a
+            // bare OneUp bool). Carrying the type is what lets a claim landing AFTER the removal
+            // flush still run the full remote-pickup apply -- AddLife for a OneUp, and
+            // ApplyRemotePowerup (HUD icon, ship mirror, cue) for every type -- instead of the
+            // flushed side of the window silently dropping everything but the extra life.
+            public Powerup.PowerupType? Pickup;
         }
 
         private static readonly Dictionary<ushort, DeathRecord> recentDeaths = new Dictionary<ushort, DeathRecord>();
@@ -1200,6 +1213,11 @@ namespace EvilAliensWeb.Compat.Net
             byte shotCount = lastTxShotCount;
             int shots = 8;
             float bulletLife = 450f;
+            // The roll rings travel beside the count they describe (card 950bb70a). A dead
+            // ship's packet carries zeros: its count has not moved, so the receiver owes no
+            // shots and never reads them.
+            byte asplodeBits = 0;
+            byte bounceBits = 0;
             if (alive)
             {
                 pos = local.GetPosition();
@@ -1210,6 +1228,8 @@ namespace EvilAliensWeb.Compat.Net
                 shotCount = AdvanceTxShots(local, ref lastTxShip, ref lastTxShipShots, ref lastTxShotCount);
                 shots = local.NetShotsPerSec;
                 bulletLife = local.NetBulletLife;
+                asplodeBits = local.NetAsplodeBits;
+                bounceBits = local.NetBounceBits;
                 lastTxPos = pos;
                 lastTxAim = aim;
                 lastTxShotCount = shotCount;
@@ -1221,7 +1241,7 @@ namespace EvilAliensWeb.Compat.Net
             // HandleShipState latches it only from a non-host peer; encoded unconditionally
             // rather than gated on the role so there is one expression, not two.
             bool scriptGate = NetScene.Current?.NetScriptHoldsShipSpawn ?? false;
-            transport.SendStream(NetProtocol.EncodeShipState(txSeq++, (uint)(now - sessionStartAt), pos, vel, aim, alive, shotCount, shots, bulletLife, scriptGate));
+            transport.SendStream(NetProtocol.EncodeShipState(txSeq++, (uint)(now - sessionStartAt), pos, vel, aim, alive, shotCount, shots, bulletLife, scriptGate, asplodeBits, bounceBits));
             metrics.StreamTx++;
         }
 
@@ -1795,11 +1815,20 @@ namespace EvilAliensWeb.Compat.Net
         // the readout and none of the ship-side effect -- see PlayerShip.NetApplyRemotePickup for
         // which types that costs and which are already covered elsewhere.
         //
-        // Card d53431b4: it is SILENT. The pickup used to play the "powerup" cue here, i.e. every
-        // powerup the other player picked up made a noise on this screen; a remote pickup is
-        // visual-only now. Local pickups and local co-op are untouched -- both go through
-        // PlayerShip.CollidesWith, which still plays it.
+        // Card 06ac5df2: it is AUDIBLE again -- the other player's pickup plays the "powerup" cue
+        // on this screen too, reversing card d53431b4's mute (which was itself the user's ruling;
+        // so is this). Gated on !OwnsSlot below with the ship-side mirror, so the host settling a
+        // claim for its OWN slot -- whose ship already played the cue in CollidesWith -- never
+        // doubles it. Local pickups and local co-op are untouched either way; both go through
+        // PlayerShip.CollidesWith.
         internal static void ApplyRemotePowerup(INetPickup powerup, byte slot)
+        {
+            ApplyRemotePowerup(powerup.NetPickupType, slot);
+        }
+
+        // The TYPE-keyed half (06ac5df2 follow-up): PayDeadClaim reaches here off the death
+        // record, where the entity itself is already out of the world.
+        internal static void ApplyRemotePowerup(Powerup.PowerupType type, byte slot)
         {
             // Bound against the SCORE PANELS (4), not the 8 of the claim ledgers' PaidMask --
             // slot is a raw wire byte, so a corrupt or mismatched peer must not index past
@@ -1808,18 +1837,22 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            score.SetPowerup(powerup.NetPickupType, slot);
+            score.SetPowerup(type, slot);
             // OwnsSlot is the double-apply guard, not a formality: the host runs this for a
             // CLIENT's claim too, so a claim naming a slot we own would otherwise re-run the
             // pickup on a ship that already took it -- a second batch of Options every time.
             // (The HUD SetPowerup above is idempotent and stays ungated.)
             if (!OwnsSlot(slot))
             {
-                FindShipForSlot(slot)?.NetApplyRemotePickup(powerup.NetPickupType);
+                FindShipForSlot(slot)?.NetApplyRemotePickup(type);
+                // Outside the ship lookup on purpose: the cue reports the pickup, not the puppet,
+                // and the collector's puppet can be dead-or-lagging between packets without that
+                // making their pickup silent.
+                sound.PlayCue("powerup");
             }
             if (NetHost.Current.NetLog)
             {
-                Console.WriteLine("[net] remote powerup " + powerup.NetPickupType + " -> slot " + slot);
+                Console.WriteLine("[net] remote powerup " + type + " -> slot " + slot);
             }
         }
 
@@ -1844,8 +1877,9 @@ namespace EvilAliensWeb.Compat.Net
             case NetFxKind.EnemyLazerFire:
                 // Entity-free: the beam itself already replicates as its own Lazer puppet, built
                 // sound-free by LazerDescriptor; this is only its report. An ENEMY telegraph is a
-                // world event both players are dodging, unlike a remote PLAYER's own pickups and
-                // summons, which stay silent (card d53431b4).
+                // world event both players are dodging, unlike a remote PLAYER's own summon glow,
+                // which stays silent. (The remote pickup cue moved sides of that line twice:
+                // muted by card d53431b4, audible again by card 06ac5df2 -- ApplyRemotePowerup.)
                 sound.PlayCue("lazershotnoloop");
                 break;
             }
@@ -1947,7 +1981,7 @@ namespace EvilAliensWeb.Compat.Net
             // a replay of the award below.
             ushort points = (ushort)MathHelper.Clamp(e.Comp.NetPointValue, 0f, 65535f);
             RecordDeath(e.Id, pos, points, killer,
-                e.Comp.NetPickup is INetPickup pu && pu.NetPickupType == Powerup.PowerupType.OneUp,
+                e.Comp.NetPickup is INetPickup pu ? pu.NetPickupType : (Powerup.PowerupType?)null,
                 e.ClaimPaidMask);
             if (!PeerUp)
             {
@@ -1968,14 +2002,14 @@ namespace EvilAliensWeb.Compat.Net
         // whatever recentDeaths already holds for the id, so the write below stays a straight
         // assignment and a wrapped netId can never inherit a stale mask from a previous entity.
         private static void RecordDeath(ushort id, Vector2 pos, ushort points, byte killerSlot,
-            bool oneUp, byte prepaidMask)
+            Powerup.PowerupType? pickup, byte prepaidMask)
         {
             DeathRecord rec = new DeathRecord
             {
                 Pos = pos,
                 Points = points,
                 PaidMask = (byte)(prepaidMask | (killerSlot < NetProtocol.PayableSlots ? 1 << killerSlot : 0)),
-                OneUp = oneUp,
+                Pickup = pickup,
             };
             if (!recentDeaths.ContainsKey(id))
             {
@@ -3369,7 +3403,35 @@ namespace EvilAliensWeb.Compat.Net
             }
             lastRxSeq = seq;
             haveRxSeq = true;
-            remoteAlive = sample.Alive;
+            // Card df72b051: a RESPAWN starts the puppet from its own samples. While the peer's
+            // ship is dead the stream keeps flowing as the heartbeat with pos = lastTxPos -- the
+            // position the ship DIED at, repeated for the whole death -- and every one of those
+            // samples lands in this buffer. Without the clear, the render clock (~InterpDelayMs
+            // behind the newest sample) reads those dead-period samples first on the respawn, so
+            // the puppet materialised at the old death spot and visibly slid across the screen to
+            // the real spawn point. Skipping the dead Adds instead is NOT enough: the buffer's
+            // trim always keeps the last pre-death sample, so the bracketing pair straddling the
+            // death gap survives and the bridge remains. Cleared on the rising edge, before the
+            // first alive sample is added, so the interpolator can never bridge a death.
+            //
+            // BOTH the edge and the alive latch are gated on the sample being IN-ORDER (the same
+            // T test buffer.Add applies): the stream lane is unordered, so a stale dead heartbeat
+            // delivered after the respawn's first alive packets would otherwise flip the latch off
+            // a sample the buffer refuses -- exploding the healthy puppet on the fake falling edge
+            // and wiping the fresh buffer when the next alive packet re-arms the rising one.
+            // The renderMs/hasLastPuppetPos resets are belt-and-braces for the ADOPT path (a
+            // scene-spawned ship taken into the Remote seat while the peer was dead, where no
+            // SpawnPuppet runs to reset them); on the ordinary respawn SpawnPuppet clears both.
+            if (!buffer.HasSamples || sample.T > buffer.NewestMs)
+            {
+                if (sample.Alive && !remoteAlive)
+                {
+                    buffer.Clear();
+                    renderMs = double.NaN;
+                    hasLastPuppetPos = false;
+                }
+                remoteAlive = sample.Alive;
+            }
             // Card 8a7772d6. HOST ONLY: the world is host-authoritative, and a client's own
             // bit describes a script that never runs. Latched raw off the newest sample, with
             // no edge detection here on purpose -- the edge belongs to the SCENE, which is not
@@ -3982,17 +4044,17 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     // Settled, but the removal has not flushed, so there is no record yet.
                     // Settle from the Entry, off the very fields OnHostDeath will read a flush
-                    // later. No ApplyRemotePowerup even though the pickup is right here on
-                    // e.Comp -- the death record carries no pickup type, so doing it here would
-                    // make a claim behave differently on the two sides of a ComponentBin flush,
-                    // for a difference the claimant cannot observe. (Score never moves on any
-                    // claim branch since v20 -- one writer per slot, card af96bcc2.)
+                    // later -- the pickup TYPE included (06ac5df2 follow-up): the death record
+                    // carries it now, so PayDeadClaim runs the same remote-pickup apply on both
+                    // sides of a ComponentBin flush and the claimant cannot observe which side
+                    // its claim landed on. (Score never moves on any claim branch since v20 --
+                    // one writer per slot, card af96bcc2.)
                     if (payable)
                     {
                         e.ClaimPaidMask |= (byte)(1 << killerSlot);
                         PayDeadClaim(netId, killerSlot, e.Comp.Position,
                             (ushort)MathHelper.Clamp(e.Comp.NetPointValue, 0f, 65535f),
-                            e.Comp.NetPickup is INetPickup dead && dead.NetPickupType == Powerup.PowerupType.OneUp);
+                            e.Comp.NetPickup is INetPickup dead ? dead.NetPickupType : (Powerup.PowerupType?)null);
                     }
                     return;
                 }
@@ -4102,7 +4164,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 rec.PaidMask |= (byte)(1 << killerSlot);
                 recentDeaths[netId] = rec;
-                PayDeadClaim(netId, killerSlot, rec.Pos, rec.Points, rec.OneUp);
+                PayDeadClaim(netId, killerSlot, rec.Pos, rec.Points, rec.Pickup);
             }
         }
 
@@ -4111,14 +4173,22 @@ namespace EvilAliensWeb.Compat.Net
         // 1bfcd705): the two ledgers cover consecutive halves of the same window, so a claim's
         // effect must not depend on which side of a ComponentBin flush it landed. Since v20
         // (card af96bcc2) no SCORE moves here -- the claimant's slot has one writer, its owner,
-        // and the owner credited itself at its own kill -- so what is left is the two things the
-        // host really does own: the shared lives pool and the paid-once bookkeeping the caller
-        // keeps for it.
-        private static void PayDeadClaim(ushort netId, byte killerSlot, Vector2 pos, ushort points, bool oneUp)
+        // and the owner credited itself at its own kill -- so what is left is the shared lives
+        // pool, the paid-once bookkeeping the caller keeps for it, and (06ac5df2 follow-up) the
+        // remote-pickup apply, now that both ledgers carry the pickup type.
+        private static void PayDeadClaim(ushort netId, byte killerSlot, Vector2 pos, ushort points,
+            Powerup.PowerupType? pickup)
         {
-            if (oneUp)
+            if (pickup == Powerup.PowerupType.OneUp)
             {
                 score.AddLife(); // overlapping collectors inside the RTT window each add one
+            }
+            if (pickup != null)
+            {
+                // The full remote-pickup apply -- HUD icon, ship-side mirror, cue -- exactly what
+                // the live branch runs (06ac5df2 follow-up). Both callers guarantee `payable`, so
+                // the slot is already inside the overload's own bound.
+                ApplyRemotePowerup(pickup.Value, killerSlot);
             }
             metrics.ClaimsPaidDead++;
             if (NetHost.Current.NetLog)
@@ -4383,7 +4453,7 @@ namespace EvilAliensWeb.Compat.Net
             hasLastPuppetPos = true;
             metrics.BufferDepthMs = (float)(buffer.NewestMs - renderMs);
             ShipSample newest = buffer.Newest;
-            ship.NetApplyRemoteState(pos, newest.Aim, newest.ShotCount, remoteShotsPerSec, remoteBulletLife);
+            ship.NetApplyRemoteState(pos, newest.Aim, newest.ShotCount, remoteShotsPerSec, remoteBulletLife, newest.AsplodeBits, newest.BounceBits);
         }
     }
 }

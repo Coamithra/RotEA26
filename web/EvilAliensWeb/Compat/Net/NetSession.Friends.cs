@@ -136,6 +136,10 @@ namespace EvilAliensWeb.Compat.Net
             // arms above protected it, so the resume starts the puppet from its own samples.
             // The clear must run BEFORE LastRxAt is refreshed (the gap is what it reads), and it
             // is what keeps the protective arms from re-opening the bridge they exist to ride out.
+            // The PRIMARY remote path deliberately has no equivalent: its respawn case is closed
+            // by the alive-edge clear in HandleShipState, and after a live-ship hiccup its lerp
+            // across the gap IS the catch-up (the ship really moved), so a friend puppet snaps
+            // where the primary glides -- a known, chosen asymmetry.
             if (ch.Buffer.HasSamples && NowMs - ch.LastRxAt > FriendTimeoutMs)
             {
                 ch.Buffer.Clear();
@@ -169,7 +173,10 @@ namespace EvilAliensWeb.Compat.Net
             // every couch/AI-friend puppet, against this very comment's stated intent. The whole
             // link being quiet past the channel's own threshold is a hiccup, not a ship death (a
             // death stops ONE slot's stream while the primary heartbeat keeps flowing), so it is
-            // recognised at the same 500 ms the channel itself times out at.
+            // recognised at the same 500 ms the channel itself times out at. `PeerStalled` is
+            // kept in the disjunction for INTENT, not effect -- it arms strictly later than the
+            // link-quiet test, so today it can never change the result; it stays so the ladder
+            // still reads (and behaves) right if the stall flag ever gains hysteresis.
             long timeout = (RemotePaused || localPaused) ? PausedPeerTimeoutMs
                 : (PeerStalled || now - lastRxStreamAt > FriendTimeoutMs) ? PeerTimeoutMs + PeerGraceMs
                 : FriendTimeoutMs;

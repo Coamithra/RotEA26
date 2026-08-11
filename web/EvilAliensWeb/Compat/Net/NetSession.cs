@@ -3278,8 +3278,10 @@ namespace EvilAliensWeb.Compat.Net
 
         // `recovered` distinguishes the two ways the banner drops: the stream actually came
         // back, versus the peer announcing a pause (which suppresses the banner but leaves
-        // the stream just as quiet -- lastRxStreamAt is only refreshed by ship state and
-        // snapshots, never by an event). Claiming a recovery in the second case would be a
+        // the stream just as quiet -- lastRxStreamAt is only refreshed by the STREAM lane:
+        // ship state, friend state and snapshots, never by an event; that source list is also
+        // what TickFriends' link-quiet arm means by "the link is alive", card 14c5943e).
+        // Claiming a recovery in the second case would be a
         // lie, and a backgrounded tab bursting out a late EvPause hits it routinely.
         private static void SetPeerStalled(bool on, bool recovered)
         {

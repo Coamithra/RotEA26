@@ -18,9 +18,8 @@
 # THE FIX (receiver-side, no wire change, both roles): NetSession.HandleShipState clears the
 # buffer (+ render clock + the pop-metric baseline) on the dead->alive RISING edge, before the
 # first alive sample is added, so a new life starts from its own samples and the interpolator can
-# never bridge a death. The friend/couch channel never had the bug: a dead extra ship simply
-# stops being streamed and any real death gap exceeds the 500 ms FriendTimeoutMs, which destroys
-# the whole channel, buffer included.
+# never bridge a death. The friend/couch channel's half is card 14c5943e (section 3 below): its
+# timeout ladder + the resume-gap clear are what keep it bridge-free.
 #
 # WHAT IT ASSERTS (Compat/Net/NetRespawnPosTest.cs carries the full reasoning):
 #   1. The bridge itself, modelled on a scratch ShipStateBuffer fed through the REAL codec -- the
@@ -59,7 +58,7 @@
 # in-order gate (latching remoteAlive raw off every packet) flips exactly the reorder leg, with
 # the stale heartbeat exploding the healthy puppet; dropping the link-quiet arm flips the hiccup
 # leg (the puppet dies at 500ms of total silence, plus the resume leg it cascades into);
-# dropping the resume-gap clear flips exactly the resume leg, at the predicted 76.2px. 23/23
+# dropping the resume-gap clear flips exactly the resume leg, at the predicted 76.2px. 24/24
 # with the fix.
 #
 # DESTRUCTIVE, so it gets a process to itself: it pairs a real host session onto the live level
@@ -91,13 +90,14 @@ expect the respawned puppet NEVER reads near the death spot
 expect and stays at the spawn point throughout
 expect a REORDERED dead heartbeat is inert: no fake death \(RemoteShipExplosions \+0\), puppet still up
 expect 3\. the friend/couch channel -- death, hiccup, and the resume-gap clear
+expect the 500ms timeout does NOT bite early -- still up at ~433ms of slot silence
 expect a couch death \(slot quiet, link alive\) destroys the channel at its 500ms timeout
 expect a 700ms LINK hiccup \(total silence\) does NOT kill the friend puppet
 expect the resumed stream starts the puppet from its OWN samples \(0px from C
 # A TALLY, never a bare `expect-not FAIL`: an absence assertion passes on a run where the eval
 # never happened, and this suite skips its live section on a bad precondition. Raise the count
 # when checks are added.
-expect \[netrespawnpos\] 23 passed, 0 failed
+expect \[netrespawnpos\] 24 passed, 0 failed
 expect-not FAIL
 expect-not SKIP
 quit

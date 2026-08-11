@@ -88,13 +88,13 @@ namespace EvilAliensWeb.Compat.Net
 
             if (GameScene.NetActiveScene == null)
             {
-                sb.Append("  SKIP section 2 (needs a live level -- boot ?level=Level2&invuln and run it there)\n");
+                sb.Append("  SKIP sections 2-3 (need a live level -- boot ?level=Level2&invuln and run it there)\n");
                 sb.Append(Tally(pass, fail));
                 return sb.ToString();
             }
             if (NetSession.Active)
             {
-                sb.Append("  SKIP section 2 (a co-op session is already up -- this suite would tear it down)\n");
+                sb.Append("  SKIP sections 2-3 (a co-op session is already up -- this suite would tear it down)\n");
                 sb.Append(Tally(pass, fail));
                 return sb.ToString();
             }
@@ -113,7 +113,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             catch (Exception ex)
             {
-                Check("section 2 ran (" + ex.GetType().Name + ": " + ex.Message + ")", false);
+                Check("sections 2-3 ran (" + ex.GetType().Name + ": " + ex.Message + ")", false);
             }
             finally
             {
@@ -337,7 +337,13 @@ namespace EvilAliensWeb.Compat.Net
             // The primary heartbeat keeps flowing, so the 500 ms friend timeout is correct and
             // must still bite: the channel (stale buffer included) is DESTROYED, which is why a
             // normal couch respawn can never bridge -- it always streams into a fresh channel.
-            for (int i = 0; i < 20; i++) // ~667 ms of friend silence under a live link
+            for (int i = 0; i < 13; i++) // ~433 ms of friend silence: under the timeout...
+            {
+                Deliver(peer, wire, clock, ref shipSeq, ref shipMs, ref clockCarry, SpawnAt, alive: true);
+            }
+            Check("the 500ms timeout does NOT bite early -- still up at ~433ms of slot silence",
+                NetSession.HasFriendPuppet(FriendSlot));
+            for (int i = 0; i < 7; i++) // ...and past it (~667 ms total)
             {
                 Deliver(peer, wire, clock, ref shipSeq, ref shipMs, ref clockCarry, SpawnAt, alive: true);
             }

@@ -444,9 +444,15 @@ async def run_tests(url: str) -> None:
     # The by-hand half below asserts EXACT rotations, which the per-room floor
     # would veto (a re-pull inside 15 s is precisely what it exists to refuse),
     # so it runs with the floor zeroed and one browser socket held open to
-    # satisfy the browser gate. The floor gets its own case (19b).
+    # satisfy the browser gate. The floor gets its own case (19b). Guarded like
+    # every other acquisition: a raise here must record a FAIL, not abort the
+    # suite, and the close at the end must survive it.
     main.SHOT_ROOM_MIN_INTERVAL_SECONDS = 0.0
-    pull_bws, _ = await browse(url, proto="4", hash="h1")
+    pull_bws = None
+    try:
+        pull_bws, _ = await browse(url, proto="4", hash="h1")
+    except Exception as e:
+        record("the by-hand half's browser socket opens", False, repr(e))
 
     # 18. a host that does not declare `shots` is never pulled
     try:
@@ -482,6 +488,12 @@ async def run_tests(url: str) -> None:
     try:
         main.SHOT_ROOM_MIN_INTERVAL_SECONDS = 3600.0
         fh, fc = await listed_host(url, shots=True)
+        # Precondition, pinned: `second is None` below only means "the floor
+        # refused a re-pull" if fc is the SOLE candidate -- a stray listed
+        # shots-room left behind by an earlier case would fail this legibly
+        # instead of turning 19b into a confusing rotation assertion.
+        stray = [r.code for r in main._pull_candidates() if r.code != fc]
+        assert not stray, f"stray pull candidates: {stray}"
         first = await main.pull_once()
         second = await main.pull_once()
         main.rooms[fc].last_pull_at = time.monotonic() - 3601.0
@@ -585,7 +597,8 @@ async def run_tests(url: str) -> None:
         record("a rate-limited shotget still gets an answer", False, repr(e))
 
     # The browser socket the by-hand half held open for the card-97b31562 gate.
-    await pull_bws.close()
+    if pull_bws is not None:
+        await pull_bws.close()
 
 
 async def main_async() -> int:

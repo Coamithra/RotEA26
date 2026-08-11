@@ -3342,8 +3342,10 @@ GAME FIELD only** -- the resolved scene render target, never a camera, a canvas 
   - **The schedule is GATED twice (card 97b31562), and both gates answer the "screenshots stutter
     the game" report.** (a) **No pull is ever sent while no browser socket is connected** -- the
     thumbnails exist only for the browse carousel, so an idle listed game pays for no captures at
-    all; the rotation resumes on the next 1 s tick once someone browses. (b) **No single room is
-    re-pulled within a 15 s floor** (`SHOT_ROOM_MIN_INTERVAL_SECONDS`). Without the floor the
+    all; once someone browses the rotation resumes on the next 1 s tick, though a room still
+    inside its floor waits the floor out first (deliberately not reset on the transition -- a
+    flapping browser socket could otherwise re-arm the every-second pulls). (b) **No single room
+    is re-pulled within a 15 s floor** (`SHOT_ROOM_MIN_INTERVAL_SECONDS`). Without the floor the
     "~15 s per-room refresh" only emerged at 15+ rooms: a LONE listed room -- the reported
     configuration, one host + one browsing peer on one machine -- was round-robined to EVERY 1 s
     budget tick, and each pull is a `ResolveBackBuffer` + synchronous GPU readback in

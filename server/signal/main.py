@@ -144,9 +144,11 @@ class Room:
         # by luck of the platform's clock, and could not be asserted at all.
         self.last_pull_seq = 0
         # ...and WHEN (monotonic). The counter above orders the rotation; this
-        # stamp enforces the per-room refresh floor (card 97b31562). 0.0 = never
-        # pulled, which sorts a fresh room straight into eligibility.
-        self.last_pull_at = 0.0
+        # stamp enforces the per-room refresh floor (card 97b31562). -inf =
+        # never pulled, unconditionally past the floor -- 0.0 would read as
+        # "pulled at boot", which on a server started at machine boot blocks
+        # every fresh room for the first floor's worth of uptime.
+        self.last_pull_at = float("-inf")
 
     def shot_age(self) -> float:
         return time.monotonic() - self.shot_at
@@ -275,9 +277,13 @@ async def pull_once() -> Room | None:
     NOTHING is pulled while no browser is connected (card 97b31562): the
     thumbnails exist only for the browse carousel, so with nobody browsing no
     host anywhere should pay the capture (a GPU readback + JPEG encode on the
-    game's own frame). The moment a browser connects, the next budget tick
-    resumes the rotation -- worst case one interval plus a browse refresh
-    before real pictures replace stock art, which is the trade the card made.
+    game's own frame). Once a browser connects the next budget tick resumes the
+    rotation, but a room still inside its per-room floor waits that floor out
+    first -- so worst case ~SHOT_ROOM_MIN_INTERVAL_SECONDS plus a browse
+    refresh of stock art before the real picture lands, the trade the card
+    made. The floor is deliberately NOT reset on the empty->non-empty browser
+    transition: a flapping browser socket could otherwise re-arm a lone host's
+    every-second pulls, the exact cost the floor exists to bound.
 
     Round-robin by construction: always the candidate whose last pull is
     oldest. Because `last_pull_seq` is stamped HERE rather than when an answer

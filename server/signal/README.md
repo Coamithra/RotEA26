@@ -59,7 +59,11 @@ pays for a capture — on the game side a pull costs a GPU readback plus a JPEG
 encode), and **no single room is re-pulled within
 `SHOT_ROOM_MIN_INTERVAL_SECONDS` (15 s)** — without the floor, the global
 budget at ONE listed room degenerated into pulling that room every second,
-which was reported as a visible once-a-second stutter on the host.
+which was reported as a visible once-a-second stutter on the host. The floor
+is not reset when browsing resumes (a flapping browser socket could otherwise
+re-arm the every-second pulls), so a room pulled just before the last browser
+left waits out the remainder of its floor before its next picture — worst
+case ~15 s of stock art after browsing resumes.
 
 **The thumbnail is a picture of the game field only** — the resolved scene
 render target, never a camera, a canvas or a page (`Compat/Net/NetRoomShot.cs`;

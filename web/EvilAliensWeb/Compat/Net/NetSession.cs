@@ -3344,6 +3344,22 @@ namespace EvilAliensWeb.Compat.Net
             }
             lastRxSeq = seq;
             haveRxSeq = true;
+            // Card df72b051: a RESPAWN starts the puppet from its own samples. While the peer's
+            // ship is dead the stream keeps flowing as the heartbeat with pos = lastTxPos -- the
+            // position the ship DIED at, repeated for the whole death -- and every one of those
+            // samples lands in this buffer. Without the clear, the render clock (~InterpDelayMs
+            // behind the newest sample) reads those dead-period samples first on the respawn, so
+            // the puppet materialised at the old death spot and visibly slid across the screen to
+            // the real spawn point. Skipping the dead Adds instead is NOT enough: the buffer's
+            // trim always keeps the last pre-death sample, so the bracketing pair straddling the
+            // death gap survives and the bridge remains. Cleared on the rising edge, before the
+            // first alive sample is added, so the interpolator can never bridge a death.
+            if (sample.Alive && !remoteAlive)
+            {
+                buffer.Clear();
+                renderMs = double.NaN;
+                hasLastPuppetPos = false;
+            }
             remoteAlive = sample.Alive;
             // Card 8a7772d6. HOST ONLY: the world is host-authoritative, and a client's own
             // bit describes a script that never runs. Latched raw off the newest sample, with

@@ -1972,6 +1972,29 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
       other headless trace (two `Explosion`s and a cue into a live world). Counts `ExplodePuppet`
       only; `ExplodeFriend` is a different lifecycle and is not folded in. Not on the `[net]`
       line: it is a per-death event, not a health rate.
+- **A RESPAWN STARTS THE PUPPET FROM ITS OWN SAMPLES -- the ship buffer is CLEARED on the
+  dead->alive rising edge (card df72b051).** While a peer's ship is dead, `SendShipState` keeps
+  streaming as the heartbeat with `alive=false` and `pos = lastTxPos` -- the position the ship
+  DIED at, repeated every send interval for the whole death -- and every one of those samples
+  landed in the interpolation buffer. On the respawn the render clock (~`InterpDelayMs` behind
+  the newest sample) read the dead-period samples FIRST, so the puppet materialised at the old
+  death spot and lerped fast across the screen to the real spawn point: "the other player appears
+  on the wrong position, then gets sync'd". A both-players-die reset makes the gap seconds long
+  and the two points arbitrarily far apart. `HandleShipState` now clears the buffer (+ render
+  clock + the pop-metric baseline) on the rising edge, BEFORE adding the first alive sample.
+  - **Skipping the dead `Add`s instead is NOT enough** -- `ShipStateBuffer.Add`'s trim always
+    keeps the last two samples, so the bracketing pair straddling the death gap survives whatever
+    the gap length and the bridge remains. The edge clear is the whole fix.
+  - **The friend/couch channel never had the bug**: a dead extra ship simply stops being streamed,
+    and any real death gap exceeds the 500 ms `FriendTimeoutMs`, which destroys the whole channel
+    -- buffer included -- before the respawn stream rebuilds a fresh one.
+  - Receiver-side only, both roles, no wire change, offline byte-identical. Verify with
+    **`eaNetRespawnPos()`** / `eval NetRespawnPos` (`Compat/Net/NetRespawnPosTest.cs`, 14
+    assertions) -- **DESTRUCTIVE** (it seats and explodes a real Remote puppet), so run it in a
+    throwaway `?level=Level2&invuln` boot; committed as
+    `tools/headless/probes/net_respawn_pos.txt`. Its section 1 models the bridge on a scratch
+    buffer through the real codec as the negative control; mutation-tested (disabling the clear
+    flips exactly the two distance legs, with the puppet driven straight back to A).
 - **Remote ship:** `ControlDevice.Remote` (APPEND-ONLY enum position). Joins via
   `oracle.AddPlayer(Remote)` on the first alive stream. (It used to be spawned by the GameScene's
   own SpawnAllPlayers reset flow as well, with NetSession adopting either -- that is what card

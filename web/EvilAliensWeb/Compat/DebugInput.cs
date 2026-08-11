@@ -1033,6 +1033,19 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetFireTest.Run();
 		}
 
+		// JS bridge for the respawn puppet-position suite (eaNetRespawnPos in wwwroot/index.html,
+		// card df72b051). A scripted peer lives, dies (heartbeat packets stamped with the death
+		// position -- the poison) and respawns across the screen; the real puppet must explode on
+		// the falling edge and NEVER be driven near the death spot after the rising edge, with the
+		// pre-card bridge modelled on a scratch buffer beside it as the negative control.
+		// **DESTRUCTIVE**: it needs a live GameScene and explodes a real Remote puppet in it, so
+		// run it in a throwaway ?level=Level2&invuln boot.
+		[JSInvokable("debugNetRespawnPosTest")]
+		public static string NetRespawnPos()
+		{
+			return EvilAliensWeb.Compat.Net.NetRespawnPosTest.Run();
+		}
+
 		// JS bridge for the co-op per-slot combo/powerup self-test (eaNetCombo in
 		// wwwroot/index.html, card 1a3ad45a). Round-trips the real MsgHudState wire format,
 		// then drives the real PowerupData exp curve over two divergent combo streams -- running

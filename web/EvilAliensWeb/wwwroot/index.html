@@ -641,6 +641,18 @@
             catch (e) { console.warn('[debug] eaNetFire failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: co-op respawn puppet position (card df72b051). The other player's ship used to
+        // reappear at the spot it DIED and slide fast across the screen to its real spawn point,
+        // because the dead peer's heartbeat packets carry the death position and they bridged the
+        // interpolation across the respawn. A scripted peer lives, dies and respawns across the
+        // screen; the real puppet must never be driven near the death spot again.
+        // DESTRUCTIVE: needs a live level and explodes a real Remote puppet in it, so run it in a
+        // throwaway ?level=Level2&invuln boot. Prints PASS/FAIL.
+        window.eaNetRespawnPos = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetRespawnPosTest')); }
+            catch (e) { console.warn('[debug] eaNetRespawnPos failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: co-op per-slot combo + powerup self-test (card 1a3ad45a). Round-trips the real
         // MsgHudState wire format, then drives the real PowerupData exp curve over two divergent
         // combo streams — running the OLD ungated behaviour over the identical stream first, so

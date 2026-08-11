@@ -66,9 +66,9 @@
 # second slot and it would report rather than assert), ?invuln so the settle cannot lose that
 # ship, ?noattract because the suite needs the LEVEL and not a demo.
 #
-# NOT COVERED HERE: card d53431b4's mute half (a remote pickup no longer plays the "powerup"
-# cue). SoundManager exposes no cue counter and adding one solely for a test would be a
-# production field with no other reader.
+# NOT COVERED HERE: the sound half (a remote pickup plays the "powerup" cue again -- card
+# 06ac5df2, reversing card d53431b4's mute). SoundManager exposes no cue counter and adding one
+# solely for a test would be a production field with no other reader (d53431b4's ruling, kept).
 #
 # eahl: --flags "?level=Level2&invuln&noattract"
 

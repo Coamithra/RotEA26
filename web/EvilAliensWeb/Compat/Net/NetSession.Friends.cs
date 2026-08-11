@@ -127,6 +127,20 @@ namespace EvilAliensWeb.Compat.Net
                 ch = new FriendChannel();
                 friendChannels[slot] = ch;
             }
+            // Card 14c5943e: a sample arriving after a gap the channel would have timed out of at
+            // its NORMAL 500 ms means the ship died/left and respawned, or the whole link dropped
+            // and recovered -- either way the buffered samples describe a previous life (or a
+            // pose from before the gap) and interpolating across them drags the puppet from the
+            // old position to the new one, the primary remote's card-df72b051 slide. A channel
+            // can only still be alive across such a gap because the stall / pause / link-quiet
+            // arms above protected it, so the resume starts the puppet from its own samples.
+            // The clear must run BEFORE LastRxAt is refreshed (the gap is what it reads), and it
+            // is what keeps the protective arms from re-opening the bridge they exist to ride out.
+            if (ch.Buffer.HasSamples && NowMs - ch.LastRxAt > FriendTimeoutMs)
+            {
+                ch.Buffer.Clear();
+                ch.RenderMs = double.NaN;
+            }
             ch.ShotsPerSec = shots;
             ch.BulletLife = life;
             ch.LastRxAt = NowMs;
@@ -147,8 +161,17 @@ namespace EvilAliensWeb.Compat.Net
             // in neither case may a 500 ms gap blow up the puppets, or a wifi hiccup would kill the
             // peer's couch players while the run itself survives. Enemy puppets park for the same
             // reason (NetPuppets' PeerStalled check).
+            //
+            // The LINK-QUIET arm is what actually delivers that promise (card 14c5943e). The
+            // PeerStalled flag only arms at PeerStallMs (1200 ms) of total stream silence, and
+            // every channel's own 500 ms boundary is crossed FIRST -- so before this arm, the
+            // "stalled" timeout was structurally unreachable and a 0.5-1.2 s hiccup exploded
+            // every couch/AI-friend puppet, against this very comment's stated intent. The whole
+            // link being quiet past the channel's own threshold is a hiccup, not a ship death (a
+            // death stops ONE slot's stream while the primary heartbeat keeps flowing), so it is
+            // recognised at the same 500 ms the channel itself times out at.
             long timeout = (RemotePaused || localPaused) ? PausedPeerTimeoutMs
-                : PeerStalled ? PeerTimeoutMs + PeerGraceMs
+                : (PeerStalled || now - lastRxStreamAt > FriendTimeoutMs) ? PeerTimeoutMs + PeerGraceMs
                 : FriendTimeoutMs;
             friendScratchSlots.Clear();
             foreach (byte slot in friendChannels.Keys)

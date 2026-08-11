@@ -18,9 +18,8 @@
 # THE FIX (receiver-side, no wire change, both roles): NetSession.HandleShipState clears the
 # buffer (+ render clock + the pop-metric baseline) on the dead->alive RISING edge, before the
 # first alive sample is added, so a new life starts from its own samples and the interpolator can
-# never bridge a death. The friend/couch channel never had the bug: a dead extra ship simply
-# stops being streamed and any real death gap exceeds the 500 ms FriendTimeoutMs, which destroys
-# the whole channel, buffer included.
+# never bridge a death. The friend/couch channel's half is card 14c5943e (section 3 below): its
+# timeout ladder + the resume-gap clear are what keep it bridge-free.
 #
 # WHAT IT ASSERTS (Compat/Net/NetRespawnPosTest.cs carries the full reasoning):
 #   1. The bridge itself, modelled on a scratch ShipStateBuffer fed through the REAL codec -- the
@@ -36,13 +35,31 @@
 #      be inert -- both the edge and the alive latch are gated on the sample being IN-ORDER, or
 #      the stale packet reads as a fake falling edge (the healthy puppet explodes) and the next
 #      alive packet's fake rising edge wipes the fresh buffer.
+#   3. THE FRIEND/COUCH CHANNEL (card 14c5943e). It has no alive edge -- a dead extra ship simply
+#      stops being streamed -- so its story is the timeout ladder's, and the pre-card ladder was
+#      broken in a way that made the card's bridge unreachable ONLY by accident: the "stalled"
+#      protection (8s) consults PeerStalled, which arms at 1200ms of TOTAL silence, while every
+#      channel's own 500ms boundary fires first -- so the protective arm was structurally dead
+#      and a 0.5-1.2s wifi hiccup exploded every couch/AI-friend puppet, against TickFriends' own
+#      stated intent. Fixing that (the LINK-QUIET arm: total silence past the channel's own
+#      threshold is a hiccup, not a death) would have opened the bridge for a couch ship that
+#      died AND respawned inside a protected window, so the RESUME-GAP CLEAR ships beside it: a
+#      sample arriving after a gap the channel would normally have died of starts the puppet from
+#      its own samples. The legs: a couch DEATH (slot quiet, link alive) still destroys the
+#      channel at 500ms and the respawn streams into a fresh puppet at the respawn point; a 700ms
+#      link hiccup does NOT kill the puppet; and the stream resuming after the survivable gap
+#      reads exactly its own new position, where the gap-bridging lerp would read ~76px short
+#      along the line from the pre-gap position.
 #
-# MUTATION-TESTED TWO WAYS, failing DISJOINT legs: disabling the rising-edge clear
+# MUTATION-TESTED FOUR WAYS, failing DISJOINT legs: disabling the rising-edge clear
 # (`if (false && ...)`) flips exactly the two distance legs -- "min 0px from A over the drive" /
 # "max 665.7px from B", i.e. the puppet is driven straight back to the death spot -- while
 # section 1, both preconditions, the explosion leg and the reorder leg stay green; dropping the
 # in-order gate (latching remoteAlive raw off every packet) flips exactly the reorder leg, with
-# the stale heartbeat exploding the healthy puppet. 15/15 with the fix.
+# the stale heartbeat exploding the healthy puppet; dropping the link-quiet arm flips the hiccup
+# leg (the puppet dies at 500ms of total silence, plus the resume leg it cascades into);
+# dropping the resume-gap clear flips exactly the resume leg, at the predicted 76.2px. 24/24
+# with the fix.
 #
 # DESTRUCTIVE, so it gets a process to itself: it pairs a real host session onto the live level
 # and seats + explodes a real Remote puppet (real explosions + the expl2 cue). Teardown stops the
@@ -62,7 +79,7 @@ expect \[net\] session start role=host .* protocol=v[0-9]+ transport=InMemory
 expect \[netrespawnpos\] respawn puppet position
 expect 1\. the death-bridge on a scratch buffer
 expect 2\. end to end -- a scripted peer dies at A and respawns at B
-expect 3\. teardown
+expect 4\. teardown
 # The numbers, not just the leg headings -- the distances are the whole subject. The negative
 # control's bridge must really read the death spot, the falling edge must really explode the
 # puppet, and the respawned puppet must stay the full screen away from A.
@@ -72,10 +89,15 @@ expect PRECONDITION the dead heartbeats kept flowing \(StreamRx \+60\)
 expect the respawned puppet NEVER reads near the death spot
 expect and stays at the spawn point throughout
 expect a REORDERED dead heartbeat is inert: no fake death \(RemoteShipExplosions \+0\), puppet still up
+expect 3\. the friend/couch channel -- death, hiccup, and the resume-gap clear
+expect the 500ms timeout does NOT bite early -- still up at ~433ms of slot silence
+expect a couch death \(slot quiet, link alive\) destroys the channel at its 500ms timeout
+expect a 700ms LINK hiccup \(total silence\) does NOT kill the friend puppet
+expect the resumed stream starts the puppet from its OWN samples \(0px from C
 # A TALLY, never a bare `expect-not FAIL`: an absence assertion passes on a run where the eval
 # never happened, and this suite skips its live section on a bad precondition. Raise the count
 # when checks are added.
-expect \[netrespawnpos\] 15 passed, 0 failed
+expect \[netrespawnpos\] 24 passed, 0 failed
 expect-not FAIL
 expect-not SKIP
 quit

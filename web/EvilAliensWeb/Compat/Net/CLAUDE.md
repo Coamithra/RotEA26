@@ -2041,24 +2041,34 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     falling edge -- exploding the healthy puppet -- and the next alive packet's fake rising edge
     would wipe the fresh buffer. Pre-card the raw latch merely flickered a bool; with an edge
     CLEAR hanging off it, the gate is load-bearing.
-  - **The friend/couch channel is unreachable at its normal timeout, but NOT immune**: a dead
-    extra ship simply stops being streamed, and any real death gap exceeds the 500 ms
-    `FriendTimeoutMs`, which destroys the whole channel -- buffer included -- before the respawn
-    stream rebuilds a fresh one. HOWEVER, while the peer is STALLED or either side holds a PAUSE,
-    `TickFriends` runs the 8 s / 120 s timeouts instead, so a couch ship that dies AND respawns
-    inside such a window keeps its channel and its pre-death samples: the identical bridge, on
-    the identical code shape. Filed as its own follow-up card rather than fixed here -- a friend
-    stream has no alive edge (death = the stream stopping), so the fix is a resume-gap detection
-    with its own live-ship catch-up semantics to decide.
+  - **The friend/couch channel has no alive edge, so its half of this card is the TIMEOUT LADDER
+    (card 14c5943e), and fixing it took TWO pieces.** A dead extra ship simply stops being
+    streamed; the 500 ms `FriendTimeoutMs` destroys the channel -- buffer included -- so a normal
+    respawn always streams into a fresh one and can never bridge. The card's stall/pause premise
+    turned out to be UNREACHABLE, but only because the stall protection was broken: `PeerStalled`
+    arms at 1200 ms of TOTAL silence while every channel's own 500 ms boundary fires first, so
+    the protective 8 s arm was structurally dead and **a 0.5-1.2 s wifi hiccup exploded every
+    couch/AI-friend puppet, against `TickFriends`' own stated intent**. The two pieces:
+    - **The LINK-QUIET arm**: total stream silence past the channel's own 500 ms threshold is a
+      hiccup, not a ship death (a death stops ONE slot while the primary heartbeat keeps
+      flowing), so it takes the stalled 8 s timeout. Couch puppets now ride a hiccup out.
+    - **The RESUME-GAP CLEAR** (`HandleFriendState`): a sample arriving after a gap the channel
+      would normally have died of clears the buffer + render clock, so the puppet starts from
+      its own samples. This is what keeps the protection above from re-opening the bridge for a
+      couch ship that died AND respawned inside a protected window -- and for a live ship it
+      just turns the post-hiccup catch-up lerp into a clean snap.
   - Receiver-side only, both roles, no wire change, offline byte-identical. Verify with
-    **`eaNetRespawnPos()`** / `eval NetRespawnPos` (`Compat/Net/NetRespawnPosTest.cs`, 15
-    assertions) -- **DESTRUCTIVE** (it seats and explodes a real Remote puppet), so run it in a
-    throwaway `?level=Level2&invuln` boot; committed as
+    **`eaNetRespawnPos()`** / `eval NetRespawnPos` (`Compat/Net/NetRespawnPosTest.cs`, 23
+    assertions) -- **DESTRUCTIVE** (it seats and explodes real Remote + RemoteFriend puppets),
+    so run it in a throwaway `?level=Level2&invuln` boot; committed as
     `tools/headless/probes/net_respawn_pos.txt`. Its section 1 models the bridge on a scratch
-    buffer through the real codec as the negative control; mutation-tested two ways failing
-    disjoint legs (disabling the clear flips exactly the two distance legs, with the puppet
-    driven straight back to A; dropping the in-order gate flips exactly the reorder leg, with
-    the stale heartbeat exploding the healthy puppet).
+    buffer through the real codec as the negative control; mutation-tested four ways failing
+    disjoint legs (clear disabled -> the two distance legs, puppet driven straight back to A;
+    in-order gate dropped -> the reorder leg, fake explosion; link-quiet arm dropped -> the
+    hiccup leg, puppet dead at 500 ms of total silence; resume-gap clear dropped -> the resume
+    leg, at the predicted 76 px bridge offset). `NetResetSpawnTest` leg 3b changed shape with
+    this: a friend timeout now needs the link otherwise ALIVE, so its clock advance is stepped
+    with primary heartbeats -- the real shape of a couch-ship death.
 - **Remote ship:** `ControlDevice.Remote` (APPEND-ONLY enum position). Joins via
   `oracle.AddPlayer(Remote)` on the first alive stream. (It used to be spawned by the GameScene's
   own SpawnAllPlayers reset flow as well, with NetSession adopting either -- that is what card
@@ -2247,9 +2257,11 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   captured without hand-arranging windows. Two things make it survive: `index.html` falls back
   to `setTimeout(tickJS, 33)` while `document.hidden` (a REQUESTED ~30Hz -- Chrome clamps
   hidden-tab timers after ~10s and much harder past 5 min, so treat it as a short window, not a
-  rate you hold), and the roster simply does not depend on cadence -- once `PeerStalled` the
-  friend timeout stretches to `PeerTimeoutMs + PeerGraceMs`, and a timed-out friend **keeps its
-  seat** by design (`NetSession.Friends.cs`). It does NOT extend to anything timing-derived:
+  rate you hold), and the roster simply does not depend on cadence -- once the link goes quiet
+  past the channel's own 500 ms threshold (the card-14c5943e link-quiet arm; `PeerStalled`
+  itself only ever arms LATER, at 1200 ms) the friend timeout stretches to
+  `PeerTimeoutMs + PeerGraceMs`, and a timed-out friend **keeps its seat** by design
+  (`NetSession.Friends.cs`). It does NOT extend to anything timing-derived:
   `pops`/`pupPops`/`buf`/`extrap` off a hidden or unfocused tab are meaningless (the FPS HUD
   says so on its own readout), so every smoothness or feel verdict still needs two focused
   windows.

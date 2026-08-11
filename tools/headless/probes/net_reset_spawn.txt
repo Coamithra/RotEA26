@@ -14,8 +14,10 @@
 # purges from inside the drain, where the local ship's death is still merely QUEUED, so both
 # callers DO take their seat and both TryAdds are refused with nothing adopted; POSITIVE -- one
 # TopOfTickFlush later the identical sequence adopts both puppets in those same seats. Leg 3b
-# (card 25ad0659 step 2a) then moves ONLY the injected virtual clock and requires the session to
-# act on it, which is what proves NetSession.Update's cadence really reads the seam.
+# (card 25ad0659 step 2a) then advances ONLY the injected virtual clock -- stepped, with a primary
+# heartbeat before each step, since card 14c5943e made the friend timeout require the link to be
+# otherwise ALIVE (total silence is a protected hiccup) -- and requires the session to act on it,
+# which is what proves NetSession.Update's cadence really reads the seam.
 #
 # LEG 0b (card 25ad0659 step 2b) rides along here for a reason worth stating: the four
 # ServiceHelper.Get<>() lookups the net cores made now go through INetHost, and a call site left

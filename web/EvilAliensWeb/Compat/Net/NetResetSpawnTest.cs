@@ -413,16 +413,25 @@ namespace EvilAliensWeb.Compat.Net
                 // teardown is already leg 4 -- and legs print in the order they run.
                 // Legs 1-3 would pass on a wall clock too, so on their own they show the pinned
                 // host does no HARM, not that NetSession reads it. This leg discriminates: it
-                // moves ONLY the virtual clock -- no packets, no ticks -- and requires the
-                // session to act on it, which a wall-clock read cannot do. The interval is
-                // chosen to straddle exactly one threshold (FriendTimeoutMs 500 < 600 <
+                // advances ONLY the virtual clock and requires the session to act on it, which a
+                // wall-clock read cannot do (real time barely moves between these calls). The
+                // total is chosen to straddle exactly one threshold (FriendTimeoutMs 500 < 600 <
                 // PeerStallMs 1200 < PeerTimeoutMs 3000), so the assertion pins WHICH deadline
                 // fired rather than merely that something did.
+                // Since card 14c5943e the friend timeout only bites while the LINK is otherwise
+                // alive (total silence is a hiccup, protected up to the stalled verdict), so the
+                // advance is stepped with a primary heartbeat before each step -- the real shape
+                // of a couch-ship DEATH, whose slot goes quiet while the peer keeps streaming.
                 sb.Append(" 3b. the session's cadence runs on the INJECTED clock\n");
                 Check("PRECONDITION both puppets are up before the clock moves",
                     NetSession.HasRemotePuppet && NetSession.HasFriendPuppet(FriendSlot));
-                clock.Advance(600);
-                NetSession.Update();
+                for (int i = 0; i < 3; i++)
+                {
+                    peer.SendStream(ShipFrame(ref shipSeq, ref shipMs));
+                    wire.Pump();
+                    clock.Advance(200);
+                    NetSession.Update();
+                }
                 Check("advancing the virtual clock past FriendTimeoutMs explodes the friend puppet",
                     !NetSession.HasFriendPuppet(FriendSlot));
                 Check("... and only that one -- the primary remote is on the 3 s peer timeout",

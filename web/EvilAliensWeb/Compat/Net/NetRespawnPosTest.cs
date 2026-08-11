@@ -37,6 +37,16 @@ namespace EvilAliensWeb.Compat.Net
     //      packets at A), respawns at B on the far side of the screen. The real puppet must
     //      explode on the falling edge, respawn on the rising edge, and every position it is
     //      driven to must stay near B -- it may never read near A again.
+    //   3  the FRIEND/couch channel (card 14c5943e). It has no alive edge -- a dead extra ship
+    //      simply stops being streamed -- so its death-gap story is the timeout ladder's:
+    //      a slot going quiet while the primary heartbeat keeps flowing is a ship DEATH and
+    //      destroys the channel at its 500 ms timeout (so a normal respawn always starts from a
+    //      fresh buffer); the WHOLE link going quiet is a hiccup and the channel must SURVIVE it
+    //      (pre-card it exploded at 500 ms, because PeerStalled only arms at 1200 ms of total
+    //      silence -- the protective arm was structurally unreachable); and a stream RESUMING
+    //      after a survivable gap starts the puppet from its own samples (the resume-gap clear),
+    //      which is what keeps that protection from re-opening this card's bridge for a couch
+    //      ship that died and respawned inside a protected window.
     //
     // *** DESTRUCTIVE, like eaNetFire / eaNetPickup. *** It pairs a real session onto the live
     // level and seats + explodes a Remote puppet (real explosions + the expl2 cue into the live
@@ -78,13 +88,13 @@ namespace EvilAliensWeb.Compat.Net
 
             if (GameScene.NetActiveScene == null)
             {
-                sb.Append("  SKIP section 2 (needs a live level -- boot ?level=Level2&invuln and run it there)\n");
+                sb.Append("  SKIP sections 2-3 (need a live level -- boot ?level=Level2&invuln and run it there)\n");
                 sb.Append(Tally(pass, fail));
                 return sb.ToString();
             }
             if (NetSession.Active)
             {
-                sb.Append("  SKIP section 2 (a co-op session is already up -- this suite would tear it down)\n");
+                sb.Append("  SKIP sections 2-3 (a co-op session is already up -- this suite would tear it down)\n");
                 sb.Append(Tally(pass, fail));
                 return sb.ToString();
             }
@@ -103,11 +113,11 @@ namespace EvilAliensWeb.Compat.Net
             }
             catch (Exception ex)
             {
-                Check("section 2 ran (" + ex.GetType().Name + ": " + ex.Message + ")", false);
+                Check("sections 2-3 ran (" + ex.GetType().Name + ": " + ex.Message + ")", false);
             }
             finally
             {
-                sb.Append(" 3. teardown\n");
+                sb.Append(" 4. teardown\n");
                 Teardown(sb, Check, oracle, bin, playersBefore);
                 NetHost.Current = hostBefore;
                 Check("the injected clock is handed back", ReferenceEquals(NetHost.Current, hostBefore));
@@ -278,6 +288,146 @@ namespace EvilAliensWeb.Compat.Net
                 NetSession.HasRemotePuppet
                 && NetSession.Metrics.RemoteShipExplosions == explodedBefore
                 && Dist(puppet.GetPosition(), SpawnAt) < NearPx);
+
+            LegFriendChannel(sb, Check, oracle, bin, clock, peer, wire, ref shipSeq, ref shipMs,
+                ref clockCarry);
+        }
+
+        // ---- 3. the friend/couch channel (card 14c5943e) ---------------------------------------
+
+        // The friend slot the scripted peer streams (its couch player / AI friend). Slots 0 (our
+        // local) and 1 (the peer's primary) are taken by section 2's rig.
+        private const byte FriendSlot = 2;
+
+        // Where the friend's three lives sit. FriendA is the first life, FriendB the respawn
+        // after a normal death, FriendC where the ship "is" after a link hiccup -- each far from
+        // the last, so "started from its own samples" and "bridged the gap" cannot be confused.
+        private static readonly Vector2 FriendA = new Vector2(200f, 400f);
+        private static readonly Vector2 FriendB = new Vector2(700f, 400f);
+        private static readonly Vector2 FriendC = new Vector2(200f, 150f);
+
+        private static void LegFriendChannel(StringBuilder sb, Action<string, bool> Check,
+            Oracle oracle, ComponentBin bin, PinnedNetHost clock, InMemoryTransport peer,
+            NetWire wire, ref ushort shipSeq, ref uint shipMs, ref float clockCarry)
+        {
+            sb.Append(" 3. the friend/couch channel -- death, hiccup, and the resume-gap clear\n");
+            ushort friendSeq = 1;
+            uint friendMs = shipMs;
+
+            // ---- 3a. a couch ship streams in at FriendA -------------------------------------
+            for (int i = 0; i < 4; i++)
+            {
+                DeliverFriend(peer, wire, clock, ref shipSeq, ref shipMs, ref friendSeq,
+                    ref friendMs, ref clockCarry, FriendA);
+            }
+            PlayerShip friend = oracle.GetPlayerShip(FriendSlot);
+            bool friendUp = NetSession.HasFriendPuppet(FriendSlot) && friend != null;
+            Check("the peer's couch ship spawned a friend puppet (slot=" + FriendSlot + ")",
+                friendUp);
+            if (!friendUp)
+            {
+                return;
+            }
+            DriveTicks(friend, bin);
+            Check("the living friend puppet is driven at its own position ("
+                + Dist(friend.GetPosition(), FriendA) + "px from it)",
+                Dist(friend.GetPosition(), FriendA) < NearPx);
+
+            // ---- 3b. a couch-ship DEATH: its slot goes quiet, the link stays alive ----------
+            // The primary heartbeat keeps flowing, so the 500 ms friend timeout is correct and
+            // must still bite: the channel (stale buffer included) is DESTROYED, which is why a
+            // normal couch respawn can never bridge -- it always streams into a fresh channel.
+            for (int i = 0; i < 13; i++) // ~433 ms of friend silence: under the timeout...
+            {
+                Deliver(peer, wire, clock, ref shipSeq, ref shipMs, ref clockCarry, SpawnAt, alive: true);
+            }
+            Check("the 500ms timeout does NOT bite early -- still up at ~433ms of slot silence",
+                NetSession.HasFriendPuppet(FriendSlot));
+            for (int i = 0; i < 7; i++) // ...and past it (~667 ms total)
+            {
+                Deliver(peer, wire, clock, ref shipSeq, ref shipMs, ref clockCarry, SpawnAt, alive: true);
+            }
+            Check("a couch death (slot quiet, link alive) destroys the channel at its 500ms"
+                + " timeout", !NetSession.HasFriendPuppet(FriendSlot));
+            // Carry the exploded ship's queued removal out (in play, the next game tick does) --
+            // without it the respawn below would adopt the corpse still standing at FriendA.
+            bin.TopOfTickFlush();
+
+            // ---- the respawn streams into a FRESH channel -----------------------------------
+            friendMs = shipMs;
+            DeliverFriend(peer, wire, clock, ref shipSeq, ref shipMs, ref friendSeq, ref friendMs,
+                ref clockCarry, FriendB);
+            DeliverFriend(peer, wire, clock, ref shipSeq, ref shipMs, ref friendSeq, ref friendMs,
+                ref clockCarry, FriendB); // second packet seeds the fresh channel's render clock
+            friend = oracle.GetPlayerShip(FriendSlot);
+            bool friendBack = NetSession.HasFriendPuppet(FriendSlot) && friend != null;
+            Check("the respawn streams into a fresh channel and a fresh puppet", friendBack);
+            if (!friendBack)
+            {
+                return;
+            }
+            DriveTicks(friend, bin);
+            Check("...driven at the RESPAWN point, nowhere near the death spot ("
+                + Dist(friend.GetPosition(), FriendB) + "px from B, "
+                + Dist(friend.GetPosition(), FriendA) + "px from A)",
+                Dist(friend.GetPosition(), FriendB) < NearPx
+                && Dist(friend.GetPosition(), FriendA) > FarPx);
+
+            // ---- 3c. a link HICCUP: the WHOLE stream goes quiet -----------------------------
+            // Pre-card the channel exploded at 500 ms here too -- PeerStalled only arms at
+            // 1200 ms of total silence, so the "stalled" protection could never engage. The
+            // link-quiet arm recognises total silence at the channel's own threshold, and the
+            // puppet must ride the hiccup out.
+            for (int i = 0; i < 7; i++)
+            {
+                clock.Advance(100);
+                NetSession.Update();
+            }
+            Check("a 700ms LINK hiccup (total silence) does NOT kill the friend puppet",
+                NetSession.HasFriendPuppet(FriendSlot) && oracle.GetPlayerShip(FriendSlot) != null);
+
+            // ---- 3d. the stream resumes after the survivable gap: no bridge -----------------
+            // The channel kept its pre-gap samples at FriendB, and the resume is at FriendC --
+            // without the resume-gap clear the interpolator reads most of the way along B->C
+            // (~(InterpDelay/gap) short of C, ~76px here) and glides in; with it the puppet
+            // starts from its own samples, exactly at C. This is the leg that closes the card's
+            // bridge for a couch ship that died AND respawned inside a protected window -- the
+            // same code path, whatever the ship did during the silence.
+            friendMs += 700;
+            DeliverFriend(peer, wire, clock, ref shipSeq, ref shipMs, ref friendSeq, ref friendMs,
+                ref clockCarry, FriendC);
+            friend = oracle.GetPlayerShip(FriendSlot);
+            Check("PRECONDITION the puppet survived into the resume", friend != null);
+            if (friend == null)
+            {
+                return;
+            }
+            DriveTicks(friend, bin);
+            Check("the resumed stream starts the puppet from its OWN samples ("
+                + Dist(friend.GetPosition(), FriendC) + "px from C -- the gap-bridging lerp"
+                + " would read ~76px short, along the line from B)",
+                Dist(friend.GetPosition(), FriendC) < 10f
+                && Dist(friend.GetPosition(), FriendB) > FarPx);
+        }
+
+        // One friend-state packet for FriendSlot, delivered beside a primary heartbeat (the link
+        // is alive unless a leg deliberately silences it), the clock advanced in step.
+        private static void DeliverFriend(InMemoryTransport peer, NetWire wire, PinnedNetHost clock,
+            ref ushort shipSeq, ref uint shipMs, ref ushort friendSeq, ref uint friendMs,
+            ref float clockCarry, Vector2 pos)
+        {
+            clockCarry += SendIntervalMs;
+            long step = (long)clockCarry;
+            clockCarry -= step;
+            shipMs += (uint)step;
+            friendMs += (uint)step;
+            peer.SendStream(NetProtocol.EncodeShipState(shipSeq++, shipMs, SpawnAt, Vector2.Zero,
+                4.712389f, alive: true, shotCount: 0, shotsPerSec: 8, bulletLife: 450f));
+            peer.SendStream(NetProtocol.EncodeFriendState(FriendSlot, friendSeq++, friendMs, pos,
+                Vector2.Zero, 4.712389f, shotCount: 0, shotsPerSec: 8, bulletLife: 450f));
+            wire.Pump();
+            clock.Advance(step);
+            NetSession.Update();
         }
 
         // One ship-state packet, delivered and drained -- the real codec onto the real wire, the

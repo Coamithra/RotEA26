@@ -2330,6 +2330,31 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
+        // (card 1878b321) A CLIENT's own killing blow on a type whose KilledBy DEFERS -- the
+        // SpiderHelperMothership's crash-after-the-mission, BattleSkull's 2.5 s shrink, the
+        // surviving MarsBoss's 5 s crash. The claim normally rides NetPuppets' removal seam,
+        // but a frozen puppet's deferred death never runs its own Die(), so nothing was ever
+        // sent and the kill was PHANTOM: the host's copy flew on untouched while the joiner
+        // kept a red, unresponsive zombie. Send the claim at death-began instead, consuming
+        // the kill note HitBy just wrote (killNotes is keyed on the pooled entity, so an
+        // unconsumed one could attribute a later death). No double claim: the puppet is only
+        // ever removed after ReleaseDyingPuppet has unmapped it or OnRemoteDeath has guarded
+        // it, and both make the removal seam's own send a no-op. A no-op for ordinary types
+        // (their KilledBy ended in Die(), so IsDead is already true here), on the host (its
+        // kills are authoritative, announced by EvDying/EvDeath) and offline.
+        public static void OnClientDeferredKill(KillableAlien comp)
+        {
+            if (!Active || IsHost || comp == null || comp.IsDead)
+            {
+                return;
+            }
+            if (!NetPuppets.TryGetId((GameComponent)(object)comp, out ushort netId))
+            {
+                return;
+            }
+            SendClaim(netId, TakeKillNote(comp));
+        }
+
         // ---- wire -> state ----------------------------------------------------------------
 
         private static void DrainRx()
@@ -4078,10 +4103,14 @@ namespace EvilAliensWeb.Compat.Net
                 if (e.Comp.NetKillable is INetKillable killable && payable)
                 {
                     killable.NetKill(NetPuppets.KillerAgent(killerSlot, e.Comp.Position), isComboGenerator: true);
-                    if (!e.Comp.IsDead)
-                    {
-                        bin.Remove((GameComponent)e.Comp);
-                    }
+                    // A killable still in the world after NetKill DEFERRED its death (card
+                    // 1878b321): its own Update finishes the dying animation/mission and Die()s
+                    // itself -- the SpiderHelperMothership completes its charge/fire before
+                    // crashing, exactly as an offline kill would. NetKill's own NoteDeathBegan
+                    // has already announced EvDying to the claimant. The `bin.Remove` that used
+                    // to sit here force-deleted the host's copy mid-animation -- a claimed kill
+                    // ended a helper's "sacred mission" on the spot where the host's own kill
+                    // let it finish.
                 }
                 else
                 {

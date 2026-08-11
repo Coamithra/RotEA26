@@ -560,12 +560,17 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   **destructive** suite here: it pairs a real session onto the live level, so run it in a
   throwaway `?level=Level2&invuln` boot),
   `eaNetDeathFx()` (join-peer death FX — cards 4e406eba / 303bfb5b / 13aa596c / f62116b5 /
-  ad9c8f8b: a self-detonating
+  ad9c8f8b / 1878b321: a self-detonating
   space mine goes out as `KillerSelf` instead of a silent despawn, and a deferred death
   (BattleSkull, the surviving MarsBoss) releases its frozen puppet so its own 2.5–5 s animation
   plays locally. Since ad9c8f8b it also WATCHES the four bosses' multi-phase deaths run to
   completion on the released puppet — and covers the SpiderBoss, which is not a `KillableAlien`
-  and so used to stand intact for five seconds and then vanish on the joiner. MENU-only and
+  and so used to stand intact for five seconds and then vanish on the joiner. Since 1878b321 it
+  also covers the SpiderHelperMothership, the deferred death that stays functionally ALIVE —
+  its dying mission is TRACKED frozen instead of released (a released puppet replayed its whole
+  unreplicated entrance/charge/fire: "hangs around when dead"), the final EvDeath plays the
+  crash impact locally, and a joiner's own kill of any deferred type files its claim at
+  death-began instead of never (net CLAUDE.md has the design). MENU-only and
   leave-no-trace, but it plants real entities off-screen and really
   kills them, so it skips itself over a live session or level. Nothing it does is drawn, but it
   is not silent — the real death paths play their real cues),

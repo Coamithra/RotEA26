@@ -669,6 +669,31 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return; // already gone; the removal seam owns it from here
             }
+            if (info.Comp.NetDyingStaysReplicated)
+            {
+                // (card 1878b321) Death has BEGUN but the entity is still functionally alive on
+                // the host -- the SpiderHelperMothership keeps flying its charge/fire mission
+                // for seconds and only crashes at the end -- and the host keeps streaming the
+                // id for that whole remnant. Releasing here would strand a puppet whose own
+                // state machine restarts from Setup (the HelperState is not replicated), i.e.
+                // it teleports off-screen and REPLAYS its entrance. Keep it frozen and
+                // tracking; the final EvDeath ends it (OnRemoteDeath -> NetBeginDeferredDeath).
+                //
+                // MIRROR THE HOST'S OWN DEAD-LATCH FIRST, though: the puppet stays collidable
+                // (bullets stop on the host's dying copy too), so continued local fire could
+                // whittle its local hp to zero, re-enter HitBy's kill path, and have
+                // OnClientDeferredKill file a spurious claim -- whose NoteKillSlot then
+                // overwrites the REAL killer's attribution on the host. NetKill closes that
+                // gate exactly as the release path does (the helper's KilledBy only flags);
+                // skipped when this peer's own blow already ran it.
+                if (killable != null && killable.NetHitPoints > 0)
+                {
+                    remoteDeaths.Add((GameComponent)info.Comp); // never echo this as a claim
+                    killable.NetKill(KillerAgent(NetProtocol.KillerNone, info.Comp.Position),
+                        isComboGenerator: false);
+                }
+                return;
+            }
             if (killable == null)
             {
                 // NOT a KillableAlien -- its whole death lives outside HitBy/KilledBy, so there
@@ -983,7 +1008,18 @@ namespace EvilAliensWeb.Compat.Net
                         // mid-animation. Note this also covers the NetKill that no-opped because
                         // WE had already killed the puppet locally -- same state, and its dying
                         // animation had not played either, so it wants the same answer.
-                        ReleaseDyingPuppet(netId, info);
+                        //
+                        // A type that owns its deferred-death entry finishes it NOW instead
+                        // (card 1878b321): the SpiderHelperMothership's whole dying mission was
+                        // tracked frozen (NetDyingStaysReplicated), so by the time this EvDeath
+                        // lands the crash arc has already been mirrored by snapshots and the
+                        // local death is the impact itself -- its NetBeginDeferredDeath runs
+                        // CrashImpact, whose Die() queues the removal, so there is nothing left
+                        // to release. A true that did NOT die still releases (the safe default).
+                        if (!comp.NetBeginDeferredDeath() || !comp.IsDead)
+                        {
+                            ReleaseDyingPuppet(netId, info);
+                        }
                     }
                 }
                 else if (killerSlot != NetProtocol.KillerNone && comp.NetPickup is INetPickup pu)

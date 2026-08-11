@@ -1242,6 +1242,14 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 		return false;
 	}
 
+	bool EvilAliensWeb.Compat.Net.INetEntity.NetDyingStaysReplicated => NetDyingStaysReplicatedSelf;
+
+	// (card 1878b321) True only for a type whose deferred death keeps the entity functionally
+	// ALIVE on the host (the SpiderHelperMothership finishes its charge/fire mission before it
+	// crashes) -- the death-began beat then keeps the frozen puppet tracking instead of
+	// releasing it. See INetEntity for the contract.
+	private protected virtual bool NetDyingStaysReplicatedSelf => false;
+
 	// The two discriminants. The base answers "no" to both; KillableAlien and Powerup override
 	// with `this`. Virtual rather than a type test inside this class so a future replicable
 	// subtype declares its own answer where its own code lives.

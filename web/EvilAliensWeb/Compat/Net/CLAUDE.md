@@ -262,9 +262,10 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     Full re-plan, including what a second-collection `ComponentBin` would cost, in
     `plans/net-headless-sim.md`.
   - **`NetSession.HandleClaim` reads NO scene** -- it reaches `NetIdRegistry` / `bin` / `score` /
-    `Explosion` / `NetPuppets.KillerAgent`, and since card d53431b4 muted the remote pickup, no
-    longer `sound` on the pickup branch (`killable.NetKill` below still plays its own cues). So
-    the claim scenarios are MENU-runnable and leave-no-trace-able (the `eaNetSnap` shape), NOT
+    `Explosion` / `NetPuppets.KillerAgent`, and `sound` on the pickup branch (card 06ac5df2 put
+    the remote pickup cue back; `killable.NetKill` below plays its own cues besides). Sound is
+    not a scene, so the claim scenarios stay MENU-runnable and leave-no-trace-able (the
+    `eaNetSnap` shape -- audible now, like `eaNetDeathFx`'s cues), NOT
     destructive like `eaNetResetSpawn`. **That is about the transitive closure, so it was checked
     one level deeper**: `killable.NetKill` runs the real per-type `KilledBy` (explosions, cues,
     `AwardScoreToAll`), and `Boss.KilledBy` is scene-free -- but check the specific types a new
@@ -857,7 +858,10 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   - **ENEMY TELEGRAPHS ARE AUDIBLE ON THE JOINER NOW**, reversing `NetChargeGlow`'s `SetupSilent`
     and the intent behind `LazerDescriptor`'s `playSound:false`. **The rule that replaced them is
     PLAYER-vs-WORLD, and it is the line to hold:** silence is for a remote PLAYER's private
-    business (their pickups -- card d53431b4), sound is for WORLD events both players are dodging.
+    business (their summon glow), sound is for WORLD events both players are dodging. (The
+    pickup cue sat on the silent side of that line for one card -- muted by d53431b4, reversed
+    by the user in 06ac5df2 -- so treat the rule as a default the user overrides per effect,
+    not a law.)
     An inaudible windup or beam is a gameplay DISADVANTAGE for the joiner, not politeness. All four
     enemy charge glows and the enemy single-shot beam are audible; the player-ship summon glow
     (`PlayerShipSummon`, and `GameScene`'s preload prime) never went through this seam and stays
@@ -1559,10 +1563,15 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     (`EvTetherBreak` carries no connector identity, being the or-of-either-peer event
     TeamChallenge's single tether was designed around, so one peer breaking one of two live
     connectors breaks both here); fixing that means putting endpoint slots on the wire.
-  - **A remote pickup is SILENT (card d53431b4, the user's ruling).** The `"powerup"` cue is gone
-    from this path -- every powerup the other player collected used to make a noise on your
-    screen. Local pickups and local co-op are untouched; both go through `PlayerShip.CollidesWith`,
-    which still plays it.
+  - **A remote pickup is AUDIBLE (card 06ac5df2, the user's ruling -- reversing card d53431b4,
+    which was also the user's ruling).** `ApplyRemotePowerup` plays the `"powerup"` cue inside its
+    `!OwnsSlot` branch, so the other player's pickup makes the same noise on your screen a local
+    one does, on both settle paths (host `HandleClaim`, client `NetPuppets.OnRemoteDeath`). The
+    gate is what keeps the host settling a claim for its OWN slot from doubling the cue its ship
+    already played in `CollidesWith`. Known gap, pre-existing and shared with the HUD icon: a
+    pickup claim landing after the removal flush settles via `PayDeadClaim`, whose death record
+    carries no pickup type, so that race is silent. The cue is still NOT asserted by `eaNetPickup`
+    -- `SoundManager` has no cue counter, the ruling d53431b4 made and this card keeps.
   - **A remote LEVEL-UP now shows the `PowerupEffect` sparkle**, which
     `ScoreVisualiser.NetSetPowerupLevel` deliberately suppressed. `doEffect` is true **only on a
     climb of exactly ONE step**: a multi-step climb is a CATCH-UP (a JIP peer adopting a slot
@@ -3368,12 +3377,29 @@ GAME FIELD only** -- the resolved scene render target, never a camera, a canvas 
 
 - **THE SERVER OWNS THE SCHEDULE, and that is the whole design.** Clients never upload
   unsolicited: the matchmaker PULLS (`{"t":"shot"}` on the room's existing signaling socket) on a
-  **global** budget of one pull per second across ALL rooms, round-robin by oldest-pulled. At <=15
-  listed rooms that is the ~15 s per-room refresh; beyond it the per-room interval stretches by
-  itself. **Degradation is staleness, never load** -- do not scale the budget with the room count.
+  **global** budget of one pull per second across ALL rooms, round-robin by oldest-pulled; beyond
+  ~15 listed rooms the per-room interval stretches by itself. **Degradation is staleness, never
+  load** -- do not scale the budget with the room count.
   The rotation is keyed on a COUNTER stamped when a pull is SENT, so a host that never answers
   forfeits its own turn and can never starve anyone; `server/signal/main.py` says why it is not a
   clock.
+  - **The schedule is GATED twice (card 97b31562), and both gates answer the "screenshots stutter
+    the game" report.** (a) **No pull is ever sent while no browser socket is connected** -- the
+    thumbnails exist only for the browse carousel, so an idle listed game pays for no captures at
+    all; once someone browses the rotation resumes on the next 1 s tick, though a room still
+    inside its floor waits the floor out first (deliberately not reset on the transition -- a
+    flapping browser socket could otherwise re-arm the every-second pulls). (b) **No single room
+    is re-pulled within a 15 s floor** (`SHOT_ROOM_MIN_INTERVAL_SECONDS`). Without the floor the
+    "~15 s per-room refresh" only emerged at 15+ rooms: a LONE listed room -- the reported
+    configuration, one host + one browsing peer on one machine -- was round-robined to EVERY 1 s
+    budget tick, and each pull is a `ResolveBackBuffer` + synchronous GPU readback in
+    `NetRoomShot.Capture` plus a `toDataURL` JPEG encode in JS, i.e. a visible 1 Hz hitch. With
+    both gates a capture is at most one frame's cost per 15 s, only while someone is actually
+    browsing -- so no threading of the capture is needed, and none was added. A PAIRED session was
+    never pulled either way (`listable()` requires an empty joiner slot). Server-side only, no
+    protocol change; both gates are mutation-tested in `server/signal/test_signal.py` (a case per
+    gate). **Deploying it is manual** -- `server/signal/README.md`'s update recipe; merging ships
+    nothing.
 - **CAPTURE IS C#, ENCODE IS JS, and the split is what makes it verifiable.**
   `Compat/Net/NetRoomShot` books one `Game1.onPostDraw`, `ResolveBackBuffer`s the scene,
   `DrawPresent`s it into a 200x150 RT (the `ScreenshotSaver.SaveScreenShot` recipe, alpha seal

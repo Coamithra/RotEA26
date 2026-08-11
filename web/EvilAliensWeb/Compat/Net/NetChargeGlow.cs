@@ -84,8 +84,9 @@ namespace EvilAliensWeb.Compat.Net
                     child.Setup(emitterPos + aim.Offset, size, lifetime, 0f, 0f);
                     // AUDIBLE, and it used to be SetupSilent() -- reversed by cards 57ea30cd /
                     // c146422f. The old reasoning ("a puppet is not the local shooter") is the
-                    // right rule for a remote PLAYER's private business, which is why a remote
-                    // powerup pickup is silent (card d53431b4). An ENEMY windup is the opposite
+                    // right rule for a remote PLAYER's private business (their summon glow stays
+                    // silent; the pickup cue was muted by that rule in card d53431b4 and the user
+                    // reversed it in card 06ac5df2). An ENEMY windup is the opposite
                     // kind of thing: it is a world event both players are dodging, and the whole
                     // point of a telegraph is that you hear it coming. Muting it on the join peer
                     // was a gameplay disadvantage, not politeness. The looped "lazercharge" cue

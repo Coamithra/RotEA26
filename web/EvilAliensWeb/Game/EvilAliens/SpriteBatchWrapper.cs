@@ -315,6 +315,36 @@ public class SpriteBatchWrapper : DrawableGameComponent, ISpriteBatchWrapperServ
 		customEffect = null;
 	}
 
+	// A batch whose DESIGN-space coordinates pass through a caller-supplied PROJECTIVE matrix
+	// before the design->render scale (card eac38cae: the credits crawl's one-point perspective).
+	// KNI's SpriteEffect folds the Begin matrix into the shader uniform as a full 4x4 product --
+	// the M14/M24/M44 perspective column survives -- so the GPU does a real per-vertex W divide
+	// and perspective-correct UV interpolation: glyph quads keystone for free. The caller pairs
+	// BeginPerspective / EndPerspective with only DrawStringPerspective between (the
+	// BeginCustom/EndCustom contract); positions handed in are the ordinary design-space ones,
+	// the matrix owns the whole mapping. Honours the current BlendMode.
+	public void BeginPerspective(Matrix design)
+	{
+		Flush();
+		// No WorldCensus.NoteBatch here: the census counts CONTENT batches at _beginDrawing
+		// only (its documented invariant); the special-Begin sites (BeginCustom, DrawPresent,
+		// SealAlpha, ...) are all uncounted and this one follows them.
+		spriteBatch.Begin(SpriteSortMode.Deferred, ToBlendState(blendmode), null, null, null, null, design * RenderScale.Matrix);
+	}
+
+	// layerDepth 0, NOT the crawl's usual 1: the quad's z rides the perspective divide too
+	// (z' = z/W), so a nonzero depth crosses the far clip plane wherever W < 1 and the bottom
+	// half of the screen silently vanishes. Deferred mode never sorts on it anyway.
+	public void DrawStringPerspective(SpriteFont spritefont, string text, Vector2 position, Color color)
+	{
+		DrawStringScaled(spritefont, text, position, color, 0f, Vector2.Zero, new Vector2(1f, 1f), (SpriteEffects)0, 0f);
+	}
+
+	public void EndPerspective()
+	{
+		spriteBatch.End();
+	}
+
 	// Force the whole current render target's ALPHA channel to 1, leaving RGB untouched, by
 	// drawing `whitePixel` over a `width`x`height` region (RENDER space, identity transform).
 	// The death cross-fade snapshots the background into an RGBA8 target and later composites

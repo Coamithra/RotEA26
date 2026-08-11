@@ -19,6 +19,14 @@ THE SERVER OWNS THE SCHEDULE -- clients never upload unsolicited, they
 only answer a pull -- and the schedule is a GLOBAL budget (one pull per
 second across ALL rooms, round-robin), so the cost of more rooms is
 staleness, never load. Shots live in memory on the Room and die with it.
+
+Card 97b31562 bounds WHEN that schedule runs at all: no pull is ever sent
+while no browser socket is connected (nobody is looking at the carousel,
+so no host should pay for a capture), and no single room is re-pulled
+within SHOT_ROOM_MIN_INTERVAL_SECONDS -- without that floor the global
+budget degenerates at ONE listed room into pulling that room every
+second, which on the host is a per-second GPU readback + JPEG encode,
+i.e. a visible 1 Hz stutter reported from exactly that configuration.
 """
 
 import asyncio
@@ -53,6 +61,11 @@ PING_RATE_MAX = 1200
 # interval stretches on its own (30 rooms -> ~30 s), which is the intended
 # degradation. Never scale this with the room count.
 SHOT_PULL_INTERVAL_SECONDS = 1.0
+# The per-ROOM refresh floor (card 97b31562): however few candidates there are,
+# one host is never asked more often than this. The global budget above caps the
+# server's total rate; this caps what any ONE host pays, so the ~15 s per-room
+# refresh the card asked for holds at ONE listed room as well as at fifteen.
+SHOT_ROOM_MIN_INTERVAL_SECONDS = 15.0
 # A 200x150 quality-60 JPEG is ~10-25 KB; base64 inflates it by 4/3. This is the
 # ceiling for one stored shot (and so, at MAX_ROOMS, ~9.6 MB of worst-case
 # server memory). Over it, the frame is dropped rather than truncated.
@@ -86,7 +99,8 @@ def _as_str(v) -> str:
 class Room:
     __slots__ = ("code", "host", "joiner", "created", "last_beat",
                  "listed", "level", "difficulty", "players", "proto", "hash",
-                 "shots", "shot", "shot_at", "shot_seq", "last_pull_seq")
+                 "shots", "shot", "shot_at", "shot_seq", "last_pull_seq",
+                 "last_pull_at")
 
     def __init__(self, code: str, host: WebSocket):
         self.code = code
@@ -129,6 +143,12 @@ class Room:
         # production, but "the rotation is exactly round-robin" then holds only
         # by luck of the platform's clock, and could not be asserted at all.
         self.last_pull_seq = 0
+        # ...and WHEN (monotonic). The counter above orders the rotation; this
+        # stamp enforces the per-room refresh floor (card 97b31562). -inf =
+        # never pulled, unconditionally past the floor -- 0.0 would read as
+        # "pulled at boot", which on a server started at machine boot blocks
+        # every fresh room for the first floor's worth of uptime.
+        self.last_pull_at = float("-inf")
 
     def shot_age(self) -> float:
         return time.monotonic() - self.shot_at
@@ -239,12 +259,31 @@ async def _expire_room(room: Room) -> None:
 
 
 def _pull_candidates() -> list[Room]:
-    """Listed, joinable, thumbnail-capable rooms -- the pull rotation."""
-    return [r for r in rooms.values() if r.listable() and r.shots and not r.expired()]
+    """Listed, joinable, thumbnail-capable rooms due a refresh -- the rotation.
+
+    The `last_pull_at` term is the per-room floor (card 97b31562): a room asked
+    within the last SHOT_ROOM_MIN_INTERVAL_SECONDS is not a candidate, so a
+    lone listed room is refreshed every ~15 s, not on every 1 s budget tick.
+    """
+    now = time.monotonic()
+    return [r for r in rooms.values()
+            if r.listable() and r.shots and not r.expired()
+            and now - r.last_pull_at >= SHOT_ROOM_MIN_INTERVAL_SECONDS]
 
 
 async def pull_once() -> Room | None:
     """Ask ONE host for a fresh thumbnail; return the room picked, if any.
+
+    NOTHING is pulled while no browser is connected (card 97b31562): the
+    thumbnails exist only for the browse carousel, so with nobody browsing no
+    host anywhere should pay the capture (a GPU readback + JPEG encode on the
+    game's own frame). Once a browser connects the next budget tick resumes the
+    rotation, but a room still inside its per-room floor waits that floor out
+    first -- so worst case ~SHOT_ROOM_MIN_INTERVAL_SECONDS plus a browse
+    refresh of stock art before the real picture lands, the trade the card
+    made. The floor is deliberately NOT reset on the empty->non-empty browser
+    transition: a flapping browser socket could otherwise re-arm a lone host's
+    every-second pulls, the exact cost the floor exists to bound.
 
     Round-robin by construction: always the candidate whose last pull is
     oldest. Because `last_pull_seq` is stamped HERE rather than when an answer
@@ -253,12 +292,15 @@ async def pull_once() -> Room | None:
     test_signal.py can drive a tick directly instead of sleeping for one.
     """
     global pull_counter
+    if not browsers:
+        return None
     candidates = _pull_candidates()
     if not candidates:
         return None
     room = min(candidates, key=lambda r: r.last_pull_seq)
     pull_counter += 1
     room.last_pull_seq = pull_counter
+    room.last_pull_at = time.monotonic()
     await _send_json(room.host, {"t": "shot"})
     return room
 

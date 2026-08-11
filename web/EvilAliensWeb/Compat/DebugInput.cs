@@ -1503,13 +1503,59 @@ namespace EvilAliensWeb.Compat
 		// Fire a ripple ring on demand at a design-space point (eaRipple.fire(x, y, power) /
 		// `eval RippleFire 400 300 2`). A real bomb needs a bomb pickup and a live ship, so
 		// this is how a rig -- browser or eahl -- reaches the effect without playing for one.
-		// Defaults to screen centre at full power.
+		// Defaults to screen centre at full power. The ring gets the duration a real bomb of
+		// that power would seed (Blast.Setup: 1000ms * (power+1), card 03c379f2) so the rig
+		// keeps matching the shipped look; it has no Blast, so nothing moves it.
 		[JSInvokable("debugRippleFire")]
 		public static void RippleFire(double x = 400.0, double y = 300.0, double power = 4.0)
 		{
+			int p = (int)System.Math.Round(power);
 			BombRipple.Fire(new Microsoft.Xna.Framework.Vector2((float)x, (float)y),
-				(int)System.Math.Round(power));
-			Console.WriteLine("[ripple] fired at " + x + "," + y + " power=" + (int)System.Math.Round(power));
+				p, mini: false, durationSeconds: 1f + Microsoft.Xna.Framework.MathHelper.Clamp(p, 0, 4));
+			Console.WriteLine("[ripple] fired at " + x + "," + y + " power=" + p);
+		}
+
+		// Spawn a REAL Blast through the real ComponentBin (eaRipple.blast(x, y, power) /
+		// `eval RippleBlast 200 300 2`), then reposition it with RippleBlastMove -- the way
+		// PlayerShip.Update drags a live blast with the ship. This is the WIRING rig for the
+		// ripple-follows-the-blast behaviour (card 03c379f2): RippleFire above never touches
+		// Blast, so a probe on it would pass with the Blast hook deleted. The blast is the
+		// genuine article -- it draws, collides and dies at its own lifetime -- so use it at
+		// the menu or in a throwaway boot, not mid-run.
+		private static EvilAliens.Blast rippleTestBlast;
+
+		[JSInvokable("debugRippleBlast")]
+		public static void RippleBlast(double x = 200.0, double y = 300.0, double power = 2.0)
+		{
+			EvilAliens.ComponentBin bin =
+				EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>()?.ComponentBin;
+			if (bin == null || bin.Game == null)
+			{
+				Console.WriteLine("[ripple] blast: no ComponentBin service");
+				return;
+			}
+			EvilAliens.Blast b = EvilAliens.Blast.NewBlast(bin, bin.Game);
+			b.Setup(new Microsoft.Xna.Framework.Vector2((float)x, (float)y),
+				(int)System.Math.Round(power), 0);
+			bin.Add(b);
+			rippleTestBlast = b;
+			Console.WriteLine("[ripple] blast spawned at " + x + "," + y
+				+ " power=" + (int)System.Math.Round(power));
+		}
+
+		// Move the last RippleBlast (eaRipple.blastMove(x, y) / `eval RippleBlastMove 500 300`)
+		// through the same SetPosition PlayerShip.Update uses; the ring must follow on the
+		// blast's next Update tick. Read the result with RippleState.
+		[JSInvokable("debugRippleBlastMove")]
+		public static void RippleBlastMove(double x, double y)
+		{
+			if (rippleTestBlast == null)
+			{
+				Console.WriteLine("[ripple] blastMove: no RippleBlast spawned");
+				return;
+			}
+			rippleTestBlast.SetPosition(new Microsoft.Xna.Framework.Vector2((float)x, (float)y));
+			Console.WriteLine("[ripple] blast moved to " + x + "," + y);
 		}
 
 		// Park ONE ripple ring at `phase` (0..1) of its life and hold it there for a still
@@ -1545,7 +1591,11 @@ namespace EvilAliensWeb.Compat
 				+ " mini=" + DebugFlags.RippleMini
 				+ " phase=" + (DebugFlags.RipplePhase.HasValue
 					? DebugFlags.RipplePhase.Value.ToString()
-					: "live"));
+					: "live")
+				// Per-ring centre + elapsed/resolved-duration (card 03c379f2): the follow
+				// behaviour's only data observable, appended so the probe regexes on the
+				// fields above keep matching.
+				+ BombRipple.DescribeRings());
 		}
 
 		// Park/un-park the respawn clock ring (`eaRespawn.park(0.9)` / `eval RespawnPark 0.9`),

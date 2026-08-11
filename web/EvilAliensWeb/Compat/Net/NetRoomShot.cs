@@ -7,7 +7,13 @@ using Microsoft.Xna.Framework.Graphics;
 namespace EvilAliensWeb.Compat.Net
 {
     // Room thumbnails, host half (card e7404647). The matchmaking server PULLS a picture of
-    // this game roughly every 15 s while it is publicly listed; this is what produces one.
+    // this game while it is publicly listed; this is what produces one. Since card 97b31562
+    // the server only pulls while someone is actually BROWSING (no browser socket connected =
+    // no pulls at all, so an idle listed game never pays for a capture) and never re-pulls one
+    // room within its 15 s floor -- before that, a lone listed room was pulled every SECOND
+    // (the global one-per-second budget round-robining over one candidate), and the per-second
+    // ResolveBackBuffer + GPU readback here plus the JPEG encode in JS was a visible 1 Hz
+    // stutter on the host. Nothing client-side rate-limits: the pull IS the schedule.
     //
     // WHAT IS CAPTURED: the resolved scene render target -- the 4:3 playing field, exactly as
     // ScreenshotSaver's level-select thumbnail takes it, and nothing else. Never the canvas,

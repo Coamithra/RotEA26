@@ -1985,16 +1985,30 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   - **Skipping the dead `Add`s instead is NOT enough** -- `ShipStateBuffer.Add`'s trim always
     keeps the last two samples, so the bracketing pair straddling the death gap survives whatever
     the gap length and the bridge remains. The edge clear is the whole fix.
-  - **The friend/couch channel never had the bug**: a dead extra ship simply stops being streamed,
-    and any real death gap exceeds the 500 ms `FriendTimeoutMs`, which destroys the whole channel
-    -- buffer included -- before the respawn stream rebuilds a fresh one.
+  - **Both the edge and the `remoteAlive` latch are gated on the sample being IN-ORDER** (the
+    same `T > NewestMs` test `buffer.Add` applies). The stream lane is unordered, so a stale dead
+    heartbeat delivered after the respawn's first alive packets would otherwise read as a fake
+    falling edge -- exploding the healthy puppet -- and the next alive packet's fake rising edge
+    would wipe the fresh buffer. Pre-card the raw latch merely flickered a bool; with an edge
+    CLEAR hanging off it, the gate is load-bearing.
+  - **The friend/couch channel is unreachable at its normal timeout, but NOT immune**: a dead
+    extra ship simply stops being streamed, and any real death gap exceeds the 500 ms
+    `FriendTimeoutMs`, which destroys the whole channel -- buffer included -- before the respawn
+    stream rebuilds a fresh one. HOWEVER, while the peer is STALLED or either side holds a PAUSE,
+    `TickFriends` runs the 8 s / 120 s timeouts instead, so a couch ship that dies AND respawns
+    inside such a window keeps its channel and its pre-death samples: the identical bridge, on
+    the identical code shape. Filed as its own follow-up card rather than fixed here -- a friend
+    stream has no alive edge (death = the stream stopping), so the fix is a resume-gap detection
+    with its own live-ship catch-up semantics to decide.
   - Receiver-side only, both roles, no wire change, offline byte-identical. Verify with
-    **`eaNetRespawnPos()`** / `eval NetRespawnPos` (`Compat/Net/NetRespawnPosTest.cs`, 14
+    **`eaNetRespawnPos()`** / `eval NetRespawnPos` (`Compat/Net/NetRespawnPosTest.cs`, 15
     assertions) -- **DESTRUCTIVE** (it seats and explodes a real Remote puppet), so run it in a
     throwaway `?level=Level2&invuln` boot; committed as
     `tools/headless/probes/net_respawn_pos.txt`. Its section 1 models the bridge on a scratch
-    buffer through the real codec as the negative control; mutation-tested (disabling the clear
-    flips exactly the two distance legs, with the puppet driven straight back to A).
+    buffer through the real codec as the negative control; mutation-tested two ways failing
+    disjoint legs (disabling the clear flips exactly the two distance legs, with the puppet
+    driven straight back to A; dropping the in-order gate flips exactly the reorder leg, with
+    the stale heartbeat exploding the healthy puppet).
 - **Remote ship:** `ControlDevice.Remote` (APPEND-ONLY enum position). Joins via
   `oracle.AddPlayer(Remote)` on the first alive stream. (It used to be spawned by the GameScene's
   own SpawnAllPlayers reset flow as well, with NetSession adopting either -- that is what card

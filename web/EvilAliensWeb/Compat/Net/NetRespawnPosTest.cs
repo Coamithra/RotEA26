@@ -192,6 +192,10 @@ namespace EvilAliensWeb.Compat.Net
             NetSession.Update();
             Check("the scripted peer paired (peer=" + (NetSession.PeerUp ? "up" : "down") + ")",
                 NetSession.PeerUp);
+            if (!NetSession.PeerUp)
+            {
+                return; // every later leg would fail against a session that never paired
+            }
 
             // ---- the first life, at A -------------------------------------------------------
             for (int i = 0; i < 8; i++)
@@ -255,6 +259,25 @@ namespace EvilAliensWeb.Compat.Net
                 + "px from A over the drive)", minToDeath > FarPx);
             Check("...and stays at the spawn point throughout (max " + maxFromSpawn
                 + "px from B)", maxFromSpawn < NearPx);
+
+            // ---- a REORDERED dead heartbeat after the respawn -------------------------------
+            // The stream lane is unordered, so a stale dead packet from the death stretch can
+            // arrive after the respawn's alive packets. It must be inert: without the in-order
+            // gate on the alive latch it reads as a fake falling edge -- the healthy puppet
+            // explodes, and the next alive packet's fake rising edge wipes the fresh buffer.
+            long explodedBefore = NetSession.Metrics.RemoteShipExplosions;
+            peer.SendStream(NetProtocol.EncodeShipState((ushort)(shipSeq - 40), shipMs - 1000,
+                DeathAt, Vector2.Zero, 4.712389f, alive: false, shotCount: 0, shotsPerSec: 8,
+                bulletLife: 450f));
+            wire.Pump();
+            NetSession.Update();
+            Deliver(peer, wire, clock, ref shipSeq, ref shipMs, ref clockCarry, SpawnAt, alive: true);
+            DriveTicks(puppet, bin);
+            Check("a REORDERED dead heartbeat is inert: no fake death (RemoteShipExplosions +"
+                + (NetSession.Metrics.RemoteShipExplosions - explodedBefore) + "), puppet still up",
+                NetSession.HasRemotePuppet
+                && NetSession.Metrics.RemoteShipExplosions == explodedBefore
+                && Dist(puppet.GetPosition(), SpawnAt) < NearPx);
         }
 
         // One ship-state packet, delivered and drained -- the real codec onto the real wire, the

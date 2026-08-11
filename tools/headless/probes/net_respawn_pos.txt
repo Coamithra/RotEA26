@@ -32,11 +32,17 @@
 #      B ~665 px away. The real puppet explodes on the falling edge (RemoteShipExplosions +1),
 #      respawns on the rising edge, and over a drive spanning the whole InterpDelay window its
 #      position must NEVER come near A (min distance > 200 px) while staying at B (max < 60 px).
+#      Then a REORDERED dead heartbeat from the death stretch arrives after the respawn: it must
+#      be inert -- both the edge and the alive latch are gated on the sample being IN-ORDER, or
+#      the stale packet reads as a fake falling edge (the healthy puppet explodes) and the next
+#      alive packet's fake rising edge wipes the fresh buffer.
 #
-# MUTATION-TESTED: disabling the rising-edge clear (`if (false && ...)`) flips exactly the two
-# discriminating legs -- "min 0px from A over the drive" / "max 665.7px from B", i.e. the puppet
-# is driven straight back to the death spot -- while section 1, both preconditions and the
-# explosion leg stay green. 12 passed, 2 failed on the mutation; 14/14 with the fix.
+# MUTATION-TESTED TWO WAYS, failing DISJOINT legs: disabling the rising-edge clear
+# (`if (false && ...)`) flips exactly the two distance legs -- "min 0px from A over the drive" /
+# "max 665.7px from B", i.e. the puppet is driven straight back to the death spot -- while
+# section 1, both preconditions, the explosion leg and the reorder leg stay green; dropping the
+# in-order gate (latching remoteAlive raw off every packet) flips exactly the reorder leg, with
+# the stale heartbeat exploding the healthy puppet. 15/15 with the fix.
 #
 # DESTRUCTIVE, so it gets a process to itself: it pairs a real host session onto the live level
 # and seats + explodes a real Remote puppet (real explosions + the expl2 cue). Teardown stops the
@@ -65,10 +71,11 @@ expect the falling edge exploded the puppet \(RemoteShipExplosions \+1\)
 expect PRECONDITION the dead heartbeats kept flowing \(StreamRx \+60\)
 expect the respawned puppet NEVER reads near the death spot
 expect and stays at the spawn point throughout
+expect a REORDERED dead heartbeat is inert: no fake death \(RemoteShipExplosions \+0\), puppet still up
 # A TALLY, never a bare `expect-not FAIL`: an absence assertion passes on a run where the eval
 # never happened, and this suite skips its live section on a bad precondition. Raise the count
 # when checks are added.
-expect \[netrespawnpos\] 14 passed, 0 failed
+expect \[netrespawnpos\] 15 passed, 0 failed
 expect-not FAIL
 expect-not SKIP
 quit

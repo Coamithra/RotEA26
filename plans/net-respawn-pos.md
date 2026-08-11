@@ -10,7 +10,7 @@ While a peer's ship is dead, `NetSession.SendShipState` keeps streaming `MsgShip
 
 On the respawn, the first `alive=true` sample lands (the spawn point / fly-in path), `ManagePuppet` → `SpawnPuppet` places the puppet at `buffer.Newest.Pos` (correct), but the render clock then samples `InterpDelayMs` (~100 ms) **behind** the newest sample — which lands among the dead-period samples. So the puppet's first driven frames read the **death position**, and over the next ~100 ms the interpolator lerps from the death spot to the spawn point: exactly the reported teleport-then-fast-slide. The buffer's 1 s trim cannot save it — `ShipStateBuffer.Add` always keeps at least the last two samples, so the bracketing pair straddling the death gap survives whatever the gap length.
 
-The friend/couch channel (`NetSession.Friends.cs`) is immune: a dead extra ship simply stops being streamed, and any real death gap exceeds the 500 ms `FriendTimeoutMs`, which destroys the whole channel (buffer included) before the respawn stream rebuilds a fresh one.
+The friend/couch channel (`NetSession.Friends.cs`) is unreachable at its normal timeout: a dead extra ship simply stops being streamed, and any real death gap exceeds the 500 ms `FriendTimeoutMs`, which destroys the whole channel (buffer included) before the respawn stream rebuilds a fresh one. It is NOT immune while the peer is stalled or a pause is held (8 s / 120 s timeouts in force) — that corner is a follow-up card, not this one.
 
 ## Design
 

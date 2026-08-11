@@ -1568,10 +1568,14 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     `!OwnsSlot` branch, so the other player's pickup makes the same noise on your screen a local
     one does, on both settle paths (host `HandleClaim`, client `NetPuppets.OnRemoteDeath`). The
     gate is what keeps the host settling a claim for its OWN slot from doubling the cue its ship
-    already played in `CollidesWith`. Known gap, pre-existing and shared with the HUD icon: a
-    pickup claim landing after the removal flush settles via `PayDeadClaim`, whose death record
-    carries no pickup type, so that race is silent. The cue is still NOT asserted by `eaNetPickup`
-    -- `SoundManager` has no cue counter, the ruling d53431b4 made and this card keeps.
+    already played in `CollidesWith`. **The LATE claim is covered too (06ac5df2 follow-up)**: the
+    `recentDeaths` record carries the pickup TYPE now (it was a bare `OneUp` bool), so a claim
+    landing after the removal flush -- both ships grabbing one powerup inside the RTT window is
+    the ordinary route -- runs the same remote-pickup apply through `PayDeadClaim` (HUD icon,
+    ship mirror, cue) instead of paying an extra life at most and silently dropping the rest.
+    That closes a pre-existing gap the HUD icon and the Linker ship mirror shared; pinned by
+    `eaNetPickup` leg 2b. The cue itself is still NOT asserted anywhere -- `SoundManager` has no
+    cue counter, the ruling d53431b4 made and this card keeps.
   - **A remote LEVEL-UP now shows the `PowerupEffect` sparkle**, which
     `ScoreVisualiser.NetSetPowerupLevel` deliberately suppressed. `doEffect` is true **only on a
     climb of exactly ONE step**: a multi-step climb is a CATCH-UP (a JIP peer adopting a slot

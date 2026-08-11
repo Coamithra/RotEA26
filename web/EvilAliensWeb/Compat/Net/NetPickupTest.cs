@@ -208,6 +208,10 @@ namespace EvilAliensWeb.Compat.Net
             int ownOptionsBefore = owner.NetOptionCount;
             score.RemovePowerup(NetSession.HostPrimarySlot);
             Powerup ours2 = Plant(bin, game, planted, Powerup.PowerupType.Option);
+            // Captured for leg 2b: after the claim below settles and flushes it, the id is the
+            // only handle left on this entity.
+            NetIdRegistry.TryGetByComp((GameComponent)(object)ours2, out NetIdRegistry.Entry ours2Entry);
+            ushort lateId = ours2Entry.Id;
             // Asserted, not branched on: a Claim that finds no netId would otherwise skip the two
             // checks below and still report "all passed" for a run that never reached the gate.
             bool claimed2 = Claim(peer, wire, bin, ref eventSeq, ours2, NetSession.HostPrimarySlot,
@@ -222,6 +226,22 @@ namespace EvilAliensWeb.Compat.Net
                 + owner.NetOptionCount + ")", owner.NetOptionCount == ownOptionsBefore);
             Check("CONTROL the HUD indicator still landed, so the gate is not an early return",
                 score.NetPowerupActive(NetSession.HostPrimarySlot));
+
+            // ---- 2b. the LATE claim -- settled and flushed, the pickup still applies -----
+            // (06ac5df2 follow-up.) The peer's claim can land after the powerup is already out
+            // of the world -- both ships grabbing it inside the RTT window is the ordinary
+            // route. The death record carries the pickup TYPE now, so PayDeadClaim runs the
+            // same remote-pickup apply the live branch does; pre-fix it paid a OneUp's life and
+            // silently dropped everything else (no HUD icon, no ship mirror, no cue).
+            sb.Append(" 2b. late claim -- a pickup already settled AND flushed still applies\n");
+            Check("PRECONDITION the settled Option really left the world (registry has no entry)",
+                !NetIdRegistry.TryGetByComp((GameComponent)(object)ours2, out _));
+            score.RemovePowerup(peerSlot);
+            peer.SendReliable(NetProtocol.EncodeClaimEvent(eventSeq++, lateId, (byte)peerSlot));
+            wire.Pump();
+            NetSession.Update();
+            Check("the late claim still drives the collector's HUD icon off the death record",
+                score.NetPowerupActive(peerSlot));
 
             // ---- 3. the connector can form, and breaks on both peers (card 83271f3d) -----
             sb.Append(" 3. with both ships armed the connector forms, and EvTetherBreak breaks it\n");

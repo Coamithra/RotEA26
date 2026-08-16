@@ -38,9 +38,13 @@ namespace EvilAliens;
 // override calls first), so LoadContent below is a cache hit rather than a decode at the worst
 // possible moment -- the first respawn after a death.
 //
-// Alpha is STRAIGHT project-wide: the solid layers are BlendMode 1 (NonPremultiplied) and the
-// glows are BlendMode 2 (additive). BlendState.AlphaBlend, KNI's PREmultiplied variant, is never
-// used here -- a glowing magenta ring is exactly the thing that goes additive-bright by accident.
+// Alpha is STRAIGHT project-wide: the solid layers set `SpriteBlendMode.AlphaBlend` and the glows
+// set `SpriteBlendMode.Additive`. MIND THE TWO AlphaBlends -- `SpriteBlendMode.AlphaBlend` is the
+// XNA-3.x compat enum this project wants, and the wrapper maps it to BlendState.NonPremultiplied;
+// `BlendState.AlphaBlend` is KNI's PREmultiplied variant and is the banned one. A glowing magenta
+// ring is exactly the thing that goes additive-bright by accident, so the distinction earns its
+// place here. Every mode set in this file is paired with a restore, so nothing leaks to the rest
+// of the frame.
 internal class PlayerShipSummon : AlienDrawableGameComponent
 {
 	// Ring geometry, in 800x600 design px. The radius is the mock's, measured off it: the rim's
@@ -462,10 +466,10 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 		// 1. The ambient halo the whole widget sits in, and the near-black disc over it. The disc
 		//    is 48 wedge quads rather than a round texture -- a 48-gon at this radius is off a true
 		//    circle by 0.08 px -- so it needs no new asset and no alpha-tested sprite.
-		spriteBatch.BlendMode = (SpriteBlendMode)2;
+		spriteBatch.BlendMode = SpriteBlendMode.Additive;
 		DrawGlow(base.Position, new Vector2(radius * 3.2f, radius * 3.2f),
 			new Color(0.85f, 0.15f, 0.75f, (0.20f + 0.10f * pulse) * popAlpha), 0f);
-		spriteBatch.BlendMode = (SpriteBlendMode)1;
+		spriteBatch.BlendMode = SpriteBlendMode.AlphaBlend;
 		DrawDisc(radius * DiscRadiusFactor, RingSegments, new Color(0.030f, 0.012f, 0.048f, 0.95f * popAlpha));
 
 		// 2. The rim, all the way round: the clock FACE, so the arc reads as sweeping a dial rather
@@ -510,7 +514,7 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 			DrawCap(0f, radius, arcCore);
 			DrawCap((float)litCount * step, radius, arcCore);
 		}
-		spriteBatch.BlendMode = (SpriteBlendMode)1;
+		spriteBatch.BlendMode = SpriteBlendMode.AlphaBlend;
 
 		// 4. The spikes, breathing with the pulse. Each is a stack of `blank` quads whose width
 		//    shrinks toward the tip -- a stepped needle. A single squashed lazerglow was tried
@@ -536,7 +540,7 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 
 		// 5. The numeral and the label. Drawn last so they sit over the disc.
 		DrawCountdownText(popAlpha, pulse);
-		spriteBatch.BlendMode = (SpriteBlendMode)1;
+		spriteBatch.BlendMode = SpriteBlendMode.AlphaBlend;
 	}
 
 	// One arc segment: a thin quad laid tangentially on the ring. Index 0 is 12 o'clock and the
@@ -633,19 +637,19 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 			digitScale = boxW / measured.X;
 		}
 		digitScale *= 1f + PunchScale * punch;
-		spriteBatch.BlendMode = (SpriteBlendMode)2;
+		spriteBatch.BlendMode = SpriteBlendMode.Additive;
 		DrawGlow(base.Position, new Vector2(RingRadius * (1.5f + 0.4f * punch), RingRadius * (1.5f + 0.4f * punch)),
 			new Color(1f, 0.30f, 0.90f, (0.30f + 0.35f * punch) * popAlpha), 0f);
-		spriteBatch.BlendMode = (SpriteBlendMode)1;
+		spriteBatch.BlendMode = SpriteBlendMode.AlphaBlend;
 		spriteBatch.DrawString(digits, base.Position, new Color(1f, 0.93f + 0.07f * punch, 1f, popAlpha),
 			0f, centered: true, digitScale, (SpriteEffects)0, 0f);
 
 		// The label, sheared. Lay the text out unscaled and centred on `anchor`, then let the
 		// matrix scale + shear the whole block about that same anchor.
 		Vector2 anchor = base.Position + new Vector2(0f, LabelOffsetY);
-		spriteBatch.BlendMode = (SpriteBlendMode)2;
+		spriteBatch.BlendMode = SpriteBlendMode.Additive;
 		DrawGlow(anchor, new Vector2(150f, 34f), new Color(0.95f, 0.15f, 0.85f, 0.24f * popAlpha), 0f);
-		spriteBatch.BlendMode = (SpriteBlendMode)1;
+		spriteBatch.BlendMode = SpriteBlendMode.AlphaBlend;
 		Vector2 size = font.MeasureString(LabelText);
 		// Row-vector convention: x' = x + y*M21, so a NEGATIVE M21 leans the top (smaller y) right.
 		Matrix shear = new Matrix(1f, 0f, 0f, 0f, 0f - LabelItalic, 1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f);

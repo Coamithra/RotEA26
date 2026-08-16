@@ -90,9 +90,94 @@ internal class ShipConnector : AlienDrawableGameComponent
 	// channel is the mutual stale-anchor loop; constants are picked/validated by
 	// tools/sim/tether_sim.py (overdamped up to 300ms one-way + the interp delay).
 	// If it ever wobbles under a real transport: SOFTEN NetPullK, never stiffen.
+	//
+	// The pull applies ONLY when an endpoint is a net PUPPET. Two LOCALLY-owned ships inside a
+	// net session (couch co-op, ?netlocal=) take the rigid offline law instead -- there is no
+	// staleness between two ships this peer simulates, so there is nothing to be soft about, and
+	// the soft law moved only ONE of the two (see NetPullOwnShip's endpoint pick), which ran away
+	// on its own. On the other peer both of those ships are puppets, so its NetPullOwnShip returns
+	// early and the rigid positions arrive over the wire unchallenged -- no peer fights another.
 	private const float NetRestPx = 78f;         // 2 x the 39px docking separation
 	private const float NetPullK = 0.0018f;      // per ms: fraction of excess stretch recovered
 	private const float NetMaxPullPxPerMs = 0.22f; // clamp below ship MaxSpeed 0.33 -> you can always fight it
+
+	// --- The hard cap (card 2cfab019) ----------------------------------------------------
+	// The soft law above is UNBOUNDED in separation, and the card ("ships can fly further and
+	// further away from each other") is that runaway. It is a GAIN problem, not a latency
+	// problem -- measured identical at one-way 0/50/100/200/300ms:
+	//
+	//   * ONE player thrusting away is already BOUNDED at ~167px: the idle partner's own 0.22
+	//     pull makes up the 0.11px/ms shortfall (gap rate 0.33 - 2p = 0 -> p = 0.165 ->
+	//     d = 78 + 0.165/0.0018). That case was never broken, which is why the card's guess
+	//     ("only the host moves itself back towards the client") is not the cause -- both peers
+	//     always ran this, and each always pulled only the ship it owns.
+	//   * The runaway needs the pull budget to be ONE-SIDED: BOTH players thrusting apart (the
+	//     gap grows at 2 x (0.33 - 0.22) = 0.22px/ms forever), or one thrusting while the partner
+	//     cannot move toward it -- pinned against the 800x600 clamp in PlayerShip.Update, which is
+	//     the everyday trigger, since backing into a corner is the natural reaction to being
+	//     dragged.
+	//
+	// THE CAP IS A RATE, NOT A POSITION CLAMP, and that is the whole design. A true clamp
+	// (`if (dist > MAX) SetPosition(anchor +/- MAX)`) has loop gain EXACTLY 1: in steady clamp
+	// x_A(t) = x_B(t-D) - MAX and x_B(t) = x_A(t-D) + MAX substitute to x_A(t) = x_A(t-2D), a pure
+	// delay at unity gain -- marginally stable, so any perturbation persists forever as a
+	// 2D-period oscillation with the two peers fighting each other. That is precisely the mutual
+	// stale-anchor loop the block above warns about, so the cap is NOT built that way.
+	//
+	// Instead the pull's SPEED ceiling becomes distance-dependent: past NetHardPx it rises above
+	// PlayerShip.ShipMaxSpeed, so thrust is OUT-RUN rather than refused. Separation then has a
+	// hard equilibrium at NetHardPx + (ShipMaxSpeed - NetMaxPullPxPerMs)/NetHardK = 220px
+	// perceived (~214.5px true -- the 5.5px is one tick of own-ship travel between the anchor
+	// sample and the pull). Still first-order, still no velocity state, still one continuous
+	// monotone function of dist; per-tick loop gain in the hard band is NetHardK * dt = 0.092, two
+	// orders below a clamp's 1. Measured over one-way 0/50/100/200/300ms: the bound is IDENTICAL
+	// at every latency (a speed equilibrium has no position memory to ring with), zero direction
+	// reversals after input stops, and the settle after release is not worse than the shipped law.
+	// NetPullK and NetMaxPullPxPerMs are UNTOUCHED and the knee is derived from where the soft law
+	// saturates, so below 200px this is bit-for-bit the pre-card behaviour -- the "soften, never
+	// stiffen" instruction above is respected literally.
+	//
+	// One honest caveat, measured rather than assumed. The law is a function of the PERCEIVED
+	// separation, and in a steady drag both ships travel at the same speed v, so each peer's stale
+	// anchor is displaced by v * (one-way + interp) ALONG the direction of travel: the LEADING
+	// peer perceives true + v*delay, the trailing one true - v*delay. Past ~200ms one-way that is
+	// ~+/-64px, enough for the leader to read past the knee while the TRUE gap is only ~162px --
+	// so at high latency the cap does engage in an ordinary drag, on a stale reading. It is
+	// bounded, it does not ring, and it acts in the TIGHTENING direction (a 300ms-one-way drag
+	// settles at 162px instead of 181px, i.e. toward the 78px rest), so it is accepted rather than
+	// designed away. Up to 100ms one-way -- where a real session lives -- nothing moves at all,
+	// and tether_sim.py asserts exactly that split.
+	//
+	// NOT gated on peer freshness, deliberately. Against a STALLED peer the anchor freezes (the
+	// jitter buffer extrapolates 250ms then holds), and a pull toward a frozen anchor is a
+	// CONTRACTION with a fixed point at NetRestPx, not an integrator: total travel is exactly
+	// dist - NetRestPx however long the stall runs (measured 136.5px, identical with the cap and
+	// without -- the cap changes the speed of that fixed journey, never its length or its
+	// destination). That is categorically unlike ShipStateBuffer's ExtrapolateCapMs or
+	// Lazer.NetExtrapolateCapMs, which bound `pos + vel*t` integrators that diverge linearly in
+	// time and therefore must be bounded in TIME. Gating the hard band on freshness would instead
+	// restore the runaway for the whole 1200ms PeerStallMs grace, which is when it is most likely:
+	// measured over one stall, the shipped law adds 264px of escape and keeps going, while the cap
+	// holds the pair and leaves a ~20px correction on recovery.
+	//
+	// The cost, and it is the user's ruling ("soft, then hard cap"): past NetHardPx the pull
+	// exceeds ship max speed, so you can no longer fight it there. That is 2.6x the rest length;
+	// ordinary play sits at the ~167px drag equilibrium and never reaches it.
+	private const float NetHardPx = 200f;        // knee. NetRestPx + NetMaxPullPxPerMs/NetPullK = 200.2px,
+	                                             // i.e. exactly where the soft cap saturates and stops
+	                                             // responding to separation at all -- the wall begins
+	                                             // precisely where the runaway becomes possible, which is
+	                                             // what makes "unchanged below the knee" exact rather
+	                                             // than approximate.
+	private const float NetHardK = 0.0055f;      // per ms: ~20px of give between the knee and the equilibrium
+	// Absolute ceiling on the pull. NOT a tuned feel value -- a guard, and it DOES bind: an online
+	// TeamChallenge creates its scripted tether once BOTH ships exist (netConnectorPending), and the
+	// two ships enter from fixed off-screen points 567-696px apart, where the raw hard term would ask
+	// for 37-49px per FRAME. 0.55px/ms is 1.67x ShipMaxSpeed -- deliberately under the 2x that
+	// NetSession's own correction-pop detector calls "a step no real ship could make" -- so the
+	// reel-in is fast (696 -> 220px in ~883ms) but still reads as ship motion. Offline the same
+	// spawn is slammed together rigidly on frame 1, so this is strictly the gentler of the two.
+	private const float NetMaxHardPullPxPerMs = 0.55f;
 
 	// Sprite-harness mode (?harness=connector). The real connector needs two live PlayerShips as
 	// endpoints; the frozen harness has none, so instead we derive the two orbs from this component's
@@ -483,27 +568,44 @@ internal class ShipConnector : AlienDrawableGameComponent
 			// (idempotent; usually its own endpoint edge already broke it).
 			EvilAliensWeb.Compat.Net.NetSession.OnTetherBreak();
 		}
-		else if (EvilAliensWeb.Compat.Net.NetSession.Active)
-		{
-			// Base sprite between the two ON-SCREEN ships (staleness reads as elastic
-			// stretch); the soft pull only ever moves the ship WE own.
-			Vector2 aPosition = A.Position;
-			Vector2 bPosition = B.Position;
-			rotation = MyMath.VectorToAngle(bPosition - aPosition);
-			base.Position = aPosition + (bPosition - aPosition) * 0.5f;
-			NetPullOwnShip(gameTime);
-			base.Update(gameTime);
-		}
 		else
 		{
 			Vector2 aPosition = A.Position;
 			Vector2 bPosition = B.Position;
 			float angle = (rotation = MyMath.VectorToAngle(bPosition - aPosition));
 			base.Position = aPosition + (bPosition - aPosition) * 0.5f;
-			A.SetPosition(base.Position - MyMath.AngleToVector(angle) * 39f);
-			B.SetPosition(base.Position + MyMath.AngleToVector(angle) * 39f);
+			// Only a PUPPET endpoint needs the soft law. Two locally-owned ships inside a net
+			// session have no staleness between them, so they take the rigid offline law -- see
+			// the NetRestPx block's second paragraph.
+			if (EvilAliensWeb.Compat.Net.NetSession.Active && (A.IsNetPuppet || B.IsNetPuppet))
+			{
+				// Base sprite between the two ON-SCREEN ships (staleness reads as elastic
+				// stretch); the soft pull only ever moves the ship WE own.
+				NetPullOwnShip(gameTime);
+			}
+			else
+			{
+				A.SetPosition(base.Position - MyMath.AngleToVector(angle) * 39f);
+				B.SetPosition(base.Position + MyMath.AngleToVector(angle) * 39f);
+			}
 			base.Update(gameTime);
 		}
+	}
+
+	// The tether's pull SPEED at a given separation, in design px per ms: the gentle first-order
+	// recovery of the excess stretch, capped at NetMaxPullPxPerMs, plus -- past NetHardPx -- the
+	// hard band that out-runs ship thrust and so bounds the separation. Continuous and monotone
+	// in dist by construction (the soft term saturates at 200.2px, so the band's own term starts
+	// from ~0 there). Pure and static so the headless logic oracle can call the REAL law:
+	// tools/sim/logic_probe -> ProbeTetherWall.
+	internal static float NetPullSpeedPxPerMs(float dist)
+	{
+		float soft = Math.Min(NetPullK * (dist - NetRestPx), NetMaxPullPxPerMs);
+		if (dist <= NetHardPx || !DebugFlags.NetTetherWall)
+		{
+			return soft;
+		}
+		return Math.Min(soft + NetHardK * (dist - NetHardPx), NetMaxHardPullPxPerMs);
 	}
 
 	// First-order clamped pull on the locally-owned endpoint (see the Net* consts above).
@@ -511,12 +613,15 @@ internal class ShipConnector : AlienDrawableGameComponent
 	{
 		PlayerShip own;
 		PlayerShip anchor;
-		if (A.Controller != ControlDevice.Remote)
+		// !IsNetPuppet, not `Controller != Remote`: a RemoteFriend is a host-driven puppet too,
+		// and treating one as the ship we own would have this peer moving a ship whose position
+		// the wire is authoritative for.
+		if (!A.IsNetPuppet)
 		{
 			own = A;
 			anchor = B;
 		}
-		else if (B.Controller != ControlDevice.Remote)
+		else if (!B.IsNetPuppet)
 		{
 			own = B;
 			anchor = A;
@@ -532,7 +637,7 @@ internal class ShipConnector : AlienDrawableGameComponent
 		{
 			return;
 		}
-		float step = Math.Min(NetPullK * (dist - NetRestPx), NetMaxPullPxPerMs) * dtMs;
+		float step = NetPullSpeedPxPerMs(dist) * dtMs;
 		own.SetPosition(own.Position + d / dist * step);
 	}
 

@@ -1322,7 +1322,10 @@ public class PlayerShip : AlienDrawableGameComponent
 	// A network-driven puppet ship (the other peer's ship, or one of the host's AI friends):
 	// its OWNER decides its motion/hits/pickups, so the local sim never damages it, lets it grab
 	// a powerup, or forces it onto the ?aiplayer AI branch.
-	private bool IsNetPuppet => controller == ControlDevice.Remote || controller == ControlDevice.RemoteFriend;
+	// `internal` rather than private since card 2cfab019: ShipConnector needs the same "is this
+	// ship ours to move" test to pick the tether endpoint it may pull, and to tell a
+	// two-locally-owned-ships link (rigid) from one with a puppet endpoint (soft pull).
+	internal bool IsNetPuppet => controller == ControlDevice.Remote || controller == ControlDevice.RemoteFriend;
 
 	// The fire state the co-op ship stream carries (card a45b78f6): how many shots this ship has
 	// actually SPAWNED, cumulative and wrapping, plus the aim of the newest one. Both are stamped

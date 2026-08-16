@@ -151,6 +151,15 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 	// live capture cannot be timed to the one frame per second that was wrong.
 	internal float DebugRemainingMs => RemainingMs;
 
+	// The numeral and its punch, for NetRespawnTest's cosmetic-mode legs. The COSMETIC clock is a
+	// plain one-shot Timer rather than the owned mode's integer-plus-repeating-timer pair, and its
+	// duration arrives off the wire with no reason to be a round number -- so "the numeral is right
+	// in BOTH modes" is a claim about a second code path, and is asserted over there rather than
+	// argued from the two happening to share RemainingMs.
+	internal int DebugShownSeconds => ShownSeconds;
+
+	internal float DebugDigitPunch => DigitPunch;
+
 	// The roster slot this indicator belongs to -- the dying player's. Read by NetSession to
 	// re-point an announcement for a slot it is already showing rather than stacking a second one.
 	internal int Owner => player;

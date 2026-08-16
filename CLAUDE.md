@@ -438,14 +438,26 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   rides the blast, and it lives the blast's own 1-5 s life; 0.75 s is only the no-blast
   fallback); `eaRipple.blast(x,y,power)` / `.blastMove(x,y)` are the wiring rig for that.
   Details: web CLAUDE.md.
-- **Respawn clock ring** (card 37f3a663): the respawn countdown is a clock ring that fills, pulses
-  near full and POPS into a free level-4 bomb as the ship returns (`Game/EvilAliens/
-  PlayerShipSummon.cs`). **`?respawnphase=<0..1>` parks the fill at a chosen point** -- negative =
+- **Respawn clock ring** (cards 37f3a663 / 045c5a92 / 258afd66): the respawn countdown is a clock
+  ring that fills, pulses near full and POPS into a free **level-3** bomb as the ship returns
+  (`Game/EvilAliens/PlayerShipSummon.cs`). Since card 045c5a92 it wears the owner's mock
+  (`new_assets_raw/respawndesign.png`): near-black disc, magenta rim swept by a thick round-capped
+  pink arc, 12 radiating spikes, a **whole-second countdown numeral** (no tenths -- ruled by the
+  owner) that PUNCHES on every change, and an italic "RESPAWNING!" label. No new art -- `blank` +
+  `lazerglow` + `menufont`, all three already in `GameScene.PreloadGraphicalContent`.
+  **`?respawnphase=<0..1>` parks the fill at a chosen point** -- negative =
   live, the `?ripplephase=` convention -- and **`?harness=respawn`** is the frozen rig for it; a
-  ~10 s fill with a 220 ms pop cannot be caught by a timed screenshot. Console `eaRespawn.park(p)`
-  / `.state()` (`eval RespawnPark` / `RespawnState`), the latter reporting fill/pulse/pop as DATA,
-  which is the only way to verify the pulse. **In netplay BOTH peers draw it** (`EvRespawn`,
-  protocol v17). Side-fix in the same card: a death that WIPES the world no longer raises a summon
+  ~10 s fill with a 220 ms pop cannot be caught by a timed screenshot. **The park now sits on the
+  MILLISECONDS and the fill is derived from them**, so it parks the numeral and the punch too -- a
+  numeral read off the raw clock would be un-parkable, since the harness freezes `Update`.
+  **`?harness=respawnrun` is the same summon UNFROZEN**: the only offline rig that can run an owned
+  countdown to its pop, because the one level seating a second local ship (TeamChallenge) is
+  shared-fate and purges the summon within ~10 frames of raising it.
+  Console `eaRespawn.park(p)`
+  / `.state()` (`eval RespawnPark` / `RespawnState`), the latter reporting fill/pulse/pop/secs/
+  punch as DATA, which is the only way to verify the pulse or the punch. **In netplay BOTH peers
+  draw it** (`EvRespawn`, protocol v17 -- unchanged by 045c5a92). Side-fix in card 37f3a663: a
+  death that WIPES the world no longer raises a summon
   at all -- it used to appear for one frame before `LoseLife` purged it. `eaKillShip(<slot>)` kills
   ONE ship (`eaKillShips()` takes them all in a tick, which is the suppressed case). Details: web
   CLAUDE.md; net half: net CLAUDE.md.

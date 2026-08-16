@@ -26,9 +26,14 @@
 #   NO reward line at all -> the pop stopped spawning a blast; check SpawnRewardBlast's callers in
 #   Update (both the cosmetic and the owned branch call it).
 #
-# Mutation-tested: RewardBlastLevel 3 -> 4 turns leg 2 and leg 3 red together (level=4 and /5.00),
-#   which is the pair that proves the two witnesses agree; deleting the SpawnRewardBlast call in
-#   the owned branch turns leg 2 and 3 red while leg 1 stays green. Both were run.
+# Mutation-tested twice, both run. The runner aborts at the first failed expect, so each trips
+# leg 2 and leg 3 is not reached in the same run:
+#   RewardBlastLevel 3 -> 4      : leg 2 goes red, printing `level=4`.
+#   both SpawnRewardBlast calls  : leg 2 goes red with no reward line at all, leg 1 still green
+#     deleted                      (so the rig did raise a clock -- the pop just dropped nothing).
+# LEG 3 WAS CONFIRMED SEPARATELY, against the pre-card build: with RewardBlastLevel still 4, this
+# same rig reported the ring as `r0=(400,300 e=3.82/5.00)`, i.e. exactly the /5.00 leg 3 refuses.
+# So the second witness is known to move with the constant rather than merely to agree with it.
 #
 # eahl: --flags "?harness=respawnrun"
 

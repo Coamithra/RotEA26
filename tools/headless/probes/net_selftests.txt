@@ -191,7 +191,12 @@ expect \[netfx\] 24 passed, 0 failed
 # rather than calling the sender, so the chain OnDeath -> ShouldSummon -> OnLocalRespawnSummon is
 # what is asserted; its negative is a PUPPET dying, which must raise nothing and announce nothing
 # back. Menu-runnable and leave-no-trace, the eaNetScenarios shape.
-expect \[netrespawn\] 25 passed, 0 failed
+# Card 045c5a92 raised this 25 -> 27: section 2 now also reads the cosmetic summon's COUNTDOWN
+# NUMERAL and its change-punch back. That clock is a plain one-shot Timer fed a duration off the
+# wire -- a different code path from the owned mode's integer-plus-repeating-timer pair, which
+# tools/headless/probes/respawn_digit.txt pins and which cannot reach this one. PeerRespawnMs is
+# deliberately 750, so the numeral has to CEIL to a whole 1 rather than truncate to 0.
+expect \[netrespawn\] 27 passed, 0 failed
 # The teleport marker (card e79bb994), which REPLACED card 8dabe812's observed-velocity cap.
 # Two halves, each with the identical jump left UNMARKED beside it: section 1 runs a real HOST
 # session and reads the snapshot frames the peer RECEIVED (the wire is the only place the host's

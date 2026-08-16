@@ -24,10 +24,13 @@
 #   which is the one that makes an exact whole second read as "changed this instant" rather
 #   than as "changed 1000 ms ago".
 #
-# Mutation-tested three ways, each failing a disjoint set of legs, all three run:
-#   ShownRemainingMs -> RemainingMs        : legs 1, 2, 3 and 5 go red (every secs= reads 10)
-#   DigitPunch       -> return 1f          : leg 4 goes red
-#   DigitPunch       -> return 0f          : legs 1 and 6 go red
+# Mutation-tested three ways, all three actually run. The runner aborts at the FIRST failed
+# expect, so what is recorded below is the leg each mutation trips first -- not a claim about
+# every leg it would have tripped:
+#   ShownRemainingMs -> RemainingMs        : trips leg 1 (secs=10 where 7 is required, because
+#                                            the frozen raw clock never leaves its start value)
+#   DigitPunch       -> return 1f          : trips leg 2 (punch still 1.000 50 ms after the change)
+#   DigitPunch       -> return 0f          : trips leg 1 (no punch at the boundary at all)
 #
 # eahl: --flags "?harness=respawn"
 

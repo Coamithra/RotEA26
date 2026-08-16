@@ -70,6 +70,12 @@ namespace EvilAliensWeb.Compat
         // position, jump-start X and land-anim resume frame be aligned by eye (?spider* flags).
         private Spider harnessSpider;
         private float spiderPhase;
+
+        // ?harness=respawnrun: the respawn summon with the freeze LIFTED, so its real owned
+        // countdown runs to the pop. Unlike the blast/spider scrubbers below this needs no phase
+        // driver at all -- the object's own Update is the thing under test, so the rig is simply
+        // "do not set Enabled=false". See the registry entry for why no LEVEL can host this.
+        private PlayerShipSummon harnessSummon;
         private Spider.JumpVizState spiderState;
         private Texture2D shadowTex;
         private Texture2D pixelTex;
@@ -173,8 +179,13 @@ namespace EvilAliensWeb.Compat
             {
                 obj.fps = DebugFlags.HarnessFps.Value;
             }
-            obj.Enabled = false;   // freeze: no gameplay Update
-            obj.Visible = true;    // but keep drawing itself
+            // ?harness=respawnrun runs the summon for real (see the field comment); every other
+            // key keeps the harness' defining property, a frozen object.
+            harnessSummon = string.Equals(DebugFlags.Harness, "respawnrun", StringComparison.OrdinalIgnoreCase)
+                ? obj as PlayerShipSummon
+                : null;
+            obj.Enabled = (harnessSummon != null);   // freeze: no gameplay Update
+            obj.Visible = true;                      // but keep drawing itself
 
             // A Blast's appearance lives entirely in its lifetime curve (which the freeze stops),
             // so loop a phase through it instead and build the collision-ring overlay texture.
@@ -292,9 +303,20 @@ namespace EvilAliensWeb.Compat
             if (obj != null)
             {
                 // Keep it frozen every frame (defensive; Enabled=false already stops its own Update).
-                obj.Enabled = false;
+                // ?harness=respawnrun is the one key that must NOT be re-frozen -- its object's own
+                // Update IS the thing under test.
+                if (harnessSummon == null)
+                {
+                    obj.Enabled = false;
+                }
 
-                if (harnessBlast != null)
+                if (harnessSummon != null)
+                {
+                    // Nothing to drive: the engine updates it through the component list. Don't
+                    // re-park its Position either -- a summon never moves, and once it has Die()d
+                    // (the pop) it is on its way out of the bin.
+                }
+                else if (harnessBlast != null)
                 {
                     // Loop the blast through its lifetime so the growth/fade/active window animate
                     // (its own Update stays frozen; we scrub the same curve via HarnessApplyPhase).

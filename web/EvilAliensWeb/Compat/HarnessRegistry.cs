@@ -88,6 +88,15 @@ namespace EvilAliensWeb.Compat
                 // fill 0 by default -- scrub it with ?respawnphase=<0..1>, which is the only way
                 // to see a chosen point of a ~10 s fill (and the 220 ms pop) as a still.
                 ["respawn"] = (bin, g, p) => { var s = PlayerShipSummon.NewPlayerShipSummon(bin, g); s.Setup(0, 0f, p, 0); return s; },
+                // The SAME summon, but NOT frozen -- HarnessScene leaves Enabled on for this key, so
+                // the real owned countdown (countdown + countdowntimer, the mode with the documented
+                // wrap hazard) actually RUNS, pops, and drops its reward Blast. It exists because
+                // there is offline NO other rig that can hold a running owned summon: the only level
+                // seating a second local ship is TeamChallenge, and TeamChallenge is SHARED-FATE
+                // (UpdateNormal asplodes the partner and calls LoseLife the moment either ship dies),
+                // so GameScene.LoseLife purges the summon within a few frames of raising it. Kept a
+                // separate key so `respawn` keeps its exact frozen, screenshot-stable behaviour.
+                ["respawnrun"] = (bin, g, p) => { var s = PlayerShipSummon.NewPlayerShipSummon(bin, g); s.Setup(0, 0f, p, 0); return s; },
 
                 // --- bosses (best-effort: shown in their spawned/idle pose, not mid-attack) ---
                 ["deathstar"] = (bin, g, p) => { var d = DeathStar.NewDeathStar(bin, g); d.Setup(p, EnemyBehaviour.normal); return d; },

@@ -93,7 +93,7 @@ last `mark` — the game's own `Console.WriteLine` diagnostics (`[loadprofile]`,
 `[net]`, …) as well as command replies. A failure quotes the offending line, so a red probe
 tells you what broke rather than just that something did.
 
-Five rules, each of which has already cost something:
+Six rules, each of which has already cost something:
 
 1. **Assert the positive too.** `expect-not "COLD decode in Level2"` passes beautifully on a
    run that never reached Level 2. Pair it with an `expect` that proves the run got where it
@@ -120,6 +120,7 @@ Five rules, each of which has already cost something:
    fourteen most populous component types, so `PlayerShip=1` vanishes on a busy scene and reads
    as "no ship". `eval OracleRoster`'s `aliveSlots=` is the ship-liveness readout (a bracketed slot list:
    `aliveSlots=[0]` is slot 0 flying, `aliveSlots=[]` is a shipless world).
+6. **Anchor a named `expect` on the verdict word, not just the message text** (cards d6645119 / 566474ae). Every `eaNet*`-style suite prints `PASS <text>` and `FAIL <text>` with the SAME `<text>`, so a bare `expect <text>` matches the FAILING line just as happily — it asserts only that the leg ran. Write `expect PASS .*<text>`. Found by mutation: four named `expect` lines in `net_motion.txt` all still matched under a mutation that reddened every one of them, and only the tally caught it — so a suite whose tally line ever drifted out of a probe would take its named assertions down with it, silently. Rule 4 is what surfaces this: if a mutation reddens the suite but not your `expect`, the `expect` is the thing that is wrong.
 
 ## The physical mouse is OFF, and that is why menu navigation is repeatable
 

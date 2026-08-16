@@ -1,4 +1,4 @@
-# CLAUDE.md — web/EvilAliensWeb/Compat/Net (the online co-op net layer)
+﻿# CLAUDE.md — web/EvilAliensWeb/Compat/Net (the online co-op net layer)
 
 Moved out of `web/EvilAliensWeb/CLAUDE.md` so it loads only when working on the net layer.
 The parent file has the rest of the game/engine notes; `NetStatusMenu.cs` lives in
@@ -2432,6 +2432,14 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   the receiver breaks silently via `NetBreakSilently`); shared-fate death asplodes only
   locally-owned ships and defers the life/reset to the host. Connector creation waits for
   BOTH ships (the puppet joins a beat late -- `netConnectorPending` in TeamChallenge).
+- **That soft pull was UNBOUNDED, and the hard cap is card 2cfab019.** "Ships can fly further and further away from each other." **It is a GAIN problem, not a latency problem** -- measured identical at one-way 0/50/100/200/300ms -- so the card's own guessed cause ("only the host moves itself back towards the client") is wrong twice over: both peers always ran `NetPullOwnShip`, and each always pulled only the ship it owns. The soft pull saturates at `NetMaxPullPxPerMs` 0.22 while a ship thrusts at `ShipMaxSpeed` 0.33, so any **one-sided pull budget** separates without bound: both players thrusting apart (0.22px/ms forever), or -- the everyday trigger -- one thrusting while the other is **pinned against the 800x600 clamp in `PlayerShip.Update`**, which is what backing into a corner to escape being dragged produces. A LONE thruster was never broken: the idle partner's own pull covers the shortfall.
+  - **WRITE THIS NUMBER DOWN: ordinary online drag play already sits at ~167px, against offline's rigid 78px.** `REST + (ShipMaxSpeed/2)/NetPullK` = **169.7px perceived, 166.9px measured true** -- the same discrete-tick offset as the 220/214.5 pair below, so quote the formula and the measurement as a pair; the formula does not evaluate to the measured figure. So the tether is ~2x looser online than off *before* the cap, and that is untouched here -- it lives in the soft law the header tells you not to stiffen, and the user's ruling was about the runaway. It is the thing a player reports next as "the connector feels loose online"; the number is here so the next person does not re-measure it.
+  - **The cap is a RATE, not a position clamp, and that distinction IS the design.** A clamp (`if (dist > MAX) SetPosition(anchor +/- MAX)`) has mutual loop gain exactly 1 -- the two peers' clamp equations substitute to `x_A(t) = x_A(t-2D)`, a pure delay at unity gain, marginally stable, ringing forever against each other's stale views. That is precisely the mutual stale-anchor loop `ShipConnector`'s header warns about. Instead the pull's SPEED ceiling rises above ship thrust past `NetHardPx`, so thrust is OUT-RUN rather than refused: per-tick loop gain `NetHardK * dt` = 0.09, and the bound is an equilibrium of SPEEDS, hence latency-independent. Consts `NetHardPx` 200 / `NetHardK` 0.0055/ms / `NetMaxHardPullPxPerMs` 0.55. Equilibrium `NetHardPx + (ShipMaxSpeed - NetMaxPullPxPerMs)/NetHardK` = 220px perceived, **214.5px true, which the sim and the real game code agree on independently**. `NetPullK`/`NetMaxPullPxPerMs` are untouched and the knee is *derived* from where the soft cap saturates (`REST + 0.22/0.0018` = 200.2), which is what makes "unchanged below the knee" exact rather than approximate.
+  - **NOT gated on peer freshness, deliberately.** A pull toward a stalled peer's frozen anchor is a CONTRACTION with a fixed point at `NetRestPx`, not an integrator: total travel is `dist - NetRestPx` however long the stall runs (measured 136.5px, *identical* with the cap and without). That is what separates it from `ShipStateBuffer.ExtrapolateCapMs` and `Lazer.NetExtrapolateCapMs`, which bound `pos + vel*t` integrators and so must be bounded in TIME. Gating it would restore the runaway for the whole 1200ms `PeerStallMs` grace -- when it is most likely: across one stall the pre-card law adds 264px of escape and keeps going, the cap leaves a ~20px correction on recovery.
+  - **`NetMaxHardPullPxPerMs` 0.55 is a guard, not a feel value, and it DOES bind:** an online TeamChallenge builds its tether once both ships exist, and they enter from fixed off-screen points **567-696px apart**, where the raw hard term would ask for 37-49px per FRAME. 0.55 is 1.67x `ShipMaxSpeed`, deliberately under the 2x `NetSession`'s own correction-pop detector calls "a step no real ship could make" (696 -> 220px in ~883ms). Offline that same spawn is slammed rigid on frame 1, so this is the gentler of the two.
+  - **One honest caveat, measured:** the law reads the PERCEIVED separation, and in a steady drag both ships move at the same speed, so each peer's stale anchor is displaced by `v * (one_way + interp)` along the direction of travel -- the LEADING peer perceives `true + v*delay`. Past ~200ms one-way that is enough to cross the knee while the TRUE gap is only ~162px, so the cap engages on a stale reading. Bounded, non-ringing, and it acts in the TIGHTENING direction (181 -> 162px, toward rest), so it is accepted. **Up to 100ms one-way nothing moves at all**, and `tether_sim.py` asserts exactly that split.
+  - **Same card, second defect: two LOCALLY-owned endpoints now take the RIGID offline law.** In a session with couch players (`?netlocal=`) a pair of local ships could be connected, and `NetPullOwnShip` applied its one-sided soft pull to only ONE of them -- so it ran away with a single thruster, with no staleness anywhere to justify being soft. On the other peer both are puppets, so its `NetPullOwnShip` returns early and the rigid positions arrive unchallenged; no peer fights another. The endpoint pick also moved from `Controller != Remote` to `!IsNetPuppet` (`PlayerShip.IsNetPuppet` is now `internal`) -- a `RemoteFriend` passed the old test and would have been moved by us.
+  - **Verify with `eaNetTether()`** (`Compat/Net/NetTetherTest.cs`, 14 assertions; `eval NetTether`). **DESTRUCTIVE** like `eaNetPickup` -- it pairs a real HOST session onto the live level and adopts a real puppet -- so run it in a throwaway `?level=Level2&invuln` boot. Three instruments split the card and none subsumes another: `tools/sim/tether_sim.py` owns the SCENARIOS (two coupled peers, stale anchors, the latency sweep, ringing, the stall), `logic_probe`'s `ProbeTetherWall` owns the pure LAW, and the suite owns the WIRING. **`?nettetherwall=0` restores the runaway** (in `DebugFlags.Active`, the `?netstaleguard=0` idiom) and is the negative control; because it is parsed at boot the probe pair is two BOOTS -- `tools/headless/probes/net_tether_wall.txt` + `net_tether_wall_absent.txt`, 214.5px vs 1010.4px. **The mutation run earned its keep**: the endpoint-pick mutation initially passed both files, because the leg put OUR ship in endpoint A and the pick takes A when A is ours, so the puppet was never examined. No protocol change.
 - **World-authority coverage gaps (follow-up to card 11.2):** the replicable set was extended
   to the enemy/boss types 11.2 left host-only -- PlasmaBall, the paratrooper family
   (ParatrooperAlien/ParatrooperBrain/Parachute), FakeBoss, SpiderBoss, BrainBoss,
@@ -3652,23 +3660,65 @@ broken CI -- and `prov=` / `owner=` remain exact, first-sample and never softene
 | scenery line | 1 in ~300 | compared FIELD BY FIELD, not as one string: the doodad carries a POSITION and got `-239.6` vs `-239.2` reported as a desync. Its name stays exact and so does everything discrete (which is what makes the missing-catch-up mutation unmistakable) | -- |
 | the `uns` run-level control itself | (history) | **RETIRED with the ledger (card af96bcc2)** -- there is no `uns` field to control any more (dump v5); the hp leg's `hpwire=` control carries the silent-deletion guard | -- |
 
-- **`NetApplyHp` ONLY EVER LOWERS, and that is why the hp compare reads the RECEIVED value rather
-  than the entity.** `KillableAlien.NetApplyHp` refuses any value at or above the puppet's current
-  hit points (`if (hp >= hitpoints) return;`) so an older snapshot cannot resurrect hits this
-  client has already landed. A first implementation recorded `hpwire` by reading the killable back
-  AFTER the apply, which therefore reports the REFUSED figure whenever the joiner is ahead:
-  measured **132 gaps across 6 seeds, 132 client-lower, 0 higher, 0 equal** -- a one-directional
-  signature that is the clamp, not a replication fault. Recording what was received keeps the two
-  ends comparable; the clamp is then asserted SEPARATELY as an invariant with no tolerance at all
-  -- **a puppet's live hp may never EXCEED its `hpwire`**, since both the clamp and local damage
-  only lower, so an entity holding more than it was last told is a state no path produces.
+- **The hp compare reads the RECEIVED value rather than the entity, because the two are different
+  quantities.** `hpwire` is recorded as `state.Hp` at the moment it is applied
+  (`PuppetInfo.LastAppliedHp`), never by reading the killable back afterwards -- a read-back
+  reports whatever `NetApplyHp` decided to do with it, which is not what the host sent. Under the
+  ORIGINAL downward-only clamp that gap was large and one-directional: measured **132 gaps across
+  6 seeds, 132 client-lower, 0 higher, 0 equal** -- the clamp's signature, not a replication
+  fault. Card 87310afa narrowed it (see the next bullet) but did not close it: the apply can still
+  be refused whole by the floor at 1 or by a dead puppet. The relationship is then asserted
+  SEPARATELY as an invariant with no tolerance at all -- **a puppet's live hp may never EXCEED its
+  `hpwire`** -- which holds under either direction, since a raise assigns exactly `state.Hp` and
+  local damage only ever goes down from there. Re-measured after the change: `--level Level2`,
+  `hpwire=40` compares, **0 violations**.
   - **COVERAGE BOUNDARY, stated because a tolerance would have hidden it:** a wrong-but-LOWER
     apply is indistinguishable from ordinary local damage seen from the host's side, so this
     suite does NOT prove `NetApplyHp` assigns the value it received. Nothing did -- `NetEntityTest`
     calls the seam directly and `NetWireTest` round-trips the byte through a frame, but neither
     drove a real snapshot entry into a real puppet. **`eaNetSnap` section 7 now does** (card
-    d108c459; `net_selftests.txt` tally 40 -> 45), driving `NetPuppets.ApplySnapshotState` and
-    reading the killable back, clamp included.
+    d108c459; `net_selftests.txt` tally 40 -> 45, then 45 -> 48 with card 87310afa), driving
+    `NetPuppets.ApplySnapshotState` and reading the killable back.
+- **`NetApplyHp` IS TWO-WAY: the host is authoritative for a puppet's hp in BOTH directions (card
+  87310afa).** It used to refuse every raise (`if (hp >= hitpoints) return;`), and that was not
+  free. A client's bullets run the real `HitBy` against puppets locally -- they are
+  `Enabled=false` but stay hit-testable through `NetPuppets.CollidableOverride`, which is what
+  client-owned kill claims ARE -- while the host's own **per-entity 35 ms `hittimer`** may refuse
+  those same hits, the two peers running independent gates over hit sequences ~100 ms apart. Every
+  such over-prediction was permanent, so a client's copy ratcheted below the host's for the rest
+  of a fight; and since the client kills locally at `hitpoints<=0` and files an unconditional
+  `EvClaim` (`HandleClaim` -> `NetKill` bypasses the hittimer -- a claim is already a confirmed
+  kill), **a boss could be claimed dead while the host's copy still had HP**.
+  - **What the old direction was NOT doing:** it is not what stops two players draining a boss at
+    double rate. That is host authority plus the 35 ms gate at the top of `HitBy` -- the host's
+    boss is ONE real entity and both players' bullets (the peer's re-spawned from the replicated
+    cumulative shot count) contend for that one gate. Card a5c2a39b's closing note credited the
+    clamp; the conclusion held, the mechanism cited did not.
+  - **THE COST, accepted deliberately (cosmetic).** An in-order but ~half-RTT-stale snapshot
+    legitimately lacks the hits the client just landed, so the DRAW-side readers of hp -- the
+    colorize redden and `BattleSkull`'s Draw-time hue remap -- can nudge back up mid-burst,
+    bounded by the snapshot turn. **`MarsBoss`'s `fps = Lerp(32, 16, HitPointsNormalized)` is
+    NOT one of them**, though it looks like the obvious third: it is re-derived at the top of
+    `MarsBoss.Update`, which a frozen puppet never runs -- which is exactly why that type opts
+    out of `NetFrameLocal` and takes the replicated frame instead.
+  - **Do NOT "fix" the raise by capping it at `initialhitpoints`.** `HitPointsNormalized <= 1`
+    reads like an invariant the raise breaks, and it is not one this class ever had: `Initialize`
+    sets `hitpoints = initialhitpoints * DifficultyFactorized(0.5f)`, which is above 1 on every
+    tier past the floor, so a `scaleWithDifficulty` type (`Boss`, 225) is already over its
+    initial at full health in ordinary single-player. A cap would cut those types' replicated hp
+    to the unscaled number on every snapshot -- a real desync traded for a cosmetic one the raise
+    does not cause, since both peers share the session difficulty and compute the same pool.
+  - **The REORDER case is a different guard and is untouched.** Card f5cf7a5c's per-netId monotone
+    seq refuses an older entry whole, before `ApplySnapshotState` reaches the hp read, so a late or
+    reordered packet still cannot raise hp. `eaNetSnap` section 7 pins the two separately, and its
+    stale leg asserts the guard's own `stale` flag as a PRECONDITION -- without that it would pass
+    on a seq that was simply accepted and applied as a no-op. Mutation-tested both ways:
+    `?netstaleguard=0` fails only the stale leg (hp raised 9 -> 110), and restoring the early-out
+    fails only the two raise legs while the floor leg still passes.
+  - **The floor at 1 and the `dead` guard are unchanged**, so deaths still arrive exclusively as
+    events or local kills and no snapshot can resurrect a dead puppet. The floor simply had no
+    leg of its own until now (it was reachable before -- the old early-out did not shadow it);
+    it is pinned separately so the direction change cannot quietly take it with it.
 - **(HISTORY, superseded by card af96bcc2.) Comparing score wire-to-wire was measured and
   declined under the ledger design** -- a joiner booked settled awards continuously and
   `EvScoreSync` was only a true-up, so the wire-to-wire version went RED on 7 of 10 seeds.

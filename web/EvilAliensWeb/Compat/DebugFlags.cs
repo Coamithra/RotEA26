@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Globalization;
 using Microsoft.Xna.Framework;
 
@@ -52,6 +52,11 @@ namespace EvilAliensWeb.Compat
 	//                  snapshot entry drags a puppet backwards again (card f5cf7a5c). The other
 	//                  deliberate bug reproduction, and in `Active` for the same reason. ON by
 	//                  default, so `Active` tests its NEGATION.
+	//   ?nettetherwall=0  turn the online connector tether's HARD CAP off, so two players
+	//                  thrusting apart -- or one thrusting while the other is pinned against the
+	//                  screen edge -- separate without bound again (card 2cfab019). Another
+	//                  deliberate bug reproduction, ON by default, in `Active` for the same
+	//                  reason, and the negative control the fix's probe pair rests on.
 	//   ?metalscore    re-enable the chrome-sheen (metal.fx) on the in-game score + "Press Start"
 	//                  text (OFF by default since card 37c4ccca — the chrome's dark mid-band reads
 	//                  crunchy on the tiny HUD glyphs) to A/B against the plain flattened drop shadow
@@ -427,6 +432,21 @@ namespace EvilAliensWeb.Compat
 		// negative control, which is why it ships rather than living inside the test suite.
 		public static bool NetSnapshotStaleGuard { get; private set; } = true;
 
+		// The UPWARD half of KillableAlien.NetApplyHp (card 87310afa), ON by default --
+		// `?nethpraise=0` turns it OFF, restoring the pre-card downward-only clamp where a client
+		// puppet's hp could never be corrected back up. Same shape and same reasons as
+		// `?netstaleguard=0` / `?netaimease=0` directly above: it turns a shipped FIX off, so it
+		// DEFAULTS TRUE and `Active` asks the INVERSE, and it is IN `Active` because a peer
+		// reproducing the bug must never reach a public lobby.
+		//
+		// WHAT IT REPRODUCES: a client's bullets run the real HitBy against puppets locally while
+		// the host's own 35ms hittimer may refuse those same hits, so under the old clamp the
+		// client's copy ratcheted permanently below the host's and could claim a boss dead while
+		// the host's still had HP. It is also the raise legs' MUTATION CONTROL in
+		// `eaNetEntity` / `eaNetSnap` -- the stale leg had `?netstaleguard=0` from the start, and
+		// a negative control you can only run by editing source is not one you will run again.
+		public static bool NetHpRaise { get; private set; } = true;
+
 		// The enemy charge-glow's AIM EASE (card eb057163), ON by default -- `?netaimease=0` turns
 		// it OFF, restoring the pre-card behaviour where a puppet's glow TELEPORTS to each newly
 		// replicated aim instead of sweeping toward it. The aim only arrives on that emitter's
@@ -440,6 +460,19 @@ namespace EvilAliensWeb.Compat
 		// is draw-only), but the two peers would disagree about where an enemy is aiming, which is
 		// exactly what this card was reported for.
 		public static bool NetChargeAimEase { get; private set; } = true;
+
+		// The online connector tether's HARD CAP (card 2cfab019), ON by default --
+		// `?nettetherwall=0` turns it OFF, restoring the pre-card behaviour where the tether's
+		// pull speed saturates at NetMaxPullPxPerMs 0.22 below the ship's own 0.33, so any
+		// one-sided pull budget (both players thrusting apart, or one thrusting while the other is
+		// pinned against the screen clamp) separates them without bound.
+		//
+		// DEFAULTS TRUE, so `Active` asks the inverse (`!NetTetherWall`) -- the `?netstaleguard=0`
+		// / `?netaimease=0` shape, and the third flag here that turns a shipped FIX off. In
+		// `Active` for the same reason: a deliberate bug reproduction must never reach a public
+		// lobby. Unlike `?netaimease` this one moves real ship POSITIONS, so a peer running it
+		// would disagree with everyone else about where the tethered pair is.
+		public static bool NetTetherWall { get; private set; } = true;
 
 		// Gates ONLY the automatic per-kill/boss-kill hit-stop freeze frame fired from
 		// Juice.KillPunch (KillableAlien.HitBy) — NOT player-death hit-stop (PlayerShip
@@ -1826,6 +1859,21 @@ namespace EvilAliensWeb.Compat
 							+ " guard stays " + (NetSnapshotStaleGuard ? "ON" : "OFF"));
 					}
 					break;
+				case "nethpraise":
+					// Same asymmetry as ?netstaleguard above, for the same reason: an unrecognised
+					// value here would silently turn a shipped FIX off, so only an explicit off
+					// spelling disables it and anything else is reported and ignored.
+					if (IsExplicitlyOff(val))
+					{
+						NetHpRaise = false;
+					}
+					else if (!IsOn(val))
+					{
+						Console.WriteLine("[debug] unknown ?" + key + "= value '" + val
+							+ "' (expected 0/off to disable) -- ignored, the upward hp"
+							+ " correction stays " + (NetHpRaise ? "ON" : "OFF"));
+					}
+					break;
 				case "netaimease":
 					// Same asymmetry as ?netstaleguard above, for the same reason: an unrecognised
 					// value here would silently turn a shipped FIX off, so only an explicit off
@@ -1839,6 +1887,21 @@ namespace EvilAliensWeb.Compat
 						Console.WriteLine("[debug] unknown ?" + key + "= value '" + val
 							+ "' (expected 0/off to disable) -- ignored, the enemy charge-glow"
 							+ " aim ease stays " + (NetChargeAimEase ? "ON" : "OFF"));
+					}
+					break;
+				case "nettetherwall":
+					// Same asymmetry as ?netstaleguard / ?netaimease above, for the same reason:
+					// an unrecognised value here would silently turn a shipped FIX off, so only an
+					// explicit off spelling disables it and anything else is reported and ignored.
+					if (IsExplicitlyOff(val))
+					{
+						NetTetherWall = false;
+					}
+					else if (!IsOn(val))
+					{
+						Console.WriteLine("[debug] unknown ?" + key + "= value '" + val
+							+ "' (expected 0/off to disable) -- ignored, the connector tether"
+							+ " hard cap stays " + (NetTetherWall ? "ON" : "OFF"));
 					}
 					break;
 				case "slowmotrail":
@@ -3938,7 +4001,7 @@ namespace EvilAliensWeb.Compat
 					+ "REFUSE its own pairing (a menu session rejects while debug flags are active). "
 					+ "Add &netallowdebug.");
 			}
-			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || FakeBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || !NetChargeAimEase || AiWallNav2008 || AiFastForward > 1;
+			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || FakeBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || !NetChargeAimEase || !NetHpRaise || !NetTetherWall || AiWallNav2008 || AiFastForward > 1;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -3975,6 +4038,7 @@ namespace EvilAliensWeb.Compat
 						// the one flag in this dump whose ABSENCE is the normal state, so a run that
 						// reordered a snapshot on purpose has to be tellable from one that did not.
 						+ (!NetSnapshotStaleGuard ? " netstaleguard=0" : "")
+						+ (!NetHpRaise ? " nethpraise=0" : "")
 						// Same rule as the line above: prints only on the deliberate bug repro, so
 						// a run whose puppets step their aim is tellable from one that sweeps it.
 						+ (!NetChargeAimEase ? " netaimease=0" : "")

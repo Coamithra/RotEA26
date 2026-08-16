@@ -38,6 +38,11 @@ internal static class Program
 {
     private static int failures;
 
+    // The build is InvariantGlobalization anyway, but every number this tool PRINTS is read by a
+    // human comparing it against a constant written with a '.', so spell it out at the call site.
+    private static readonly System.Globalization.CultureInfo Inv =
+        System.Globalization.CultureInfo.InvariantCulture;
+
     private static void Check(string label, bool ok, string detail)
     {
         if (!ok)
@@ -228,6 +233,12 @@ internal static class Program
         }
 
         rc = ProbeBombRippleFollow(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
+        rc = ProbeTetherWall(asm);
         if (rc != 0)
         {
             return rc;
@@ -3658,6 +3669,158 @@ internal static class Program
         // Leave nothing live for whatever runs after.
         Step(999f);
         Check("teardown: no live rings", Rep() == " rings=none", Rep());
+        return 0;
+    }
+
+    // Card 2cfab019 -- the online connector tether's pull-speed law, ShipConnector's answer to
+    // "ships can fly further and further away from each other". The law is a PURE static function
+    // of one float, so this is the headless logic oracle's case: it calls the REAL method in the
+    // desktop CLR, with no browser, no session and no ships.
+    //
+    // Every bound is read out of the REAL private consts by reflection rather than copied here.
+    // A probe that restates the constants it is checking passes whatever they become, and the
+    // properties that actually matter (continuity at the knee, "you can fight it below the knee",
+    // "you cannot above it") are relations BETWEEN those constants and PlayerShip.ShipMaxSpeed.
+    private static int ProbeTetherWall(Assembly asm)
+    {
+        Type conn = asm.GetType("EvilAliens.ShipConnector", true);
+        Type ship = asm.GetType("EvilAliens.PlayerShip", true);
+        Type flags = asm.GetType("EvilAliensWeb.Compat.DebugFlags", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo law = conn.GetMethod("NetPullSpeedPxPerMs", anyStatic);
+        MethodInfo parse = flags.GetMethod("Parse", anyStatic);
+        PropertyInfo wallProp = flags.GetProperty("NetTetherWall", anyStatic);
+        if (law == null || parse == null || wallProp == null)
+        {
+            Console.WriteLine("FAIL: could not reflect the targets (NetPullSpeedPxPerMs=" + (law != null)
+                + " Parse=" + (parse != null) + " NetTetherWall=" + (wallProp != null)
+                + ") -- renamed or moved?");
+            return 2;
+        }
+        Func<string, float> konst = name =>
+        {
+            FieldInfo f = conn.GetField(name, anyStatic);
+            if (f == null)
+            {
+                throw new InvalidOperationException("ShipConnector." + name + " is gone -- renamed?");
+            }
+            return (float)f.GetRawConstantValue();
+        };
+        float rest = konst("NetRestPx");
+        float k = konst("NetPullK");
+        float softCap = konst("NetMaxPullPxPerMs");
+        float hardPx = konst("NetHardPx");
+        float hardK = konst("NetHardK");
+        float hardCap = konst("NetMaxHardPullPxPerMs");
+        float maxSpeed = (float)ship.GetField("ShipMaxSpeed", anyStatic).GetRawConstantValue();
+        Func<float, float> p = d => (float)law.Invoke(null, new object[] { d });
+
+        Console.WriteLine("[logic_probe] connector tether pull law (card 2cfab019)");
+        Check("the wall is ON by default (the shipped path is what follows)",
+            (bool)wallProp.GetValue(null), null);
+
+        // 1. THE KNEE IS DERIVED, NOT PICKED. This is what makes "below the knee it is bit-for-bit
+        // the pre-card law" exact instead of approximate: the knee sits exactly where the soft cap
+        // saturates, so the hard term starts from zero effect.
+        float saturation = rest + softCap / k;
+        Check("knee == where the soft cap saturates (" + saturation.ToString("0.00", Inv) + "px)",
+            Math.Abs(hardPx - saturation) <= 0.5f,
+            "NetHardPx=" + hardPx.ToString("0.##", Inv));
+
+        // 2. BELOW THE KNEE: identical to the pre-card law, sampled densely.
+        bool belowSame = true, monotone = true, fightable = true;
+        float prev = -1f;
+        for (float d = rest; d <= 1200f; d += 0.25f)
+        {
+            float got = p(d);
+            if (got < prev - 1e-6f)
+            {
+                monotone = false;
+            }
+            prev = got;
+            if (d <= hardPx)
+            {
+                float pre = Math.Min(k * (d - rest), softCap);
+                if (Math.Abs(got - pre) > 1e-6f)
+                {
+                    belowSame = false;
+                }
+                // The 11.3 property the header states: the clamp sits below ship MaxSpeed so a
+                // player can always fight the soft pull. It must survive this card untouched.
+                if (got >= maxSpeed)
+                {
+                    fightable = false;
+                }
+            }
+        }
+        Check("below the knee the law is bit-for-bit the pre-card soft law", belowSame, null);
+        Check("the law is monotone non-decreasing in separation", monotone, null);
+        Check("below the knee the pull stays under ShipMaxSpeed (you can always fight it)",
+            fightable, "ShipMaxSpeed=" + maxSpeed.ToString("0.###", Inv));
+
+        // 3. CONTINUITY AT THE KNEE -- a step here would be a visible jolt exactly at the moment
+        // the tether starts to bite, which is the one place a player is looking.
+        float atKnee = p(hardPx);
+        float justPast = p(hardPx + 0.01f);
+        Check("continuous across the knee (no jolt)", Math.Abs(justPast - atKnee) < 0.001f,
+            atKnee.ToString("0.#####", Inv) + " -> " + justPast.ToString("0.#####", Inv));
+
+        // 4. THE CAP ACTUALLY CAPS. The bound is the separation where the pull matches ship
+        // thrust: past it a thrusting player is out-run, so the gap cannot grow. Asserting the
+        // ANALYTIC point rather than a measured one keeps this independent of the sim.
+        float equilibrium = hardPx + (maxSpeed - softCap) / hardK;
+        Check("pull == ShipMaxSpeed at the analytic equilibrium ("
+                + equilibrium.ToString("0.0", Inv) + "px)",
+            Math.Abs(p(equilibrium) - maxSpeed) < 0.001f, p(equilibrium).ToString("0.####", Inv));
+        Check("... and past it the pull EXCEEDS ship thrust (so separation is bounded)",
+            p(equilibrium + 10f) > maxSpeed, p(equilibrium + 10f).ToString("0.####", Inv));
+        Check("... while just inside it the player still wins (the cap is not a wall early)",
+            p(equilibrium - 10f) < maxSpeed, p(equilibrium - 10f).ToString("0.####", Inv));
+
+        // 5. THE CEILING. It is a guard against a huge separation asking for a teleport (an online
+        // TeamChallenge really does create its tether with the ships 567-696px apart), and it is
+        // sized against the project's OWN "no real ship could move that far in a tick" bar --
+        // NetSession's correction-pop detector uses 2x ShipMaxSpeed.
+        Check("the ceiling binds far out", Math.Abs(p(5000f) - hardCap) < 1e-6f,
+            p(5000f).ToString("0.####", Inv));
+        Check("the ceiling exceeds ship thrust (or it could not cap anything)", hardCap > maxSpeed,
+            hardCap.ToString("0.##", Inv));
+        Check("the ceiling stays under the correction-pop bar of 2x ShipMaxSpeed",
+            hardCap < 2f * maxSpeed,
+            hardCap.ToString("0.##", Inv) + " vs " + (2f * maxSpeed).ToString("0.##", Inv));
+        Check("a TeamChallenge spawn separation (696px) is ceiling-limited, not a teleport",
+            Math.Abs(p(696f) - hardCap) < 1e-6f, p(696f).ToString("0.####", Inv));
+
+        // 6. THE NEGATIVE CONTROL. ?nettetherwall=0 must return the law to the pre-card one at
+        // EVERY separation -- that is the arm the headless probe pair's failing side rests on, and
+        // a control that does not actually change the answer is not a control.
+        string outOff = FirstLine(RunParse(parse, "?nettetherwall=0"));
+        Check("?nettetherwall=0 turns the cap off", !(bool)wallProp.GetValue(null), outOff);
+        bool offIsPreCard = true;
+        for (float d = rest; d <= 1200f; d += 0.25f)
+        {
+            if (Math.Abs(p(d) - Math.Min(k * (d - rest), softCap)) > 1e-6f)
+            {
+                offIsPreCard = false;
+                break;
+            }
+        }
+        Check("... and the law is then the pre-card one at every separation", offIsPreCard, null);
+        Check("... which really is a different answer far out (the control is not vacuous)",
+            Math.Abs(p(696f) - hardCap) > 0.1f, p(696f).ToString("0.####", Inv));
+
+        // An unrecognised value must NOT silently disable a shipped fix -- the value-carrying
+        // flags' rule, which ?netstaleguard / ?netaimease follow for the same reason.
+        wallProp.GetSetMethod(nonPublic: true).Invoke(null, new object[] { true });
+        string outJunk = FirstLine(RunParse(parse, "?nettetherwall=nope"));
+        Check("a junk ?nettetherwall= value is reported, not obeyed",
+            (bool)wallProp.GetValue(null) && outJunk.Contains("unknown ?nettetherwall="), outJunk);
+
+        // Leave the flag as shipped: it is a persistent static and every later probe (and any
+        // future one) is entitled to the default.
+        wallProp.GetSetMethod(nonPublic: true).Invoke(null, new object[] { true });
+        Check("teardown: the cap is back ON for whatever runs next",
+            (bool)wallProp.GetValue(null), null);
         return 0;
     }
 }

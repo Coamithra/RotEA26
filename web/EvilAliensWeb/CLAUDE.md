@@ -1466,7 +1466,9 @@ Update-reached state show their spawned/idle pose — bosses are best-effort. Sp
 `?harness=eyeattract` forces the JunkBoss attract sheet (`HarnessForceAttract`; try `&play&fps=2` to
 prove the `interpolate.fx` frame-interpolation shader tweens); `?harness=blast` loops the blast
 lifecycle (`?blastloop=` sweep speed); `?harness=respawn` shows the respawn clock ring, scrubbed
-with `?respawnphase=<0..1>`;
+with `?respawnphase=<0..1>`, and **`?harness=respawnrun` is the same summon UNFROZEN** (its own
+`Update` runs, so the owned countdown reaches its pop and drops the reward blast -- the only
+offline rig that can, see the respawn bullet below);
 `?harness=spiderjump` loops the spider crawl→jump→land cycle; `?harness=connector` animates the
 ship connector with no ships; `?harness=battleskull` shows the colorize tuner; `?harness=brainboss`
 plays the boss overlays (they advance on `WorldTime`, which the harness does not freeze -- it
@@ -1481,21 +1483,65 @@ uses `Enabled=false`, not a pause layer -- so they still play here while a `shot
   ActiveAlpha` 0.5); hitbox radius uses `DrawScale` (supersample divided out) at
   `DefaultHitRadiusFactor` 0.8-of-visible. `?blastactive=`/`?blasthit=` override live;
   `?harness=blast` overlays the ring (green = damaging) + readout.
-- **Respawn clock ring (`PlayerShipSummon.cs`, card 37f3a663).** The 2008 respawn indicator was a
+- **Respawn clock ring (`PlayerShipSummon.cs`, cards 37f3a663 / 045c5a92 / 258afd66).** The 2008
+  respawn indicator was a
   `LazerGenerator` charge orb plus a DarkGoldenrod integer countdown; it is now a clock ring that
   fills clockwise from 12 o'clock, pulses as it nears full, and flares outward over its last 220 ms
-  as the ship arrives -- dropping a **free level-4 `Blast`** at the respawn point as the reward.
-  - **The ring is ~48 thin rotated quads of `GFX/Game/blank`** (a 10x10 OPAQUE WHITE texture the
-    class already loaded, and never drew, as its own animation) -- no new asset, no shader, no
-    pipeline change. The draws go through the `SpriteBatchWrapper` overloads, which clamp the
+  as the ship arrives -- dropping a **free level-3 `Blast`** at the respawn point as the reward.
+  - **Card 045c5a92 restyled it to the owner's mock** (`new_assets_raw/respawndesign.png`): a
+    near-black disc, a magenta rim swept by a thick round-capped pink arc, 12 radiating spikes, a
+    **whole-second countdown numeral** and an italic "RESPAWNING!" label. The numeral is the 2008
+    integer countdown returning in a new form, with the owner's explicit approval; **whole seconds
+    only** ("we dont need fractions of seconds there"), so the mock's decorative "2.1" is not what
+    ships. **The arc still FILLS rather than drains** -- the mock is a hand-composited still, card
+    37f3a663's fill-and-pop is approved shipped behaviour, and the ring reaching full is what makes
+    the pop read as the arrival.
+  - **The ring, disc and spikes are ~96 rotated quads of `GFX/Game/blank`** (a 10x10 OPAQUE WHITE
+    texture the class already loaded, and never drew, as its own animation) plus
+    `GFX/Sprites/lazerglow` for the soft halos and `menufont` for the text -- **no new asset**, no
+    shader, no pipeline change. All three are in `GameScene.PreloadGraphicalContent` (every level
+    override calls `base` first), so `LoadContent` is a cache hit rather than a decode at the first
+    respawn. The draws go through the `SpriteBatchWrapper` overloads, which clamp the
     source to `LogicalBounds()`; a raw `SpriteBatch.Draw` would stretch the `--padtest` pad, the
-    `SealAlpha` trap (card b7e9b106). Unfilled arc at alpha-blend, filled arc ADDITIVE, straight
-    alpha throughout.
+    `SealAlpha` trap (card b7e9b106). Straight alpha throughout; `BlendState.AlphaBlend` appears
+    nowhere.
+  - **TWO SEAM RULES the restyle had to learn, and both are about overlapping quads.** Neighbouring
+    arc segments must overlap or the ring seams, so (a) the bright core is drawn OPAQUE
+    (`alpha = popAlpha`, the pulse living in RGB) because blending two translucent quads is not
+    idempotent -- 0.72 over 0.72 reads 0.92, which drew a bright rib every few px; and (b) there is
+    **no per-segment additive glow pass at all**, because additive overlap can never be idempotent
+    at any alpha. Measured, that pass hatched the whole 39-45 px fringe by 70-126/255 while the
+    stroke itself was flat to 1/255. The bloom comes from a radial `lazerglow` (a texture, so it
+    has no seams) plus the engine's own bloom over a saturated opaque stroke. Segment quads are
+    also sized at the stroke's OUTER radius, not its centre-line, or consecutive quads leave a
+    `thickness/2 * step` wedge gap out there.
+  - **The italic label is a real shear**, via `SpriteBatchWrapper.BeginPerspective` -- it takes an
+    arbitrary design-space matrix (it exists for the credits crawl's projective one) and a shear is
+    an affine member of that family. There is no italic face in the atlas and `SpriteBatch` cannot
+    skew a single quad, so this is the only route.
   - **The COUNTDOWN itself is untouched.** The 1 Hz `countdowntimer`, the rumble ladder and the
     tick the ship arrives on are unchanged; `RemainingMs` is derived from them, so only the
     drawing moved. The pulse phase reads **`WorldTime.Seconds`**, so it freezes under a pause or a
     hit-stop like every other Draw-time cosmetic.
-  - **The reward blast is NOT `doBlast()`**: no bomb is spent, the level is a fixed 4 rather than
+  - **THE PARK SEAM IS ON THE MILLISECONDS, and the fill is derived from THEM** (card 045c5a92
+    inverted this). Everything the indicator looks like -- fill, pulse, pop, numeral, punch --
+    comes off `ShownRemainingMs`, so `?respawnphase=` parks all five at once. The old shape (park
+    the fill, let the ms run underneath) was invisible while the fill was the only thing drawn and
+    is fatal to a numeral: `?harness=respawn` freezes `Update`, so a numeral read off the raw clock
+    shows **the same digit at every phase** -- in the harness AND in the very screenshots this
+    card is verified with. `respawn_digit.txt` pins it by asserting `remainMs=10000` on the same
+    line as a changing `secs=`. **The live fill curve is arithmetically unchanged** and was proven
+    so, not argued: a stepped unparked run through `?harness=respawnrun` produced a byte-identical
+    fill column before and after (41 coarse samples over the whole clock + 260 per-frame samples
+    spanning four 1 Hz wrap events -- the window the file's own `RemainingMs` comment warns about).
+  - **The digit punch is a PURE FUNCTION of that clock** -- `sinceChange = 1000 - (remain mod
+    1000)`, decaying over `PunchMs`. So it needs no per-instance accumulator (one less field for a
+    missed `Initialize` to leak across a pool recycle -- the EvilSkull bug of card d8344c17) and it
+    parks for free. **The coupling to the change is by construction**: the numeral steps exactly
+    where the ms cross a whole second, which is exactly where this reads 0 elapsed. An edit that
+    rounds the numeral differently silently decouples them, which is why `respawn_digit.txt`
+    asserts the punch AT the boundary rather than near it.
+  - **The reward blast is NOT `doBlast()`**: no bomb is spent, the level is a fixed 3 rather than
     the player's progression, and no `EvBlast` is sent -- in a session the far peer's own cosmetic
     summon drops its copy off its own `EvRespawn`. Reusing `EvBlast` would have raced the puppet's
     arrival (its rx handler needs a live ship in that slot, and at a respawn there may not be one).
@@ -1514,13 +1560,30 @@ uses `Enabled=false`, not a pause layer -- so they still play here while a `shot
     BETWEEN frames, so the death tick and the purge tick coalesce and the summon never reaches a
     Draw. `DebugStateLine`'s `wiped=` is the observable either way.
   - **Rigs:** `?harness=respawn` (frozen, real pipeline) + **`?respawnphase=<0..1>`** to scrub the
-    fill (negative = live, the `?ripplephase=` convention; it parks the pop too, since the pop is
-    derived from the fill). Console `eaRespawn.park(p)` / `.state()` (`eval RespawnPark` /
-    `RespawnState`). **Read the pulse as DATA, never from a screenshot pair** -- an identical frame
+    fill (negative = live, the `?ripplephase=` convention; it parks the pop, the numeral and the
+    punch too, since all of them are derived from the parked ms). Console `eaRespawn.park(p)` /
+    `.state()` (`eval RespawnPark` /
+    `RespawnState`, now reporting `secs=` and `punch=` as well). **Read the pulse and the punch as
+    DATA, never from a screenshot pair** -- an identical frame
     also passes on a build that stopped drawing the ring. `eaKillShip(<slot>)` reaches the co-op
     case (`eaKillShips()` kills every locally-owned ship in one tick, which is the SUPPRESSED
     case). Pinned by `tools/headless/probes/respawn_summon.txt` (co-op positive + the wipe),
-    `respawn_singleplayer.txt` and `logic_probe`'s `ProbeRespawnSummon`.
+    `respawn_singleplayer.txt`, `respawn_digit.txt`, `respawn_reward_level.txt` and `logic_probe`'s
+    `ProbeRespawnSummon`.
+  - **`?harness=respawnrun` is the same summon with the freeze LIFTED**, and it exists because
+    NOTHING ELSE OFFLINE CAN RUN AN OWNED SUMMON TO ITS POP. The reward blast only fires in co-op;
+    the one level that seats a second local ship without a gamepad is TeamChallenge; and
+    TeamChallenge is **shared-fate** (`UpdateNormal` asplodes the partner and calls `LoseLife` the
+    moment either ship dies), so `GameScene.LoseLife` purges the summon within ~10 frames of it
+    being raised -- measured, from either seat. That is why `respawn_summon.txt` only ever asserts
+    the SPAWN lines. `respawnrun` needs no phase driver: the object's own `Update` is the thing
+    under test, so the rig is one registry key plus "do not set `Enabled = false`".
+  - **The numeral is verified in BOTH modes, on two different clocks.** The owned mode (integer
+    `countdown` + repeating timer) is `respawn_digit.txt`; the COSMETIC mode (a plain one-shot
+    `Timer` fed a duration off the wire) is two legs in `NetRespawnTest` section 2, where
+    `PeerRespawnMs` is deliberately **750** -- so a receiver that truncated would show 0 and one
+    that kept fractions would not read a whole 1. That raised `net_selftests.txt`'s pinned
+    assertion count 25 -> 27.
   - The netplay half -- both peers draw it, `EvRespawn`, protocol v17 -- is in
     [`Compat/Net/CLAUDE.md`](Compat/Net/CLAUDE.md).
 - **The evil grinning face of death (`EvilSkull.cs`) fires in VOLLEYS, and the volley length is

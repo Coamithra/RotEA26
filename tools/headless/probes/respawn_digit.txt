@@ -1,0 +1,84 @@
+# PROBE: the respawn numeral counts WHOLE SECONDS off the parked clock, and punches on change
+#         (card 045c5a92)
+#
+# PINS:   two things a screenshot cannot, and one it can but would not notice.
+#
+#         1. THE NUMERAL IS DERIVED FROM THE PARKED CLOCK, NOT FROM RemainingMs. ?harness=respawn
+#            freezes the object's Update, so the raw countdown never advances -- every leg below
+#            reads `remainMs=10000` no matter which phase is parked. That is the whole reason the
+#            card inverted the derivation (park the ms, derive the fill) instead of parking the
+#            fill and reading the ms underneath it: the obvious implementation reads 10 at every
+#            phase, in the harness AND in the sprite harness screenshots the card is verified with,
+#            and it looks entirely plausible.
+#         2. THE PUNCH IS COUPLED TO THE CHANGE, not merely near it. Phase 0.300 is exactly where
+#            the 10 s clock crosses 7000 ms, i.e. exactly where the numeral becomes 7 -- and that
+#            is where the punch must read 1.000, not 0.9 and not 0.98.
+#         3. IT SETTLES. A punch that never decays looks identical in any single frame.
+#
+# FAILURE MEANS:
+#   every `secs=` reading 10 -> the numeral is being read off the raw clock again; look at
+#   ShownRemainingMs in PlayerShipSummon and make sure FillFraction is derived FROM it rather
+#   than the other way round.
+#   punch=1.000 at 0.320 -> DigitPunch never decays (check the PunchMs comparison).
+#   punch=0.000 at 0.300 -> it never fires; check the `sinceChangeMs >= 1000` boundary case,
+#   which is the one that makes an exact whole second read as "changed this instant" rather
+#   than as "changed 1000 ms ago".
+#
+# Mutation-tested three ways, all three actually run. The runner aborts at the FIRST failed
+# expect, so what is recorded below is the leg each mutation trips first -- not a claim about
+# every leg it would have tripped:
+#   ShownRemainingMs -> RemainingMs        : trips leg 1 (secs=10 where 7 is required, because
+#                                            the frozen raw clock never leaves its start value)
+#   DigitPunch       -> return 1f          : trips leg 2 (punch still 1.000 50 ms after the change)
+#   DigitPunch       -> return 0f          : trips leg 1 (no punch at the boundary at all)
+#
+# eahl: --flags "?harness=respawn"
+
+step 160
+
+# 1. THE BOUNDARY. Phase 0.300 of a 10 s clock is 7000 ms left: the numeral has just become 7, so
+#    the punch is at full. remainMs= is on the line as the standing proof that the raw clock is
+#    frozen at its start value and cannot be what secs= came from.
+mark
+eval RespawnPark 0.300
+eval RespawnState
+expect \[respawn\] fill=0\.300 .* secs=7 punch=1\.000 remainMs=10000
+
+# 2. DECAYING, 50 ms later.
+mark
+eval RespawnPark 0.305
+eval RespawnState
+expect \[respawn\] fill=0\.305 .* secs=7 punch=0\.473 remainMs=10000
+
+# 3. Still the same numeral 100 ms in -- the punch is an animation OF the change to 7, so `secs`
+#    must NOT step again while it plays.
+mark
+eval RespawnPark 0.310
+eval RespawnState
+expect \[respawn\] fill=0\.310 .* secs=7 punch=0\.141 remainMs=10000
+
+# 4. THE NEGATIVE CONTROL: 200 ms past the change, the punch is fully settled. Without this leg a
+#    punch stuck at 1.000 passes every other leg here.
+mark
+eval RespawnPark 0.320
+eval RespawnState
+expect \[respawn\] fill=0\.320 .* secs=7 punch=0\.000 remainMs=10000
+
+# 5. The numeral TRACKS the clock rather than being a constant that happens to read 7. Phase 0.640
+#    is deliberately NOT a round tenth: 0.600 would leave exactly 4000 ms, which is a whole-second
+#    boundary and therefore reads punch=1.000 -- correct behaviour that makes a poor "it settles"
+#    leg. 0.640 leaves 3600 ms, i.e. 400 ms after the change to 4.
+mark
+eval RespawnPark 0.640
+eval RespawnState
+expect \[respawn\] fill=0\.640 .* secs=4 punch=0\.000 remainMs=10000
+
+# 6. THE FIRST FRAME, which is the numeral's worst case in both directions: two glyphs AND a full
+#    punch (a respawn opens exactly on a whole second, so it opens mid-punch by construction).
+#    DigitScale is fitted to the disc off this case -- see the fit in DrawCountdownText.
+mark
+eval RespawnPark 0.000
+eval RespawnState
+expect \[respawn\] fill=0\.000 .* secs=10 punch=1\.000 remainMs=10000
+
+quit

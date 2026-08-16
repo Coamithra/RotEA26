@@ -266,6 +266,20 @@ namespace EvilAliensWeb.Compat.Net
             Check("...for the announced duration (" + (mirrored != null ? mirrored.DurationMs : -1)
                 + "ms vs " + PeerRespawnMs + "ms)",
                 mirrored != null && mirrored.DurationMs == PeerRespawnMs);
+            // Card 045c5a92's numeral, on the COSMETIC path. PeerRespawnMs is deliberately not a
+            // round second, which is exactly what makes this worth asserting: the countdown must
+            // still read a whole 1 here (ceil of 0.75), never a 0 and never a fraction. The owned
+            // mode's numeral is pinned by tools/headless/probes/respawn_digit.txt, which cannot
+            // reach this clock -- it is a different Timer, fed a duration off the wire.
+            Check("...and its countdown numeral reads whole seconds ("
+                + (mirrored != null ? mirrored.DebugShownSeconds : -1) + " for "
+                + PeerRespawnMs + "ms)",
+                mirrored != null && mirrored.DebugShownSeconds == 1);
+            // ...and the punch is settled 250ms past that (non-round) boundary, so the animation is
+            // driven by this clock rather than stuck on for every cosmetic summon that appears.
+            Check("...with the digit punch settled (" + (mirrored != null
+                ? mirrored.DebugDigitPunch.ToString("0.000") : "none") + ")",
+                mirrored != null && mirrored.DebugDigitPunch == 0f);
 
             // 2b. The refusal. A frame naming a slot we own must be dropped: otherwise a slot
             // disagreement parks a phantom clock over a player who is alive and flying, and drops

@@ -52,6 +52,23 @@ namespace EvilAliensWeb.Compat.Net
                 state, new byte[1], 0, 0, out _, out _);
         }
 
+        // The same entry at an EXPLICIT packet seq instead of the suite's monotone one -- the only
+        // way to reach the staleness guard (card f5cf7a5c) from here, since OnSnapshotEntryNextSeq
+        // fabricates a counter that is newer by construction. Returns the guard's own `stale`
+        // flag, so a leg can assert that its chosen seq really was refused rather than assume it:
+        // `stale` is reported whether or not the guard is armed (?netstaleguard=0 reports and
+        // applies), which is exactly what makes it usable as a precondition AND leaves the flag a
+        // working mutation control for the leg that follows it.
+        private static bool SnapshotHpAtSeq(ushort netId, byte typeIdx, int hp, ushort packetSeq)
+        {
+            NetBaseState state = default(NetBaseState);
+            state.Scale = 1f;
+            state.Hp = hp;
+            NetPuppets.OnSnapshotEntry(netId, typeIdx, NetProtocol.NetSnapshotFlags.None,
+                state, new byte[1], 0, 0, packetSeq, out _, out _, out bool stale);
+            return stale;
+        }
+
         // The two registry indices section 6 drives. The wire typeIdx IS the registry order
         // (NetTypeRegistry.BuildTable), so these are asserted against the live table rather than
         // trusted -- a reorder would otherwise make the whole section test the wrong descriptor.
@@ -314,12 +331,20 @@ namespace EvilAliensWeb.Compat.Net
                 // crossed the wire on both ends, and a wrong-but-LOWER apply is indistinguishable
                 // from the local damage a joiner deals with its own bullets.
                 //
-                // Values are taken RELATIVE to whatever the puppet built with, because
-                // NetApplyHp only ever LOWERS -- an absolute number picked here would be refused
-                // the day the type's own hit points change, and the leg would pass vacuously.
+                // Values are taken RELATIVE to whatever the puppet built with, so the legs stay
+                // meaningful the day the type's own hit points change rather than passing
+                // vacuously against an absolute number.
                 // A StarMine, not the UFO above: a UFO dies in one hit, so its puppet starts at
                 // 1 hit point and NetApplyHp's floor leaves NOTHING a snapshot could lower it to
                 // -- the leg would assert against the floor instead of against the apply.
+                //
+                // SINCE CARD 87310afa THE APPLY IS TWO-WAY, so this section also has to keep the
+                // two guards that still refuse a raise separable from the direction that no
+                // longer does. They fail differently and for different reasons: the STALENESS
+                // guard drops the whole entry before hp is read (card f5cf7a5c), while the floor
+                // lives inside NetApplyHp. A single "hp did not change" assertion would pass on
+                // either, so the stale leg asserts the guard's own `stale` flag as its
+                // precondition rather than trusting the seq it picked to be old.
                 sb.Append("[netsnap] a snapshot's hp reaches the puppet\n");
                 byte mineType = NetTypeRegistry.TryGet(new StarMine(game), out byte mineIdx, out _)
                     ? mineIdx : (byte)0;
@@ -335,10 +360,29 @@ namespace EvilAliensWeb.Compat.Net
                     SnapshotHp(IdHp, mineType, start - 1);
                     Check("a snapshot LOWERING hp lands on the puppet (want " + (start - 1)
                         + ", was " + hpKill.NetHitPoints + ")", hpKill.NetHitPoints == start - 1);
-                    // The clamp, through the SNAPSHOT path rather than the seam: an older entry
-                    // must not resurrect hits this client has already landed.
+                    // The other direction, through the SNAPSHOT path rather than the seam: the
+                    // host is authoritative both ways, so a client that over-predicted damage
+                    // with its own bullets gets corrected back up (card 87310afa).
                     SnapshotHp(IdHp, mineType, start + 100);
-                    Check("a snapshot RAISING hp is refused (still " + (start - 1) + ", was "
+                    Check("a snapshot RAISING hp lands on the puppet (want " + (start + 100)
+                        + ", was " + hpKill.NetHitPoints + ")", hpKill.NetHitPoints == start + 100);
+                    // ...but a STALE entry still cannot, and that is a different guard entirely.
+                    // Drive hp back down first so a refused raise is distinguishable from an
+                    // applied one, then offer the raise at a seq the guard must reject.
+                    SnapshotHp(IdHp, mineType, start - 1);
+                    Check("hp is back down before the stale leg (want " + (start - 1) + ", was "
+                        + hpKill.NetHitPoints + ")", hpKill.NetHitPoints == start - 1);
+                    // ASK FOR THE MARK rather than picking a literal: the suite counter is
+                    // process-wide, and the guard compares the SIGNED difference, so neither 0 nor
+                    // a big jump forward is reliably stale. Re-offering exactly the last applied
+                    // seq is a difference of zero, which `<= 0` refuses at any counter value.
+                    bool haveSeq = NetPuppets.TryGetLastSnapSeqForTest(IdHp, out ushort lastSeq);
+                    Check("the hp puppet has taken a sequenced entry (the stale leg needs a mark"
+                        + " to re-offer)", haveSeq);
+                    bool refusedAsStale = SnapshotHpAtSeq(IdHp, mineType, start + 100, lastSeq);
+                    Check("the stale-seq entry really was seen as stale (the leg's precondition,"
+                        + " not an assumption about the suite's seq counter)", refusedAsStale);
+                    Check("a STALE snapshot cannot raise hp (want " + (start - 1) + ", was "
                         + hpKill.NetHitPoints + ")", hpKill.NetHitPoints == start - 1);
                 }
                 if (hpPuppet != null)

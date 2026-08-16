@@ -369,14 +369,19 @@ def diff_entity(h, c, tol, stats):
                     bad.append(("hp", "hp %d sent vs %d received off the wire (live %s vs %s, "
                                       "limit %d)"
                                 % (sent, got, h.get("hp"), c.get("hp"), tol["hp"])))
-                # 2. THE CLAMP'S OWN INVARIANT, exact and with no tolerance at all.
-                #    `KillableAlien.NetApplyHp` ONLY EVER LOWERS -- it refuses a value at or above
-                #    the puppet's current hp so an older snapshot cannot resurrect hits this
-                #    client has already landed -- and local damage only lowers too. So a puppet
-                #    holding MORE than the last value it was told is a state no path produces:
-                #    either it adopted something it should have refused, or something raised it
-                #    locally. The measured direction confirms the rule is the right shape: over
-                #    132 gaps across 6 seeds, 132 were client-lower, 0 higher, 0 equal.
+                # 2. THE APPLY'S OWN INVARIANT, exact and with no tolerance at all.
+                #    A puppet holding MORE than the last value it was told is a state no path
+                #    produces: `KillableAlien.NetApplyHp` assigns exactly the received value (the
+                #    same one recorded here as `hpwire`), and local damage only ever lowers from
+                #    there. So live > got means either it adopted something no snapshot carried,
+                #    or something raised it locally.
+                #
+                #    IT HOLDS UNDER BOTH DIRECTIONS, which is why card 87310afa did not have to
+                #    touch it. Under the ORIGINAL downward-only clamp the gap was also large and
+                #    one-directional -- 132 gaps across 6 seeds, 132 client-lower, 0 higher, 0
+                #    equal, since a client ahead of the host had its correction refused. Now the
+                #    host is authoritative both ways, the gap mostly collapses to equality, and
+                #    the bound is unchanged.
                 #
                 #    WHAT THIS DOES NOT COVER, stated plainly because a tolerance would have
                 #    hidden it: a wrong-but-LOWER apply is indistinguishable from ordinary local
@@ -386,8 +391,9 @@ def diff_entity(h, c, tol, stats):
                 if live is not None and live > got:
                     bad.append(("hp-clamp",
                                 "the joiner's puppet holds hp %s, ABOVE the %d it last received "
-                                "off the wire -- NetApplyHp only ever lowers, so nothing should "
-                                "raise it" % (c.get("hp"), got)))
+                                "off the wire -- NetApplyHp assigns what it is sent and local "
+                                "damage only lowers, so nothing should raise it past that"
+                                % (c.get("hp"), got)))
 
     # CARD de4d5d65's PROVISIONAL SHAPE, and one of the two assertions this whole tool exists
     # for: a puppet the snapshot self-heal built on DEFAULT spawn extras and no later EvSpawn

@@ -1,0 +1,60 @@
+# PROBE: the respawn reward bomb is a level 3, and it really reaches Blast (card 258afd66)
+#
+# PINS:   the card lowered the free bomb a dead player gets on their way back in, 4 -> 3, because
+#         at 4 a co-op partner's death cleared most of the screen. A constant is trivial to read in
+#         a diff and worth nothing on its own -- what can silently rot is whether that constant is
+#         still the one that reaches Blast.Setup. So this asserts the value at BOTH ends:
+#
+#           * `[respawn] reward blast ... level=3` is printed from the call site, with the value
+#             actually passed to Setup.
+#           * the ring the Blast fires resolves to a 4.00 s duration. Blast.Setup makes the
+#             lifetime 1000ms * (level+1) and BombRipple seeds the ring from that real lifetime
+#             (card 03c379f2), so a level 4 reads 5.00 here. That second witness is independent of
+#             the print: it comes off the Blast, through the ripple, not off this class at all.
+#
+#         THE RIG IS ?harness=respawnrun, and it has to be. The reward only fires in CO-OP, and the
+#         one level that seats a second local ship offline is TeamChallenge -- which is SHARED-FATE
+#         (UpdateNormal asplodes the partner and calls LoseLife the instant either ship dies), so
+#         GameScene.LoseLife purges the summon within about ten frames of it being raised and it
+#         never reaches its pop. Measured, both seats, before this rig existed. respawnrun is the
+#         same summon with the harness freeze lifted, so the real owned countdown runs to the pop.
+#
+# FAILURE MEANS:
+#   `level=4` -> the constant went back up.
+#   the level line present but the ripple reading /5.00 -> the printed constant and the one handed
+#   to Blast.Setup have drifted apart, which is the whole reason both are asserted.
+#   NO reward line at all -> the pop stopped spawning a blast; check SpawnRewardBlast's callers in
+#   Update (both the cosmetic and the owned branch call it).
+#
+# Mutation-tested: RewardBlastLevel 3 -> 4 turns leg 2 and leg 3 red together (level=4 and /5.00),
+#   which is the pair that proves the two witnesses agree; deleting the SpawnRewardBlast call in
+#   the owned branch turns leg 2 and 3 red while leg 1 stays green. Both were run.
+#
+# eahl: --flags "?harness=respawnrun"
+
+step 160
+
+# 1. THE PRECONDITION, pinned rather than waited out (card af4c3694): a summon really is running
+#    before the steps below, so leg 2's absence-or-presence is about the POP and not about a rig
+#    that never raised a clock at all.
+mark
+eval RespawnState
+expect \[respawn\] summons=1
+expect \[respawn\] fill=0\.[0-9]+ .* secs=[0-9]+ .* local
+
+# 2. Run past the 10 s clock into the pop. `mark` first, because the reward line is printed DURING
+#    the steps and an assertion window opened afterwards would have thrown it away.
+mark
+step 500
+expect \[respawn\] reward blast slot=0 level=3
+expect-not \[respawn\] reward blast slot=0 level=4
+
+# 3. THE INDEPENDENT WITNESS. The ring is still in flight (it lives 4.00 s and the pop was ~1 s
+#    ago), and its resolved duration is the Blast's own lifetime, so it reads the bomb's level
+#    back out through a completely different object.
+mark
+eval RippleState
+expect e=[0-9.]+/4\.00
+expect-not e=[0-9.]+/5\.00
+
+quit

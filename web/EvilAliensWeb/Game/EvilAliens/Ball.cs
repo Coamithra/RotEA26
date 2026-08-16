@@ -351,6 +351,37 @@ internal class Ball : AlienDrawableGameComponent
 
 	internal bool NetDetachedFx => netDetached;
 
+	// ---- local rotation (card 566474ae, "the asteroids rotate choppily for the joining player")
+	//
+	// THE BUG: `rotation` advances only in Update, which a frozen puppet never runs, so a client's
+	// ball stepped to the replicated angle once per SnapshotTurnMs -- up to 13.7 degrees every
+	// 240 ms. This is the same defect Asteroid.NetSpinPerMs already fixes for the rocks earlier in
+	// the mission, and "the same system as the asteroids" is what the card asks for.
+	//
+	// THE JUSTIFICATION TRANSFERS, AND MORE STRONGLY THAN ASTEROID'S OWN. Asteroid argues "tumble
+	// is decorative and no hitbox reads it"; here CollisionType is literally a
+	// CollisionSimpleCircle, so rotation reaches nothing but Draw in ANY state. What the two peers
+	// then disagree about is the tumble's phase and direction, which is the trade Asteroid already
+	// ships with deliberately.
+	//
+	// THE PLAUSIBLE-BUT-WRONG READING, WRITTEN DOWN BECAUSE IT COST THIS CARD A WHOLE DESIGN.
+	// `connected` looks like it settles: it picks the sign of its step to chase the bearing to the
+	// owner the short way, which reads as a lock. It is not one. Both branches step by exactly
+	// `rotationspeed * dt` -- only the SIGN is conditional -- so it is a bang-bang controller with
+	// a fixed step, which can dither about its target or lag behind it but can never settle. A
+	// CONNECTED BALL THEREFORE TURNS AT ITS FULL ROLLED SPEED, like every other state; measured off
+	// the real Update at 1.00x for 16 of 16 balls, with 5-124 direction reversals per 10 s
+	// (NetMotionTest section 6, which asserts it so this stops being a claim).
+	//
+	// That is why this override is UNCONDITIONAL and needs no wire byte, no protocol bump and no
+	// "is it spinning" bit: a puppet free-spinning at its own roll has the right angular SPEED in
+	// all four states, and only the phase and the occasional reversal differ. The rejected
+	// alternative -- the host declaring per turn whether the ball is free, and a connected puppet
+	// taking the replicated angle -- would have left exactly the balls that turn longest without
+	// reversing still stepping 13.7 degrees a turn, i.e. it would have fixed the rain-in and left
+	// the fight.
+	internal override float NetSpinPerMs => rotationspeed;
+
 	internal int NetAsteroidVariant
 	{
 		get

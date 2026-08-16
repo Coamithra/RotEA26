@@ -71,6 +71,9 @@ namespace EvilAliensWeb.Compat.Net
             sb.Append(" 5. the HOST's velocity decision (NetSession.ResolveBaseVelocity)\n");
             SectionHostVelocity(Check);
 
+            sb.Append(" 6. Ball local rotation -- the junkboss rocks (card 566474ae)\n");
+            SectionBallSpin(bin, game, Check);
+
             sb.Append(string.Format(System.Globalization.CultureInfo.InvariantCulture,
                 "[netmotion] {0} passed, {1} failed\n", pass, fail));
             return sb.ToString();
@@ -308,15 +311,50 @@ namespace EvilAliensWeb.Compat.Net
             // has just been fired reports growth and no lead catch-up. Asserting the gate rather
             // than just the number is what stops a readback that ignored Update's own conditions.
             check("...and no lead rate until the emitter lets go", host.NetLeadRate == 0f);
-            host.Free();
-            check("...which STARTS once it does", Near(host.NetLeadRate, 0.4f * modifier, 0.0005f));
 
             // Nothing sweeps a single shot, so the angular rate is honestly zero -- and the
             // miniboss' constant is what a swept beam reports.
+            //
+            // THESE TWO USED TO SIT AFTER host.Free() AND NOW SIT BEFORE IT (card d6645119): the
+            // sweep readback is gated on `freed` from this card on, so the old order was asserting
+            // the constant on a beam that has been released, which is exactly the state that must
+            // now report zero. The legs are MOVED rather than deleted -- their intent (a swept
+            // beam declares Boss.LazerSweepRadPerMs) is the pin, and `host` stays un-freed for the
+            // rest of the section so the frame it encodes below is a LIVE beam's.
             check("an unswept beam reports no angular rate", host.NetAngleRate == 0f);
             host.SetSweepRate(Boss.LazerSweepRadPerMs);
             check("a swept beam reports the sweeper's constant",
                 Near(host.NetAngleRate, Boss.LazerSweepRadPerMs, 0.000001f));
+
+            // ---- the RELEASED beam (card d6645119) -----------------------------------------
+            //
+            // A SECOND beam, so the live one above keeps its rates for the encode further down.
+            // Boss.Update sweeps only the beams still in `lazors`, and its 3-beam eviction drops
+            // one from that list in the SAME statement pair that calls Free() -- so `freed` is the
+            // host's own "I have stopped turning this beam" and the rate has to follow it. The
+            // reported defect is what happens when it does not: the client keeps integrating a
+            // sweep the host abandoned, the next snapshot's aim snaps it back, and it does that
+            // every turn for the beam's remaining seconds of life.
+            Lazer released = Lazer.NewLazer(bin, game);
+            released.Initialize();
+            released.SetupSingleShot(new Vector2(400f, 300f), 1.0f, 50f, playSound: false);
+            released.SetSweepRate(Boss.LazerSweepRadPerMs);
+            // THE PRECONDITION IS PINNED, not assumed: a beam that was never sweeping in the first
+            // place would satisfy the zero below for the wrong reason.
+            check("a beam about to be released IS sweeping first (the precondition)",
+                Near(released.NetAngleRate, Boss.LazerSweepRadPerMs, 0.000001f));
+            check("...and no lead rate yet either", released.NetLeadRate == 0f);
+            released.Free();
+            check("the lead rate STARTS when the emitter lets go",
+                Near(released.NetLeadRate, 0.4f * modifier, 0.0005f));
+            check("...and the SWEEP rate goes to ZERO on the SAME event (card d6645119)",
+                released.NetAngleRate == 0f);
+            // The gate is `freed`, not "the beam has been re-Setup": a released beam that is still
+            // in the world must keep reporting zero for the rest of its life, which is the whole
+            // ~2.9s the abandoned beam takes to catch its own tail.
+            released.SetSweepRate(Boss.LazerSweepRadPerMs);
+            check("...and it STAYS zero even if the sweep constant is handed over again",
+                released.NetAngleRate == 0f);
 
             // THE REAL SPAWN ORDER, and this leg is not optional: Boss.Update does
             // Setup -> SetSweepRate -> collection.Add, and ComponentBin.Add runs Initialize
@@ -341,6 +379,18 @@ namespace EvilAliensWeb.Compat.Net
             int len = desc.EncodeStateExtra(host, extra, 0);
             check("the state extras carry the values AND the three rates", len == 12);
 
+            // THE WIRE FIELD ITSELF, both arms (card d6645119). The readback legs above prove the
+            // property; these prove the byte the joining peer actually receives, which is the only
+            // thing the defect ever showed up in. Offset 10 is the angleRate i16 at the rad scale.
+            byte[] freedExtra = new byte[64];
+            int freedLen = desc.EncodeStateExtra(released, freedExtra, 0);
+            check("...and the released beam encodes the same 12-byte block", freedLen == 12);
+            check("the wire's angleRate field carries the sweep for a LIVE beam",
+                Near(NetProtocol.ReadScaledI16(extra, 10, NetProtocol.RateRadPerMsScale),
+                    Boss.LazerSweepRadPerMs, 0.00002f));
+            check("...and exactly ZERO for a RELEASED one (the card's stop-rotating event)",
+                NetProtocol.ReadScaledI16(freedExtra, 10, NetProtocol.RateRadPerMsScale) == 0f);
+
             // The puppet: built through the real descriptor, fed the real frame, then DRIVEN.
             NetBaseState state = default;
             state.Pos = new Vector2(400f, 300f);
@@ -354,6 +404,52 @@ namespace EvilAliensWeb.Compat.Net
                 Near(puppet.NetLen - lenBefore, 0.4f * modifier * 100f, 1f));
             check("...and SWEEPS at the sent angular rate",
                 Near(puppet.NetAngle - aimBefore, Boss.LazerSweepRadPerMs * 100f, 0.0005f));
+
+            // ...and the released frame's puppet does NOT, on the identical drive. Same
+            // descriptor, same driver, same dt -- the only difference is the byte above.
+            Lazer stoppedPuppet = (Lazer)desc.CreatePuppet(bin, game, state, freedExtra, 0, 0);
+            stoppedPuppet.Initialize();
+            desc.ApplyStateExtra(stoppedPuppet, freedExtra, 0, freedLen);
+            float stoppedAimBefore = stoppedPuppet.NetAngle;
+            DriveOnce(stoppedPuppet, 100f);
+            check("a puppet fed the RELEASED frame holds its aim on the same drive",
+                stoppedPuppet.NetAngle == stoppedAimBefore);
+            // ...and it is not simply frozen: the LENGTH still grows, because the host is still
+            // extending that beam. A gate that killed all three rates would pass the leg above.
+            check("...while still growing, so the gate is angular and nothing else",
+                stoppedPuppet.NetLen > 0f
+                    && Near(stoppedPuppet.NetLen - stoppedPuppet.NetLead,
+                        // len - lead is what CollisionType draws its line from; both grew by the
+                        // same 0.4*mod*100, so their DIFFERENCE is unchanged from the applied frame.
+                        released.NetLen - released.NetLead, 1.5f));
+
+            // ---- THE SAWTOOTH, measured (card d6645119) ------------------------------------
+            //
+            // The legs above say the mechanism is wired. This one says what it is WORTH, and it is
+            // the shape of the reported defect rather than a property: the host has stopped
+            // turning the beam, so its aim is constant, and every snapshot turn the client
+            // integrates a stale rate away from it and then gets snapped back by NetApplyBeam.
+            // Read as the worst aim error reached WITHIN a turn, over several turns.
+            //
+            // The pre-card arm is not a mutation -- it is the LIVE frame (a still-sweeping beam's
+            // rate) applied against a host aim that no longer moves, which is precisely the state
+            // the ungated readback produced for an evicted beam.
+            // An EXACT tick count, not a `t < turnMs` accumulation: 240/16.7 leaves a part tick,
+            // and rounding it up drove 250.5 ms -- over Lazer's 250 ms extrapolation cap, so the
+            // arm below was measuring the cap as much as the sweep.
+            const float TickMs = 16f;
+            const int TicksPerTurn = 15; // 240 ms, comfortably inside the 250 ms cap
+            const float TurnMs = TickMs * TicksPerTurn;
+            float stale = WorstAimDrift(bin, game, desc, state, extra, len, TickMs, TicksPerTurn, 5);
+            float fixedArm = WorstAimDrift(bin, game, desc, state, freedExtra, freedLen, TickMs, TicksPerTurn, 5);
+            check("the PRE-CARD arm drifts a whole turn's worth of sweep, every turn ("
+                    + stale.ToString("F4", System.Globalization.CultureInfo.InvariantCulture)
+                    + " rad)",
+                Near(stale, System.Math.Abs(Boss.LazerSweepRadPerMs) * TurnMs, 0.005f));
+            check("...and the gated one does not drift at all ("
+                    + fixedArm.ToString("F4", System.Globalization.CultureInfo.InvariantCulture)
+                    + " rad)",
+                fixedArm == 0f);
 
             // NEGATIVE CONTROL: the same puppet given the PRE-CARD six-byte block has no rates,
             // so it holds its beam between turns -- which is the reported chop, and is what every
@@ -380,9 +476,43 @@ namespace EvilAliensWeb.Compat.Net
                 Near(capped.NetLen - capBefore, 0.4f * modifier * 250f, 1f));
 
             bin.Remove(host);
+            bin.Remove(released);
             bin.Remove(puppet);
+            bin.Remove(stoppedPuppet);
             bin.Remove(noRates);
             bin.Remove(capped);
+        }
+
+        // One puppet, `turns` snapshot turns of a host whose beam aim is STANDING STILL: apply the
+        // frame, drive the turn out in real 16.7 ms ticks, and record how far the aim wandered from
+        // the one the frame carried before the next apply pulls it back. Returns the worst such
+        // excursion in radians -- 0 when the client is told the beam has stopped sweeping.
+        //
+        // The turn is 240 ms, comfortably under Lazer's 250 ms extrapolation cap (NetApplyRates
+        // resets that budget on every apply), so the cap is not what this measures.
+        private static float WorstAimDrift(ComponentBin bin, Game game, LazerDescriptor desc,
+            in NetBaseState state, byte[] frame, int frameLen, float tickMs, int ticksPerTurn,
+            int turns)
+        {
+            Lazer p = (Lazer)desc.CreatePuppet(bin, game, state, frame, 0, 0);
+            p.Initialize();
+            float worst = 0f;
+            for (int turn = 0; turn < turns; turn++)
+            {
+                desc.ApplyStateExtra(p, frame, 0, frameLen);
+                float hostAim = p.NetAngle; // what the host just said, quantisation included
+                for (int t = 0; t < ticksPerTurn; t++)
+                {
+                    DriveOnce(p, tickMs);
+                    float d = System.Math.Abs(p.NetAngle - hostAim);
+                    if (d > worst)
+                    {
+                        worst = d;
+                    }
+                }
+            }
+            bin.Remove(p);
+            return worst;
         }
 
         // ---- 5. the host's velocity decision -----------------------------------------------
@@ -443,6 +573,206 @@ namespace EvilAliensWeb.Compat.Net
                 NetSession.ResolveBaseVelocity(
                     declared, anchored: false, teleported: false, far, true, last, 0L, 100L, scripted: false, announced: default)
                     != declared);
+        }
+
+        // ---- 6. Ball local rotation ---------------------------------------------------------
+        //
+        // The junkboss rocks stepped to the replicated angle once per snapshot turn -- up to ~13.7
+        // degrees every 240 ms -- because `rotation` advances only in a frozen puppet's Update.
+        // The card asks for "the same system as the asteroids", and that is what ships:
+        // Ball.NetSpinPerMs, unconditional, exactly as Asteroid's.
+        //
+        // THE LEG THAT MATTERS MOST HERE IS 6a's, AND IT IS NOT ABOUT THE NET LAYER AT ALL. The
+        // design turns on one fact about `Ball.Update` that reads the other way round on a careless
+        // pass: `connected` picks the SIGN of its step to chase the bearing to its owner, which
+        // looks like settling, but both branches step by the same fixed `rotationspeed * dt`. It is
+        // bang-bang, not proportional, so it cannot settle -- a connected ball turns at FULL rolled
+        // speed and merely wobbles in direction. A first cut of this card read it as a lock and
+        // built a wire bit, a new INetEntity member and a protocol bump on top of that reading.
+        // 6a is what stops the next reader repeating it.
+        private static void SectionBallSpin(ComponentBin bin, Game game,
+            System.Action<string, bool> check)
+        {
+            // ---- 6a. what the real state machine does to the angle ---------------------------
+            //
+            // GROUND TRUTH FROM THE GAME, NOT FROM A READER (NetScriptedMotionTest section 2's
+            // shape): a real Ball with a real JunkBoss owner is driven through its own Update
+            // until it genuinely reaches `connected`, and the angle it produces is measured --
+            // rather than a table written from the same reading of Ball.cs the override was.
+            JunkBoss boss = JunkBoss.NewJunkBoss(bin, game);
+            boss.Setup(false);
+            boss.Initialize();
+            boss.Position = new Vector2(400f, 300f);
+
+            Ball ball = Ball.NewBall(bin, game);
+            ball.Setup(boss);
+            ball.Initialize();
+
+            float rolled = ((INetEntity)ball).NetSpinPerMs;
+            check("a Ball spins locally at its OWN rolled rate (the Asteroid seam)", rolled != 0f);
+            // The seam is UNCONDITIONAL, so the driver never re-snaps a Ball puppet's angle in any
+            // state -- the default NetSpinPerMs != 0 owner test in ApplySnapshotState. Asserted
+            // through the interface, which is what the driver reads.
+            check("...and it is the interface's answer too, so the driver sees it",
+                ((INetEntity)ball).NetSpinPerMs == rolled);
+
+            // Drive it. CollidesWith is safe to call every tick: `startup` has no case in that
+            // switch, and `attracted` is the one that transitions. ~8.4 s of sim is needed (a
+            // 5 s starttimer, then the speed decaying under 0.01), so this is generous.
+            bool connected = false;
+            int ticks = 0;
+            for (; ticks < 800 && !connected; ticks++)
+            {
+                ball.Update(Tick(50f));
+                ball.CollidesWith(boss);
+                connected = ball.IsConnected();
+            }
+            // THE PRECONDITION IS PINNED, NOT WAITED OUT (card af4c3694). The measurement below is
+            // about a CONNECTED ball and passes vacuously on a run that never got there.
+            check("a real Ball reaches `connected` against a real JunkBoss (" + ticks + " ticks)",
+                connected);
+            if (!connected)
+            {
+                bin.Remove(ball);
+                bin.Remove(boss);
+                return;
+            }
+
+            // THE FACT THE WHOLE DESIGN RESTS ON, measured rather than trusted: over 10 s of
+            // connected ticks the mean |per-tick turn| comes out at 1.00x the ball's own free
+            // roll, with a handful to a hundred-odd direction reversals. Measured at 1.00x for
+            // 16 of 16 balls across two runs while this card was being designed.
+            float sumAbs = 0f;
+            int reversals = 0;
+            float lastSign = 0f;
+            float prev = ((INetEntity)ball).NetRotation;
+            const int LockTicks = 600;
+            for (int i = 0; i < LockTicks; i++)
+            {
+                ball.Update(Tick(16.7f));
+                ball.CollidesWith(boss);
+                float now = ((INetEntity)ball).NetRotation;
+                float d = now - prev;
+                prev = now;
+                sumAbs += System.Math.Abs(d);
+                float sign = d > 0f ? 1f : (d < 0f ? -1f : 0f);
+                if (sign != 0f && lastSign != 0f && sign != lastSign) { reversals++; }
+                if (sign != 0f) { lastSign = sign; }
+            }
+            float meanPerMs = sumAbs / (LockTicks * 16.7f);
+            check("a CONNECTED ball turns at its FULL rolled speed, only the sign wobbles ("
+                    + (meanPerMs / System.Math.Abs(rolled)).ToString("F2",
+                        System.Globalization.CultureInfo.InvariantCulture) + "x, "
+                    + reversals + " reversals)",
+                Near(meanPerMs, System.Math.Abs(rolled), System.Math.Abs(rolled) * 0.01f));
+            // ...and the reversals are what make it a wobble rather than a spin. Both halves are
+            // needed: a build where the sign stopped flipping would pass the rate leg alone, and a
+            // build where the STEP became proportional would pass the reversal leg alone.
+            check("...and it really does reverse (not a constant spin in disguise)", reversals > 0);
+            bin.Remove(ball);
+            bin.Remove(boss);
+
+            // ---- 6b. the real driver, on real puppets --------------------------------------
+            //
+            // NetPuppets.OnSpawn / OnSnapshotEntry / Drive with no session, NetStaleTest's shape.
+            // Nothing below reads a COPY of a driver line: the rotation these puppets end up with
+            // is the one NetPuppets actually gave them.
+            if (NetSession.Active || NetPuppets.LiveCount > 0 || GameScene.NetActiveScene != null)
+            {
+                check("SKIPPED the driver legs (a session, level or attract demo is up)", false);
+                return;
+            }
+
+            const ushort IdBall = 60421;
+            const ushort IdControl = 60422;
+            const byte TypeBall = 5;
+            const byte TypeEvilBullet = 0;
+            check("registry index " + TypeBall + " is the Ball descriptor",
+                NetTypeRegistry.Get(TypeBall) is BallDescriptor);
+
+            NetPuppets.Enable(game);
+            try
+            {
+                NetBaseState st = default;
+                st.Pos = new Vector2(-600f, -600f);
+                st.Scale = 1f;
+                st.Rotation = 0f;
+                byte[] variant = new byte[1] { 1 };
+
+                if (NetPuppets.OnSpawn(IdBall, TypeBall, st, variant, 0, 1) != SpawnRejectKind.None
+                    || !(NetPuppets.FindPuppet(IdBall) is Ball pup))
+                {
+                    check("a Ball puppet was built for the driver legs", false);
+                    return;
+                }
+                check("a Ball puppet was built for the driver legs", true);
+
+                // The host's angle is deliberately PI away from the puppet's, so an assignment
+                // would be unmistakable -- and the puppet must ignore it in favour of its own spin.
+                float pupRate = ((INetEntity)pup).NetSpinPerMs;
+                ((INetEntity)pup).NetRotation = 0f;
+                st.Rotation = 3.1415927f;
+                Apply(IdBall, TypeBall, st, variant, 0, 1);
+                check("a Ball puppet is NOT snapped to the wire's angle",
+                    ((INetEntity)pup).NetRotation == 0f);
+                float before = ((INetEntity)pup).NetRotation;
+                NetPuppets.Drive(16.7f);
+                float step = ((INetEntity)pup).NetRotation - before;
+                check("...it advances every tick at its own rate instead, not once a turn",
+                    pupRate != 0f && Near(step, pupRate * 16.7f, 0.0005f));
+
+                // THE PRE-CARD CONTROL, and it is what makes the two legs above mean something:
+                // the driver's per-turn assignment is still LIVE for a type that has not opted
+                // out. EvilBullet does not, which is exactly where Ball was before this card --
+                // same driver, same PI-away frame, and it steps the whole way in one go. That is
+                // the reported chop, at its most extreme.
+                if (NetPuppets.OnSpawn(IdControl, TypeEvilBullet, st, variant, 0, 0)
+                    != SpawnRejectKind.None
+                    || !(NetPuppets.FindPuppet(IdControl) is INetEntity ctrl))
+                {
+                    check("a control puppet was built", false);
+                    return;
+                }
+                ctrl.NetRotation = 0f;
+                check("CONTROL an EvilBullet declares no local spin (the pre-card Ball)",
+                    ctrl.NetSpinPerMs == 0f);
+                Apply(IdControl, TypeEvilBullet, st, variant, 0, 3);
+                check("...so the identical frame SNAPS it -- the stepping Ball no longer does",
+                    Near(ctrl.NetRotation, 3.1415927f, 0.01f));
+            }
+            finally
+            {
+                // BY HAND: Disable() clears the id maps but leaves the components it built in
+                // Game.Components, drawn and in the Oracle scans. NetStaleTest's shape, and
+                // collected BEFORE Disable since FindPuppet reads the maps it clears.
+                foreach (ushort id in new ushort[] { IdBall, IdControl })
+                {
+                    INetEntity p = NetPuppets.FindPuppet(id);
+                    if (p != null)
+                    {
+                        bin.Remove((GameComponent)(object)p);
+                    }
+                }
+                NetPuppets.Disable();
+            }
+        }
+
+        private static void Apply(ushort id, byte typeIdx, in NetBaseState st, byte[] extra,
+            int extraLen, ushort seq)
+        {
+            NetPuppets.OnSnapshotEntry(id, typeIdx, NetProtocol.NetSnapshotFlags.None, st,
+                extra, 0, extraLen, seq, out _, out _, out _);
+        }
+
+        private static float Wrapped(float radians)
+        {
+            float d = System.Math.Abs(radians) % 6.2831855f;
+            return System.Math.Min(d, 6.2831855f - d);
+        }
+
+        private static GameTime Tick(float dtMs)
+        {
+            return new GameTime(System.TimeSpan.Zero, System.TimeSpan.FromMilliseconds(dtMs));
         }
 
         // ---- helpers -----------------------------------------------------------------------

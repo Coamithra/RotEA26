@@ -516,6 +516,25 @@ namespace EvilAliensWeb.Compat.Net
                 ++suiteSeq, out popped, out kind, out _);
         }
 
+        // The seq last APPLIED to this puppet, for a suite that has to hand OnSnapshotEntry a value
+        // the staleness guard will refuse. `suiteSeq` above is process-wide and shared with every
+        // other menu suite, so a literal (0, or a big jump forward) is not reliably stale: the
+        // guard compares the SIGNED difference, which makes a large step forward read as stale and
+        // a wrapped counter make 0 read as new. Handing back the mark lets a leg ask for exactly
+        // `last` -- a difference of 0, which the guard's `<= 0` refuses by definition, at any
+        // counter value. Returns false when the puppet has never taken a sequenced entry, so a
+        // caller cannot mistake "no mark yet" for seq 0.
+        internal static bool TryGetLastSnapSeqForTest(ushort netId, out ushort seq)
+        {
+            seq = 0;
+            if (!byId.TryGetValue(netId, out PuppetInfo info) || !info.HasSnapSeq)
+            {
+                return false;
+            }
+            seq = info.LastSnapSeq;
+            return true;
+        }
+
         // THE STALENESS GUARD (card f5cf7a5c). `packetSeq` is the MsgWorldSnapshot header's
         // monotone per-packet counter; an entry not NEWER than the last one applied to this
         // puppet is refused whole and reported through `stale`.
@@ -894,15 +913,17 @@ namespace EvilAliensWeb.Compat.Net
             if (state.Hp > 0 && comp.NetKillable is INetKillable killable)
             {
                 killable.NetApplyHp(state.Hp);
-                // THE VALUE RECEIVED, not the entity read back after the clamp -- and the
-                // difference is the whole reason this field is trustworthy. NetApplyHp ONLY EVER
-                // LOWERS (it refuses to let an older snapshot resurrect hits this client has
-                // already landed), so a read-back reports the REFUSED figure whenever the client
-                // is ahead: measured 132 gaps across 6 seeds, every single one client-lower,
-                // none higher, none equal -- the clamp's signature, not a replication fault.
-                // Recording what crossed the wire keeps this comparable with the host's
-                // LastSentHp, and the clamp itself is asserted separately as an invariant
-                // (net_jip_sync: a puppet's live hp may never EXCEED this).
+                // THE VALUE RECEIVED, not the entity read back afterwards -- these are two
+                // different quantities and only this one is comparable with the host's
+                // LastSentHp. The gap between them narrowed with card 87310afa (NetApplyHp now
+                // takes the host's value in both directions, where it used to refuse every
+                // raise: measured 132 gaps across 6 seeds under the old clamp, every single one
+                // client-lower) but it did not close, because the apply can still be REFUSED
+                // WHOLE by the floor at 1 or by a dead puppet. Recording what crossed the wire
+                // keeps this field meaning one thing either way, and the relationship is
+                // asserted separately as an invariant (net_jip_sync: a puppet's live hp may
+                // never EXCEED this -- a raise assigns exactly this value, and local damage
+                // only ever goes down from it).
                 info.LastAppliedHp = state.Hp;
             }
             // ORDER MATTERS: state extras run LAST. The base writes above have per-type side

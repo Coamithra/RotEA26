@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using EvilAliens;
 using Microsoft.Xna.Framework;
 
@@ -281,16 +281,27 @@ namespace EvilAliensWeb.Compat.Net
             pick?.NetMarkTaken();
             Check("NetMarkTaken sets `taken`", pickup.taken);
 
-            // The killable surface. NetApplyHp only ever LOWERS and floors at 1 -- deaths
-            // arrive as events, never by snapshot -- so both directions are worth pinning
-            // here rather than trusting the forward alone.
+            // The killable surface. NetApplyHp takes the host's value in BOTH directions since
+            // card 87310afa (it used to refuse every raise, which left a client's local
+            // over-predictions uncorrectable) and floors at 1 -- deaths still arrive as events,
+            // never by snapshot -- so all three legs are worth pinning here rather than trusting
+            // the forward alone.
             INetKillable kill = ((INetEntity)killable).NetKillable;
             int hp0 = killable.NetHitPoints;
             Check("NetHitPoints fronts the class member", kill != null && kill.NetHitPoints == hp0 && hp0 > 1);
             kill?.NetApplyHp(hp0 - 1);
             Check("NetApplyHp lowers through the seam", kill != null && kill.NetHitPoints == hp0 - 1);
             kill?.NetApplyHp(hp0 + 100);
-            Check("NetApplyHp still refuses to RAISE through the seam", kill != null && kill.NetHitPoints == hp0 - 1);
+            Check("NetApplyHp RAISES through the seam (want " + (hp0 + 100) + ", was "
+                + (kill != null ? kill.NetHitPoints : -1) + ")",
+                kill != null && kill.NetHitPoints == hp0 + 100);
+            // The floor is a guard of its own -- it is what keeps a death off the snapshot path.
+            // It had no leg of its own until this card (nothing was shadowing it; it was simply
+            // never asserted), and it gets one here so the direction change cannot take it along
+            // unnoticed.
+            kill?.NetApplyHp(0);
+            Check("NetApplyHp still floors at 1 (was "
+                + (kill != null ? kill.NetHitPoints : -1) + ")", kill != null && kill.NetHitPoints == 1);
 
             sb.Append("[netentity] ").Append(fail == 0 ? "PASS" : "FAIL")
                 .Append(" (").Append(pass).Append(" passed, ").Append(fail).Append(" failed)\n");
@@ -374,8 +385,10 @@ namespace EvilAliensWeb.Compat.Net
 
             public override ICollisionType CollisionType => null;
 
-            // Never reached: this suite exercises NetApplyHp, which only ever LOWERS and
-            // floors at 1, so the death path is unreachable from here by construction.
+            // Never reached: this suite only ever reaches hp through NetApplyHp, which FLOORS AT
+            // 1, so the death path is unreachable from here by construction. That is the floor
+            // doing the work, not the clamp direction -- NetApplyHp raises as well since card
+            // 87310afa, and the leg above drives it to 0 to prove the floor still holds.
             protected override void KilledBy(ICollidable other, bool comboGenerator)
             {
             }

@@ -382,7 +382,29 @@ internal class Lazer : AlienDrawableGameComponent
 	internal float NetLeadRate =>
 		freed ? growthspeed * Settings.GetInstance().DifficultyModifier : 0f;
 
-	internal float NetAngleRate => netSweepRadPerMs;
+	// ...and the SWEEP rate takes the same treatment, gated on `freed` (card d6645119, "the laser
+	// stops rotating but the rotating movement still happens on the joining peer's machine").
+	// `netSweepRadPerMs` is a constant handed over once by the sweeper and never cleared, so an
+	// ungated readback kept declaring the sweep long after the host had stopped turning the beam:
+	// the client integrated it, the next snapshot's aim snapped it back, and it did that every
+	// turn for the beam's remaining ~2.9 s / DifficultyModifier of life. The reporter's "rotate,
+	// then get placed back, rotate some more, get placed back, etc.".
+	//
+	// `freed` IS THE COMPLETE GATE, by enumeration rather than by resemblance. Boss is the only
+	// sweeper in the tree (nothing else calls ChangeAim or SetSweepRate), and it stops sweeping a
+	// beam at exactly two sites -- the 3-beam eviction in Update and its own OnComponentRemoved --
+	// each of which calls Free() in the SAME statement pair that drops the beam from `lazors`. So
+	// there is no path where a beam stops being swept without being freed, and none the other way
+	// round. SweepUFO's beam never sweeps at all and honestly reports 0 before and after.
+	//
+	// THE CARD ASKS FOR A "STOP ROTATING EVENT" AND THIS IS IT: the rate already rides the wire,
+	// it was simply lying. Do NOT route an immediate beat through NetFxKind/NetPlayFx instead --
+	// that contract is DRAW AND AUDIO ONLY and idempotent, and this moves a COLLIDABLE hitbox's
+	// extrapolation. The residual is that the client hears one snapshot turn late and so
+	// over-rotates by rate x SnapshotTurnMs ONCE (~2.4 deg at a 60 ms turn, ~19 deg at 480 ms)
+	// before being corrected once -- the same latency residual card 76ec8bdb states and declines
+	// to close, and a single correction where the defect was an endless sawtooth.
+	internal float NetAngleRate => freed ? 0f : netSweepRadPerMs;
 
 	// Puppet side. Assigned rather than eased, unlike the wasp's amplitude: these are step
 	// functions (a beam stops or is freed at an instant) and easing across such a step would

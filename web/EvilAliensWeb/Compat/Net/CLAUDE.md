@@ -2940,6 +2940,98 @@ velocities the layer already had are wrong for it -- and the fix is neither of t
   - Mutation-tested five ways, each failing a different leg; the matrix is in the probe's header.
     The pre-card build (the override answering false) fails 12.
 
+## ROTATION FIDELITY -- two reports, two unrelated causes (cards d6645119 / 566474ae)
+
+The fourth member of the smoothness family, and the first about ANGLE rather than position. Two
+reports that read as one bug ("the joining player sees it rotating wrong") and share no code:
+the Level-1 mothership's swept beam, and the junkboss rocks. **Neither needed a wire change** --
+protocol stayed at **v21** across both -- which is worth recording, because the first design for
+the second one spent a byte, a new `INetEntity` member and a version bump before a measurement
+took all three back.
+
+- **THE MOTHERSHIP BEAM: the host stopped sweeping and never said so** (card d6645119). `Boss`
+  keeps at most three beams in `lazors` and sweeps every beam **still in that list**; firing a
+  third evicts the oldest with `lazors[0].Free(); lazors.RemoveAt(0)`, which stops `ChangeAim`
+  reaching it. `Lazer.NetAngleRate` returned `netSweepRadPerMs` ungated -- a constant handed over
+  once by the sweeper and cleared only in the two `Setup*` entry points -- so the beam went on
+  DECLARING a sweep it was no longer performing. The client integrated it, the next snapshot's
+  aim snapped it back, and it repeated every turn: the reporter's "rotate, then get placed back,
+  rotate some more, get placed back, etc.".
+  - **THE FIX IS THE GATE THE FILE'S OWN IDIOM ALREADY ASKS FOR**: `NetAngleRate => freed ? 0f :
+    netSweepRadPerMs`, beside `NetLenRate`'s `stopped` gate and `NetLeadRate`'s `freed` one. The
+    card asks for "some stop-rotating event from the host" and this IS it -- the rate has ridden
+    the state extras since v14 and was simply lying.
+  - **`freed` IS COMPLETE BY ENUMERATION, not by resemblance**, and that is what makes a one-line
+    change safe. `ChangeAim` and `SetSweepRate` have exactly one caller in the tree (`Boss`), which
+    stops sweeping a beam at exactly two sites -- the eviction and its own `OnComponentRemoved` --
+    each calling `Free()` in the SAME statement pair that drops the beam from `lazors`. `SweepUFO`
+    fires through `Setup` but never sweeps, so it honestly reports 0 either side.
+  - **The timing independently reproduces the report.** `lazertimer` is 10000 ms once and then 800
+    ms repeating, so the first eviction lands **1.6 s after the first shot** ("after some
+    rotation"), and an abandoned beam then lives ~2.9 s / `DifficultyModifier` more -- `lead` only
+    catches `len` once the beam is `stopped`, so it is the 1200px lead cap that ends it.
+  - **RESIDUAL, stated: the client hears one snapshot turn late**, so it over-rotates by
+    `rate x SnapshotTurnMs` ONCE (~2.4 deg at a 60 ms turn, ~19 deg at 480) and is corrected once,
+    where the defect was an endless sawtooth. **Do NOT close that by routing an immediate beat
+    through `NetFxKind`/`NetPlayFx`** -- that contract is draw and audio only and idempotent, and
+    this moves a COLLIDABLE hitbox's extrapolation. Same residual card 76ec8bdb states and declines.
+- **THE JUNKBOSS ROCKS: `Ball` had no local-rotation seam at all** (card 566474ae). They are
+  `Ball`, not `Asteroid` -- a distinction the card's own "should use same system as the asteroids
+  earlier in the mission" hides. `Asteroid` overrides `NetSpinPerMs`; `Ball` overrode nothing, so a
+  frozen puppet stepped to the replicated angle once per turn, up to 13.7 degrees every 240 ms.
+  `Ball.NetSpinPerMs => rotationspeed` is the whole fix, unconditional, identical to Asteroid's.
+- **THE READING THAT COST THE FIRST DESIGN, and the reason section 6a of the suite exists.**
+  `Ball` looked like it needed more than Asteroid's one-liner, because `BallState.connected`
+  appears to LOCK the angle: it picks the sign of its step to chase the bearing to its owner the
+  short way. **It does not lock.** Both branches step by exactly `rotationspeed * dt` and only the
+  SIGN is conditional -- a bang-bang controller with a fixed step, which can dither about its
+  target or lag behind it but can never settle. **Measured off the real `Update`: a connected ball
+  turns at 1.00x its own free-spin rate, 16 of 16 balls across two runs, with 5-124 direction
+  reversals per 10 s.**
+  - **That measurement is what makes the seam unconditional and the wire unnecessary.** A puppet
+    free-spinning on its own roll has the right angular SPEED in all four states; only the phase
+    and the occasional reversal differ, on a tumble that reaches nothing but Draw (`Ball`'s
+    `CollisionType` is a `CollisionSimpleCircle`, so the decorative-rotation argument is STRONGER
+    here than in `Asteroid`, whose own comment makes it).
+  - **THE DESIGN IT REPLACED IS RECORDED BECAUSE IT WILL BE RE-PROPOSED.** The first cut had the
+    host declare per turn whether the ball was free-spinning (one flags byte, `BallDescriptor`'s
+    first state extras, protocol v22) and a connected puppet take the replicated angle. Measured
+    against the truth above it is **worse than doing nothing for the balls that matter**: the low
+    end of that reversal spread is a ball turning continuously for ~2 s, which at 0.001 rad/ms is
+    over 100 degrees, still stepped 13.7 degrees per turn. It would have fixed the rain-in and left
+    the fight. A second cut added a `NetRotationLocal` seam on top, to stop the rate falling to
+    zero from ALSO re-arming the driver's per-turn assignment (which would snap a puppet by up to
+    PI at the moment it joins the boss) -- that seam is unnecessary once the rate never falls to
+    zero, and was reverted with the rest.
+  - **Sending the RATE was rejected too, on quantisation**: `rotationspeed` tops out at 0.001
+    rad/ms, i.e. TEN units at `RateRadPerMsScale`, so a slow ball rounds to "not spinning at all".
+    A finer scale would be a third rate scale to keep straight, and would still not make the two
+    peers agree on PHASE.
+- **`NetJipDump.LocalSeams` needed nothing**, and that is a consequence worth stating rather than a
+  coincidence: it keys `rot` off `NetSpinPerMs != 0f`, which under an unconditional override is
+  true in every state, so `net_jip_sync.py` skips ball rotation always and cannot false-fail on it.
+  The reverted design would have made that label flap between the two peers.
+- **VERIFIED IN ONE PLACE, deliberately.** `eaNetMotion()` /
+  `tools/headless/probes/net_motion.txt` grew section 4's released-beam legs and a new section 6
+  (33 -> 56 assertions). **The sawtooth is measured there, not in the sim**: 0.1680 rad of drift
+  every turn pre-card against exactly 0 after. `tools/sim/net_puppet_drive_sim.py --smoothness`
+  was NOT extended -- its `SmoothPuppet` models 2D POSITION, and bolting an angular metric family
+  onto a Python model of the driver would be worse evidence than section 4's leg, which drives the
+  real driver through the real descriptor. That omission is deliberate; do not "fix" it.
+  - **Section 6a is not about the net layer at all** and is the leg to keep if any are ever cut:
+    it drives a real `Ball` against a real `JunkBoss` to a genuinely `connected` state (the
+    precondition is asserted, not waited out -- card af4c3694) and measures the turn rate the game
+    actually produces. Its free-spin baseline is OBSERVED by differencing `rotation`, not read off
+    `NetSpinPerMs`, so it keeps meaning something in a build where the seam is wrong.
+  - Mutation-tested three ways beyond the existing matrix, each tripping its OWN named `expect`:
+    the Lazer gate (5 legs), `Ball.NetSpinPerMs -> 0` (4), and `connected` no longer flipping its
+    sign (1 -- the reversal leg only, since the rate half still reads 1.00x, which is why both
+    halves are asserted).
+  - **The probe's named `expect` lines are anchored on `PASS`**, and that is load-bearing: the
+    suite prints `PASS <text>` and `FAIL <text>`, so a bare `expect <text>` matches the FAILING
+    line too and asserts only that the leg ran. Without the anchor all four still matched under a
+    mutation that reddened them, and only the tally caught it.
+
 ## LEVEL-3 WALLS -- derived scale, and the collision/draw coincidence (cards 4392bd30 / 80749dc4)
 
 Two reports -- "lvl3 walls go out of sync" and "walls stutter, and I hit them before I touch

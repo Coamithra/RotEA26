@@ -616,6 +616,22 @@ namespace EvilAliensWeb.Compat.Net
             check("...and it is the interface's answer too, so the driver sees it",
                 ((INetEntity)ball).NetSpinPerMs == rolled);
 
+            // THE FREE-SPIN BASELINE IS OBSERVED, NOT READ OFF THE SEAM. Differencing `rotation`
+            // over a few `startup` ticks measures what Update actually does; taking |NetSpinPerMs|
+            // instead would couple this measurement to the very override it is supposed to be
+            // independent of, and a build that zeroed the seam would divide by zero rather than
+            // report a wrong rate. Section 6a is a statement about Ball.Update and nothing else.
+            float spinFrom = ((INetEntity)ball).NetRotation;
+            for (int i = 0; i < 10; i++)
+            {
+                ball.Update(Tick(16.7f));
+            }
+            float freeRatePerMs = System.Math.Abs(((INetEntity)ball).NetRotation - spinFrom)
+                / (10f * 16.7f);
+            check("a ball in `startup` free-spins, and at the rate the seam declares",
+                freeRatePerMs > 0f && Near(freeRatePerMs, System.Math.Abs(rolled),
+                    System.Math.Abs(rolled) * 0.01f));
+
             // Drive it. CollidesWith is safe to call every tick: `startup` has no case in that
             // switch, and `attracted` is the one that transitions. ~8.4 s of sim is needed (a
             // 5 s starttimer, then the speed decaying under 0.01), so this is generous.
@@ -660,11 +676,11 @@ namespace EvilAliensWeb.Compat.Net
                 if (sign != 0f) { lastSign = sign; }
             }
             float meanPerMs = sumAbs / (LockTicks * 16.7f);
-            check("a CONNECTED ball turns at its FULL rolled speed, only the sign wobbles ("
-                    + (meanPerMs / System.Math.Abs(rolled)).ToString("F2",
+            check("a CONNECTED ball turns at its FULL free-spin speed, only the sign wobbles ("
+                    + (meanPerMs / freeRatePerMs).ToString("F2",
                         System.Globalization.CultureInfo.InvariantCulture) + "x, "
                     + reversals + " reversals)",
-                Near(meanPerMs, System.Math.Abs(rolled), System.Math.Abs(rolled) * 0.01f));
+                Near(meanPerMs, freeRatePerMs, freeRatePerMs * 0.01f));
             // ...and the reversals are what make it a wobble rather than a spin. Both halves are
             // needed: a build where the sign stopped flipping would pass the rate leg alone, and a
             // build where the STEP became proportional would pass the reversal leg alone.

@@ -900,8 +900,9 @@
         };
 
         // Debug: the online connector tether's HARD CAP (card 2cfab019). Drives a real connector
-        // between our ship and a real puppet through 8s of both ships thrusting directly apart and
-        // reports whether the separation PLATEAUS or runs away, plus the endpoint-pick and
+        // between our ship and a real puppet through 8s of OUR ship thrusting directly away while
+        // the partner holds station (the card's pinned-partner trigger, not a two-thruster drive).
+        // It reports whether the separation PLATEAUS or runs away, plus the endpoint-pick and
         // couch-pair routing. DESTRUCTIVE (it pairs a real host session onto the live level) --
         // run it in a throwaway ?level=Level2&invuln boot. No frame can show any of it: bounded
         // and unbounded are the same still picture until seconds of sustained input have passed.

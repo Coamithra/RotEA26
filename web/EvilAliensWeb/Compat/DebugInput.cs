@@ -847,8 +847,10 @@ namespace EvilAliensWeb.Compat
 		}
 
 		// JS bridge for the online connector tether's HARD CAP (eaNetTether, card 2cfab019): a
-		// real connector between our ship and a real puppet, driven through 8s of both ships
-		// thrusting directly apart, reporting whether the separation PLATEAUS or runs away. No
+		// real connector between our ship and a real puppet, driven through 8s of OUR ship
+		// thrusting directly away while the partner holds station -- the card's pinned-partner
+		// trigger, and deliberately NOT a two-thruster drive (see DriveApart's own header for
+		// why). It reports whether the separation PLATEAUS or runs away. No
 		// frame can show it -- "bounded at 215px" and "on its way past 1800px" are the same still
 		// picture, and the runaway needs seconds of sustained input to appear at all. It reports
 		// the verdict on whichever arm of ?nettetherwall it was booted with, which is what the

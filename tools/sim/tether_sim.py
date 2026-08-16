@@ -77,7 +77,7 @@ class Peer:
         return pos + vel * min(t - tv, EXTRAP_CAP)
 
 
-def run(one_way_ms, drive_ms=1000.0, total_ms=8000.0, mode="drag", wall=True,
+def run(one_way_ms, drive_ms: "float | None" = 1000.0, total_ms=8000.0, mode="drag", wall=True,
         pin_b=False, dark=None):
     """1-D scenario. A drives away for drive_ms (None = for the whole run); mode 'both' has B
     drive the other way too. pin_b freezes B in place (the screen-clamp corner). dark=(t0,t1)

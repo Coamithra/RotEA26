@@ -106,9 +106,11 @@ internal class ShipConnector : AlienDrawableGameComponent
 	// further away from each other") is that runaway. It is a GAIN problem, not a latency
 	// problem -- measured identical at one-way 0/50/100/200/300ms:
 	//
-	//   * ONE player thrusting away is already BOUNDED at ~167px: the idle partner's own 0.22
-	//     pull makes up the 0.11px/ms shortfall (gap rate 0.33 - 2p = 0 -> p = 0.165 ->
-	//     d = 78 + 0.165/0.0018). That case was never broken, which is why the card's guess
+	//   * ONE player thrusting away is already BOUNDED: the idle partner's own 0.22 pull makes up
+	//     the 0.11px/ms shortfall (gap rate 0.33 - 2p = 0 -> p = 0.165 -> d = 78 + 0.165/0.0018
+	//     = 169.7px PERCEIVED, 166.9px measured true -- the same discrete-tick offset as the
+	//     220/214.5 pair below, so do NOT read the formula as producing the measured figure).
+	//     That case was never broken, which is why the card's guess
 	//     ("only the host moves itself back towards the client") is not the cause -- both peers
 	//     always ran this, and each always pulled only the ship it owns.
 	//   * The runaway needs the pull budget to be ONE-SIDED: BOTH players thrusting apart (the

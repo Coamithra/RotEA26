@@ -1,4 +1,5 @@
-# PROBE: anchored motion -- the sent Lazer rates and the FlyingSpider path anchor.
+# PROBE: anchored motion -- the sent Lazer rates and the FlyingSpider path anchor, plus the two
+# ROTATION-FIDELITY gates that joined it (cards d6645119 / 566474ae).
 #
 # PINS: card c1a38ef9 -- Compat/Net/NetMotionTest, driven by eaNetMotion() / `eval NetMotionTest`.
 # The lane carries the MOTION MODEL on the wire (INetEntity.NetPathAnchored / NetPathOffset, the
@@ -21,15 +22,31 @@
 # `python tools/sim/net_puppet_drive_sim.py --smoothness`, which asserts it. This suite asserts
 # that the mechanism is wired and exact.
 #
-# MUTATION-TESTED SIX WAYS, each isolated (the first five fail a DIFFERENT leg each; the sixth
-# is deliberately non-disjoint -- see below):
+# MUTATION-TESTED NINE WAYS, each isolated (all but the last fail a DIFFERENT set of legs; that
+# one is deliberately non-disjoint -- see below):
 #   * FlyingSpider.NetPathAnchored -> false                     1 FAIL (the predicate)
 #   * ApplyStateExtra spends the swivel correction in one step   1 FAIL (the ease leg)
 #   * the sweep rate encoded at the px scale instead of the rad  1 FAIL (the driven sweep)
 #   * NetSession.ResolveBaseVelocity drops its anchored branch   1 FAIL (section 5)
 #   * Lazer clears its sweep rate from Initialize again          1 FAIL (the Add-order leg)
+#   * Lazer.NetAngleRate loses its `freed` gate (card d6645119)  5 FAIL (the released beam, both
+#                                                                      wire arms, the held puppet,
+#                                                                      and the sawtooth, which
+#                                                                      then reads 0.1680 rad)
+#   * Ball.NetSpinPerMs -> the base 0 (card 566474ae)            4 FAIL (the seam, the observed
+#                                                                      free-spin rate, and both
+#                                                                      driver legs)
+#   * Ball.Update's connected branch stops flipping the sign     1 FAIL (the reversal leg ONLY --
+#                                                                      the rate half still reads
+#                                                                      1.00x, which is why both
+#                                                                      halves are asserted)
 #   * CreatePuppet drops its `len >= SpawnAnchorBytes` guard    2 FAIL (the negative control
 #                                                                      + its sentinel)
+# THE TWO BALL MUTATIONS ARE THE PAIR THAT MATTERS AND THEY ARE DISJOINT ON PURPOSE: the first is
+# the shipped fix going away, the second is the FACT the fix rests on going away. Section 6a
+# measures the connected-state turn rate off the real Ball.Update, deliberately observing the
+# free-spin baseline rather than reading NetSpinPerMs -- so it keeps meaning something in a build
+# where the seam itself is wrong, instead of dividing by zero.
 # That last one is card c41a89a2's: section 2's negative control asserts over FOUR independent
 # puppets ("0/4 kept theirs" when it goes red) rather than one, because two independent rolls over
 # the same uniform 0..475 entry height agree inside 1.5px ~0.6% of the time -- a spurious failure
@@ -60,8 +77,32 @@ expect 2\. FlyingSpider path anchor through the real descriptor
 expect 3\. FlyingSpider drifting parameters are EASED, not snapped
 expect 4\. Lazer sent rates
 expect 5\. the HOST's velocity decision
+expect 6\. Ball local rotation
+
+# THE TWO ROTATION GATES, named rather than left to the tally: each is a one-line predicate whose
+# failure mode is a build that looks shipped and is merely wrong on the joining peer's screen, and
+# the tally alone cannot say WHICH went.
+#
+# EVERY ONE OF THESE IS ANCHORED ON `PASS`, and that is not decoration. The suite prints
+# "  PASS <text>" and "  FAIL <text>", so a bare `expect <text>` is satisfied by the FAILING line
+# too -- it asserts only that the leg RAN. Mutation-tested: without the anchor all four still
+# matched under a mutation that reddened them, and only the tally caught it.
+expect PASS .*the SWEEP rate goes to ZERO on the SAME event
+expect PASS .*exactly ZERO for a RELEASED one
+expect PASS .*the gated one does not drift at all \(0\.0000 rad\)
+expect PASS a Ball puppet is NOT snapped to the wire's angle
+
+# ...and section 6a's measurement, which is not about the net layer at all: a CONNECTED ball turns
+# at its FULL free-spin speed and only wobbles in direction. Both halves are pinned because each
+# passes alone under a different mutation. The 1.00x is load-bearing -- `connected` picking the
+# SIGN of a fixed-magnitude step is exactly why Ball.NetSpinPerMs can be unconditional and needs
+# no wire bit at all. If this line ever reads otherwise the step has become proportional, and the
+# seam needs re-DECIDING rather than re-tuning.
+expect PASS a CONNECTED ball turns at its FULL free-spin speed, only the sign wobbles \(1\.00x
+expect PASS .*it really does reverse
+
 # A TALLY, never `expect-not FAIL` on its own: an absence assertion passes on a run where the
 # eval never happened at all. Raise it when legs are added; never lower it to make a run green.
-expect \[netmotion\] 33 passed, 0 failed
+expect \[netmotion\] 56 passed, 0 failed
 expect-not FAIL
 quit

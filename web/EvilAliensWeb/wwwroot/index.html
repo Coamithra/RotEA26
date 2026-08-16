@@ -899,6 +899,18 @@
             catch (e) { console.warn('[debug] eaNetStale failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: the online connector tether's HARD CAP (card 2cfab019). Drives a real connector
+        // between our ship and a real puppet through 8s of OUR ship thrusting directly away while
+        // the partner holds station (the card's pinned-partner trigger, not a two-thruster drive).
+        // It reports whether the separation PLATEAUS or runs away, plus the endpoint-pick and
+        // couch-pair routing. DESTRUCTIVE (it pairs a real host session onto the live level) --
+        // run it in a throwaway ?level=Level2&invuln boot. No frame can show any of it: bounded
+        // and unbounded are the same still picture until seconds of sustained input have passed.
+        window.eaNetTether = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetTetherTest')); }
+            catch (e) { console.warn('[debug] eaNetTether failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: the enemy charge-glow's AIM on a join peer (card eb057163). A scripted host
         // charges a MarsBoss puppet over a real client session while the client ticks between
         // snapshot turns, and the drawn aim is sampled every tick. It reports a VERDICT --

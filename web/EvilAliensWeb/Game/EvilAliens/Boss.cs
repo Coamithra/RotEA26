@@ -115,6 +115,12 @@ internal class Boss : KillableAlien
 			lazerangle -= RandomHelper.RandomNextFloat(1.0995574f, (float)Math.PI * 9f / 20f);
 			if (lazors.Count == 3)
 			{
+				// THIS IS ALSO THE "STOP SWEEPING" EVENT, and online co-op reads it as one (card
+				// d6645119). Dropping the beam from `lazors` is what stops the ChangeAim loop
+				// above reaching it, and the Free() on the same statement pair is the only
+				// observable of that -- which is why Lazer.NetAngleRate gates on `freed`. Keep
+				// the two together: separated, the beam would go on declaring a sweep it no
+				// longer performs and the joining peer would rotate it on its own.
 				lazors[0].Free();
 				lazors.RemoveAt(0);
 			}

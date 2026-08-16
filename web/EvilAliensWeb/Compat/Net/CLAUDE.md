@@ -2432,6 +2432,14 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   the receiver breaks silently via `NetBreakSilently`); shared-fate death asplodes only
   locally-owned ships and defers the life/reset to the host. Connector creation waits for
   BOTH ships (the puppet joins a beat late -- `netConnectorPending` in TeamChallenge).
+- **That soft pull was UNBOUNDED, and the hard cap is card 2cfab019.** "Ships can fly further and further away from each other." **It is a GAIN problem, not a latency problem** -- measured identical at one-way 0/50/100/200/300ms -- so the card's own guessed cause ("only the host moves itself back towards the client") is wrong twice over: both peers always ran `NetPullOwnShip`, and each always pulled only the ship it owns. The soft pull saturates at `NetMaxPullPxPerMs` 0.22 while a ship thrusts at `ShipMaxSpeed` 0.33, so any **one-sided pull budget** separates without bound: both players thrusting apart (0.22px/ms forever), or -- the everyday trigger -- one thrusting while the other is **pinned against the 800x600 clamp in `PlayerShip.Update`**, which is what backing into a corner to escape being dragged produces. A LONE thruster was never broken: the idle partner's own pull covers the shortfall.
+  - **WRITE THIS NUMBER DOWN: ordinary online drag play already sits at ~167px, against offline's rigid 78px.** `REST + (ShipMaxSpeed/2)/NetPullK` = **169.7px perceived, 166.9px measured true** -- the same discrete-tick offset as the 220/214.5 pair below, so quote the formula and the measurement as a pair; the formula does not evaluate to the measured figure. So the tether is ~2x looser online than off *before* the cap, and that is untouched here -- it lives in the soft law the header tells you not to stiffen, and the user's ruling was about the runaway. It is the thing a player reports next as "the connector feels loose online"; the number is here so the next person does not re-measure it.
+  - **The cap is a RATE, not a position clamp, and that distinction IS the design.** A clamp (`if (dist > MAX) SetPosition(anchor +/- MAX)`) has mutual loop gain exactly 1 -- the two peers' clamp equations substitute to `x_A(t) = x_A(t-2D)`, a pure delay at unity gain, marginally stable, ringing forever against each other's stale views. That is precisely the mutual stale-anchor loop `ShipConnector`'s header warns about. Instead the pull's SPEED ceiling rises above ship thrust past `NetHardPx`, so thrust is OUT-RUN rather than refused: per-tick loop gain `NetHardK * dt` = 0.09, and the bound is an equilibrium of SPEEDS, hence latency-independent. Consts `NetHardPx` 200 / `NetHardK` 0.0055/ms / `NetMaxHardPullPxPerMs` 0.55. Equilibrium `NetHardPx + (ShipMaxSpeed - NetMaxPullPxPerMs)/NetHardK` = 220px perceived, **214.5px true, which the sim and the real game code agree on independently**. `NetPullK`/`NetMaxPullPxPerMs` are untouched and the knee is *derived* from where the soft cap saturates (`REST + 0.22/0.0018` = 200.2), which is what makes "unchanged below the knee" exact rather than approximate.
+  - **NOT gated on peer freshness, deliberately.** A pull toward a stalled peer's frozen anchor is a CONTRACTION with a fixed point at `NetRestPx`, not an integrator: total travel is `dist - NetRestPx` however long the stall runs (measured 136.5px, *identical* with the cap and without). That is what separates it from `ShipStateBuffer.ExtrapolateCapMs` and `Lazer.NetExtrapolateCapMs`, which bound `pos + vel*t` integrators and so must be bounded in TIME. Gating it would restore the runaway for the whole 1200ms `PeerStallMs` grace -- when it is most likely: across one stall the pre-card law adds 264px of escape and keeps going, the cap leaves a ~20px correction on recovery.
+  - **`NetMaxHardPullPxPerMs` 0.55 is a guard, not a feel value, and it DOES bind:** an online TeamChallenge builds its tether once both ships exist, and they enter from fixed off-screen points **567-696px apart**, where the raw hard term would ask for 37-49px per FRAME. 0.55 is 1.67x `ShipMaxSpeed`, deliberately under the 2x `NetSession`'s own correction-pop detector calls "a step no real ship could make" (696 -> 220px in ~883ms). Offline that same spawn is slammed rigid on frame 1, so this is the gentler of the two.
+  - **One honest caveat, measured:** the law reads the PERCEIVED separation, and in a steady drag both ships move at the same speed, so each peer's stale anchor is displaced by `v * (one_way + interp)` along the direction of travel -- the LEADING peer perceives `true + v*delay`. Past ~200ms one-way that is enough to cross the knee while the TRUE gap is only ~162px, so the cap engages on a stale reading. Bounded, non-ringing, and it acts in the TIGHTENING direction (181 -> 162px, toward rest), so it is accepted. **Up to 100ms one-way nothing moves at all**, and `tether_sim.py` asserts exactly that split.
+  - **Same card, second defect: two LOCALLY-owned endpoints now take the RIGID offline law.** In a session with couch players (`?netlocal=`) a pair of local ships could be connected, and `NetPullOwnShip` applied its one-sided soft pull to only ONE of them -- so it ran away with a single thruster, with no staleness anywhere to justify being soft. On the other peer both are puppets, so its `NetPullOwnShip` returns early and the rigid positions arrive unchallenged; no peer fights another. The endpoint pick also moved from `Controller != Remote` to `!IsNetPuppet` (`PlayerShip.IsNetPuppet` is now `internal`) -- a `RemoteFriend` passed the old test and would have been moved by us.
+  - **Verify with `eaNetTether()`** (`Compat/Net/NetTetherTest.cs`, 14 assertions; `eval NetTether`). **DESTRUCTIVE** like `eaNetPickup` -- it pairs a real HOST session onto the live level and adopts a real puppet -- so run it in a throwaway `?level=Level2&invuln` boot. Three instruments split the card and none subsumes another: `tools/sim/tether_sim.py` owns the SCENARIOS (two coupled peers, stale anchors, the latency sweep, ringing, the stall), `logic_probe`'s `ProbeTetherWall` owns the pure LAW, and the suite owns the WIRING. **`?nettetherwall=0` restores the runaway** (in `DebugFlags.Active`, the `?netstaleguard=0` idiom) and is the negative control; because it is parsed at boot the probe pair is two BOOTS -- `tools/headless/probes/net_tether_wall.txt` + `net_tether_wall_absent.txt`, 214.5px vs 1010.4px. **The mutation run earned its keep**: the endpoint-pick mutation initially passed both files, because the leg put OUR ship in endpoint A and the pick takes A when A is ours, so the puppet was never examined. No protocol change.
 - **World-authority coverage gaps (follow-up to card 11.2):** the replicable set was extended
   to the enemy/boss types 11.2 left host-only -- PlasmaBall, the paratrooper family
   (ParatrooperAlien/ParatrooperBrain/Parachute), FakeBoss, SpiderBoss, BrainBoss,
@@ -2931,6 +2939,98 @@ velocities the layer already had are wrong for it -- and the fix is neither of t
     sweep" on another. An early cut of this suite reported five spurious failures exactly that way.
   - Mutation-tested five ways, each failing a different leg; the matrix is in the probe's header.
     The pre-card build (the override answering false) fails 12.
+
+## ROTATION FIDELITY -- two reports, two unrelated causes (cards d6645119 / 566474ae)
+
+The fourth member of the smoothness family, and the first about ANGLE rather than position. Two
+reports that read as one bug ("the joining player sees it rotating wrong") and share no code:
+the Level-1 mothership's swept beam, and the junkboss rocks. **Neither needed a wire change** --
+protocol stayed at **v21** across both -- which is worth recording, because the first design for
+the second one spent a byte, a new `INetEntity` member and a version bump before a measurement
+took all three back.
+
+- **THE MOTHERSHIP BEAM: the host stopped sweeping and never said so** (card d6645119). `Boss`
+  keeps at most three beams in `lazors` and sweeps every beam **still in that list**; firing a
+  third evicts the oldest with `lazors[0].Free(); lazors.RemoveAt(0)`, which stops `ChangeAim`
+  reaching it. `Lazer.NetAngleRate` returned `netSweepRadPerMs` ungated -- a constant handed over
+  once by the sweeper and cleared only in the two `Setup*` entry points -- so the beam went on
+  DECLARING a sweep it was no longer performing. The client integrated it, the next snapshot's
+  aim snapped it back, and it repeated every turn: the reporter's "rotate, then get placed back,
+  rotate some more, get placed back, etc.".
+  - **THE FIX IS THE GATE THE FILE'S OWN IDIOM ALREADY ASKS FOR**: `NetAngleRate => freed ? 0f :
+    netSweepRadPerMs`, beside `NetLenRate`'s `stopped` gate and `NetLeadRate`'s `freed` one. The
+    card asks for "some stop-rotating event from the host" and this IS it -- the rate has ridden
+    the state extras since v14 and was simply lying.
+  - **`freed` IS COMPLETE BY ENUMERATION, not by resemblance**, and that is what makes a one-line
+    change safe. `ChangeAim` and `SetSweepRate` have exactly one caller in the tree (`Boss`), which
+    stops sweeping a beam at exactly two sites -- the eviction and its own `OnComponentRemoved` --
+    each calling `Free()` in the SAME statement pair that drops the beam from `lazors`. `SweepUFO`
+    fires through `Setup` but never sweeps, so it honestly reports 0 either side.
+  - **The timing independently reproduces the report.** `lazertimer` is 10000 ms once and then 800
+    ms repeating, so the first eviction lands **1.6 s after the first shot** ("after some
+    rotation"), and an abandoned beam then lives ~2.9 s / `DifficultyModifier` more -- `lead` only
+    catches `len` once the beam is `stopped`, so it is the 1200px lead cap that ends it.
+  - **RESIDUAL, stated: the client hears one snapshot turn late**, so it over-rotates by
+    `rate x SnapshotTurnMs` ONCE (~2.4 deg at a 60 ms turn, ~19 deg at 480) and is corrected once,
+    where the defect was an endless sawtooth. **Do NOT close that by routing an immediate beat
+    through `NetFxKind`/`NetPlayFx`** -- that contract is draw and audio only and idempotent, and
+    this moves a COLLIDABLE hitbox's extrapolation. Same residual card 76ec8bdb states and declines.
+- **THE JUNKBOSS ROCKS: `Ball` had no local-rotation seam at all** (card 566474ae). They are
+  `Ball`, not `Asteroid` -- a distinction the card's own "should use same system as the asteroids
+  earlier in the mission" hides. `Asteroid` overrides `NetSpinPerMs`; `Ball` overrode nothing, so a
+  frozen puppet stepped to the replicated angle once per turn, up to 13.7 degrees every 240 ms.
+  `Ball.NetSpinPerMs => rotationspeed` is the whole fix, unconditional, identical to Asteroid's.
+- **THE READING THAT COST THE FIRST DESIGN, and the reason section 6a of the suite exists.**
+  `Ball` looked like it needed more than Asteroid's one-liner, because `BallState.connected`
+  appears to LOCK the angle: it picks the sign of its step to chase the bearing to its owner the
+  short way. **It does not lock.** Both branches step by exactly `rotationspeed * dt` and only the
+  SIGN is conditional -- a bang-bang controller with a fixed step, which can dither about its
+  target or lag behind it but can never settle. **Measured off the real `Update`: a connected ball
+  turns at 1.00x its own free-spin rate, 16 of 16 balls across two runs, with 5-124 direction
+  reversals per 10 s.**
+  - **That measurement is what makes the seam unconditional and the wire unnecessary.** A puppet
+    free-spinning on its own roll has the right angular SPEED in all four states; only the phase
+    and the occasional reversal differ, on a tumble that reaches nothing but Draw (`Ball`'s
+    `CollisionType` is a `CollisionSimpleCircle`, so the decorative-rotation argument is STRONGER
+    here than in `Asteroid`, whose own comment makes it).
+  - **THE DESIGN IT REPLACED IS RECORDED BECAUSE IT WILL BE RE-PROPOSED.** The first cut had the
+    host declare per turn whether the ball was free-spinning (one flags byte, `BallDescriptor`'s
+    first state extras, protocol v22) and a connected puppet take the replicated angle. Measured
+    against the truth above it is **worse than doing nothing for the balls that matter**: the low
+    end of that reversal spread is a ball turning continuously for ~2 s, which at 0.001 rad/ms is
+    over 100 degrees, still stepped 13.7 degrees per turn. It would have fixed the rain-in and left
+    the fight. A second cut added a `NetRotationLocal` seam on top, to stop the rate falling to
+    zero from ALSO re-arming the driver's per-turn assignment (which would snap a puppet by up to
+    PI at the moment it joins the boss) -- that seam is unnecessary once the rate never falls to
+    zero, and was reverted with the rest.
+  - **Sending the RATE was rejected too, on quantisation**: `rotationspeed` tops out at 0.001
+    rad/ms, i.e. TEN units at `RateRadPerMsScale`, so a slow ball rounds to "not spinning at all".
+    A finer scale would be a third rate scale to keep straight, and would still not make the two
+    peers agree on PHASE.
+- **`NetJipDump.LocalSeams` needed nothing**, and that is a consequence worth stating rather than a
+  coincidence: it keys `rot` off `NetSpinPerMs != 0f`, which under an unconditional override is
+  true in every state, so `net_jip_sync.py` skips ball rotation always and cannot false-fail on it.
+  The reverted design would have made that label flap between the two peers.
+- **VERIFIED IN ONE PLACE, deliberately.** `eaNetMotion()` /
+  `tools/headless/probes/net_motion.txt` grew section 4's released-beam legs and a new section 6
+  (33 -> 56 assertions). **The sawtooth is measured there, not in the sim**: 0.1680 rad of drift
+  every turn pre-card against exactly 0 after. `tools/sim/net_puppet_drive_sim.py --smoothness`
+  was NOT extended -- its `SmoothPuppet` models 2D POSITION, and bolting an angular metric family
+  onto a Python model of the driver would be worse evidence than section 4's leg, which drives the
+  real driver through the real descriptor. That omission is deliberate; do not "fix" it.
+  - **Section 6a is not about the net layer at all** and is the leg to keep if any are ever cut:
+    it drives a real `Ball` against a real `JunkBoss` to a genuinely `connected` state (the
+    precondition is asserted, not waited out -- card af4c3694) and measures the turn rate the game
+    actually produces. Its free-spin baseline is OBSERVED by differencing `rotation`, not read off
+    `NetSpinPerMs`, so it keeps meaning something in a build where the seam is wrong.
+  - Mutation-tested three ways beyond the existing matrix, each tripping its OWN named `expect`:
+    the Lazer gate (5 legs), `Ball.NetSpinPerMs -> 0` (4), and `connected` no longer flipping its
+    sign (1 -- the reversal leg only, since the rate half still reads 1.00x, which is why both
+    halves are asserted).
+  - **The probe's named `expect` lines are anchored on `PASS`**, and that is load-bearing: the
+    suite prints `PASS <text>` and `FAIL <text>`, so a bare `expect <text>` matches the FAILING
+    line too and asserts only that the leg ran. Without the anchor all four still matched under a
+    mutation that reddened them, and only the tally caught it.
 
 ## LEVEL-3 WALLS -- derived scale, and the collision/draw coincidence (cards 4392bd30 / 80749dc4)
 

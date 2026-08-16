@@ -1,4 +1,4 @@
-# CLAUDE.md — web/EvilAliensWeb/Compat/Net (the online co-op net layer)
+﻿# CLAUDE.md — web/EvilAliensWeb/Compat/Net (the online co-op net layer)
 
 Moved out of `web/EvilAliensWeb/CLAUDE.md` so it loads only when working on the net layer.
 The parent file has the rest of the game/engine notes; `NetStatusMenu.cs` lives in
@@ -3595,9 +3595,19 @@ broken CI -- and `prov=` / `owner=` remain exact, first-sample and never softene
     cumulative shot count) contend for that one gate. Card a5c2a39b's closing note credited the
     clamp; the conclusion held, the mechanism cited did not.
   - **THE COST, accepted deliberately (cosmetic).** An in-order but ~half-RTT-stale snapshot
-    legitimately lacks the hits the client just landed, so the draw-side readers of hp -- the
-    colorize redden, `BattleSkull`'s hue remap, `MarsBoss`'s `fps = Lerp(32, 16,
-    HitPointsNormalized)` -- can nudge back up mid-burst, bounded by the snapshot turn.
+    legitimately lacks the hits the client just landed, so the DRAW-side readers of hp -- the
+    colorize redden and `BattleSkull`'s Draw-time hue remap -- can nudge back up mid-burst,
+    bounded by the snapshot turn. **`MarsBoss`'s `fps = Lerp(32, 16, HitPointsNormalized)` is
+    NOT one of them**, though it looks like the obvious third: it is re-derived at the top of
+    `MarsBoss.Update`, which a frozen puppet never runs -- which is exactly why that type opts
+    out of `NetFrameLocal` and takes the replicated frame instead.
+  - **Do NOT "fix" the raise by capping it at `initialhitpoints`.** `HitPointsNormalized <= 1`
+    reads like an invariant the raise breaks, and it is not one this class ever had: `Initialize`
+    sets `hitpoints = initialhitpoints * DifficultyFactorized(0.5f)`, which is above 1 on every
+    tier past the floor, so a `scaleWithDifficulty` type (`Boss`, 225) is already over its
+    initial at full health in ordinary single-player. A cap would cut those types' replicated hp
+    to the unscaled number on every snapshot -- a real desync traded for a cosmetic one the raise
+    does not cause, since both peers share the session difficulty and compute the same pool.
   - **The REORDER case is a different guard and is untouched.** Card f5cf7a5c's per-netId monotone
     seq refuses an older entry whole, before `ApplySnapshotState` reaches the hp read, so a late or
     reordered packet still cannot raise hp. `eaNetSnap` section 7 pins the two separately, and its
@@ -3606,8 +3616,9 @@ broken CI -- and `prov=` / `owner=` remain exact, first-sample and never softene
     `?netstaleguard=0` fails only the stale leg (hp raised 9 -> 110), and restoring the early-out
     fails only the two raise legs while the floor leg still passes.
   - **The floor at 1 and the `dead` guard are unchanged**, so deaths still arrive exclusively as
-    events or local kills and no snapshot can resurrect a dead puppet. The floor used to be
-    unfalsifiable from `NetEntityTest` (the direction reached it first); it is now pinned alone.
+    events or local kills and no snapshot can resurrect a dead puppet. The floor simply had no
+    leg of its own until now (it was reachable before -- the old early-out did not shadow it);
+    it is pinned separately so the direction change cannot quietly take it with it.
 - **(HISTORY, superseded by card af96bcc2.) Comparing score wire-to-wire was measured and
   declined under the ledger design** -- a joiner booked settled awards continuously and
   `EvScoreSync` was only a true-up, so the wire-to-wire version went RED on 7 of 10 seeds.

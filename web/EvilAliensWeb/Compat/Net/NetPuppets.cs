@@ -516,6 +516,25 @@ namespace EvilAliensWeb.Compat.Net
                 ++suiteSeq, out popped, out kind, out _);
         }
 
+        // The seq last APPLIED to this puppet, for a suite that has to hand OnSnapshotEntry a value
+        // the staleness guard will refuse. `suiteSeq` above is process-wide and shared with every
+        // other menu suite, so a literal (0, or a big jump forward) is not reliably stale: the
+        // guard compares the SIGNED difference, which makes a large step forward read as stale and
+        // a wrapped counter make 0 read as new. Handing back the mark lets a leg ask for exactly
+        // `last` -- a difference of 0, which the guard's `<= 0` refuses by definition, at any
+        // counter value. Returns false when the puppet has never taken a sequenced entry, so a
+        // caller cannot mistake "no mark yet" for seq 0.
+        internal static bool TryGetLastSnapSeqForTest(ushort netId, out ushort seq)
+        {
+            seq = 0;
+            if (!byId.TryGetValue(netId, out PuppetInfo info) || !info.HasSnapSeq)
+            {
+                return false;
+            }
+            seq = info.LastSnapSeq;
+            return true;
+        }
+
         // THE STALENESS GUARD (card f5cf7a5c). `packetSeq` is the MsgWorldSnapshot header's
         // monotone per-packet counter; an entry not NEWER than the last one applied to this
         // puppet is refused whole and reported through `stale`.

@@ -273,18 +273,35 @@ public abstract class KillableAlien : AlienDrawableGameComponent, EvilAliensWeb.
 	// credited the clamp; the conclusion held, the mechanism cited did not.
 	//
 	// THE COST, accepted deliberately: an in-order but ~half-RTT-stale snapshot legitimately does
-	// not contain the hits we just landed, so the draw-side readers of hp (this redden,
-	// BattleSkull's hue remap, MarsBoss's fps = Lerp(32,16,HitPointsNormalized)) can nudge back up
-	// mid-burst. Cosmetic, and bounded by the snapshot turn. The REORDER case is a different guard
-	// and is untouched: NetPuppets refuses an entry older than the last applied seq for this netId
-	// (card f5cf7a5c) before ApplySnapshotState ever reaches here.
+	// not contain the hits we just landed, so the DRAW-SIDE readers of hp -- this redden, and
+	// BattleSkull's Draw-time hue remap -- can nudge back up mid-burst. Cosmetic, and bounded by
+	// the snapshot turn. (MarsBoss's fps = Lerp(32,16,HitPointsNormalized) is NOT one of them: it
+	// is re-derived at the top of its Update, which a frozen puppet never runs -- that is exactly
+	// why MarsBoss opts out of NetFrameLocal and takes the replicated frame instead.) The REORDER
+	// case is a different guard and is untouched: NetPuppets refuses an entry older than the last
+	// applied seq for this netId (card f5cf7a5c) before ApplySnapshotState ever reaches here.
+	//
+	// ?nethpraise=0 restores the downward-only clamp verbatim -- the deliberate bug reproduction,
+	// and the raise legs' mutation control.
 	internal void NetApplyHp(int hp)
 	{
 		if (dead || hitpoints <= 0)
 		{
 			return;
 		}
+		// FLOORED ONLY -- do NOT add a cap at initialhitpoints here, however tempting it looks
+		// now that hp can rise. `HitPointsNormalized <= 1` is NOT an invariant this class has:
+		// Initialize sets hitpoints = initialhitpoints * DifficultyFactorized(0.5f), which is
+		// ABOVE 1 on every tier past the floor, so a scaleWithDifficulty type (Boss, 225) is
+		// already over its initial at full health in ordinary single-player. Capping here would
+		// cut those types' replicated hp to the unscaled number on every snapshot -- a real
+		// desync traded for a cosmetic one that the raise does not actually cause, since both
+		// peers share the session difficulty and so compute the same scaled pool.
 		hp = (int)MathHelper.Max(hp, 1f);
+		if (!EvilAliensWeb.Compat.DebugFlags.NetHpRaise && hp >= hitpoints)
+		{
+			return;
+		}
 		hitpoints = hp;
 		if (colorize)
 		{

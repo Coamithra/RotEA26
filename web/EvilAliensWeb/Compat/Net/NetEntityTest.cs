@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using EvilAliens;
 using Microsoft.Xna.Framework;
 
@@ -295,8 +295,10 @@ namespace EvilAliensWeb.Compat.Net
             Check("NetApplyHp RAISES through the seam (want " + (hp0 + 100) + ", was "
                 + (kill != null ? kill.NetHitPoints : -1) + ")",
                 kill != null && kill.NetHitPoints == hp0 + 100);
-            // The floor is a guard of its own, not a side effect of the old direction: it is what
-            // keeps a death off the snapshot path, so it has to be pinned separately now.
+            // The floor is a guard of its own -- it is what keeps a death off the snapshot path.
+            // It had no leg of its own until this card (nothing was shadowing it; it was simply
+            // never asserted), and it gets one here so the direction change cannot take it along
+            // unnoticed.
             kill?.NetApplyHp(0);
             Check("NetApplyHp still floors at 1 (was "
                 + (kill != null ? kill.NetHitPoints : -1) + ")", kill != null && kill.NetHitPoints == 1);

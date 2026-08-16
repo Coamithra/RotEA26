@@ -1,4 +1,4 @@
-# PROBE: every menu-runnable net-layer self-test still passes, in one run.
+﻿# PROBE: every menu-runnable net-layer self-test still passes, in one run.
 #
 # PINS: nothing of its own. This is a MECHANICAL REGRESSION NET over the suites cards 40334a8f,
 # b0ab09ec, 1a3ad45a, 48ab9b2f, 9a3175d0, 0b8a300b, c0229c57, ee96ea61, 74403f83, e6927ef8 and
@@ -114,7 +114,8 @@ expect \[nethost\] 37 passed, 0 failed
 # explosion. Not a logic_probe case set, unlike eaNetHost: constructing an entity needs a Game.
 # Card 87310afa: 46 -> 47. NetApplyHp is two-way now (the host is authoritative in both
 # directions), so the seam's raise leg asserts the value LANDS where it used to assert refusal,
-# and the floor at 1 -- which the old direction made unfalsifiable from here -- is pinned alone.
+# and the floor at 1 -- which simply had no leg of its own before -- is pinned separately, so the
+# direction change cannot quietly take it along.
 expect \[netentity\] PASS \(47 passed, 0 failed\)
 # primary-slot negotiation + the v8 handshake codec (cards c0229c57 / ee96ea61)
 expect \[slottest\] PASS \(82/82 checks\)
@@ -145,7 +146,10 @@ expect \[kicktest\] PASS \(29/29 checks\)
 # seq, which drops the whole entry BEFORE hp is read) must still fail to raise, and that leg
 # asserts the guard's own `stale` flag as its precondition rather than assuming the seq it picked
 # was old -- otherwise it would pass on a seq that was simply accepted and applied as a no-op.
-expect \[netsnap\] PASS \(48 passed, 0 failed\)
+# It asks NetPuppets for the mark to re-offer rather than picking a literal seq: the suite counter
+# is process-wide and the guard compares the SIGNED difference, so neither 0 nor a jump forward is
+# reliably stale, while re-offering the last applied seq is a difference of zero at any value.
+expect \[netsnap\] PASS \(49 passed, 0 failed\)
 # per-slot HUD wire format + OwnsSlot + the real PowerupData exp curve (card 1a3ad45a), plus the
 # per-layer option counts v16 appended to that entry (card c5228350) and their decode-boundary
 # clamp -- asserted off a RAW packet, since the encoder clamps too and a value put through it can

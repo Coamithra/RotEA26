@@ -23,7 +23,9 @@ No wire change, no protocol bump: the same `Hp` byte, applied differently on rec
 
 ### Accepted cost (user's call, recorded)
 
-hp also drives draw-side state: the colorize redden (`KillableAlien.HitBy` and the identical recompute inside `NetApplyHp`), `BattleSkull`'s green→red hue remap, and `MarsBoss`'s `fps = Lerp(32, 16, HitPointsNormalized)`. An **in-order but ~half-RTT-stale** snapshot will now nudge those back up while the client is shooting. Judged barely noticeable — a shade less red than it is about to be, and a small animation-rate wobble.
+hp also drives draw-side state: the colorize redden (`KillableAlien.HitBy` and the identical recompute inside `NetApplyHp`) and `BattleSkull`'s green→red hue remap. An **in-order but ~half-RTT-stale** snapshot will now nudge those back up while the client is shooting. Judged barely noticeable — a shade less red than it is about to be.
+
+`MarsBoss`'s `fps = Lerp(32, 16, HitPointsNormalized)` is **not** affected, though it reads like it should be: that line is the top of `MarsBoss.Update`, and a puppet's `Update` never runs — which is why the type opts out of `NetFrameLocal` and takes the replicated frame instead.
 
 This is *not* the reorder case. Card f5cf7a5c's per-netId monotone seq already refuses a stale entry in `NetPuppets` **before** `ApplySnapshotState` runs, so a late or reordered packet cannot raise hp at all. The two guards stay distinct and the probe asserts that.
 

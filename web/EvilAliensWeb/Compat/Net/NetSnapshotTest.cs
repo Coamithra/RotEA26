@@ -372,7 +372,14 @@ namespace EvilAliensWeb.Compat.Net
                     SnapshotHp(IdHp, mineType, start - 1);
                     Check("hp is back down before the stale leg (want " + (start - 1) + ", was "
                         + hpKill.NetHitPoints + ")", hpKill.NetHitPoints == start - 1);
-                    bool refusedAsStale = SnapshotHpAtSeq(IdHp, mineType, start + 100, 0);
+                    // ASK FOR THE MARK rather than picking a literal: the suite counter is
+                    // process-wide, and the guard compares the SIGNED difference, so neither 0 nor
+                    // a big jump forward is reliably stale. Re-offering exactly the last applied
+                    // seq is a difference of zero, which `<= 0` refuses at any counter value.
+                    bool haveSeq = NetPuppets.TryGetLastSnapSeqForTest(IdHp, out ushort lastSeq);
+                    Check("the hp puppet has taken a sequenced entry (the stale leg needs a mark"
+                        + " to re-offer)", haveSeq);
+                    bool refusedAsStale = SnapshotHpAtSeq(IdHp, mineType, start + 100, lastSeq);
                     Check("the stale-seq entry really was seen as stale (the leg's precondition,"
                         + " not an assumption about the suite's seq counter)", refusedAsStale);
                     Check("a STALE snapshot cannot raise hp (want " + (start - 1) + ", was "

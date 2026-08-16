@@ -112,7 +112,10 @@ expect \[nethost\] 37 passed, 0 failed
 # the wrong member of the same type (two floats swap silently), and a subtype that stops answering
 # the NetKillable / NetPickup discriminant, which turns every remote powerup pickup into an
 # explosion. Not a logic_probe case set, unlike eaNetHost: constructing an entity needs a Game.
-expect \[netentity\] PASS \(46 passed, 0 failed\)
+# Card 87310afa: 46 -> 47. NetApplyHp is two-way now (the host is authoritative in both
+# directions), so the seam's raise leg asserts the value LANDS where it used to assert refusal,
+# and the floor at 1 -- which the old direction made unfalsifiable from here -- is pinned alone.
+expect \[netentity\] PASS \(47 passed, 0 failed\)
 # primary-slot negotiation + the v8 handshake codec (cards c0229c57 / ee96ea61)
 expect \[slottest\] PASS \(82/82 checks\)
 # the kick/block predicate + the v6 peer-identity codec (card 0b8a300b)
@@ -134,9 +137,15 @@ expect \[kicktest\] PASS \(29/29 checks\)
 # directly through the INetKillable seam and NetWireTest round-trips an Hp byte through a frame,
 # but neither drives a real snapshot entry into a real puppet and reads the entity back. It uses a
 # StarMine (a UFO puppet starts at 1 hit point, where NetApplyHp's floor leaves nothing to lower
-# it to) and takes its values RELATIVE to whatever the puppet built with, since NetApplyHp only
-# ever lowers and an absolute number would pass vacuously the day the type's hit points change.
-expect \[netsnap\] PASS \(45 passed, 0 failed\)
+# it to) and takes its values RELATIVE to whatever the puppet built with, so an absolute number
+# cannot make it pass vacuously the day the type's hit points change.
+# Card 87310afa: 45 -> 48. The apply is TWO-WAY now, so the leg that asserted a raise is refused
+# asserts it lands -- and the section then has to keep the guard that still refuses one separable
+# from the direction that no longer does. A stale-seq entry (card f5cf7a5c's per-netId monotone
+# seq, which drops the whole entry BEFORE hp is read) must still fail to raise, and that leg
+# asserts the guard's own `stale` flag as its precondition rather than assuming the seq it picked
+# was old -- otherwise it would pass on a seq that was simply accepted and applied as a no-op.
+expect \[netsnap\] PASS \(48 passed, 0 failed\)
 # per-slot HUD wire format + OwnsSlot + the real PowerupData exp curve (card 1a3ad45a), plus the
 # per-layer option counts v16 appended to that entry (card c5228350) and their decode-boundary
 # clamp -- asserted off a RAW packet, since the encoder clamps too and a value put through it can

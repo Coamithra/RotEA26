@@ -3560,23 +3560,54 @@ broken CI -- and `prov=` / `owner=` remain exact, first-sample and never softene
 | scenery line | 1 in ~300 | compared FIELD BY FIELD, not as one string: the doodad carries a POSITION and got `-239.6` vs `-239.2` reported as a desync. Its name stays exact and so does everything discrete (which is what makes the missing-catch-up mutation unmistakable) | -- |
 | the `uns` run-level control itself | (history) | **RETIRED with the ledger (card af96bcc2)** -- there is no `uns` field to control any more (dump v5); the hp leg's `hpwire=` control carries the silent-deletion guard | -- |
 
-- **`NetApplyHp` ONLY EVER LOWERS, and that is why the hp compare reads the RECEIVED value rather
-  than the entity.** `KillableAlien.NetApplyHp` refuses any value at or above the puppet's current
-  hit points (`if (hp >= hitpoints) return;`) so an older snapshot cannot resurrect hits this
-  client has already landed. A first implementation recorded `hpwire` by reading the killable back
-  AFTER the apply, which therefore reports the REFUSED figure whenever the joiner is ahead:
-  measured **132 gaps across 6 seeds, 132 client-lower, 0 higher, 0 equal** -- a one-directional
-  signature that is the clamp, not a replication fault. Recording what was received keeps the two
-  ends comparable; the clamp is then asserted SEPARATELY as an invariant with no tolerance at all
-  -- **a puppet's live hp may never EXCEED its `hpwire`**, since both the clamp and local damage
-  only lower, so an entity holding more than it was last told is a state no path produces.
+- **The hp compare reads the RECEIVED value rather than the entity, because the two are different
+  quantities.** `hpwire` is recorded as `state.Hp` at the moment it is applied
+  (`PuppetInfo.LastAppliedHp`), never by reading the killable back afterwards -- a read-back
+  reports whatever `NetApplyHp` decided to do with it, which is not what the host sent. Under the
+  ORIGINAL downward-only clamp that gap was large and one-directional: measured **132 gaps across
+  6 seeds, 132 client-lower, 0 higher, 0 equal** -- the clamp's signature, not a replication
+  fault. Card 87310afa narrowed it (see the next bullet) but did not close it: the apply can still
+  be refused whole by the floor at 1 or by a dead puppet. The relationship is then asserted
+  SEPARATELY as an invariant with no tolerance at all -- **a puppet's live hp may never EXCEED its
+  `hpwire`** -- which holds under either direction, since a raise assigns exactly `state.Hp` and
+  local damage only ever goes down from there. Re-measured after the change: `--level Level2`,
+  `hpwire=40` compares, **0 violations**.
   - **COVERAGE BOUNDARY, stated because a tolerance would have hidden it:** a wrong-but-LOWER
     apply is indistinguishable from ordinary local damage seen from the host's side, so this
     suite does NOT prove `NetApplyHp` assigns the value it received. Nothing did -- `NetEntityTest`
     calls the seam directly and `NetWireTest` round-trips the byte through a frame, but neither
     drove a real snapshot entry into a real puppet. **`eaNetSnap` section 7 now does** (card
-    d108c459; `net_selftests.txt` tally 40 -> 45), driving `NetPuppets.ApplySnapshotState` and
-    reading the killable back, clamp included.
+    d108c459; `net_selftests.txt` tally 40 -> 45, then 45 -> 48 with card 87310afa), driving
+    `NetPuppets.ApplySnapshotState` and reading the killable back.
+- **`NetApplyHp` IS TWO-WAY: the host is authoritative for a puppet's hp in BOTH directions (card
+  87310afa).** It used to refuse every raise (`if (hp >= hitpoints) return;`), and that was not
+  free. A client's bullets run the real `HitBy` against puppets locally -- they are
+  `Enabled=false` but stay hit-testable through `NetPuppets.CollidableOverride`, which is what
+  client-owned kill claims ARE -- while the host's own **per-entity 35 ms `hittimer`** may refuse
+  those same hits, the two peers running independent gates over hit sequences ~100 ms apart. Every
+  such over-prediction was permanent, so a client's copy ratcheted below the host's for the rest
+  of a fight; and since the client kills locally at `hitpoints<=0` and files an unconditional
+  `EvClaim` (`HandleClaim` -> `NetKill` bypasses the hittimer -- a claim is already a confirmed
+  kill), **a boss could be claimed dead while the host's copy still had HP**.
+  - **What the old direction was NOT doing:** it is not what stops two players draining a boss at
+    double rate. That is host authority plus the 35 ms gate at the top of `HitBy` -- the host's
+    boss is ONE real entity and both players' bullets (the peer's re-spawned from the replicated
+    cumulative shot count) contend for that one gate. Card a5c2a39b's closing note credited the
+    clamp; the conclusion held, the mechanism cited did not.
+  - **THE COST, accepted deliberately (cosmetic).** An in-order but ~half-RTT-stale snapshot
+    legitimately lacks the hits the client just landed, so the draw-side readers of hp -- the
+    colorize redden, `BattleSkull`'s hue remap, `MarsBoss`'s `fps = Lerp(32, 16,
+    HitPointsNormalized)` -- can nudge back up mid-burst, bounded by the snapshot turn.
+  - **The REORDER case is a different guard and is untouched.** Card f5cf7a5c's per-netId monotone
+    seq refuses an older entry whole, before `ApplySnapshotState` reaches the hp read, so a late or
+    reordered packet still cannot raise hp. `eaNetSnap` section 7 pins the two separately, and its
+    stale leg asserts the guard's own `stale` flag as a PRECONDITION -- without that it would pass
+    on a seq that was simply accepted and applied as a no-op. Mutation-tested both ways:
+    `?netstaleguard=0` fails only the stale leg (hp raised 9 -> 110), and restoring the early-out
+    fails only the two raise legs while the floor leg still passes.
+  - **The floor at 1 and the `dead` guard are unchanged**, so deaths still arrive exclusively as
+    events or local kills and no snapshot can resurrect a dead puppet. The floor used to be
+    unfalsifiable from `NetEntityTest` (the direction reached it first); it is now pinned alone.
 - **(HISTORY, superseded by card af96bcc2.) Comparing score wire-to-wire was measured and
   declined under the ledger design** -- a joiner booked settled awards continuously and
   `EvScoreSync` was only a true-up, so the wire-to-wire version went RED on 7 of 10 seeds.

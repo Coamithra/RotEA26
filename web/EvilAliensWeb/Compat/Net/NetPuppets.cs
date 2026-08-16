@@ -894,15 +894,17 @@ namespace EvilAliensWeb.Compat.Net
             if (state.Hp > 0 && comp.NetKillable is INetKillable killable)
             {
                 killable.NetApplyHp(state.Hp);
-                // THE VALUE RECEIVED, not the entity read back after the clamp -- and the
-                // difference is the whole reason this field is trustworthy. NetApplyHp ONLY EVER
-                // LOWERS (it refuses to let an older snapshot resurrect hits this client has
-                // already landed), so a read-back reports the REFUSED figure whenever the client
-                // is ahead: measured 132 gaps across 6 seeds, every single one client-lower,
-                // none higher, none equal -- the clamp's signature, not a replication fault.
-                // Recording what crossed the wire keeps this comparable with the host's
-                // LastSentHp, and the clamp itself is asserted separately as an invariant
-                // (net_jip_sync: a puppet's live hp may never EXCEED this).
+                // THE VALUE RECEIVED, not the entity read back afterwards -- these are two
+                // different quantities and only this one is comparable with the host's
+                // LastSentHp. The gap between them narrowed with card 87310afa (NetApplyHp now
+                // takes the host's value in both directions, where it used to refuse every
+                // raise: measured 132 gaps across 6 seeds under the old clamp, every single one
+                // client-lower) but it did not close, because the apply can still be REFUSED
+                // WHOLE by the floor at 1 or by a dead puppet. Recording what crossed the wire
+                // keeps this field meaning one thing either way, and the relationship is
+                // asserted separately as an invariant (net_jip_sync: a puppet's live hp may
+                // never EXCEED this -- a raise assigns exactly this value, and local damage
+                // only ever goes down from it).
                 info.LastAppliedHp = state.Hp;
             }
             // ORDER MATTERS: state extras run LAST. The base writes above have per-type side

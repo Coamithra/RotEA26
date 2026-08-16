@@ -251,10 +251,33 @@ public abstract class KillableAlien : AlienDrawableGameComponent, EvilAliensWeb.
 		hittimer.Start();
 	}
 
-	// Apply a replicated hp value to a frozen client puppet. Only ever lowers (local hits
-	// already landed must not be resurrected by an older snapshot) and floors at 1 — deaths
-	// arrive exclusively as events/local kills, never by snapshot. Recomputes the colorize
-	// redden exactly like HitBy so damage tint tracks.
+	// Apply a replicated hp value to a frozen client puppet: the HOST IS AUTHORITATIVE IN BOTH
+	// DIRECTIONS (card 87310afa). Floors at 1 and refuses a dead/spent puppet, so deaths still
+	// arrive exclusively as events/local kills and no snapshot can resurrect one. Recomputes the
+	// colorize redden exactly like HitBy so damage tint tracks.
+	//
+	// IT USED TO REFUSE ANY RAISE, and that was not a free property. A client's bullets run the
+	// real HitBy against puppets locally (they are Enabled=false but stay hit-testable via
+	// NetPuppets.CollidableOverride -- that is what client-owned kill claims ARE), while the
+	// host's own per-entity 35ms hittimer may refuse those same hits: the two peers run
+	// independent gates over hit sequences ~100ms apart. Under a downward-only clamp every such
+	// over-prediction was permanent, so the client's copy ratcheted below the host's for the rest
+	// of the fight -- and since the client kills locally at hitpoints<=0 and files an
+	// unconditional EvClaim (HandleClaim -> NetKill bypasses the hittimer: a claim is already a
+	// confirmed kill), a boss could be claimed dead while the host's copy still had HP.
+	//
+	// WHAT THE OLD DIRECTION WAS NOT DOING: it is not what stops two players draining a boss at
+	// double rate. That is host authority plus the 35ms gate at the top of HitBy -- the host's
+	// boss is ONE real entity and both players' bullets (the peer's re-spawned from the
+	// replicated cumulative shot count) contend for that one gate. Card a5c2a39b's closing note
+	// credited the clamp; the conclusion held, the mechanism cited did not.
+	//
+	// THE COST, accepted deliberately: an in-order but ~half-RTT-stale snapshot legitimately does
+	// not contain the hits we just landed, so the draw-side readers of hp (this redden,
+	// BattleSkull's hue remap, MarsBoss's fps = Lerp(32,16,HitPointsNormalized)) can nudge back up
+	// mid-burst. Cosmetic, and bounded by the snapshot turn. The REORDER case is a different guard
+	// and is untouched: NetPuppets refuses an entry older than the last applied seq for this netId
+	// (card f5cf7a5c) before ApplySnapshotState ever reaches here.
 	internal void NetApplyHp(int hp)
 	{
 		if (dead || hitpoints <= 0)
@@ -262,10 +285,6 @@ public abstract class KillableAlien : AlienDrawableGameComponent, EvilAliensWeb.
 			return;
 		}
 		hp = (int)MathHelper.Max(hp, 1f);
-		if (hp >= hitpoints)
-		{
-			return;
-		}
 		hitpoints = hp;
 		if (colorize)
 		{

@@ -1,0 +1,103 @@
+# PROBE: the online connector tether's HARD CAP -- the SHIPPED arm.
+#
+# PINS: card 2cfab019 -- Compat/Net/NetTetherTest, driven by eaNetTether() / `eval NetTether`.
+# Its negative control is a SEPARATE BOOT, net_tether_wall_absent.txt; read both together.
+#
+# WHAT BROKE. "The connector powerup links two ships together ... in online multiplayer, due to
+# latency etc, this pulling back isnt working and ships can fly further and further away from each
+# other." The latency half of that sentence is wrong and the fix does not touch latency: the
+# runaway is a GAIN problem, measured IDENTICAL at one-way 0/50/100/200/300ms
+# (tools/sim/tether_sim.py). ShipConnector's soft pull saturates at NetMaxPullPxPerMs 0.22 while a
+# PlayerShip thrusts at ShipMaxSpeed 0.33, so any ONE-SIDED pull budget separates without bound:
+# both players thrusting apart, or -- the everyday trigger -- one thrusting while the other is
+# pinned against the 800x600 clamp in PlayerShip.Update, which is exactly what backing into a
+# corner to escape being dragged produces. A LONE thruster was never broken (the idle partner's
+# own pull covers the 0.11px/ms shortfall and the pair holds at ~167px), which is why the card's
+# guessed cause -- "only the host moves itself back towards the client" -- is not it. Both peers
+# always ran NetPullOwnShip, and each always pulled only the ship it owns.
+#
+# THE FIX IS A RATE, NOT A POSITION CLAMP, and the distinction is the whole design. A clamp would
+# have mutual loop gain exactly 1 (x_A(t) = x_A(t-2D)) and ring forever against the two peers'
+# stale views of each other -- the instability ShipConnector's own header warns about. Instead the
+# pull's SPEED ceiling rises above ship thrust past NetHardPx, so thrust is out-run rather than
+# refused, and separation has an equilibrium at ~220px perceived / ~214.5px true.
+#
+# FAILURE MEANS: read the quoted PASS/FAIL line. NOTHING here throws, and no existing counter moves
+# -- a tether stretched to 1000px is a perfectly healthy net session by every metric the game
+# already prints, which is why this was reported from a two-window playtest and is invisible in
+# every log.
+#
+# WHY IT IS NOT A logic_probe CASE SET: the pure LAW is one (ProbeTetherWall -- continuity at the
+# knee, monotonicity, the equilibrium, the ceiling). What THIS pins is the WIRING that no pure
+# function can see: that ShipConnector.Update routes a real connector between a real local ship and
+# a real puppet into that law at all, that it moves the ship we OWN and never the puppet, and that
+# two LOCALLY-owned endpoints take the rigid branch. Those need a real session and a real puppet,
+# which needs a Game -- so eahl is the only headless runner.
+#
+# WHY IT IS A LEVEL BOOT and not `?menu`, unlike net_stale: the suite adopts a real ship puppet
+# beside a real LOCAL ship, so it needs a live level with a live player -- the eaNetPickup gate.
+# ?invuln keeps the 8s drive from being interrupted by the level killing our ship.
+#
+# MUTATION-TESTED FOUR WAYS, each isolated, against BOTH arms of the pair:
+#   * NetHardK 0.0055 -> 0                        this file FAIL (leg 2 verdict flips to
+#                                                 RUNAWAY, ~1010px), _absent PASS
+#   * NetHardPx 200 -> 9000                       this file FAIL (the knee is out of reach),
+#                                                 _absent PASS
+#   * the rigid branch reverted to the pre-card   BOTH FAIL (leg 3)
+#     `NetSession.Active` test
+#   * the endpoint pick back to the pre-card      BOTH FAIL (leg 1)
+#     `Controller != Remote`
+#
+# The first two failing only HERE is the point of the pair: they are the flag's own subject, so the
+# arm that has the flag off is supposed to be indifferent to them. The last two failing on both is
+# equally correct -- those are fixes ?nettetherwall does not gate.
+#
+# AND THE MUTATION RUN EARNED ITS KEEP: the endpoint-pick mutation initially passed both files. The
+# suite put OUR ship in endpoint A, and the pick takes A when A is ours -- so the puppet was never
+# examined and the pre-card bug was unreachable from the leg written to catch it. Leg 1 now puts
+# the puppet in A deliberately. A leg that cannot fail is not a leg.
+#
+# NOTE the POSITIVE is asserted as a NUMBER and paired with a "not a weld" leg. "Bounded" alone
+# also passes on a build that welds the two ships together at the rest length, which would be a
+# different bug wearing the same verdict -- so the pair has to still STRETCH past rest before the
+# cap takes hold.
+#
+# DESTRUCTIVE and leave-no-trace: it pairs a real HOST session onto the live level and adopts a
+# real puppet, then unwinds both by hand (NetSession.Stop does not unseat a puppet). It SKIPs
+# itself if a session is already up.
+#
+# eahl: --flags "?level=Level2&invuln&noattract"
+
+step 200 nodraw
+mark
+eval NetTether
+
+expect \[nettether\] connector tether hard cap
+expect 0\. rig -- a real HOST session, a scripted client, and a real connector
+expect 1\. endpoint pick -- the tether may only move the ship we own
+expect 2\. sustained separation
+expect 3\. couch pair -- two locally-owned ships inside a session are RIGID
+
+# THE ARM. Without this line a run booted with ?nettetherwall=0 would satisfy the suite's own
+# assertions (it passes on both arms by design) and this probe would go green on the broken build.
+expect arm: \?nettetherwall is ON \(shipped\)
+
+# THE CLAIM, as a number rather than a verdict word: the shipped equilibrium. If the constants
+# move, this moves with them and the change has to be re-argued, not silently absorbed.
+expect gap start=78\.0 peak=214\.5 end=214\.5 verdict=BOUNDED
+expect BOUNDED -- the separation plateaus instead of growing
+# ... and that it is a cap and not a weld -- see the NOTE above.
+expect it is a cap, not a weld
+
+# The rigid branch for two locally-owned ships (?netlocal= couch co-op inside a session), which the
+# soft law used to move only ONE of, so it ran away on its own with no staleness to justify it.
+expect one tick locks them at the rigid 78px docking separation \(gap=78\.0\)
+
+# The SKIP guard: a skipped run prints no tally, so this separates "the level was busy" from "the
+# suite passed".
+expect-not SKIP \(
+# A TALLY, never `expect-not FAIL` alone: an absence assertion passes on a run where the eval never
+# happened. Raise it when legs are added; never lower it to make a run green.
+expect \[nettether\] 14 passed, 0 failed
+expect-not FAIL
+quit

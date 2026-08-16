@@ -264,6 +264,21 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   measurement. Console `eaNetStale()` / `eval NetStale` is the suite (it drives the flag through
   the injected host, so no reboot); protocol v19 also raised `NetBaseState.Scale` 1/256 -> 1/4096
   with rounding. Details: net CLAUDE.md.
+- **`?nettetherwall=0`** (card 2cfab019): turn the online connector tether's HARD CAP off, so two
+  tethered ships separate without bound again. **The runaway is a GAIN problem, not a latency one**
+  (measured identical at one-way 0-300ms): the soft pull saturates at 0.22 px/ms against
+  `ShipMaxSpeed` 0.33, so any ONE-SIDED pull budget escapes -- both players thrusting apart, or one
+  thrusting while the other is pinned on the screen clamp. A LONE thruster was never broken (held
+  at ~167px by the idle partner's own pull), so the card's guessed cause is not it. The cap is a
+  RATE, not a position clamp -- past 200px the pull out-runs thrust, bounding separation at
+  ~214.5px -- because a clamp has mutual loop gain 1 and would ring forever against the two peers'
+  stale views of each other. **Another deliberate bug reproduction** (the `?netstaleguard=0` /
+  `?netaimease=0` idiom) and IN `DebugFlags.Active` for that reason; like those it turns a shipped
+  FIX off, so it DEFAULTS TRUE and `Active` tests its negation. Console `eaNetTether()` /
+  `eval NetTether` is the suite (**DESTRUCTIVE** -- run it in a throwaway `?level=Level2&invuln`
+  boot); the flag is parsed at boot, so its probe pair is two BOOTS,
+  `tools/headless/probes/net_tether_wall.txt` + `net_tether_wall_absent.txt` (214.5px vs 1010.4px).
+  No protocol change, still v21. Details: net CLAUDE.md.
 - **`?netaimease=0`** (card eb057163): stop a puppet's enemy charge glow SWEEPING toward each
   newly replicated aim, so it teleports to it once per snapshot turn again -- the pre-card
   staircase (measured: 15 moving ticks of 144, 7.62px each, over one 2500ms MarsBoss windup at a

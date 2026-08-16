@@ -1,0 +1,55 @@
+# PROBE: the online connector tether's hard cap -- the NEGATIVE CONTROL.
+#
+# PINS: card 2cfab019. The partner of net_tether_wall.txt, which carries the full write-up and the
+# mutation matrix; this file is only the other arm.
+#
+# WHY A SEPARATE BOOT rather than a section inside the suite: `?nettetherwall=0` is parsed once at
+# boot in DebugFlags (the ?netstaleguard=0 / ?netaimease=0 / ?aiwallnav2008=1 deliberate-bug-repro
+# idiom, and IN DebugFlags.Active for the same reason -- a build that turns a shipped fix off must
+# never reach a public lobby). There is no runtime seam to flip it through, so the two arms are two
+# processes. That is also the honest shape: this arm runs the SAME suite over the SAME rig and gets
+# a different answer, which is the only thing that proves the rig can tell them apart.
+#
+# WHAT IT ASSERTS: with the cap off, the pre-card runaway comes back. Our ship thrusts directly
+# away while the partner holds station (pinned on the screen clamp -- the card's everyday trigger),
+# the pull saturates at NetMaxPullPxPerMs 0.22 against ShipMaxSpeed 0.33, and the gap grows at
+# 0.11px/ms without bound: ~1010px over the suite's 8s drive, against 214.5px on the shipped arm.
+#
+# WHY THIS FILE IS LOAD-BEARING. Every green tick in net_tether_wall.txt is consistent with a rig
+# that never separates the ships at all -- a broken drive loop, a connector that never formed, a
+# suite that silently SKIPped. This arm is what rules that out: the rig is identical and it
+# produces a 4.7x different number, so the rig demonstrably CAN see a runaway and simply does not
+# find one on the shipped build.
+#
+# It also pins the flag itself. If ?nettetherwall= ever stops being parsed, this file fails (the
+# arm line reads ON) while the shipped probe stays green -- which is the failure mode a
+# single-armed probe pair silently absorbs.
+#
+# THE TALLY IS 13, NOT 14, and that is not a typo: leg 2 asserts ONE thing on this arm (the
+# runaway) where the shipped arm asserts two (bounded, and not a weld).
+#
+# eahl: --flags "?level=Level2&invuln&noattract&nettetherwall=0"
+
+step 200 nodraw
+mark
+eval NetTether
+
+expect \[nettether\] connector tether hard cap
+# THE ARM. If this reads ON, the flag stopped being parsed and everything below is meaningless.
+expect arm: \?nettetherwall is OFF \(the pre-card runaway\)
+
+# THE DEFECT, as a number. The floor is the assertion; the exact value is printed beside it so a
+# drift is visible rather than merely tolerated.
+expect verdict=RUNAWAY
+expect RUNAWAY -- with the cap off the pre-card separation is unbounded
+
+# The parts that are NOT the flag's business must be unchanged on this arm -- the endpoint pick and
+# the couch-pair rigid branch are fixes the flag does not gate, so a build where ?nettetherwall=0
+# also turned those off would be over-reaching.
+expect a RemoteFriend in endpoint A is still a puppet, not ours to move
+expect one tick locks them at the rigid 78px docking separation \(gap=78\.0\)
+
+expect-not SKIP \(
+expect \[nettether\] 13 passed, 0 failed
+expect-not FAIL
+quit

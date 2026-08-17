@@ -120,11 +120,15 @@ namespace EvilAliensWeb.Compat.Net
         // peer receiving our 33-byte frames) tolerates the extra bytes.
         // v22 (card 1210e14e): BallDescriptor gains its first STATE EXTRAS, [flags:1], bit0 = the
         // ball is CONNECTED to the junkboss -- the one bit a joiner needs to hit-test the rocks at
-        // the same radius the host does (it was reading them 20% small). Like v14 and v18 the block
-        // is APPEND-ONLY and length-guarded (snapshot entries are length-prefixed and
-        // ApplyStateExtra gates on `len`), so an older peer degrades to exactly the pre-card
-        // behaviour rather than mis-parsing: a courtesy bump under the cheap-protocol ruling, not a
-        // forced one.
+        // the same radius the host does (it was reading them 20% small). The block is APPEND-ONLY
+        // and length-guarded (snapshot entries are length-prefixed and ApplyStateExtra gates on
+        // `len`), which is what keeps the DECODER robust and the bump mechanical.
+        // NOTE, because the v18/v21 notes above can read otherwise: no peer ever sees a version it
+        // does not itself speak. OnHandshake refuses `ver != ProtocolVersion` outright with
+        // RejectVersion before a single snapshot is exchanged, and the build-hash equality check
+        // right behind it would refuse anyway. So a bump here is BOOKKEEPING -- it names the wire
+        // layout for the next reader; it is not a compatibility measure, and there is no
+        // graceful-degradation path to reason about in either direction.
         public const byte ProtocolVersion = 22;
         public const float InterpDelayMs = 100f;
 

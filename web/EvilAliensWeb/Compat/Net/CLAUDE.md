@@ -786,10 +786,15 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   re-roll) -- a real bump, not a convention one; only the reverse direction tolerates the
   extra bytes.
   **v22** gives `BallDescriptor` its first STATE EXTRAS, `[flags:1]`, bit0 = the ball is
-  CONNECTED to the junkboss -- card 1210e14e, see "THE SAME ROCKS, A 20%-SMALL HITBOX". Like
-  v14 and v18 the block is APPEND-ONLY and length-guarded (snapshot entries are
-  length-prefixed and `ApplyStateExtra` gates on `len`), so an older peer degrades to exactly
-  the pre-card behaviour rather than mis-parsing: a convention bump, not a forced one.
+  CONNECTED to the junkboss -- card 1210e14e, see "THE SAME ROCKS, A 20%-SMALL HITBOX". The
+  block is APPEND-ONLY and length-guarded (snapshot entries are length-prefixed and
+  `ApplyStateExtra` gates on `len`), which keeps the DECODER robust and the bump mechanical.
+  **A BUMP IS BOOKKEEPING, NOT COMPATIBILITY -- and several notes in this list can read
+  otherwise.** `OnHandshake` refuses `ver != ProtocolVersion` outright with `RejectVersion`
+  before a single snapshot is exchanged, and the build-hash equality check behind it would
+  refuse regardless. No peer ever receives a layout it does not itself speak, in either
+  direction, so there is no graceful-degradation path to weigh when deciding to bump; the
+  version names the wire layout for the next reader and nothing more.
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).

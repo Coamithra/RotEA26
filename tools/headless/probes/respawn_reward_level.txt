@@ -12,12 +12,15 @@
 #             (card 03c379f2), so a level 4 reads 5.00 here. That second witness is independent of
 #             the print: it comes off the Blast, through the ripple, not off this class at all.
 #
-#         THE RIG IS ?harness=respawnrun, and it has to be. The reward only fires in CO-OP, and the
-#         one level that seats a second local ship offline is TeamChallenge -- which is SHARED-FATE
-#         (UpdateNormal asplodes the partner and calls LoseLife the instant either ship dies), so
-#         GameScene.LoseLife purges the summon within about ten frames of it being raised and it
-#         never reaches its pop. Measured, both seats, before this rig existed. respawnrun is the
-#         same summon with the harness freeze lifted, so the real owned countdown runs to the pop.
+#         THE RIG IS ?harness=respawn&harnessrun, and it has to be. The reward only fires in
+#         CO-OP, and the one level that seats a second local ship offline is TeamChallenge -- which
+#         is SHARED-FATE (UpdateNormal asplodes the partner and calls LoseLife the instant either
+#         ship dies), so GameScene.LoseLife purges the summon within about ten frames of it being
+#         raised and it never reaches its pop. Measured, both seats, before this rig existed.
+#         ?harnessrun is the same summon with the harness freeze lifted, so the real owned
+#         countdown runs to the pop. (It was its own registry key, ["respawnrun"], until card
+#         d1ee8761 generalised it into a flag that works on every key; nothing about this rig
+#         changed but the spelling, which is why this probe stayed green through that card.)
 #
 # FAILURE MEANS:
 #   `level=4` -> the constant went back up.
@@ -35,7 +38,7 @@
 # same rig reported the ring as `r0=(400,300 e=3.82/5.00)`, i.e. exactly the /5.00 leg 3 refuses.
 # So the second witness is known to move with the constant rather than merely to agree with it.
 #
-# eahl: --flags "?harness=respawnrun"
+# eahl: --flags "?harness=respawn&harnessrun"
 
 step 160
 

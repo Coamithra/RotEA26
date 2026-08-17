@@ -70,7 +70,10 @@ dotnet run --project web/DevServer -c Debug --urls http://localhost:5280   # the
   verification tool behind a URL flag (shipped builds unchanged):
   - how something DRAWS → the **sprite harness** (`?harness=<Obj>&frame=<n>` — one object, frozen,
     real pipeline, reliable screenshots; picker `wwwroot/harness.html`; details + how to add an
-    object in one registry line: web CLAUDE.md);
+    object in one registry line: web CLAUDE.md). **`&harnessrun` lifts the freeze on ANY key**
+    (card d1ee8761) when the object's own `Update` is the thing under test and no level can host
+    it — it replaces the per-object `<key>run` copy-paste, and the frozen default is unchanged,
+    pinned by `tools/headless/probes/harness_run_absent.txt` + `harness_run_generic_absent.txt`;
   - a time-varying VISUAL (fade, transition, death FX, glint, pulse) → a **scrub/showcase scene or
     freeze flag** (`?textshot` / `?lazershot` / `?spiderphase=` / `?wcmothershipfreeze=` pattern)
     that parks the effect at any chosen phase, then screenshot at leisure;
@@ -476,9 +479,10 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   ~10 s fill with a 220 ms pop cannot be caught by a timed screenshot. **The park now sits on the
   MILLISECONDS and the fill is derived from them**, so it parks the numeral and the punch too -- a
   numeral read off the raw clock would be un-parkable, since the harness freezes `Update`.
-  **`?harness=respawnrun` is the same summon UNFROZEN**: the only offline rig that can run an owned
-  countdown to its pop, because the one level seating a second local ship (TeamChallenge) is
-  shared-fate and purges the summon within ~10 frames of raising it.
+  **`?harness=respawn&harnessrun` is the same summon UNFROZEN**: the only offline rig that can run
+  an owned countdown to its pop, because the one level seating a second local ship (TeamChallenge)
+  is shared-fate and purges the summon within ~10 frames of raising it. (`?harnessrun` was its own
+  registry key, `respawnrun`, until card d1ee8761 generalised it -- see the harness bullet below.)
   Console `eaRespawn.park(p)`
   / `.state()` (`eval RespawnPark` / `RespawnState`), the latter reporting fill/pulse/pop/secs/
   punch as DATA, which is the only way to verify the pulse or the punch. **In netplay BOTH peers

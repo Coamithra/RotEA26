@@ -1,0 +1,58 @@
+# PROBE: without ?harnessrun the sprite harness is still FROZEN (card d1ee8761)
+#
+# PINS:   the card that added ?harnessrun had one hard requirement -- `?harness=<x>` must stay
+#         exactly as screenshot-stable as it was, because that is the harness' entire value. This
+#         is that requirement, committed. It is the `_absent` half of the pair with
+#         harness_run.txt (the ai_wallnav_2008.txt / ai_wallnav_2008_absent.txt idiom): same key,
+#         same steps, no flag.
+#
+#         EVERY ASSERTION HERE IS A VALUE, NOT AN ABSENCE, and that is deliberate. "The fill did
+#         not move" is also true of a boot where the key was rejected, the object never spawned or
+#         the scene died -- so a probe written that way reads as coverage while proving nothing.
+#         The frozen summon has exact readings (fill=0.000, secs=10, remainMs=10000) and they are
+#         asserted at BOTH marks, with the summon's existence pinned first.
+#
+# FAILURE MEANS:
+#   `[harness] respawn: RUNNING` -> the freeze is off by DEFAULT. Every existing harness rig,
+#     probe and screenshot in the repo just became non-reproducible; this is the loud one.
+#   the frozen line present but remainMs falling -> the announcement and the behaviour have
+#     drifted apart, i.e. something else started ticking the object (a scene-level driver, a
+#     component-list change) even though the harness still believes it is frozen.
+#   secs= or remainMs= changed but constant -> not this seam: the summon's own countdown constant
+#     moved. Check PlayerShipSummon; harness_run.txt's bands will have moved too.
+#
+# Mutation-tested: `harnessRun` forced true turns this RED (and leaves both flagged probes green),
+# which is the direction that matters -- it is the mutation that means "the frozen default is
+# gone". Forcing it false leaves this GREEN, correctly: this probe never asks for the flag.
+#
+# eahl: --flags "?harness=respawn"
+
+step 160
+
+# 1. THE ANNOUNCEMENT, asserted in the opening window before the first `mark`: HarnessScene reports
+#    the resolved mode once, as it builds the object, and that happens on the first update tick
+#    rather than at `ready`. It is itself a positive -- the line is only reached after the object
+#    exists, so this cannot pass on a boot that failed to resolve the key.
+expect \[harness\] respawn: frozen \(Enabled=false
+expect-not \[harness\] respawn: RUNNING
+
+# 2. THE PRECONDITION: the thing being called frozen exists, and is not being driven by a parked
+#    phase (which would hold the fill still for a completely different reason).
+mark
+eval RespawnState
+expect \[respawn\] summons=1 park=live
+
+# 3. THE FROZEN VALUES, exact. 160 steps is ~2.7 s of sim time -- a running clock would read
+#    fill~0.26 / secs=8 / remainMs~7366 by now (that is literally harness_run.txt's leg 2), so
+#    these three are a strong statement and not a tautology.
+expect \[respawn\] fill=0\.000 .* secs=10 .* remainMs=10000 totalMs=10000 .* local
+
+# 4. STILL EXACTLY THE SAME 200 STEPS LATER. The harness' promise is not "it starts frozen" but
+#    "a screenshot at ANY moment is identical", so the same reading has to hold later in the run.
+mark
+step 200
+eval RespawnState
+expect \[respawn\] summons=1 park=live
+expect \[respawn\] fill=0\.000 .* secs=10 .* remainMs=10000 totalMs=10000 .* local
+
+quit

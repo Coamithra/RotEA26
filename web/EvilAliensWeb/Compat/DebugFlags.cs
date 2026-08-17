@@ -210,6 +210,22 @@ namespace EvilAliensWeb.Compat
 		// Let the object's animation play in place instead of freezing on a single frame.
 		public static bool HarnessPlay { get; private set; }
 
+		// ?harnessrun (card d1ee8761) -- LIFT THE HARNESS FREEZE, so the object's own gameplay
+		// Update runs and IT drives itself. The harness' defining property is a frozen,
+		// screenshot-stable object (Enabled=false, re-asserted every frame, plus the scene
+		// re-parking Position/curframe); this is the one seam that turns all of that off, for the
+		// case where an object's Update IS the thing under test and no LEVEL can host it -- see
+		// HarnessScene. Generalises the old one-off ["respawnrun"] registry key, which was a
+		// duplicate entry for the same object that HarnessScene special-cased by name.
+		//
+		// A companion of ?harness=, meaningless without it (reported below if set alone), so it
+		// needs no `Active` entry of its own -- `Harness != null` already covers the boot hijack.
+		// It composes with EVERY registry key, including ones added after this flag, which is why
+		// it is a flag and not a "<key>run" naming convention: a suffix rule would silently
+		// collide with a future key that legitimately ends in "run", and the harness would then
+		// draw a plausible frozen object while you believed it was running.
+		public static bool HarnessRun { get; private set; }
+
 		// Which Background setup to use behind the object (default "space").
 		public static string HarnessBg { get; private set; } = "space";
 
@@ -3879,6 +3895,13 @@ namespace EvilAliensWeb.Compat
 					case "animate":
 						HarnessPlay = IsOn(val);
 						break;
+					case "harnessrun":
+						// See the property comment. Deliberately NOT validated against ?harness= here:
+						// flags are parsed in URL order, so "?harnessrun&harness=spider" would see a
+						// null Harness at this point. The "set alone" complaint is made once, after the
+						// whole query is parsed, with the other post-parse notices.
+						HarnessRun = IsOn(val);
+						break;
 					case "bg":
 					case "background":
 						if (!string.IsNullOrEmpty(val))
@@ -4001,6 +4024,16 @@ namespace EvilAliensWeb.Compat
 					+ "REFUSE its own pairing (a menu session rejects while debug flags are active). "
 					+ "Add &netallowdebug.");
 			}
+			// ?harnessrun with no ?harness= does nothing at all -- it is a companion flag, and the
+			// scene it modifies is never booted. Said out loud because the failure is SILENT: you get
+			// a perfectly normal game boot and no hint that the rig you asked for was never built.
+			// Checked here rather than in the parse case because flags are parsed in URL order.
+			if (HarnessRun && Harness == null)
+			{
+				Console.WriteLine("[debug] ?harnessrun without ?harness=<object> -- it is a companion "
+					+ "flag that unfreezes the sprite harness' object, and no harness was requested, so "
+					+ "it does nothing. Add &harness=<object>.");
+			}
 			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || FakeBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || !NetChargeAimEase || !NetHpRaise || !NetTetherWall || AiWallNav2008 || AiFastForward > 1;
 			if (Active)
 			{
@@ -4048,7 +4081,8 @@ namespace EvilAliensWeb.Compat
 						// shipped one -- the two produce plausible tables either way.
 						+ (AiWallNav2008 ? " aiwallnav2008" : "")
 						+ (Harness != null
-							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "") + " bg=" + HarnessBg
+							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "")
+								+ (HarnessRun ? " run" : "") + " bg=" + HarnessBg
 							: ""));
 			}
 			else

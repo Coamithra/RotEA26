@@ -785,6 +785,16 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   so a v20 peer's ship frames would be refused wholesale (a frozen puppet, not a graceful
   re-roll) -- a real bump, not a convention one; only the reverse direction tolerates the
   extra bytes.
+  **v22** gives `BallDescriptor` its first STATE EXTRAS, `[flags:1]`, bit0 = the ball is
+  CONNECTED to the junkboss -- card 1210e14e, see "THE SAME ROCKS, A 20%-SMALL HITBOX". The
+  block is APPEND-ONLY and length-guarded (snapshot entries are length-prefixed and
+  `ApplyStateExtra` gates on `len`), which keeps the DECODER robust and the bump mechanical.
+  **A BUMP IS BOOKKEEPING, NOT COMPATIBILITY -- and several notes in this list can read
+  otherwise.** `OnHandshake` refuses `ver != ProtocolVersion` outright with `RejectVersion`
+  before a single snapshot is exchanged, and the build-hash equality check behind it would
+  refuse regardless. No peer ever receives a layout it does not itself speak, in either
+  direction, so there is no graceful-degradation path to weigh when deciding to bump; the
+  version names the wire layout for the next reader and nothing more.
   Card 11.3 bumps the protocol to v3 and adds the shared-state
   events: EvMessage/EvUnlock/EvBackground/EvMusic/EvCheckpoint (script beats), EvReset
   (host LoseLife branch), EvVictory, EvPause (either peer), EvTetherBreak (either peer).
@@ -3031,6 +3041,20 @@ took all three back.
     suite prints `PASS <text>` and `FAIL <text>`, so a bare `expect <text>` matches the FAILING
     line too and asserts only that the leg ran. Without the anchor all four still matched under a
     mutation that reddened them, and only the tally caught it.
+
+## THE SAME ROCKS, A 20%-SMALL HITBOX (card 1210e14e, protocol v22)
+
+Found while working the rotation cards above and deliberately left out of both. Same entity, same joiner, unrelated defect -- and unlike the rotation ones this one is a GAMEPLAY divergence, not a cosmetic one.
+
+- **THE DEFECT.** `Ball.CollisionType` picks its circle radius from a per-state factor: `connected` 1.0, `startup` / `attracted` / `freed` 0.8. On the host a latched rock is `connected`. On the JOINER it never is -- a puppet is frozen so its `Update` never runs and `state` never leaves `Initialize`'s `startup`, and `CheckOwner` (which runs at the top of `CollidesWith`) flips the null owner `BallDescriptor.CreatePuppet` gave it straight to `freed`. Both are 0.8, so the junkboss's whole body was hit-tested 20% small on p2's screen.
+- **FOUR LOCAL READERS, all of them on the joiner, and the direction is not uniform** -- which is why the report reads as "my shots miss" rather than as one clean symptom. `Bullet.CollidesWith` twice (the bullet dies on the rock; and via `IsConnected()`, whether the hit SUSTAINS THE COMBO -- so p2's combo silently dropped on rocks p1's kept), `PlayerShip.CollidesWith` (p2's ship survived a band p1's screen called a collision -- an *advantage*), and `Option.CollidesWith`.
+- **THE FIX MOVES NO AUTHORITY, and that is worth stating because the symptom sounds like lost damage.** It is not: `Bullet` is not in `NetTypeRegistry`, the host re-fires the remote ship's shots locally, and the host's copy chips its own real `Ball` at 1.0 throughout. Only the joiner's LOCAL reads were wrong. One bit (`BallDescriptor`'s first state extras, `[flags:1]`) carries the host's `connected` answer; the host is untouched.
+- **THE BIT MAY NOT BE WRITTEN INTO `Ball.state`, AND THE REASON IS NOT THE OBVIOUS ONE.** The card predicted an NRE -- a puppet re-entering `case BallState.connected:` and calling `owner.RemoveChild()` on its null owner. **Measured, that is wrong: the naive design is silently USELESS, not crashy.** `CheckOwner` runs FIRST in `CollidesWith` and flips a null-owner ball back to `freed` before the switch dispatches, so nothing throws, nothing blinks -- and the radius reverts on the very first collision test, staying small until the next snapshot turn (60 ms to ~1.2 s). The conclusion is unchanged (do not replicate into `state`); only the reason is. So the two questions are SPLIT: `ConnectedForCollision` (a replicated field behind a has-it-arrived latch) answers "which RADIUS do I use", `state` still answers "which gameplay ARM do I run", and a puppet enters no arm at all.
+  - **The latch is what keeps the HOST bit-identical**: nothing calls `NetSetConnected` there, so it falls through to `state == connected` exactly as before. A puppet reads 0.8 until its first turn, which is the right answer -- a just-spawned ball really is in `startup`.
+  - **The two remaining raw `state == connected` reads inside `CollidesWith` are deliberate and commented in place** (the connected balls' mutual push-out, and the attract->connect latch-on). Both MOVE things or call `owner.AddChild()`, i.e. both are gameplay, and both are unreachable on a joiner for the same `CheckOwner` reason. Do not "make them consistent" with `ConnectedForCollision`.
+- **BALL WAS THE LAST ONE -- the class is closed, checked rather than assumed.** All 40 `CollisionType` overrides were enumerated; exactly two read a state enum a frozen puppet cannot reach, and `SpiderBoss` already replicates its `NetState`/`NetAnimIndex`/`NetAnimFrame`. (`SpiderBoss` can take the naive route precisely because its `CollidesWith` does NOT switch on `state`.) `EvilSkull.Fading`, the other frozen-state predicate a hit-test reads, is likewise already carried by `NetFadePhase` + `NetTickTimers`.
+- **The state extras ride EVERY snapshot turn, not a change edge** (`SendWorldSnapshot` encodes unconditionally per round-robin entry), which is what makes a ball that latches on mid-fight and a join-in-progress puppet both correct on their next turn rather than only on the next transition.
+- **Verified in `eaNetMotion()` section 7** (`tools/headless/probes/net_motion.txt`, 56 -> 71 assertions) -- the same suite as the rotation half, one eahl boot, deliberately. 7a OBSERVES the 1.25x off a real `Ball` driven to a real `connected` state (6a's doctrine: never read the ratio off the constants the fix uses); 7b then requires a puppet to reach that same figure through the real descriptor and the real apply path, come back DOWN on a clear bit, and take no gameplay arm on a hit. Mutation-tested three ways, each tripping its own named `expect`: the fix reverted (4 legs, section 6 untouched), the encoder stuck at 0 (the host-encode leg alone), and the wrong `state` design (the radius-after-a-hit leg alone -- which is where the "useless, not crashy" measurement above comes from).
 
 ## LEVEL-3 WALLS -- derived scale, and the collision/draw coincidence (cards 4392bd30 / 80749dc4)
 

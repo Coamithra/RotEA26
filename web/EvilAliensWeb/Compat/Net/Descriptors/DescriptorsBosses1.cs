@@ -94,10 +94,19 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     //   * Draw: base.Draw (asteroid sheet) + a hit-blink lightenEffect while hittimer is Active
     //     (ticked by the driver; started locally on the client's own hits). No boss-internal state.
     // Spawn extras: [variant:1]  -- the ctor picks one of AsteroidSmall1..4 at RANDOM; without pinning
-    //   the same netId is a different rock on each screen (the UFO small-sheet precedent). State
-    //   extras: none (size arrives as base Scale; spin as base Rotation).
+    //   the same netId is a different rock on each screen (the UFO small-sheet precedent).
+    // State extras: [flags:1]  (bit0 = the ball is CONNECTED to the junkboss) -- protocol v22,
+    //   card 1210e14e. This is the ONE bit every local hit-test of a Ball wants: a connected ball is
+    //   tested at full radius, every other state at 0.8, and a frozen puppet can reach neither
+    //   `connected` nor any other state of its own (Update never runs and CheckOwner parks it at
+    //   `freed`), so the joiner hit-tested the whole junkboss body 20% small. Ball.cs's
+    //   ConnectedForCollision block has the defect, the four readers and -- importantly -- why the
+    //   host's answer may NOT simply be written into Ball's own `state`.
+    //   Size still arrives as base Scale and spin as base Rotation.
     internal sealed class BallDescriptor : NetTypeDescriptor<Ball>
     {
+        private const byte FlagConnected = 1;
+
         public override int EncodeSpawnExtra(AlienDrawableGameComponent c, byte[] buf, int off)
         {
             buf[off++] = (byte)C(c).NetAsteroidVariant;
@@ -110,6 +119,21 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             b.Setup(null); // no live JunkBoss owner -- puppet never Updates, so it is never dereferenced
             b.NetForceAsteroidVariant(len >= 1 ? buf[off] : 1);
             return b;
+        }
+
+        public override int EncodeStateExtra(AlienDrawableGameComponent c, byte[] buf, int off)
+        {
+            buf[off++] = (byte)(C(c).NetConnected ? FlagConnected : 0);
+            return off;
+        }
+
+        public override void ApplyStateExtra(AlienDrawableGameComponent c, byte[] buf, int off, int len)
+        {
+            if (len < 1)
+            {
+                return;
+            }
+            C(c).NetSetConnected((buf[off] & FlagConnected) != 0);
         }
     }
 

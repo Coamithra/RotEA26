@@ -1474,6 +1474,15 @@ those are suppressed, never silently, and **the scene prints the RESOLVED mode o
 `[harness] <key>: frozen|RUNNING ...`, naming anything it overrode** — the `[debug]` dump reports
 only the parse, and a run that believed it was unfrozen but was frozen produces a plausible, wrong
 table (the `[aiwallnav] steering:` rule). The label shows `(RUNNING)` so a screenshot says so too.
+**IT CANNOT NAME A PARK IT DOES NOT OWN, AND THAT IS THE ONE GAP.** `HarnessScene` only reports the
+drivers *it* suppressed; an object that reads its OWN park flag still obeys it under `?harnessrun`
+— `?respawnphase=` (`PlayerShipSummon` reads `DebugFlags.RespawnPhase` directly), and the same
+shape in `?brainoverlayphase=` / `?ripplephase=`. So `?harness=respawn&harnessrun&respawnphase=0.5`
+announces `RUNNING` over a fill its own flag has frozen — the announcement is honest about the
+harness and silent about the object. Deliberately not fixed in `HarnessScene`: naming per-object
+flags there is exactly the type-coupling this card deleted. **Drop the object's own phase flag when
+you ask for a run**, and read the object's own state dump (`eval RespawnState` reports `park=`)
+rather than trusting the mode line alone.
 **The frozen default is unchanged and pinned**: `tools/headless/probes/harness_run.txt` +
 `harness_run_absent.txt` (the summon, in numbers) and `harness_run_generic.txt` +
 `harness_run_generic_absent.txt` (a `bullet`, in the world census — the only pair that catches

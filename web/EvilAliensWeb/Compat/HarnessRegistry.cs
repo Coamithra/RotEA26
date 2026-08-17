@@ -21,7 +21,9 @@
 //   * Objects whose Draw depends on state only their Update reaches (e.g. a boss
 //     mid-attack, the spider's airborne sheet) show their spawned/idle look frozen
 //     — the harness deliberately does NOT run gameplay Update. Bosses are therefore
-//     best-effort; the common per-frame sprite-sheet enemies are exact.
+//     best-effort; the common per-frame sprite-sheet enemies are exact. When that
+//     Update is itself the thing under test, &harnessrun lifts the freeze for ANY
+//     key here (card d1ee8761) — no second entry needed.
 //   * A few objects need a live owner (Ball needs a JunkBoss, Option a PlayerShip,
 //     etc.) and are intentionally omitted.
 // ---------------------------------------------------------------------------
@@ -87,16 +89,17 @@ namespace EvilAliensWeb.Compat
                 // The respawn clock ring (card 37f3a663). Frozen by the harness, so it draws at
                 // fill 0 by default -- scrub it with ?respawnphase=<0..1>, which is the only way
                 // to see a chosen point of a ~10 s fill (and the 220 ms pop) as a still.
+                //
+                // Add &harnessrun (card d1ee8761) and the freeze lifts instead: the real owned
+                // countdown (countdown + countdowntimer, the mode with the documented wrap hazard)
+                // RUNS, pops, and drops its reward Blast. That is the ONLY offline rig that can
+                // hold a running owned summon -- the only level seating a second local ship is
+                // TeamChallenge, and TeamChallenge is SHARED-FATE (UpdateNormal asplodes the
+                // partner and calls LoseLife the moment either ship dies), so GameScene.LoseLife
+                // purges the summon within a few frames of raising it. This used to be a second
+                // registry key, ["respawnrun"], special-cased by name in HarnessScene; ?harnessrun
+                // is the same capability as a flag, so it composes with every key here.
                 ["respawn"] = (bin, g, p) => { var s = PlayerShipSummon.NewPlayerShipSummon(bin, g); s.Setup(0, 0f, p, 0); return s; },
-                // The SAME summon, but NOT frozen -- HarnessScene leaves Enabled on for this key, so
-                // the real owned countdown (countdown + countdowntimer, the mode with the documented
-                // wrap hazard) actually RUNS, pops, and drops its reward Blast. It exists because
-                // there is offline NO other rig that can hold a running owned summon: the only level
-                // seating a second local ship is TeamChallenge, and TeamChallenge is SHARED-FATE
-                // (UpdateNormal asplodes the partner and calls LoseLife the moment either ship dies),
-                // so GameScene.LoseLife purges the summon within a few frames of raising it. Kept a
-                // separate key so `respawn` keeps its exact frozen, screenshot-stable behaviour.
-                ["respawnrun"] = (bin, g, p) => { var s = PlayerShipSummon.NewPlayerShipSummon(bin, g); s.Setup(0, 0f, p, 0); return s; },
 
                 // --- bosses (best-effort: shown in their spawned/idle pose, not mid-attack) ---
                 ["deathstar"] = (bin, g, p) => { var d = DeathStar.NewDeathStar(bin, g); d.Setup(p, EnemyBehaviour.normal); return d; },

@@ -1,0 +1,74 @@
+# PROBE: ?harnessrun really lifts the sprite harness' freeze (card d1ee8761)
+#
+# PINS:   the harness freezes the object under test, and that is its defining property -- so the
+#         seam that turns the freeze OFF is worth a probe on both sides. This is the ON side; its
+#         control is harness_run_absent.txt, which boots the SAME key with no flag and pins the
+#         frozen numbers. Read the two together: alone, neither says the flag is what made the
+#         difference.
+#
+#         "Unfrozen" is ONE bit with THREE enforcement sites in HarnessScene -- the initial
+#         Enabled=false, the defensive per-frame re-assert, and the Update dispatch chain that
+#         re-parks Position and overwrites curframe. This asserts the OUTCOME (a clock that
+#         actually advances), so it fails if ANY of the three comes back, including the third,
+#         which is the one that would half-work silently: the object ticks, then gets dragged back.
+#
+#         WHY THE RESPAWN SUMMON IS THE SUBJECT HERE. Nothing else offline can run an owned
+#         summon: the reward only fires in co-op, the one level seating a second local ship is
+#         TeamChallenge, and TeamChallenge is SHARED-FATE, so GameScene.LoseLife purges the summon
+#         within ~10 frames of raising it. It is also the case the seam was extracted from (it used
+#         to be its own registry key, ["respawnrun"]). That the seam is GENERIC -- that it works on
+#         a key which never had a run variant, of an unrelated type -- is a separate claim, pinned
+#         separately by harness_run_generic.txt.
+#
+# FAILURE MEANS:
+#   `[harness] respawn: frozen` -> the flag did not reach HarnessScene at all (parse, or the
+#     Initialize gate). The [debug] dump reports only the PARSE, so trust this line over that one.
+#   the RUNNING line present but fill stuck at 0.000 -> the freeze came back at one of the other
+#     two sites: the per-frame re-assert, or the dispatch chain re-parking the object.
+#   fill advancing but by the wrong amount -> the clock changed, not the seam; check totalMs.
+#
+# Mutation-tested, all four runs recorded:
+#   harnessRun forced false          -> RED on leg 1, the announcement.
+#   per-frame re-assert unconditional-> leg 1 GREEN, RED on leg 3 (`fill=0.[123]` matched nothing).
+#     The two legs fail apart, which is why the announcement and the outcome are both asserted.
+#   harnessRun forced true           -> GREEN (correctly: this probe asks for the flag anyway).
+#   dispatch chain re-parks under run-> GREEN, and that is a real BLIND SPOT of this probe, not an
+#     oversight: a summon never moves, so re-parking its Position changes nothing it reports.
+#     Enforcement site 3 is covered by harness_run_generic.txt, whose subject does move. Neither
+#     probe covers all three sites alone.
+#
+# eahl: --flags "?harness=respawn&harnessrun"
+
+step 160
+
+# 1. THE ANNOUNCEMENT. HarnessScene reports the resolved mode once, as it builds the object -- which
+#    happens on the first update tick, not at `ready` (which still reports scene=menu). So it is
+#    asserted in the opening window, BEFORE the first `mark`, and the steps come first.
+expect \[harness\] respawn: RUNNING -- its own Update drives it
+expect-not \[harness\] respawn: frozen
+
+# 2. THE PRECONDITION, pinned rather than waited out (card af4c3694): a summon that really exists,
+#    so the legs below are about the CLOCK and not about a rig that never built an object.
+#    `park=live` matters too -- a parked phase would drive the fill from DebugFlags instead of from
+#    the object's own Update, which is not what is under test here.
+mark
+eval RespawnState
+expect \[respawn\] summons=1 park=live
+
+# 3. THE CLOCK ADVANCED. ~2.7 s of sim time in at 160 steps, so the fill is a fifth or so of the
+#    10 s countdown and the whole-second numeral has come off its starting 10. Deliberately loose
+#    (a band, not the exact 0.263 the fixed-dt stepper produces) so an unrelated timing change
+#    does not paint this red -- but never 0.000, which is the frozen reading this probe exists to
+#    tell itself apart from.
+expect \[respawn\] fill=0\.[123][0-9]* .* secs=[789] .* local
+expect-not \[respawn\] fill=0\.000
+
+# 4. AND KEPT ADVANCING, which one sample cannot show. A build that ticked the summon exactly once
+#    at boot and re-froze it afterwards passes leg 2 and fails here.
+mark
+step 200
+eval RespawnState
+expect \[respawn\] fill=0\.[567][0-9]* .* secs=[3456] .* local
+expect-not \[respawn\] fill=0\.000
+
+quit

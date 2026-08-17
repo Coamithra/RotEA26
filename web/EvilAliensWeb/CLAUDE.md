@@ -1457,8 +1457,27 @@ site now lives under:
 the real pipeline (see root CLAUDE.md for when to use it). Code: `Compat/HarnessScene.cs` +
 `Compat/HarnessRegistry.cs` (name→factory; **add an object in ONE line** — call its `New*`+`Setup`).
 Human picker `wwwroot/harness.html` — keep its list in sync with the registry. Companion flags:
-`?frame=` `?play` `?bg=space|spaceclassic|holodeck|mars|base|basedark` `?pos=x,y` `?objscale=`
-(alias `?size`) `?rot=` `?fps=` (with `?play`; set low to watch the interpolation shader tween).
+`?frame=` `?play` `?harnessrun` `?bg=space|spaceclassic|holodeck|mars|base|basedark` `?pos=x,y`
+`?objscale=` (alias `?size`) `?rot=` `?fps=` (with `?play`; set low to watch the interpolation
+shader tween).
+
+**`?harnessrun` (card d1ee8761) lifts the freeze on ANY registry key** — the object's own `Update`
+runs and IT drives itself, for when that `Update` is the thing under test and no level can host it.
+It replaced a per-object copy-paste (`["respawnrun"]`, a duplicate entry special-cased by name in
+`HarnessScene`), and is a FLAG rather than a `<key>run` naming convention because a suffix rule
+would silently collide with a future key legitimately ending in "run". **"Unfrozen" is one bit with
+THREE enforcement sites** in `HarnessScene`: the initial `Enabled=false`, the defensive per-frame
+re-assert, and the Update dispatch chain that re-parks `Position`/`curframe` — miss the third and
+the object ticks and is then dragged back, which is the silent half. It is therefore mutually
+exclusive with `?play` and with the blast/spiderjump phase scrubbers (all alternative drivers);
+those are suppressed, never silently, and **the scene prints the RESOLVED mode once as
+`[harness] <key>: frozen|RUNNING ...`, naming anything it overrode** — the `[debug]` dump reports
+only the parse, and a run that believed it was unfrozen but was frozen produces a plausible, wrong
+table (the `[aiwallnav] steering:` rule). The label shows `(RUNNING)` so a screenshot says so too.
+**The frozen default is unchanged and pinned**: `tools/headless/probes/harness_run.txt` +
+`harness_run_absent.txt` (the summon, in numbers) and `harness_run_generic.txt` +
+`harness_run_generic_absent.txt` (a `bullet`, in the world census — the only pair that catches
+enforcement site 3, since a summon never moves).
 Parked objects with CIRCULAR hitboxes get their real collision ring drawn (green) — sprite-vs-hitbox
 size mismatches (the supersample bug class: a rescaled sheet whose hand-rolled radius forgot
 `DrawScale`) are visible by eye; box hitboxes show no ring. Caveat: objects whose Draw depends on
@@ -1466,9 +1485,9 @@ Update-reached state show their spawned/idle pose — bosses are best-effort. Sp
 `?harness=eyeattract` forces the JunkBoss attract sheet (`HarnessForceAttract`; try `&play&fps=2` to
 prove the `interpolate.fx` frame-interpolation shader tweens); `?harness=blast` loops the blast
 lifecycle (`?blastloop=` sweep speed); `?harness=respawn` shows the respawn clock ring, scrubbed
-with `?respawnphase=<0..1>`, and **`?harness=respawnrun` is the same summon UNFROZEN** (its own
-`Update` runs, so the owned countdown reaches its pop and drops the reward blast -- the only
-offline rig that can, see the respawn bullet below);
+with `?respawnphase=<0..1>`, and **`&harnessrun` makes that same summon RUN** (its own `Update`
+ticks, so the owned countdown reaches its pop and drops the reward blast -- the only offline rig
+that can, see the respawn bullet below);
 `?harness=spiderjump` loops the spider crawl→jump→land cycle; `?harness=connector` animates the
 ship connector with no ships; `?harness=battleskull` shows the colorize tuner; `?harness=brainboss`
 plays the boss overlays (they advance on `WorldTime`, which the harness does not freeze -- it
@@ -1531,7 +1550,7 @@ uses `Enabled=false`, not a pause layer -- so they still play here while a `shot
     shows **the same digit at every phase** -- in the harness AND in the very screenshots this
     card is verified with. `respawn_digit.txt` pins it by asserting `remainMs=10000` on the same
     line as a changing `secs=`. **The live fill curve is arithmetically unchanged** and was proven
-    so, not argued: a stepped unparked run through `?harness=respawnrun` produced a byte-identical
+    so, not argued: a stepped unparked run through `?harness=respawn&harnessrun` produced a byte-identical
     fill column before and after (41 coarse samples over the whole clock + 260 per-frame samples
     spanning four 1 Hz wrap events -- the window the file's own `RemainingMs` comment warns about).
   - **The digit punch is a PURE FUNCTION of that clock** -- `sinceChange = 1000 - (remain mod
@@ -1570,14 +1589,16 @@ uses `Enabled=false`, not a pause layer -- so they still play here while a `shot
     case). Pinned by `tools/headless/probes/respawn_summon.txt` (co-op positive + the wipe),
     `respawn_singleplayer.txt`, `respawn_digit.txt`, `respawn_reward_level.txt` and `logic_probe`'s
     `ProbeRespawnSummon`.
-  - **`?harness=respawnrun` is the same summon with the freeze LIFTED**, and it exists because
-    NOTHING ELSE OFFLINE CAN RUN AN OWNED SUMMON TO ITS POP. The reward blast only fires in co-op;
-    the one level that seats a second local ship without a gamepad is TeamChallenge; and
+  - **`?harness=respawn&harnessrun` is the same summon with the freeze LIFTED**, and it exists
+    because NOTHING ELSE OFFLINE CAN RUN AN OWNED SUMMON TO ITS POP. The reward blast only fires in
+    co-op; the one level that seats a second local ship without a gamepad is TeamChallenge; and
     TeamChallenge is **shared-fate** (`UpdateNormal` asplodes the partner and calls `LoseLife` the
     moment either ship dies), so `GameScene.LoseLife` purges the summon within ~10 frames of it
     being raised -- measured, from either seat. That is why `respawn_summon.txt` only ever asserts
-    the SPAWN lines. `respawnrun` needs no phase driver: the object's own `Update` is the thing
-    under test, so the rig is one registry key plus "do not set `Enabled = false`".
+    the SPAWN lines. It needs no phase driver: the object's own `Update` is the thing under test,
+    so the rig is just "do not freeze it". **This was its own registry key (`respawnrun`) until
+    card d1ee8761 generalised it into `?harnessrun`, which works on every key** -- see the sprite
+    harness section.
   - **The numeral is verified in BOTH modes, on two different clocks.** The owned mode (integer
     `countdown` + repeating timer) is `respawn_digit.txt`; the COSMETIC mode (a plain one-shot
     `Timer` fed a duration off the wire) is two legs in `NetRespawnTest` section 2, where

@@ -1,0 +1,71 @@
+# PROBE: ?harnessrun is GENERIC -- it drives a key that never had a run variant (card d1ee8761)
+#
+# PINS:   the whole point of the card. The capability existed before it, as a duplicate registry
+#         entry (["respawnrun"]) that HarnessScene special-cased by NAME, so it reached exactly ONE
+#         object of ONE type. A seam demonstrated only on the object it was extracted from has not
+#         been shown to generalise -- and if it has not, the failure is silent: the harness draws a
+#         perfectly plausible frozen sprite and says nothing.
+#
+#         So this drives `bullet`: an unrelated type, a registry line that long predates the card,
+#         and no bespoke support anywhere in HarnessScene. Its sibling harness_run.txt covers the
+#         respawn summon, which is the object the seam came from.
+#
+#         THE OBSERVABLE IS THE COMPONENT CENSUS, not a value on the object, and that is the point
+#         -- it is type-independent. A Bullet's own Update flies it off screen and Die()s it, so a
+#         RUNNING harness ends with no Bullet in the world at all, while a frozen one parks it
+#         there forever. Both directions are asserted as a POSITIVE (the census names what IS
+#         live, and `HarnessScene=1 Background=1` prove the scene itself is up), so neither leg can
+#         pass on a boot that died early or never built the object.
+#
+#         Deliberately NOT an enemy with a firing diagnostic: EvilSkull was tried first and its
+#         rearm interval comes off the unseeded RandomHelper (measured: first rearm anywhere from
+#         t=67 to t=4983 ms across runs, so the volley fell outside the assertion window in 2 of 6
+#         runs) and it fades out mid-run besides. A Bullet has a fixed heading and speed and no RNG
+#         anywhere in its path -- verified 5/5 identical on each side.
+#
+# FAILURE MEANS:
+#   `[harness] bullet: frozen` -> the flag is being resolved per-key again somewhere, which is
+#     exactly the one-off this card deleted.
+#   RUNNING present but `Bullet=1` still in the census -> the object is enabled and still not
+#     moving: the per-frame re-assert or the dispatch chain (which re-parks Position) is holding
+#     it. harness_run.txt will be red too, on its clock legs.
+#   no `HarnessScene=1` -> the rig never came up; ignore everything else and check the boot.
+#
+# Mutation-tested, all four runs recorded:
+#   harnessRun forced false          -> RED on leg 1, the announcement.
+#   per-frame re-assert unconditional-> leg 1 GREEN, RED on leg 3 with `Bullet=1` still in the
+#     census. The legs fail apart, which is why both are asserted.
+#   harnessRun forced true           -> GREEN (this probe asks for the flag anyway).
+#   dispatch chain re-parks under run-> RED on leg 3, and THIS PROBE IS THE ONLY ONE THAT CATCHES
+#     IT. Re-parking Position drags a moving object back every frame; harness_run.txt stays green
+#     through that mutation because a respawn summon never moves. Enforcement site 3 is the reason
+#     the generic pair exists on top of the summon pair -- it is not redundant coverage.
+#
+# eahl: --flags "?harness=bullet&harnessrun"
+
+step 100
+
+# 1. THE ANNOUNCEMENT. HarnessScene reports the resolved mode once, as it builds the object, and
+#    that happens on the first update tick rather than at `ready` (which still reports scene=menu)
+#    -- so it is asserted here, in the opening window, before the first `mark`. It doubles as "the
+#    registry key resolved", since the line is only reached once the object exists.
+expect \[harness\] bullet: RUNNING -- its own Update drives it
+expect-not \[harness\] bullet: frozen
+
+# 2. THE PRECONDITION, armed and asserted separately (probes README rule 5). Arming the census
+#    clears its window, so it is armed here and read after the steps below.
+mark
+eval Census true
+expect \[census\] armed
+
+# 3. ITS OWN UPDATE ACTUALLY RAN. 250 further steps is ~4.2 s of sim time; a bullet crosses the
+#    600 px screen in well under one. The census is the witness in both directions: the scene is
+#    still up (positive) and the Bullet is gone from it (the thing the freeze would have prevented).
+mark
+step 250
+eval Census true
+expect \[census\] .* HarnessScene=1
+expect \[census\] .* Background=1
+expect-not \[census\] .* Bullet=
+
+quit

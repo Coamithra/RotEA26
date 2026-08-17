@@ -14,6 +14,9 @@
 //     is identical: no fighting game timing to catch a frame.
 //   * ?play instead lets the harness step the animation in place (curframe advances
 //     at the object's own fps) — gameplay logic still doesn't run.
+//   * ?harnessrun (card d1ee8761) lifts the freeze ENTIRELY: the object's own Update
+//     runs and IT drives itself, for the case where that Update *is* the thing under
+//     test and no level can host it. Works on ANY registry key — see `harnessRun`.
 //
 // This is 1:1 with in-game rendering precisely because it reuses the object's real
 // construction (HarnessRegistry calls each type's NewXxx + Setup) and the real draw
@@ -71,11 +74,21 @@ namespace EvilAliensWeb.Compat
         private Spider harnessSpider;
         private float spiderPhase;
 
-        // ?harness=respawnrun: the respawn summon with the freeze LIFTED, so its real owned
-        // countdown runs to the pop. Unlike the blast/spider scrubbers below this needs no phase
-        // driver at all -- the object's own Update is the thing under test, so the rig is simply
-        // "do not set Enabled=false". See the registry entry for why no LEVEL can host this.
-        private PlayerShipSummon harnessSummon;
+        // ?harnessrun (card d1ee8761): run the object under test instead of freezing it. Unlike
+        // the blast/spider scrubbers above it needs no phase driver at all -- the object's own
+        // Update IS the thing under test, so the rig is simply "leave the harness out of the way".
+        //
+        // That is ONE bit with THREE enforcement sites, and all three matter:
+        //   1. the initial `obj.Enabled = false` in Initialize;
+        //   2. the defensive per-frame re-assert in Update;
+        //   3. the Update dispatch chain, whose frozen path re-parks `obj.Position` and overwrites
+        //      `obj.curframe` every frame -- which would fight an object that now owns both.
+        // Missing (3) is the silent half: the object would tick, and then be dragged back.
+        //
+        // Generalises the old ["respawnrun"] registry key (a duplicate entry for the same object,
+        // special-cased here by name), which is why this is a plain bool and not an object
+        // reference: nothing on the run path is type-specific, so it applies to every key.
+        private bool harnessRun;
         private Spider.JumpVizState spiderState;
         private Texture2D shadowTex;
         private Texture2D pixelTex;
@@ -179,17 +192,17 @@ namespace EvilAliensWeb.Compat
             {
                 obj.fps = DebugFlags.HarnessFps.Value;
             }
-            // ?harness=respawnrun runs the summon for real (see the field comment); every other
-            // key keeps the harness' defining property, a frozen object.
-            harnessSummon = string.Equals(DebugFlags.Harness, "respawnrun", StringComparison.OrdinalIgnoreCase)
-                ? obj as PlayerShipSummon
-                : null;
-            obj.Enabled = (harnessSummon != null);   // freeze: no gameplay Update
-            obj.Visible = true;                      // but keep drawing itself
+            // ?harnessrun runs the object for real (see the field comment); without it every key
+            // keeps the harness' defining property, a frozen object.
+            harnessRun = DebugFlags.HarnessRun;
+            obj.Enabled = harnessRun;   // freeze: no gameplay Update
+            obj.Visible = true;         // but keep drawing itself
 
             // A Blast's appearance lives entirely in its lifetime curve (which the freeze stops),
             // so loop a phase through it instead and build the collision-ring overlay texture.
-            harnessBlast = obj as Blast;
+            // Not under ?harnessrun: a phase scrubber is by definition an ALTERNATIVE driver, and
+            // the object's own Update is the one thing that mode exists to let win.
+            harnessBlast = harnessRun ? null : obj as Blast;
             if (harnessBlast != null)
             {
                 blastPhase = 0f;
@@ -201,8 +214,9 @@ namespace EvilAliensWeb.Compat
             // hitboxes get a ring; box-hitbox members of the class (e.g. Braineroid) show none.
             ringTex = BuildRingTexture();
 
-            // ?harness=spiderjump: loop the full jump cycle (the "spider" key stays a plain frozen view).
-            if (obj is Spider sp && string.Equals(DebugFlags.Harness, "spiderjump", StringComparison.OrdinalIgnoreCase))
+            // ?harness=spiderjump: loop the full jump cycle (the "spider" key stays a plain frozen
+            // view). Suppressed under ?harnessrun for the same reason as the blast scrubber above.
+            if (!harnessRun && obj is Spider sp && string.Equals(DebugFlags.Harness, "spiderjump", StringComparison.OrdinalIgnoreCase))
             {
                 harnessSpider = sp;
                 spiderPhase = 0f;
@@ -213,6 +227,43 @@ namespace EvilAliensWeb.Compat
             }
 
             label = BuildLabel();
+            ReportMode();
+        }
+
+        // Say which mode actually ran, once, at boot. The `[debug]` flags dump reports only the
+        // PARSE; this reports the RESOLUTION -- including what ?harnessrun overrode and why. It
+        // matters because the two modes are not tellable apart from a number or a data dump: a run
+        // that believed it was unfrozen but was frozen produces a perfectly plausible table (the
+        // `[aiwallnav] steering:` rule). Every suppressed scrubber is named, so nothing goes
+        // quietly missing from a rig someone is trusting.
+        private void ReportMode()
+        {
+            if (obj == null)
+            {
+                return;
+            }
+            string key = DebugFlags.Harness;
+            if (!harnessRun)
+            {
+                Console.WriteLine("[harness] " + key + ": frozen (Enabled=false; the harness owns "
+                    + "Position/curframe, so every frame is identical)");
+                return;
+            }
+            string overridden = "";
+            if (DebugFlags.HarnessPlay)
+            {
+                overridden += "   ?play ignored (the object's own Update owns curframe)";
+            }
+            if (obj is Blast)
+            {
+                overridden += "   blast lifetime scrubber disabled (the object's own Update drives it)";
+            }
+            if (obj is Spider && string.Equals(key, "spiderjump", StringComparison.OrdinalIgnoreCase))
+            {
+                overridden += "   spiderjump cycle scrubber disabled (the object's own Update drives it)";
+            }
+            Console.WriteLine("[harness] " + key + ": RUNNING -- its own Update drives it "
+                + "(?harnessrun; nothing is frozen or re-parked)" + overridden);
         }
 
         private Texture2D BuildPixelTexture()
@@ -264,7 +315,7 @@ namespace EvilAliensWeb.Compat
             int total = Math.Max(1, obj.rows * obj.columns);
             return DebugFlags.Harness.ToLowerInvariant()
                 + "   frame " + (int)obj.curframe + "/" + total
-                + (DebugFlags.HarnessPlay ? "  (playing)" : "")
+                + (harnessRun ? "  (RUNNING)" : DebugFlags.HarnessPlay ? "  (playing)" : "")
                 + (obj.texturename != null ? "   " + obj.texturename : "");
         }
 
@@ -303,18 +354,18 @@ namespace EvilAliensWeb.Compat
             if (obj != null)
             {
                 // Keep it frozen every frame (defensive; Enabled=false already stops its own Update).
-                // ?harness=respawnrun is the one key that must NOT be re-frozen -- its object's own
-                // Update IS the thing under test.
-                if (harnessSummon == null)
+                // ?harnessrun is what must NOT be re-frozen -- there the object's own Update IS the
+                // thing under test.
+                if (!harnessRun)
                 {
                     obj.Enabled = false;
                 }
 
-                if (harnessSummon != null)
+                if (harnessRun)
                 {
                     // Nothing to drive: the engine updates it through the component list. Don't
-                    // re-park its Position either -- a summon never moves, and once it has Die()d
-                    // (the pop) it is on its way out of the bin.
+                    // re-park Position or curframe either -- the object owns both now, and one that
+                    // has Die()d (a summon's pop, a blast's expiry) is on its way out of the bin.
                 }
                 else if (harnessBlast != null)
                 {
@@ -392,6 +443,7 @@ namespace EvilAliensWeb.Compat
             }
             harnessBlast = null;
             harnessSpider = null;
+            harnessRun = false;
             if (spiderShadowDrawer != null)
             {
                 ((Collection<IGameComponent>)(object)base.Game.Components).Remove((IGameComponent)(object)spiderShadowDrawer);

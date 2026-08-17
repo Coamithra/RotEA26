@@ -1,0 +1,49 @@
+# PROBE: the same generic key stays FROZEN without ?harnessrun (card d1ee8761)
+#
+# PINS:   the control for harness_run_generic.txt. That probe proves a Bullet driven by
+#         ?harnessrun leaves the world; on its own that is not evidence the FLAG caused it -- a
+#         census that renamed the type, a rig that dropped the object at boot, or a harness that
+#         never parked anything would all read as "no Bullet in the census" too. This boots the
+#         SAME key with the SAME steps and no flag, and requires the Bullet to be sitting there.
+#
+#         It is also the second half of the card's hard requirement, on a key that is NOT the
+#         respawn summon: `?harness=<x>` must stay exactly as screenshot-stable as it was.
+#         harness_run_absent.txt pins that for the summon in numbers; this pins it for an ordinary
+#         sprite, in the world census.
+#
+# FAILURE MEANS:
+#   `[harness] bullet: RUNNING` -> the freeze is off by DEFAULT; every harness rig and screenshot
+#     in the repo just became non-reproducible. The loud one.
+#   frozen line present but no `Bullet=1` -> the object is being dropped or driven by something
+#     other than the ?harnessrun seam. Note this also invalidates harness_run_generic.txt's
+#     `expect-not Bullet=`, which is why the two are a pair.
+#   no `HarnessScene=1` -> the rig never came up; check the boot before anything else.
+#
+# Mutation-tested: making `harnessRun` default to true turns leg 1 red on the announcement and
+# leg 3 red on the still-parked Bullet.
+#
+# eahl: --flags "?harness=bullet"
+
+step 100
+
+# 1. THE ANNOUNCEMENT, in the opening window before the first `mark` (HarnessScene reports the
+#    resolved mode as it builds the object, on the first update tick). It is a positive in its own
+#    right: the line is only reached once the object exists.
+expect \[harness\] bullet: frozen \(Enabled=false
+expect-not \[harness\] bullet: RUNNING
+
+# 2. THE PRECONDITION. Arming the census clears its window, so arm here and read after the steps.
+mark
+eval Census true
+expect \[census\] armed
+
+# 3. STILL PARKED, after the same 250 steps that carry the running bullet clean off the screen.
+#    `Bullet=1` is the whole assertion: the frozen harness holds its object indefinitely, which is
+#    what makes a screenshot at any moment identical.
+mark
+step 250
+eval Census true
+expect \[census\] .* HarnessScene=1
+expect \[census\] .* Bullet=1
+
+quit

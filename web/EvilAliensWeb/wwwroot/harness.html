@@ -93,7 +93,6 @@
         <option value="evilbullet">evilbullet</option>
         <option value="blast">blast (lifetime viz: loops + collision ring; ?blastactive= ?blasthit= ?blastloop=)</option>
         <option value="respawn">respawn (the respawn clock ring; scrub the fill with ?respawnphase=0..1)</option>
-        <option value="respawnrun">respawnrun (the same ring UNFROZEN: the countdown runs to its pop)</option>
       </optgroup>
       <optgroup label="Bosses (best-effort: idle pose)">
         <option value="deathstar">deathstar</option>
@@ -149,6 +148,15 @@
     <div class="check">
       <input id="play" type="checkbox" />
       <label for="play">Play the animation in place (instead of freezing on the frame)</label>
+    </div>
+
+    <!-- ?harnessrun — lift the freeze entirely (card d1ee8761). Applies to EVERY object above:
+         the object's own gameplay Update runs and drives it, for when that Update is the thing
+         under test. Frames stop being identical, so a screenshot is no longer reproducible. -->
+    <div class="check">
+      <input id="harnessrun" type="checkbox" />
+      <label for="harnessrun">Run it live — the object's own Update drives it (no longer frozen, so
+        screenshots are no longer identical; overrides Play and any phase scrubber)</label>
     </div>
 
     <!-- fps override (?fps=) — only with Play. Turn it real low to make the frame-interpolation
@@ -274,9 +282,15 @@
     var p = new URLSearchParams();
     p.set("harness", document.getElementById("obj").value);
 
-    var play = document.getElementById("play").checked;
+    // Run wins over Play: under ?harnessrun the object owns curframe, so ?play has nothing to
+    // step. Sending both is harmless (the game says which one it honoured on its [harness] line),
+    // but a URL that only says what actually happens is easier to paste into a bug report.
+    var run = document.getElementById("harnessrun").checked;
+    if (run) p.set("harnessrun", "1");
+
+    var play = document.getElementById("play").checked && !run;
     if (play) p.set("play", "1");
-    else {
+    else if (!run) {
       var frame = parseInt(document.getElementById("frame").value, 10) || 0;
       if (frame !== 0) p.set("frame", String(frame));
     }

@@ -74,6 +74,9 @@ namespace EvilAliensWeb.Compat.Net
             sb.Append(" 6. Ball local rotation -- the junkboss rocks (card 566474ae)\n");
             SectionBallSpin(bin, game, Check);
 
+            sb.Append(" 7. Ball hit-test radius -- the same rocks (card 1210e14e)\n");
+            SectionBallRadius(bin, game, Check);
+
             sb.Append(string.Format(System.Globalization.CultureInfo.InvariantCulture,
                 "[netmotion] {0} passed, {1} failed\n", pass, fail));
             return sb.ToString();
@@ -728,7 +731,13 @@ namespace EvilAliensWeb.Compat.Net
                 float pupRate = ((INetEntity)pup).NetSpinPerMs;
                 ((INetEntity)pup).NetRotation = 0f;
                 st.Rotation = 3.1415927f;
-                Apply(IdBall, TypeBall, st, variant, 0, 1);
+                // NOT `variant` (card 1210e14e): these are STATE extras, and since that card
+                // BallDescriptor HAS some -- a flags byte whose bit0 is "connected". Handing it the
+                // spawn-extra array {1} would decode as a CONNECTED ball and quietly change what
+                // this rotation leg is measuring. Zero = unconnected, which is what it measured
+                // before the state extras existed.
+                byte[] ballState = new byte[1] { 0 };
+                Apply(IdBall, TypeBall, st, ballState, 0, 1);
                 check("a Ball puppet is NOT snapped to the wire's angle",
                     ((INetEntity)pup).NetRotation == 0f);
                 float before = ((INetEntity)pup).NetRotation;
@@ -771,6 +780,211 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 NetPuppets.Disable();
             }
+        }
+
+        // ---- 7. Ball hit-test RADIUS (card 1210e14e) ----------------------------------------
+        //
+        // Section 6's rocks, a different property of them, and a defect that is SILENT in every
+        // frame: `Ball.CollisionType` tests a connected ball at full radius and every other state at
+        // 0.8, and a frozen puppet can reach neither `connected` nor any state of its own -- Update
+        // never runs, and CheckOwner parks the null-owner puppet at `freed`. So the joining player
+        // hit-tested the whole junkboss body 20% small: their bullets flew through rocks they had
+        // visibly touched, those hits did not sustain their combo, and their ship survived a band
+        // the host's screen called a collision. Nothing throws and no counter moves either way,
+        // which is why this is a probe and not something anyone noticed.
+        //
+        // The fix replicates ONE BIT (BallDescriptor's first state extras, protocol v22) into a
+        // field that answers the RADIUS question only. `state` still owns the gameplay arm, and
+        // 7b's last leg is the assertion that keeps those two apart.
+        private static void SectionBallRadius(ComponentBin bin, Game game,
+            System.Action<string, bool> check)
+        {
+            // ---- 7a. the HOST's two radii, measured off a real connected ball ----------------
+            //
+            // 6a's shape and 6a's doctrine: the 1.25x is OBSERVED by reading CollisionType before
+            // and after the real state machine reaches `connected`, not read off the 0.8f/1f
+            // constants the fix itself uses. A build that broke both arms together would still have
+            // to break this ratio to pass.
+            JunkBoss boss = JunkBoss.NewJunkBoss(bin, game);
+            boss.Setup(false);
+            boss.Initialize();
+            boss.Position = new Vector2(400f, 300f);
+
+            Ball hostBall = Ball.NewBall(bin, game);
+            hostBall.Setup(boss);
+            hostBall.Initialize();
+
+            float startupRadius = Radius(hostBall);
+            check("a host Ball in `startup` has a radius at all (" + F2(startupRadius) + "px)",
+                startupRadius > 0f);
+            check("...and it does not claim to be connected", !hostBall.IsConnected());
+
+            bool connected = false;
+            int ticks = 0;
+            for (; ticks < 800 && !connected; ticks++)
+            {
+                hostBall.Update(Tick(50f));
+                hostBall.CollidesWith(boss);
+                connected = hostBall.IsConnected();
+            }
+            // PINNED, NOT WAITED OUT (card af4c3694): every leg below is about a CONNECTED ball and
+            // passes vacuously on a run that never got there.
+            check("a real Ball reaches `connected` against a real JunkBoss (" + ticks + " ticks)",
+                connected);
+            if (!connected)
+            {
+                bin.Remove(hostBall);
+                bin.Remove(boss);
+                return;
+            }
+
+            float connectedRadius = Radius(hostBall);
+            check("a CONNECTED host Ball is hit-tested 1.25x larger ("
+                    + F2(connectedRadius) + "px vs " + F2(startupRadius) + "px, "
+                    + F2(connectedRadius / startupRadius) + "x)",
+                Near(connectedRadius, startupRadius * 1.25f, startupRadius * 0.001f));
+
+            // The HOST ENCODE half, which nothing else in the suite reaches: the descriptor has to
+            // put that answer on the wire, and a build whose EncodeStateExtra always wrote 0 would
+            // pass every puppet leg below (they drive the bytes directly).
+            INetTypeDescriptor desc = NetTypeRegistry.Get(5);
+            byte[] enc = new byte[8];
+            int encLen = desc.EncodeStateExtra(hostBall, enc, 0);
+            check("the descriptor encodes the connected bit for the wire (len=" + encLen
+                    + ", flags=" + enc[0] + ")",
+                encLen == 1 && enc[0] == 1);
+            bin.Remove(hostBall);
+            bin.Remove(boss);
+
+            Ball looseBall = Ball.NewBall(bin, game);
+            looseBall.Setup(null);
+            looseBall.Initialize();
+            encLen = desc.EncodeStateExtra(looseBall, enc, 0);
+            check("CONTROL an unconnected Ball encodes it CLEAR (len=" + encLen
+                    + ", flags=" + enc[0] + ")",
+                encLen == 1 && enc[0] == 0);
+            bin.Remove(looseBall);
+
+            // ---- 7b. the real descriptor and the real puppet layer ---------------------------
+            //
+            // 6b's shape: NetPuppets.OnSpawn / OnSnapshotEntry with no session. The radius these
+            // puppets report is the one the production apply path actually gave them.
+            if (NetSession.Active || NetPuppets.LiveCount > 0 || GameScene.NetActiveScene != null)
+            {
+                check("SKIPPED the puppet legs (a session, level or attract demo is up)", false);
+                return;
+            }
+
+            const ushort IdBall = 60431;
+            const ushort IdControl = 60432;
+            const byte TypeBall = 5;
+
+            NetPuppets.Enable(game);
+            try
+            {
+                NetBaseState st = default;
+                st.Pos = new Vector2(-600f, -600f);
+                st.Scale = 1f;
+                st.Rotation = 0f;
+                byte[] variant = new byte[1] { 1 };
+                byte[] flagsClear = new byte[1] { 0 };
+                byte[] flagsConnected = new byte[1] { 1 };
+
+                if (NetPuppets.OnSpawn(IdBall, TypeBall, st, variant, 0, 1) != SpawnRejectKind.None
+                    || !(NetPuppets.FindPuppet(IdBall) is Ball pup))
+                {
+                    check("a Ball puppet was built for the radius legs", false);
+                    return;
+                }
+                check("a Ball puppet was built for the radius legs", true);
+
+                // THE PRE-CARD STATE, and the leg that must NOT be the only one: a puppet that has
+                // heard nothing keeps the small radius. That is correct (a just-spawned ball really
+                // is in `startup`) AND it is exactly the whole defect, so it proves nothing alone.
+                float smallRadius = Radius(pup);
+                check("a fresh Ball puppet reads the SMALL radius (" + F2(smallRadius) + "px)",
+                    smallRadius > 0f && !pup.IsConnected());
+
+                Apply(IdBall, TypeBall, st, flagsClear, 1, 1);
+                check("...and a CLEAR state extra leaves it there",
+                    Near(Radius(pup), smallRadius, 0.001f) && !pup.IsConnected());
+
+                // THE FIX. The host says connected; the puppet must now hit-test at the host's
+                // radius, which is 7a's measured 1.25x and not a constant copied from Ball.cs.
+                Apply(IdBall, TypeBall, st, flagsConnected, 1, 2);
+                check("a CONNECTED state extra grows the puppet to the host's radius ("
+                        + F2(Radius(pup)) + "px, " + F2(Radius(pup) / smallRadius) + "x)",
+                    Near(Radius(pup), smallRadius * 1.25f, smallRadius * 0.001f));
+                // The other three local readers (Bullet's combo sustain, PlayerShip's IsAiShootable)
+                // go through IsConnected, so it takes the host's answer too.
+                check("...and IsConnected() reports the host's answer to the joiner's own bullets",
+                    pup.IsConnected());
+
+                // THE CONTRACT LEG: a puppet must never run gameplay. The host's answer reaches the
+                // RADIUS and nothing else -- CollidesWith still dispatches on the puppet's own
+                // `state`, which CheckOwner parks at `freed`, so the connected arm (hp, the 35 ms
+                // blink, owner.RemoveChild() on a null owner) is not entered. This is what fails if
+                // anyone ever "simplifies" the fix by replicating into `state` itself.
+                Bullet slug = Bullet.NewBullet(bin, game);
+                slug.Setup(st.Pos, 0f, 500f, 0);
+                bool threw = false;
+                try { pup.CollidesWith(slug); }
+                catch (System.Exception) { threw = true; }
+                check("a hit on a CONNECTED puppet runs no gameplay arm (no throw, no blink)",
+                    !threw && !pup.NetHitBlinking);
+                check("...and the puppet still reads the host's radius afterwards",
+                    Near(Radius(pup), smallRadius * 1.25f, smallRadius * 0.001f));
+                bin.Remove(slug);
+
+                // ...and it comes back DOWN. A fix that latched "connected" for the rest of the
+                // ball's life would pass every leg above.
+                Apply(IdBall, TypeBall, st, flagsClear, 1, 3);
+                check("a ball that breaks away shrinks back on the next turn",
+                    Near(Radius(pup), smallRadius, 0.001f) && !pup.IsConnected());
+
+                // CONTROL a second puppet that is never told anything keeps its radius for its
+                // whole life -- so the legs above are reading the WIRE, not a global.
+                // Against its OWN baseline, deliberately: Ball.Initialize rolls
+                // `scale = 0.45 * rand(0.42, 0.85)` per instance and `r` follows it, so two puppets
+                // never share a radius and comparing one against the other's is meaningless.
+                if (NetPuppets.OnSpawn(IdControl, TypeBall, st, variant, 0, 1)
+                        != SpawnRejectKind.None
+                    || !(NetPuppets.FindPuppet(IdControl) is Ball ctrl))
+                {
+                    check("a control Ball puppet was built", false);
+                    return;
+                }
+                float ctrlSmall = Radius(ctrl);
+                Apply(IdBall, TypeBall, st, flagsConnected, 1, 4);
+                check("CONTROL an unaddressed Ball puppet is unaffected by another's state extra",
+                    Near(Radius(ctrl), ctrlSmall, 0.001f) && !ctrl.IsConnected()
+                        && Near(Radius(pup), smallRadius * 1.25f, smallRadius * 0.001f));
+            }
+            finally
+            {
+                // BY HAND, 6b's shape: Disable() clears the id maps but leaves the components it
+                // built in Game.Components. Collected BEFORE Disable, since FindPuppet reads the
+                // maps it clears.
+                foreach (ushort id in new ushort[] { IdBall, IdControl })
+                {
+                    INetEntity p = NetPuppets.FindPuppet(id);
+                    if (p != null)
+                    {
+                        bin.Remove((GameComponent)(object)p);
+                    }
+                }
+                NetPuppets.Disable();
+            }
+        }
+
+        private static float Radius(Ball b)
+        {
+            return ((CollisionSimpleCircle)b.CollisionType).Radius;
+        }
+
+        private static string F2(float v)
+        {
+            return v.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         private static void Apply(ushort id, byte typeIdx, in NetBaseState st, byte[] extra,

@@ -54,29 +54,59 @@ internal class Ball : AlienDrawableGameComponent
 	// silently refuse every beat and the feature would do nothing at all.
 	private bool netDetached;
 
+	// Online co-op (card 1210e14e): the HOST's answer to "is this ball latched onto the junkboss",
+	// and whether one has arrived yet. See the ConnectedForCollision block below.
+	private bool netConnectedFromHost;
+
+	private bool netHasConnectedFromHost;
+
 	private CollisionSimpleCircle collisionSimpleCircle = new CollisionSimpleCircle(Vector2.Zero, 1f);
+
+	// Online co-op (card 1210e14e, "the junkboss rocks have a 20%-small hitbox on the joiner").
+	//
+	// THE DEFECT. Everything that hit-tests a Ball wants ONE bit: a connected ball is tested at full
+	// radius, every other state at 0.8. On the host `state` answers it. On the JOINER it cannot -- a
+	// puppet is frozen (Enabled = false) so its Update never runs and `state` never leaves
+	// Initialize's `startup`, and CheckOwner (which runs at the top of CollidesWith) flips the null
+	// owner BallDescriptor.CreatePuppet gave it straight to `freed`. Both are 0.8, so every rock in
+	// the junkboss's body was hit-tested 20% small on the joining player's screen.
+	//
+	// WHY THIS IS A SECOND FIELD AND NOT THE REPLICATED `state`. A puppet must never run gameplay,
+	// and `state` is what CollidesWith's switch dispatches on -- a puppet holding `connected` would
+	// re-enter an arm that calls owner.RemoveChild() on a null owner. Writing the host's answer into
+	// `state` is ALSO USELESS rather than merely unsafe, which is the less obvious half and the one
+	// that would have wasted the next attempt: CheckOwner runs FIRST and flips it back to `freed` on
+	// the very first collision test, restoring the small radius until the next snapshot turn (60 ms
+	// to ~1.2 s later). So the two questions are split -- this answers "which RADIUS do I use",
+	// `state` still answers "which gameplay ARM do I run", and that arm is never entered on a joiner.
+	//
+	// THE LATCH is what keeps the HOST bit-identical: nothing calls NetSetConnected there, so
+	// netHasConnectedFromHost stays false and both readers below are `state == connected` exactly as
+	// before. On a joiner the wire wins from that puppet's first snapshot turn onward; until then it
+	// reads 0.8, which is the right answer -- a just-spawned ball really is in `startup`. Both fields
+	// are reset by Initialize (balls are pool-recycled, and a puppet's Initialize runs inside
+	// ComponentBin.Add, i.e. AFTER CreatePuppet has returned).
+	private bool ConnectedForCollision => (netHasConnectedFromHost ? netConnectedFromHost : state == BallState.connected);
 
 	public override ICollisionType CollisionType
 	{
 		get
 		{
-			float radiusFactor = state switch
-			{
-				BallState.startup => 0.8f, 
-				BallState.connected => 1f, 
-				BallState.attracted => 0.8f, 
-				BallState.freed => 0.8f, 
-				_ => 1f, 
-			};
+			// 1.0 iff connected; the other three states all read 0.8, and BallState has no fifth
+			// member, so the old switch's `_ => 1f` default arm was unreachable.
+			float radiusFactor = (ConnectedForCollision ? 1f : 0.8f);
 			collisionSimpleCircle.Position = base.Position;
 			collisionSimpleCircle.Radius = radiusFactor * r;
 			return collisionSimpleCircle;
 		}
 	}
 
+	// Read by Bullet.CollidesWith (a loose ball does not sustain a combo) and by PlayerShip's
+	// IsAiShootable. Both are LOCAL reads on the joiner too, so they take the host's answer for the
+	// same reason the radius does; neither damages, kills nor awards anything.
 	public bool IsConnected()
 	{
-		return state == BallState.connected;
+		return ConnectedForCollision;
 	}
 
 	public Ball(Game game)
@@ -143,6 +173,8 @@ internal class Ball : AlienDrawableGameComponent
 		starttimer.Start();
 		hitpoints = 3;
 		netDetached = false;
+		netConnectedFromHost = false;
+		netHasConnectedFromHost = false;
 		ybuffer = 900f / Settings.GetInstance().DifficultyFactorized(0.5f);
 	}
 
@@ -291,6 +323,13 @@ internal class Ball : AlienDrawableGameComponent
 					}
 				}
 			}
+			// RAW `state`, deliberately, unlike CollisionType/IsConnected above (card 1210e14e).
+			// This is the connected balls' mutual push-out: it MOVES both balls, i.e. it is
+			// gameplay, so it must run on the host and only on the host. It is unreachable on a
+			// joiner anyway -- CheckOwner above has already flipped this puppet to `freed`, so this
+			// `case BallState.connected:` arm is never entered there. Do NOT "make it consistent"
+			// by routing it through ConnectedForCollision; that would hand a puppet the host's
+			// answer for a decision a puppet is not allowed to take.
 			if (other is Ball && ((Ball)other).state == BallState.connected)
 			{
 				Ball ball = (Ball)other;
@@ -325,6 +364,10 @@ internal class Ball : AlienDrawableGameComponent
 			}
 			break;
 		case BallState.attracted:
+			// RAW `state` again, and for the same reason as the push-out above (card 1210e14e):
+			// latching onto the boss is a STATE TRANSITION plus an owner.AddChild(), i.e. gameplay.
+			// Unreachable on a joiner -- a puppet is `freed` by the time this switch runs, so it
+			// never enters this arm either.
 			if ((other is JunkBoss) | (other is Ball && ((Ball)other).state == BallState.connected))
 			{
 				state = BallState.connected;
@@ -350,6 +393,23 @@ internal class Ball : AlienDrawableGameComponent
 	internal bool NetHitBlinking => hittimer.Active;
 
 	internal bool NetDetachedFx => netDetached;
+
+	// ---- the replicated hit-test radius (card 1210e14e) ----------------------------------------
+	//
+	// The HOST's encode side reads the RAW state on purpose: this is the authoritative answer being
+	// put on the wire, and routing it through ConnectedForCollision would let a received value echo
+	// back out. (A host never receives one, so it is honesty rather than a live hazard.)
+	internal bool NetConnected => state == BallState.connected;
+
+	// The CLIENT's apply side. Arrives every snapshot turn (BallDescriptor's state extras are
+	// encoded unconditionally in NetSession.SendWorldSnapshot -- there is no change gate anywhere on
+	// that path), so a ball that latches on mid-fight and a puppet built by a join-in-progress
+	// catch-up both pick the host's answer up on their next turn.
+	internal void NetSetConnected(bool connected)
+	{
+		netConnectedFromHost = connected;
+		netHasConnectedFromHost = true;
+	}
 
 	// ---- local rotation (card 566474ae, "the asteroids rotate choppily for the joining player")
 	//

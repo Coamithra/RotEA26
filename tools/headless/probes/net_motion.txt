@@ -1,5 +1,6 @@
 # PROBE: anchored motion -- the sent Lazer rates and the FlyingSpider path anchor, plus the two
-# ROTATION-FIDELITY gates that joined it (cards d6645119 / 566474ae).
+# ROTATION-FIDELITY gates that joined it (cards d6645119 / 566474ae) and the junkboss rocks'
+# HIT-TEST RADIUS (card 1210e14e -- section 7, the same rocks as section 6, a different property).
 #
 # PINS: card c1a38ef9 -- Compat/Net/NetMotionTest, driven by eaNetMotion() / `eval NetMotionTest`.
 # The lane carries the MOTION MODEL on the wire (INetEntity.NetPathAnchored / NetPathOffset, the
@@ -22,7 +23,7 @@
 # `python tools/sim/net_puppet_drive_sim.py --smoothness`, which asserts it. This suite asserts
 # that the mechanism is wired and exact.
 #
-# MUTATION-TESTED NINE WAYS, each isolated (all but the last fail a DIFFERENT set of legs; that
+# MUTATION-TESTED TWELVE WAYS, each isolated (all but one fail a DIFFERENT set of legs; that
 # one is deliberately non-disjoint -- see below):
 #   * FlyingSpider.NetPathAnchored -> false                     1 FAIL (the predicate)
 #   * ApplyStateExtra spends the swivel correction in one step   1 FAIL (the ease leg)
@@ -42,6 +43,22 @@
 #                                                                      halves are asserted)
 #   * CreatePuppet drops its `len >= SpawnAnchorBytes` guard    2 FAIL (the negative control
 #                                                                      + its sentinel)
+#   * Ball.ConnectedForCollision ignores the wire (card          4 FAIL (all of section 7b's
+#     1210e14e -- i.e. the whole fix reverted)                          apply legs; section 6
+#                                                                      stays green throughout)
+#   * BallDescriptor.EncodeStateExtra always writes 0            1 FAIL (the host-ENCODE leg,
+#                                                                      alone -- every puppet leg
+#                                                                      drives the bytes directly,
+#                                                                      which is why it exists)
+#   * the host's answer written into Ball.state itself           1 FAIL (the radius-after-a-hit
+#     (the WRONG design, and the one that will be re-proposed)          leg, alone) -- and it
+#                                                                      still PASSES the
+#                                                                      no-gameplay-arm leg, which
+#                                                                      is the measurement behind
+#                                                                      "silently useless, not
+#                                                                      crashy": CheckOwner flips
+#                                                                      it back to `freed` before
+#                                                                      the switch ever dispatches.
 # THE TWO BALL MUTATIONS ARE THE PAIR THAT MATTERS AND THEY ARE DISJOINT ON PURPOSE: the first is
 # the shipped fix going away, the second is the FACT the fix rests on going away. Section 6a
 # measures the connected-state turn rate off the real Ball.Update, deliberately observing the
@@ -78,6 +95,7 @@ expect 3\. FlyingSpider drifting parameters are EASED, not snapped
 expect 4\. Lazer sent rates
 expect 5\. the HOST's velocity decision
 expect 6\. Ball local rotation
+expect 7\. Ball hit-test radius
 
 # THE TWO ROTATION GATES, named rather than left to the tally: each is a one-line predicate whose
 # failure mode is a build that looks shipped and is merely wrong on the joining peer's screen, and
@@ -101,8 +119,40 @@ expect PASS a Ball puppet is NOT snapped to the wire's angle
 expect PASS a CONNECTED ball turns at its FULL free-spin speed, only the sign wobbles \(1\.00x
 expect PASS .*it really does reverse
 
+# ...and section 7, the OTHER property of the SAME rocks (card 1210e14e): a connected ball is
+# hit-tested at full radius and every other state at 0.8, and a frozen puppet reaches neither
+# `connected` nor any state of its own -- so the joining player hit-tested the whole junkboss body
+# 20% SMALL. Their bullets flew through rocks they had visibly touched, those hits did not sustain
+# their combo, and their ship survived a band the host's screen called a collision. Nothing throws
+# and no counter moves either way, which is the whole reason it is pinned here rather than noticed.
+#
+# The 1.25x is anchored in BOTH legs on purpose: 7a OBSERVES it off a real Ball driven to a real
+# `connected` state, and 7b then requires the puppet to reach that same figure through the real
+# descriptor and the real apply path. A build that broke both arms together would still have to
+# break the ratio to pass. The encode leg is separate because every puppet leg drives the bytes
+# directly -- an EncodeStateExtra stuck at 0 fails that leg ALONE (measured).
+expect PASS a CONNECTED host Ball is hit-tested 1\.25x larger
+expect PASS the descriptor encodes the connected bit for the wire \(len=1, flags=1\)
+expect PASS a fresh Ball puppet reads the SMALL radius
+expect PASS a CONNECTED state extra grows the puppet to the host's radius .*1\.25x\)
+expect PASS a ball that breaks away shrinks back on the next turn
+
+# THE CONTRACT PAIR, and the one to read first if section 7 goes red: the host's answer reaches the
+# RADIUS and nothing else. CollidesWith still dispatches on the puppet's OWN `state`, which
+# CheckOwner parks at `freed`, so a puppet never enters the connected arm (hp, the 35 ms blink,
+# owner.RemoveChild() on a null owner).
+#
+# BOTH LINES ARE NEEDED AND THE SECOND IS THE SHARP ONE. Replicating the host's answer into
+# Ball.state itself -- the "obvious" simplification, and the one the card predicted would be
+# re-proposed -- is SILENTLY USELESS rather than crashy: measured, that mutation still PASSES the
+# no-gameplay-arm line (no throw and no blink, because CheckOwner gets there first) and instead
+# flips the puppet back to `freed` on the very first collision test, losing the radius until the
+# next snapshot turn. The line below is the only thing that catches it.
+expect PASS a hit on a CONNECTED puppet runs no gameplay arm \(no throw, no blink\)
+expect PASS .*the puppet still reads the host's radius afterwards
+
 # A TALLY, never `expect-not FAIL` on its own: an absence assertion passes on a run where the
 # eval never happened at all. Raise it when legs are added; never lower it to make a run green.
-expect \[netmotion\] 56 passed, 0 failed
+expect \[netmotion\] 71 passed, 0 failed
 expect-not FAIL
 quit

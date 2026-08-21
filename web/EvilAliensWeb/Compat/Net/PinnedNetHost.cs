@@ -46,6 +46,13 @@ namespace EvilAliensWeb.Compat.Net
         // suite must be able to take that measurement without rebooting. null => the production flag.
         internal bool? AimEase;
 
+        // Overridable because a MENU session refuses its own pairing while DebugFlags.Active is
+        // set unless ?netallowdebug waives it -- and NetNPeerTest's subject is menu-session
+        // MATCH-END semantics, not that refusal, so it must run under whatever boot flags the
+        // probe happens to carry (net_selftests boots ?menu, which is Active). null => the
+        // production flag.
+        internal bool? AllowDebug;
+
         internal PinnedNetHost()
             : this(0L, null)
         {
@@ -71,7 +78,7 @@ namespace EvilAliensWeb.Compat.Net
         public bool DebugActive => inner.DebugActive;
 
         public bool NetJip => inner.NetJip;
-        public bool NetAllowDebug => inner.NetAllowDebug;
+        public bool NetAllowDebug => AllowDebug ?? inner.NetAllowDebug;
 
         public bool NetLog => inner.NetLog;
 

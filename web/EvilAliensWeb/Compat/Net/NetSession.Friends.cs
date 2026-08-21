@@ -87,9 +87,67 @@ namespace EvilAliensWeb.Compat.Net
                 byte shotCount = AdvanceTxShots(s, ref tx.Ship, ref tx.ShipShots, ref tx.WireCount);
                 // alive is unconditionally true here: a dead extra is simply not in GetShips()
                 // any more, so it stops being streamed -- the receiver's timeout is its death.
-                transport.SendStream(NetProtocol.EncodeShipState((byte)slot, primary: false, friendTxSeq++, (uint)(now - sessionStartAt),
+                SendStreamToSession(NetProtocol.EncodeShipState((byte)slot, primary: false, friendTxSeq++, (uint)(now - sessionStartAt),
                     s.GetPosition(), s.NetVelocity, s.NetLastFireAim, alive: true, shotCount, s.NetShotsPerSec, s.NetBulletLife,
                     scriptGate: false, s.NetAsplodeBits, s.NetBounceBits));
+            }
+        }
+
+        // THE HOST'S HUB DUTY (card 87242257): every client's ships, re-streamed to every OTHER
+        // client as NON-primary slot-keyed frames -- host clock, own relay seq -- so a recipient
+        // cannot tell a relayed client primary from a host couch ship, which is the point of
+        // v23's one ship path. Runs on the ship-stream cadence beside SendFriendStates.
+        //
+        // The samples come off each channel's NEWEST buffered frame rather than the host's own
+        // interpolated puppet: the cumulative shot count and roll rings must cross UNALTERED
+        // (they are per-slot tallies the recipient takes wrapped deltas of), and a channel keeps
+        // streaming through windows where the host's puppet does not exist. The recipient's own
+        // interpolation smooths the raw poses; the added latency budget is card 6fb406bc's
+        // (relayed-channel interp delay).
+        //
+        // DEATH PROPAGATES AS THE EXTRAS SEMANTIC: a primary whose alive latch is down -- and
+        // any channel gone quiet past FriendTimeoutMs -- simply stops being relayed, and the
+        // recipient's 500 ms timeout explodes its puppet; the respawn's fresh stream re-spawns
+        // it (the resume-gap clear keeps the recipient from bridging the death). A departed
+        // peer's seats are freed by EvPeerLeft, not by this going quiet.
+        private static void RelayPeerShips(long now)
+        {
+            if (UpPeerCount() < 2)
+            {
+                return;
+            }
+            foreach (PeerChannel p in peers.Values)
+            {
+                if (!p.Up || p.PrimarySlot == NetProtocol.SlotNone)
+                {
+                    continue;
+                }
+                if (p.Primary.Alive && p.Primary.Buffer.HasSamples)
+                {
+                    RelayShipSample(p, p.PrimarySlot, p.Primary, now);
+                }
+                foreach (KeyValuePair<byte, ShipChannel> extra in p.Extras)
+                {
+                    if (extra.Value.Buffer.HasSamples && now - extra.Value.LastRxAt <= FriendTimeoutMs)
+                    {
+                        RelayShipSample(p, extra.Key, extra.Value, now);
+                    }
+                }
+            }
+        }
+
+        private static void RelayShipSample(PeerChannel from, byte slot, ShipChannel ch, long now)
+        {
+            ShipSample newest = ch.Buffer.Newest;
+            byte[] frame = NetProtocol.EncodeShipState(slot, primary: false, relayShipSeq++, (uint)(now - sessionStartAt),
+                newest.Pos, newest.Vel, newest.Aim, alive: true, newest.ShotCount, ch.ShotsPerSec, ch.BulletLife,
+                scriptGate: false, newest.AsplodeBits, newest.BounceBits);
+            foreach (PeerChannel q in peers.Values)
+            {
+                if (q.Up && q != from)
+                {
+                    transport.SendStreamTo(q.Id, frame);
+                }
             }
         }
 
@@ -98,13 +156,28 @@ namespace EvilAliensWeb.Compat.Net
         // that bites more often, since couch players hit the resets that arm Purge<PlayerShip>.
         internal static bool HasFriendPuppet(byte slot)
         {
-            return peer != null && peer.Extras.TryGetValue(slot, out ShipChannel ch) && ch.Puppet != null;
+            foreach (PeerChannel p in peers.Values)
+            {
+                if (p.Extras.TryGetValue(slot, out ShipChannel ch) && ch.Puppet != null)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
-        // Is this slot actively streamed to us? (Host-side grant bookkeeping asks.)
-        private static bool FriendChannelExists(byte slot)
+        // Is this slot actively streamed to us? (Host-side grant bookkeeping asks; internal for
+        // NetNPeerTest's own-slot-refusal leg, whose subject is exactly a channel NOT existing.)
+        internal static bool FriendChannelExists(byte slot)
         {
-            return peer != null && peer.Extras.ContainsKey(slot);
+            foreach (PeerChannel p in peers.Values)
+            {
+                if (p.Extras.ContainsKey(slot))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         // ---- receive (either role) --------------------------------------------------------------
@@ -113,6 +186,15 @@ namespace EvilAliensWeb.Compat.Net
         // heartbeat and (if needed) run PeerConnected before routing here.
         private static void HandleExtraShipFrame(PeerChannel p, byte slot, ShipSample sample, int shots, float life)
         {
+            // Nothing off the wire may drive a locally-owned ship (card 87242257): on a bus
+            // medium a client can see frames that were not meant for it, and a relay echo or a
+            // slot disagreement must not seat a puppet in -- or feed samples at -- our own seat.
+            // The primary slot is tested by NUMBER as well as by seat, because the grant is ours
+            // from the handshake on while the seat itself only exists once a level launches.
+            if (slot == localPrimarySlot || OwnsSlot(slot))
+            {
+                return;
+            }
             if (!p.Extras.TryGetValue(slot, out ShipChannel ch))
             {
                 ch = new ShipChannel(isPrimary: false);
@@ -167,7 +249,7 @@ namespace EvilAliensWeb.Compat.Net
             // kept in the disjunction for INTENT, not effect -- it arms strictly later than the
             // link-quiet test, so today it can never change the result; it stays so the ladder
             // still reads (and behaves) right if the stall flag ever gains hysteresis.
-            long timeout = (p.RemotePaused || localPaused) ? PausedPeerTimeoutMs
+            long timeout = (AnyPeerPaused() || localPaused) ? PausedPeerTimeoutMs
                 : (p.Stalled || now - p.LastRxStreamAt > FriendTimeoutMs) ? PeerTimeoutMs + PeerGraceMs
                 : FriendTimeoutMs;
             friendScratchSlots.Clear();
@@ -277,28 +359,44 @@ namespace EvilAliensWeb.Compat.Net
         // DriveRemoteShip): resolve this ship's channel, then the shared DriveShip does the work.
         public static void DriveFriendShip(PlayerShip ship, GameTime gameTime)
         {
-            if (!Active || peer == null)
+            if (!Active)
             {
                 return;
             }
             ShipChannel ch = null;
-            foreach (ShipChannel candidate in peer.Extras.Values)
+            foreach (PeerChannel p in peers.Values)
             {
-                if (ReferenceEquals(candidate.Puppet, ship))
+                foreach (ShipChannel candidate in p.Extras.Values)
                 {
-                    ch = candidate;
+                    if (ReferenceEquals(candidate.Puppet, ship))
+                    {
+                        ch = candidate;
+                        break;
+                    }
+                }
+                if (ch != null)
+                {
                     break;
                 }
             }
             // ADOPT a ship the scene spawned into this slot behind our back -- SpawnAllPlayers
             // respawns every seated slot after a death/checkpoint reset, puppet slots included.
             // Without this the re-spawned puppet matches no channel and freezes on its spawn pose
-            // forever (the primary remote path has always adopted; this one didn't).
-            if (ch == null && peer.Extras.TryGetValue((byte)ship.Owner, out ShipChannel bySlot))
+            // forever (the primary remote path has always adopted; this one didn't). Slots are
+            // globally unique across the peers (host-allocated), so the first channel keyed by
+            // this seat is THE channel.
+            if (ch == null)
             {
-                bySlot.Puppet = ship;
-                bySlot.RenderMs = double.NaN;
-                ch = bySlot;
+                foreach (PeerChannel p in peers.Values)
+                {
+                    if (p.Extras.TryGetValue((byte)ship.Owner, out ShipChannel bySlot))
+                    {
+                        bySlot.Puppet = ship;
+                        bySlot.RenderMs = double.NaN;
+                        ch = bySlot;
+                        break;
+                    }
+                }
             }
             if (ch == null)
             {
@@ -346,13 +444,13 @@ namespace EvilAliensWeb.Compat.Net
         // clears the slot bookkeeping that is not per-peer.
         private static void ResetFriends()
         {
-            if (peer != null)
+            foreach (PeerChannel p in peers.Values)
             {
-                foreach (ShipChannel ch in peer.Extras.Values)
+                foreach (ShipChannel ch in p.Extras.Values)
                 {
                     ch.Puppet = null;
                 }
-                peer.Extras.Clear();
+                p.Extras.Clear();
             }
             ResetFriendTx();
         }

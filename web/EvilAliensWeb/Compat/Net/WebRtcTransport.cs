@@ -86,8 +86,7 @@ namespace EvilAliensWeb.Compat.Net
         private void Forward(byte[] payload, bool reliable, string peerId)
         {
             // The senderId is JS's real per-connection id since card 583a3ef8 (it was the
-            // hard-coded literal "peer"). NetSession still discards it while the protocol is
-            // 2-peer; the per-peer stages key their channels off it.
+            // hard-coded literal "peer"); NetSession keys its peer channels off it.
             OnData?.Invoke(payload, reliable, peerId);
         }
 

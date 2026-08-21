@@ -135,13 +135,20 @@ namespace EvilAliensWeb.Compat.Net
         // would mis-parse every ship frame in both directions and every HUD entry after the
         // first. Behaviour-neutral at 2 peers by design; the session layer's N-peer semantics
         // are card 87242257's.
+        // v24 (card 87242257, Stage 11.9): EvPeerLeft (event 27) -- the host tells the remaining
+        // clients that a departed peer's roster seats are free, which the new match-end policy
+        // (a client leaving no longer ends the match) makes a fact they cannot infer from the
+        // relay going quiet. New event type only, so an older peer would merely leak the seats
+        // -- but the handshake refuses a mismatched pairing anyway (the NOTE below). The same
+        // card makes the host->client EvPause carry a per-recipient AGGREGATE ("someone besides
+        // you is paused") rather than the host's own pause alone; payload unchanged.
         // NOTE, because the v18/v21 notes above can read otherwise: no peer ever sees a version it
         // does not itself speak. OnHandshake refuses `ver != ProtocolVersion` outright with
         // RejectVersion before a single snapshot is exchanged, and the build-hash equality check
         // right behind it would refuse anyway. So a bump here is BOOKKEEPING -- it names the wire
         // layout for the next reader; it is not a compatibility measure, and there is no
         // graceful-degradation path to reason about in either direction.
-        public const byte ProtocolVersion = 23;
+        public const byte ProtocolVersion = 24;
         public const float InterpDelayMs = 100f;
 
         // ~30 Hz ship stream. INTERNAL because NetFireTest scripts its packet cadence against it.
@@ -256,10 +263,11 @@ namespace EvilAliensWeb.Compat.Net
 
         public static bool Active { get; private set; }
 
-        // FACADE over the peer channel (card b2828be8): the static API is unchanged for its ~60
-        // external call sites while the state behind it lives per-peer. "The peer" is the one
-        // PeerChannel this build pairs; every facade here reads through it.
-        public static bool PeerUp => peer != null && peer.Up;
+        // FACADE over the peer channels (card b2828be8; a real SET since card 87242257): the
+        // static API is unchanged for its ~60 external call sites while the state behind it
+        // lives per-peer. The boolean facades are AGGREGATES now -- "a peer is up", "someone
+        // remote holds a pause" -- which is exactly what every external caller was asking.
+        public static bool PeerUp => AnyPeerUp();
 
         public static bool IsHost => Active && isHost;
         public static bool IsClient => Active && !isHost;
@@ -277,8 +285,26 @@ namespace EvilAliensWeb.Compat.Net
         // session or a build that never sends the bit all leave the joiner spawning normally.
         // The only thing that can hold a ship back is a live host actively saying so, which is
         // what keeps the worst case "P2 flies around during the intro" (the pre-card bug) rather
-        // than "P2 never gets a ship".
-        public static bool PeerHoldsShipSpawn => IsClient && peer != null && peer.Up && peer.ScriptGate;
+        // than "P2 never gets a ship". (A client's one channel IS its host, so the any-peer scan
+        // reads exactly the host's bit -- HandleShipFrame only ever latches it client-side.)
+        public static bool PeerHoldsShipSpawn
+        {
+            get
+            {
+                if (!IsClient)
+                {
+                    return false;
+                }
+                foreach (PeerChannel p in peers.Values)
+                {
+                    if (p.Up && p.ScriptGate)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
 
         // Card 9a3175d0: IsReplicableInstance, not IsReplicable -- a decorative instance is the
         // client's OWN to spawn (its spawner is what got replicated), so the bin must let it
@@ -298,8 +324,23 @@ namespace EvilAliensWeb.Compat.Net
 
         // Peer stream quiet past PeerStallMs but not yet past the drop verdict -- the grace
         // window. Drives the "waiting for other player" banner and parks puppet dead-reckoning
-        // (NetPuppets.Drive); never freezes the world.
-        internal static bool PeerStalled => peer != null && peer.Stalled;
+        // (NetPuppets.Drive); never freezes the world. An AGGREGATE since card 87242257: the
+        // banner (and the parked dead reckoning behind it) is about "is some participant's
+        // stream unwell", and the per-peer flags live on the channels.
+        internal static bool PeerStalled
+        {
+            get
+            {
+                foreach (PeerChannel p in peers.Values)
+                {
+                    if (p.Stalled)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
 
         private static bool isHost;
         private static Game game;
@@ -312,71 +353,154 @@ namespace EvilAliensWeb.Compat.Net
 
         private static readonly Queue<(byte[] data, bool reliable, string from)> rxQueue = new Queue<(byte[], bool, string)>();
 
-        // ---- the peer channels (card b2828be8) ----------------------------------------------
+        // ---- the peer channels (card b2828be8; a SET since card 87242257) -------------------
         //
-        // Keyed by the transport senderId (the 11.7 address). THIS BUILD PAIRS EXACTLY ONE PEER
-        // -- the card's acceptance criterion -- so the dictionary holds at most one entry and
-        // `peer` is that entry (null before first contact). The dictionary shape is what card
-        // 87242257 (N-peer session) extends; nothing below the facade may assume the singleton.
+        // Keyed by the transport senderId (the 11.7 address). A HOST hub holds up to
+        // MaxRemotePeers channels on the star topology plans/4p-online-coop.md fixed; a CLIENT
+        // holds exactly one -- its host -- and only ever CREATES it from a handshake frame whose
+        // role byte says host, because on a bus medium (BroadcastChannel) a client sees its
+        // fellow clients' frames directly and must not bind to one.
         private static readonly Dictionary<string, PeerChannel> peers = new Dictionary<string, PeerChannel>();
-        private static PeerChannel peer;
-        // SenderIds we refused frames from (a third identity while a peer is live), so the
-        // console says each name once rather than at 30 Hz.
+        // Iteration scratch: PeerLost / a kick removes channels mid-walk, so every loop that can
+        // mutate the set walks this copy. ONE list, so a walker must re-snapshot after calling
+        // anything that could itself snapshot (nothing today does).
+        private static readonly List<PeerChannel> peerScratch = new List<PeerChannel>(4);
+        // Oracle.MaxPlayers minus the host's own seat: more peers than this can never all be
+        // seated, so the surplus is refused at the door with an addressed RejectFull.
+        private const int MaxRemotePeers = 3;
+        // SenderIds refused at the door (over capacity), so each is rejected + named once.
         private static readonly HashSet<string> extraSenderReported = new HashSet<string>();
+        // How long a Refused channel keeps soaking up its sender's frames before it is swept;
+        // its bye sweeps it earlier. Generous -- the cost of holding one is a dictionary probe.
+        private const long RefusedChannelSweepMs = 30000;
         // Byes queued from the transport callback, drained on the game tick (world mutation
         // belongs there). The id is the departing peer's, except WebRtcTransport's terminal
         // whole-link failure, which keeps its legacy "phase:reason" string -- an unrecognized
         // id therefore means "every peer" (INetTransport's documented contract).
         private static readonly Queue<string> byeQueue = new Queue<string>();
 
-        // Resolve a senderId to its channel, creating one on first contact. A DOWN peer
-        // reconnecting under a fresh identity (a reloaded tab mints a new BroadcastChannel id)
-        // RE-KEYS the existing channel -- the static singletons served whoever talked, so the
-        // granted seat and seq bookkeeping surviving a reconnect is the pre-card behaviour, kept.
-        // A third identity while the peer is LIVE is refused: exactly 2 peers on the wire.
-        private static PeerChannel GetOrCreatePeer(string from)
+        private static bool AnyPeerUp()
+        {
+            foreach (PeerChannel p in peers.Values)
+            {
+                if (p.Up)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static int UpPeerCount()
+        {
+            int n = 0;
+            foreach (PeerChannel p in peers.Values)
+            {
+                if (p.Up)
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        // A CLIENT's one channel -- its host -- up or not; null before first contact. Host-side
+        // there is no such thing as "the" peer any more; do not call it there.
+        private static PeerChannel ClientHostChannel()
+        {
+            foreach (PeerChannel p in peers.Values)
+            {
+                return p;
+            }
+            return null;
+        }
+
+        private static List<PeerChannel> PeersSnapshot()
+        {
+            peerScratch.Clear();
+            foreach (PeerChannel p in peers.Values)
+            {
+                peerScratch.Add(p);
+            }
+            return peerScratch;
+        }
+
+        // Resolve a senderId to its channel, creating one where the role's rules allow. A DOWN,
+        // unrefused channel re-keys to a fresh identity (a reloaded tab mints a new
+        // BroadcastChannel id), so the granted seat and seq bookkeeping survive a reconnect --
+        // the pre-11.9 behaviour, kept per channel. (With several down channels the first found
+        // is taken: which seat a reconnecting stranger owned is not derivable from a senderId,
+        // and the dev ?net= flow this serves runs one joiner per tab.) A Refused channel soaks
+        // its sender's frames up silently until swept.
+        private static PeerChannel GetOrCreatePeer(string from, byte[] data)
         {
             from = from ?? "";
-            if (peer == null)
+            if (peers.TryGetValue(from, out PeerChannel existing))
             {
-                peer = new PeerChannel(from);
-                peers[peer.Id] = peer;
-                return peer;
+                return existing.Refused ? null : existing;
             }
-            if (peer.Id == from)
+            if (!isHost)
             {
-                return peer;
+                // The client side of the star: exactly one channel, created only by a
+                // host-role Hello/Welcome (data[2] is the role byte in both layouts). Fellow
+                // clients' hellos and streams on a bus medium are routine, not faults, so the
+                // drop is silent. The cost of the filter is that a mid-session reload waits for
+                // the hello exchange instead of the host's next stream frame -- one second.
+                if (peers.Count > 0)
+                {
+                    return null;
+                }
+                bool hostHandshake = (data[0] == NetProtocol.MsgHello || data[0] == NetProtocol.MsgWelcome)
+                    && data.Length >= 3 && data[2] != 0;
+                if (!hostHandshake)
+                {
+                    return null;
+                }
+                PeerChannel host = new PeerChannel(from);
+                peers[host.Id] = host;
+                return host;
             }
-            if (!peer.Up)
+            foreach (PeerChannel candidate in peers.Values)
             {
-                peers.Remove(peer.Id);
-                peer.Id = from;
-                peers[peer.Id] = peer;
-                return peer;
+                if (!candidate.Up && !candidate.Refused)
+                {
+                    peers.Remove(candidate.Id);
+                    candidate.Id = from;
+                    peers[candidate.Id] = candidate;
+                    return candidate;
+                }
             }
-            // NOT SendRejectOnce: that helper queues a whole-session wind-down (pendingStopAt),
-            // so a stray third tab could end a live pairing. A per-peer reject that leaves the
-            // session standing is card 87242257's per-peer handshake work; until then the drop
-            // matches the transport contract (an unknown target is a silent drop). The report
-            // set is capped so a reconnect-looping tab cannot grow it for the session's life.
+            if (peers.Count < MaxRemotePeers)
+            {
+                PeerChannel p = new PeerChannel(from);
+                peers[p.Id] = p;
+                return p;
+            }
+            // Over capacity: refuse at the door, ADDRESSED so the newcomer hears "Game full"
+            // instead of hanging on a silent drop, and once per id so a retry loop cannot spam
+            // the console (the set is capped so a reconnect-looping tab cannot grow it forever).
             if (extraSenderReported.Count < 16 && extraSenderReported.Add(from))
             {
-                Console.WriteLine("[net] dropping frames from unexpected peer id '" + from
-                    + "' -- this build pairs exactly one peer (N-peer sessions are card 87242257)");
+                transport.SendReliableTo(from, NetProtocol.EncodeReject(NetProtocol.RejectFull));
+                Console.WriteLine("[net] refusing peer id '" + from + "' -- session already holds "
+                    + peers.Count + " peers (cap " + MaxRemotePeers + ")");
             }
             return null;
         }
 
         // handshake / heartbeat
         private static long sessionStartAt;
-        // Session-level rather than per-peer: the hello is a broadcast, and before first contact
-        // there is no channel to hold the clock. Card 87242257 moves it per-peer with the rest
-        // of the handshake loop.
+        // The BROADCAST hello's clock -- only used while no channel exists at all (it is how a
+        // pairing is initiated); once a channel is known its own LastHelloTx paces the
+        // addressed retries.
         private static long lastHelloTx;
 
         // tx
         private static ushort txSeq;
-        private static ushort txEventSeq;
+        // (the reliable EVENT seq lives per-recipient on PeerChannel.TxEventSeq since card
+        // 87242257 -- see SendEventToPeer; the relayed ship stream keeps one shared seq below,
+        // since the extras receive path reads none)
+        private static ushort relayShipSeq;
         // The world snapshot's own packet counter (card f5cf7a5c). Monotone for the whole SESSION,
         // not per match: ResetPerMatchState deliberately leaves it alone, exactly as it leaves the
         // tx/rx event sequences alone -- the puppet layer's id maps are cycled there, so no
@@ -533,6 +657,79 @@ namespace EvilAliensWeb.Compat.Net
         // Every cadence in this file reads through here, so injecting the host's clock (card
         // 25ad0659 step 2a) makes the whole session drivable on a virtual clock in one line.
         private static long NowMs => NetHost.Current.NowMs;
+
+        // ---- per-recipient reliable sends (card 87242257) -----------------------------------
+        //
+        // Every reliable EVENT is stamped with the RECIPIENT channel's own TxEventSeq: addressed
+        // sends (a welcome's grant, a replay catch-up, a relayed event) under one global counter
+        // would open a false seqGap at every peer that was not the target, and seqGap=0 is a
+        // health bar the verification gate asserts. A broadcast is therefore N addressed sends,
+        // each contiguous on its own channel -- byte-identical to the old broadcast at one peer.
+
+        private delegate byte[] EventEncoder(ushort seq);
+
+        // The ADDRESSED CATCH-UP latch: while set, "session-wide" event sends route to this one
+        // peer instead. The EvReady handler wraps NetIdRegistry.ReplayLive() +
+        // NetReplayCatchUp() with it, so a late joiner's burst reaches only the peer that asked
+        // -- re-blasting every already-caught-up peer was the 4p plan's named hazard with the
+        // unaddressed replay.
+        private static PeerChannel replayTarget;
+
+        private static void SendEventToPeer(PeerChannel p, EventEncoder encode)
+        {
+            transport.SendReliableTo(p.Id, encode(p.TxEventSeq++));
+            metrics.EventsTx++;
+        }
+
+        // "Broadcast" an event: one addressed send per UP peer, minus an optional exclusion (the
+        // relay's source must not hear its own event back). Honours the replayTarget latch.
+        private static void SendEventToSessionPeers(EventEncoder encode, PeerChannel except = null)
+        {
+            if (replayTarget != null)
+            {
+                if (replayTarget.Up && replayTarget != except)
+                {
+                    SendEventToPeer(replayTarget, encode);
+                }
+                return;
+            }
+            foreach (PeerChannel p in peers.Values)
+            {
+                if (p.Up && p != except)
+                {
+                    SendEventToPeer(p, encode);
+                }
+            }
+        }
+
+        // Host hub: re-emit a client-sent symmetric event to every OTHER client, under each
+        // recipient channel's own event seq (card 87242257). No-op for a client, or with nobody
+        // else up. Addressed by construction -- the source must never hear its own event back
+        // (an echoed pause would freeze the pauser's world under a "remote" pause).
+        private static void RelayFromClient(PeerChannel from, EventEncoder encode)
+        {
+            if (isHost)
+            {
+                SendEventToSessionPeers(encode, except: from);
+            }
+        }
+
+        // The stream lane's session send. The host genuinely broadcasts (everyone wants its
+        // frames); a client addresses its host, so a bus medium carries no client-to-client
+        // stream noise for the other tabs to filter.
+        private static void SendStreamToSession(byte[] payload)
+        {
+            if (!isHost)
+            {
+                PeerChannel host = ClientHostChannel();
+                if (host != null)
+                {
+                    transport.SendStreamTo(host.Id, payload);
+                    return;
+                }
+            }
+            transport.SendStream(payload);
+        }
 
         // URL boot path (?net=host/join [&rtc]) -- called from Game1.Initialize; a plain
         // boot (NetRole.None) constructs nothing. Deliberately still reads DebugFlags direct:
@@ -707,7 +904,12 @@ namespace EvilAliensWeb.Compat.Net
         // because the retry gate IS `puppet == null` -- adopting a ship the bin diverted points it
         // at a ship the world does not have (card 74403f83; the window is one tick, see the note
         // in SpawnPuppet).
-        internal static bool HasRemotePuppet => peer != null && peer.Primary.Puppet != null;
+        internal static bool HasRemotePuppet => AnyPrimaryPuppet();
+
+        // Channel-census read seams for NetNPeerTest -- the peer SET is otherwise observable
+        // only through log lines.
+        internal static int PeerChannelCount => peers.Count;
+        internal static int UpPeerCountNow => UpPeerCount();
 
         private static void StartWith(Game g, bool host, INetTransport t, string room, bool asMenuSession, bool asListedSession)
         {
@@ -785,9 +987,11 @@ namespace EvilAliensWeb.Compat.Net
             }
             Console.WriteLine("[net] session stop (" + reason + ")");
             Active = false;
-            if (peer != null)
+            foreach (PeerChannel p in peers.Values)
             {
-                peer.Up = false;
+                p.Up = false;
+                p.RemotePaused = false;
+                p.Stalled = false;
             }
             transport.Close();
             transport = null;
@@ -802,15 +1006,10 @@ namespace EvilAliensWeb.Compat.Net
             {
                 NetPuppets.Disable();
             }
-            if (peer != null && peer.RemotePaused)
-            {
-                peer.RemotePaused = false;
-                NetScene.Current?.NetSetRemotePaused(false);
-            }
-            if (peer != null)
-            {
-                ClearPeerStalled(peer); // never leave the banner up over a session that no longer exists
-            }
+            // Never leave the world frozen, or the banner up, over a session that no longer
+            // exists -- the aggregates just went false with the flags above.
+            SyncRemotePauseToScene();
+            SyncStallBannerToScene();
             ResetPerSessionState();
             if (notice != null)
             {
@@ -831,15 +1030,18 @@ namespace EvilAliensWeb.Compat.Net
         {
             localPaused = false;
             rxQueue.Clear();
-            // The channels die with the session: a fresh pairing negotiates a fresh peer, and
+            // The channels die with the session: a fresh pairing negotiates fresh peers, and
             // the puppet COMPONENTS are torn down by the scene's own purge as always.
-            if (peer != null)
+            foreach (PeerChannel p in peers.Values)
             {
-                peer.Primary.Puppet = null;
+                p.Primary.Puppet = null;
             }
             ResetFriends();
             peers.Clear();
-            peer = null;
+            remotePauseApplied = false;
+            stallBannerApplied = false;
+            kickOfferPeer = null;
+            replayTarget = null;
             byeQueue.Clear();
             extraSenderReported.Clear();
             localPrimarySlot = HostPrimarySlot;
@@ -850,7 +1052,7 @@ namespace EvilAliensWeb.Compat.Net
             localJoinSimAt = 0;
             unmarkedTeleportReported.Clear();
             txSeq = 0;
-            txEventSeq = 0;
+            relayShipSeq = 0;
             txSnapshotSeq = 0;
             lastTxShotCount = 0;
             lastTxShip = null;   // also drops a stale ship reference from the previous session
@@ -921,8 +1123,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeLaunchEvent(txEventSeq++, (byte)level, (byte)difficulty));
-            metrics.EventsTx++;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeLaunchEvent(seq, (byte)level, (byte)difficulty));
             Console.WriteLine("[net] tx launch level=" + level + " difficulty=" + difficulty);
         }
 
@@ -968,83 +1169,117 @@ namespace EvilAliensWeb.Compat.Net
             DrainPeerByes();
             if (!Active)
             {
-                return; // a bye ended the session (menu session match end)
+                return; // a bye ended the session (the host went away, or the last peer did)
             }
             UpdateSceneEdges();
             if (!Active)
             {
-                return; // the local match ended (menu session) -- Stop() ran
+                return; // the local match ended -- Stop() ran
             }
-            if (peer != null)
+            SweepRefusedChannels(now);
+            // Initiate: while NO channel exists the hello is a broadcast -- it is how a pairing
+            // starts (a client knocking on its host, a dev host knocking first). Once a channel
+            // is known, its handshake retries ADDRESSED below, each on its own clock, until THAT
+            // peer's slot exchange settles -- whoever hears the other's hello first goes up
+            // immediately, and a client that fell silent there would never be answered with its
+            // slot grant. An unset PrimarySlot means "not settled" for both roles (the host sets
+            // it when it reserves the joiner's seat, the client when it adopts its own).
+            if (peers.Count == 0 && now - lastHelloTx >= HelloIntervalMs)
             {
-                AdvanceShipClock(peer.Primary);
+                lastHelloTx = now;
+                transport.SendReliable(NetProtocol.EncodeHello(ProtocolVersion, isHost, localBuildHash, LocalHelloFlags(),
+                    NetProtocol.SlotNone, localPeerId, LocalBlockedSlots()));
             }
-            // Keep saying hello until the SLOT exchange has settled too, not just until the peer
-            // is up: whoever hears the other's hello first goes PeerUp immediately, and a client
-            // that fell silent there would never be answered with its slot grant.
-            // An unset PrimarySlot means "not settled" for both roles (the host sets it when
-            // it reserves the joiner's seat, the client when it adopts its own).
-            if (peer == null || !peer.Up || peer.PrimarySlot == NetProtocol.SlotNone)
+            // The paused widening covers ANY held pause, not just this channel's: a world frozen
+            // by anyone's pause has every participant's tab liable to background-throttle, so
+            // every link takes the wide backstop while the freeze lasts (card 87242257).
+            bool anyPaused = localPaused || AnyPeerPaused();
+            foreach (PeerChannel p in PeersSnapshot())
             {
-                if (now - lastHelloTx >= HelloIntervalMs)
+                if (p.Refused)
                 {
-                    lastHelloTx = now;
-                    transport.SendReliable(NetProtocol.EncodeHello(ProtocolVersion, isHost, localBuildHash, LocalHelloFlags(),
-                        isHost ? (peer?.PrimarySlot ?? NetProtocol.SlotNone) : NetProtocol.SlotNone, localPeerId, LocalBlockedSlots()));
+                    continue;
                 }
-            }
-            if (peer != null && peer.Up)
-            {
-                long quiet = now - peer.LastRxStreamAt;
-                bool paused = peer.RemotePaused || localPaused;
-                if (quiet > (paused ? PausedPeerTimeoutMs : PeerTimeoutMs + PeerGraceMs))
+                AdvanceShipClock(p.Primary);
+                if ((!p.Up || p.PrimarySlot == NetProtocol.SlotNone) && now - p.LastHelloTx >= HelloIntervalMs)
                 {
-                    PeerLost(peer, "timeout");
+                    p.LastHelloTx = now;
+                    transport.SendReliableTo(p.Id, NetProtocol.EncodeHello(ProtocolVersion, isHost, localBuildHash, LocalHelloFlags(),
+                        isHost ? p.PrimarySlot : NetProtocol.SlotNone, localPeerId, LocalBlockedSlots()));
+                }
+                if (!p.Up)
+                {
+                    continue;
+                }
+                long quiet = now - p.LastRxStreamAt;
+                if (quiet > (anyPaused ? PausedPeerTimeoutMs : PeerTimeoutMs + PeerGraceMs))
+                {
+                    // PER-PEER verdict (card 87242257): for a host this is one client departing
+                    // -- seats free, play continues; only a client losing its HOST (or the last
+                    // client leaving a lobby with no level up) ends anything.
+                    PeerLost(p, "timeout");
                 }
                 else
                 {
                     // Grace window (card 11.5): past PeerStallMs the link is visibly unwell,
                     // but the verdict is deferred by PeerGraceMs and we keep streaming
                     // throughout, so a wifi hiccup or a backgrounded tab's burst-send recovers
-                    // instead of ending the run. A PAUSED peer is an explicit "here but
+                    // instead of ending the run. A PAUSED world is an explicit "here but
                     // frozen" state whose own overlay already says so -- no stall banner on
-                    // top of it, and its much wider backstop still applies.
-                    SetPeerStalled(peer, !paused && quiet > PeerStallMs, recovered: quiet <= PeerStallMs);
-                    if (now - lastStreamTx >= StreamIntervalMs)
-                    {
-                        SendShipState(now);
-                        // Couch players + host AI friends ride the same cadence, both directions.
-                        SendFriendStates(now);
-                    }
-                    if (now - lastHudTx >= HudIntervalMs)
-                    {
-                        SendHudState(now);
-                    }
-                    if (isHost && now - lastSnapshotTx >= SnapshotIntervalMs)
-                    {
-                        SendWorldSnapshot(now);
-                    }
-                    if (isHost && now - lastScoreSyncTx >= ScoreSyncIntervalMs)
-                    {
-                        SendScoreSync(now);
-                    }
+                    // top of it, and the much wider backstop still applies.
+                    SetPeerStalled(p, !anyPaused && quiet > PeerStallMs, recovered: quiet <= PeerStallMs);
+                }
+                if (!Active)
+                {
+                    return; // the loss above ended the session
                 }
             }
-            // Up is re-tested deliberately: the block above can call PeerLost("timeout"), and
-            // roster bookkeeping must not run against a session that just ended.
-            if (peer != null && peer.Up)
+            if (AnyPeerUp())
             {
+                if (now - lastStreamTx >= StreamIntervalMs)
+                {
+                    SendShipState(now);
+                    // Couch players + host AI friends ride the same cadence, both directions --
+                    // and the host's hub duty: every client's ships re-streamed to the others.
+                    SendFriendStates(now);
+                    if (isHost)
+                    {
+                        RelayPeerShips(now);
+                    }
+                }
+                if (now - lastHudTx >= HudIntervalMs)
+                {
+                    SendHudState(now);
+                }
+                if (isHost && now - lastSnapshotTx >= SnapshotIntervalMs)
+                {
+                    SendWorldSnapshot(now);
+                }
+                if (isHost && now - lastScoreSyncTx >= ScoreSyncIntervalMs)
+                {
+                    SendScoreSync(now);
+                }
                 TickLocalJoinSim(now);
                 if (isHost)
                 {
                     ExpireUnclaimedGrants(now);
-                    TickKickOffer(peer, now);
+                    foreach (PeerChannel p in PeersSnapshot())
+                    {
+                        if (p.Up)
+                        {
+                            TickKickOffer(p, now);
+                        }
+                    }
                 }
             }
-            if (peer != null)
+            foreach (PeerChannel p in PeersSnapshot())
             {
-                ManagePuppet(peer);
-                TickFriends(peer); // spawn/interpolate/expire the peer's couch + AI-friend puppets
+                if (p.Refused)
+                {
+                    continue;
+                }
+                ManagePuppet(p);
+                TickFriends(p); // spawn/interpolate/expire the peer's couch + AI-friend puppets
             }
             if (now - lastMetricsAt >= MetricsIntervalMs)
             {
@@ -1056,24 +1291,106 @@ namespace EvilAliensWeb.Compat.Net
                 metrics.ImpJitterMs = impairment.JitterMs;
                 int liveCount = isHost ? NetIdRegistry.LiveCount : NetPuppets.LiveCount;
                 Console.WriteLine(metrics.Report(isHost, PeerUp, liveCount, SnapshotTurnMs(liveCount),
-                    FindLocalShip() != null, peer != null && peer.Primary.Puppet != null, RosterReport()));
+                    FindLocalShip() != null, AnyPrimaryPuppet(), RosterReport()));
+                // The per-peer half (card 87242257), only once the session actually holds more
+                // than one channel -- so every existing 2-peer probe's log is byte-identical.
+                if (peers.Count > 1)
+                {
+                    Console.WriteLine(PeersReport(now));
+                }
+            }
+        }
+
+        private static bool AnyPrimaryPuppet()
+        {
+            foreach (PeerChannel p in peers.Values)
+            {
+                if (p.Primary.Puppet != null)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static bool AnyPeerPaused()
+        {
+            foreach (PeerChannel p in peers.Values)
+            {
+                if (p.RemotePaused)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // The per-peer [net] metrics line (card 87242257): one entry per channel -- identity,
+        // ladder state, granted seat, stream quiet, primary buffer depth, extras population and
+        // the per-recipient event seqs. Parseable like the rest of the [net] family; ';' between
+        // peers, ',' inside one.
+        private static string PeersReport(long now)
+        {
+            string s = "";
+            foreach (PeerChannel p in peers.Values)
+            {
+                string state = p.Refused ? "refused" : !p.Up ? "down" : p.Stalled ? "stalled" : p.RemotePaused ? "paused" : "up";
+                s += (s.Length > 0 ? "; " : "")
+                    + p.Id + "=" + state
+                    + ",pri=" + (p.PrimarySlot == NetProtocol.SlotNone ? "-" : p.PrimarySlot.ToString())
+                    + ",quiet=" + (p.LastRxStreamAt == 0 ? -1 : now - p.LastRxStreamAt) + "ms"
+                    + ",buf=" + (p.Primary.Buffer.HasSamples && !double.IsNaN(p.Primary.RenderMs)
+                        ? ((int)(p.Primary.Buffer.NewestMs - p.Primary.RenderMs)).ToString() : "-") + "ms"
+                    + ",extras=" + p.Extras.Count
+                    + ",evTx=" + p.TxEventSeq + ",evRx=" + (p.LastRxEventSeq < 0 ? "-" : p.LastRxEventSeq.ToString());
+            }
+            return "[netpeers] n=" + peers.Count + " " + (s.Length > 0 ? s : "-");
+        }
+
+        private static void SweepRefusedChannels(long now)
+        {
+            foreach (PeerChannel p in PeersSnapshot())
+            {
+                if (p.Refused && now >= p.RemoveAtMs)
+                {
+                    peers.Remove(p.Id);
+                }
             }
         }
 
         // Byes are queued from the transport callback and spent here, on the game tick. The id
         // names the departing peer; an UNRECOGNIZED id is WebRtcTransport's terminal whole-link
-        // "phase:reason" string, which means every peer (INetTransport's contract). With exactly
-        // one peer both readings resolve to the same channel, so the routing is shape, not
-        // behaviour -- card 87242257 is what makes the distinction bite.
+        // "phase:reason" string, which means EVERY peer at once (INetTransport's contract) --
+        // so that reading walks the whole set.
         private static void DrainPeerByes()
         {
             while (byeQueue.Count > 0)
             {
                 string from = byeQueue.Dequeue();
-                PeerChannel p = peers.TryGetValue(from, out PeerChannel byId) ? byId : peer;
-                if (p != null)
+                if (peers.TryGetValue(from, out PeerChannel byId))
                 {
-                    PeerLost(p, "bye");
+                    if (byId.Refused)
+                    {
+                        peers.Remove(byId.Id); // a refused/kicked sender finally went away
+                    }
+                    else
+                    {
+                        PeerLost(byId, "bye");
+                    }
+                }
+                else
+                {
+                    foreach (PeerChannel p in PeersSnapshot())
+                    {
+                        if (!p.Refused)
+                        {
+                            PeerLost(p, "bye");
+                        }
+                        if (!Active)
+                        {
+                            break;
+                        }
+                    }
                 }
                 if (!Active)
                 {
@@ -1145,8 +1462,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 if (!isHost && PeerUp)
                 {
-                    transport.SendReliable(NetProtocol.EncodeEmptyEvent(txEventSeq++, NetProtocol.EvReady));
-                    metrics.EventsTx++;
+                    SendEventToSessionPeers(seq => NetProtocol.EncodeEmptyEvent(seq, NetProtocol.EvReady));
                 }
                 return;
             }
@@ -1166,12 +1482,14 @@ namespace EvilAliensWeb.Compat.Net
             }
             if (menuSession || listedSession)
             {
-                // Our own level ended / we quit: tell the peer and end the match. For a JIP
-                // host this fires when its level finishes; the joiner (menu session) then
-                // exits to its menu with a notice.
+                // Our own level ended / we quit: tell the peers and leave. Under the 11.9
+                // match-end policy the two roles diverge at the RECEIVER, not here: a HOST's
+                // EvLeave ends the match for every client (host leaves -> match over, no
+                // migration), while a CLIENT's EvLeave only frees its seats on the host and
+                // play continues for everyone else.
                 if (PeerUp)
                 {
-                    transport.SendReliable(NetProtocol.EncodeEmptyEvent(txEventSeq++, NetProtocol.EvLeave));
+                    SendEventToSessionPeers(seq => NetProtocol.EncodeEmptyEvent(seq, NetProtocol.EvLeave));
                 }
                 Stop("match ended");
             }
@@ -1198,14 +1516,16 @@ namespace EvilAliensWeb.Compat.Net
         {
             localPaused = false;
             rxQueue.Clear();
-            // The channel's world-scoped half (buffers, puppets, alive latch, script gate, the
+            // Each channel's world-scoped half (buffers, puppets, alive latch, script gate, the
             // extras). Up / PrimarySlot / PeerId / the event seqs survive -- they describe the
             // PAIRING, exactly the split the comment above spells out.
-            if (peer != null)
+            foreach (PeerChannel p in peers.Values)
             {
-                ClearPeerStalled(peer);
-                peer.ResetMatchState();
+                p.Stalled = false;
+                p.ResetMatchState();
             }
+            SyncStallBannerToScene();
+            SyncRemotePauseToScene();
             // The TX half of the extra-ship stream is session-level scratch; reset it with the
             // channels so the next level's counters start clean, as ResetFriends always did.
             ResetFriendTx();
@@ -1329,7 +1649,7 @@ namespace EvilAliensWeb.Compat.Net
             // Slot-keyed like every ship frame since v23; the PRIMARY flag is what marks this as
             // the heartbeat stream, so the receiver's routing never depends on the slot-settle
             // race (the slot here can change mid-handshake on a re-grant).
-            transport.SendStream(NetProtocol.EncodeShipState(localPrimarySlot, primary: true, txSeq++, (uint)(now - sessionStartAt), pos, vel, aim, alive, shotCount, shots, bulletLife, scriptGate, asplodeBits, bounceBits));
+            SendStreamToSession(NetProtocol.EncodeShipState(localPrimarySlot, primary: true, txSeq++, (uint)(now - sessionStartAt), pos, vel, aim, alive, shotCount, shots, bulletLife, scriptGate, asplodeBits, bounceBits));
             metrics.StreamTx++;
         }
 
@@ -1386,17 +1706,31 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            transport.SendStream(NetProtocol.EncodeHudState(hudTxSlots, hudTxCombos, hudTxComboLeft, hudTxTypes, hudTxProgress, hudTxLevels, hudTxOptions, hudTxScores, count));
+            SendStreamToSession(NetProtocol.EncodeHudState(hudTxSlots, hudTxCombos, hudTxComboLeft, hudTxTypes, hudTxProgress, hudTxLevels, hudTxOptions, hudTxScores, count));
             // Counted in ENTRIES, matching HudRx -- a peer with a couch partner puts two slots in
             // one packet, so counting packets here would make the two sides incomparable.
             metrics.HudTx += count;
         }
 
-        private static void HandleHudState(byte[] data)
+        private static void HandleHudState(PeerChannel from, byte[] data)
         {
             if (score == null || !NetProtocol.TryDecodeHudCount(data, out int count))
             {
                 return;
+            }
+            // The hub relays a client's HUD packet to the other clients VERBATIM (card
+            // 87242257): it has no seq and carries only the sender's owned slots, and every
+            // receiver's own-slot guard below already protects its own panels. Addressed, so the
+            // sender never hears its own state back.
+            if (isHost)
+            {
+                foreach (PeerChannel q in peers.Values)
+                {
+                    if (q.Up && q != from)
+                    {
+                        transport.SendStreamTo(q.Id, data);
+                    }
+                }
             }
             for (int i = 0; i < count; i++)
             {
@@ -1492,8 +1826,8 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeBlastEvent(txEventSeq++, (byte)ship.Owner, pos, level));
-            metrics.EventsTx++;
+            byte slot = (byte)ship.Owner;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeBlastEvent(seq, slot, pos, level));
         }
 
         // Called from PlayerShip.PlayerShip_OnDeath, at the moment a respawn summon is spawned for
@@ -1510,8 +1844,8 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeRespawnEvent(txEventSeq++, (byte)ship.Owner, pos, durationMs));
-            metrics.EventsTx++;
+            byte slot = (byte)ship.Owner;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeRespawnEvent(seq, slot, pos, durationMs));
         }
 
         // ---- level-script beats + shared state machine (card 11.3) ---------------------------
@@ -1519,7 +1853,7 @@ namespace EvilAliensWeb.Compat.Net
         // True while the OTHER peer holds a pause. GameScene's resume paths consult this so
         // an overlapping local+remote pause only unfreezes when both are clear. A facade over
         // the peer channel since card b2828be8.
-        public static bool RemotePaused => peer != null && peer.RemotePaused;
+        public static bool RemotePaused => AnyPeerPaused();
 
         // True while OUR pause menu is up (set by OnLocalPause) -- widens the peer timeout
         // symmetrically: our own throttled ticking must not misread the peer as gone.
@@ -1536,8 +1870,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeMessageEvent(txEventSeq++, (byte)msgType, (byte)speech, angle, text));
-            metrics.EventsTx++;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeMessageEvent(seq, (byte)msgType, (byte)speech, angle, text));
             metrics.BeatsTx++;
         }
 
@@ -1552,8 +1885,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeMessageEvent(txEventSeq++, (byte)msgType, (byte)speech, angle, text, isShort));
-            metrics.EventsTx++;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeMessageEvent(seq, (byte)msgType, (byte)speech, angle, text, isShort));
             metrics.BeatsTx++;
         }
 
@@ -1582,8 +1914,7 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 netId = entry.Id;
             }
-            transport.SendReliable(NetProtocol.EncodeFxEvent(txEventSeq++, (byte)kind, netId, param));
-            metrics.EventsTx++;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeFxEvent(seq, (byte)kind, netId, param));
             metrics.BeatsTx++;
         }
 
@@ -1612,8 +1943,7 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             float ms = MathHelper.Clamp(seconds * 1000f, 0f, 65535f);
-            transport.SendReliable(NetProtocol.EncodeSlowmoEvent(txEventSeq++, (ushort)ms));
-            metrics.EventsTx++;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeSlowmoEvent(seq, (ushort)ms));
             metrics.BeatsTx++;
         }
 
@@ -1663,8 +1993,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeDyingEvent(txEventSeq++, netId));
-            metrics.EventsTx++;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeDyingEvent(seq, netId));
             if (NetHost.Current.NetLog)
             {
                 Console.WriteLine("[net] tx dying id=" + netId);
@@ -1677,8 +2006,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeUnlockEvent(txEventSeq++, (byte)item, (byte)unlockType, (byte)speech, text));
-            metrics.EventsTx++;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeUnlockEvent(seq, (byte)item, (byte)unlockType, (byte)speech, text));
             metrics.BeatsTx++;
         }
 
@@ -1688,8 +2016,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeBackgroundEvent(txEventSeq++, (byte)op, v));
-            metrics.EventsTx++;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeBackgroundEvent(seq, (byte)op, v));
             metrics.BeatsTx++;
         }
 
@@ -1707,8 +2034,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeCosmeticSwarmEvent(txEventSeq++, (byte)kind, on, rate));
-            metrics.EventsTx++;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeCosmeticSwarmEvent(seq, (byte)kind, on, rate));
             metrics.BeatsTx++;
         }
 
@@ -1723,8 +2049,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeIntroVolleyEvent(txEventSeq++, seed));
-            metrics.EventsTx++;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeIntroVolleyEvent(seq, seed));
             metrics.BeatsTx++;
         }
 
@@ -1738,8 +2063,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeByteEvent(txEventSeq++, NetProtocol.EvMusic, song < 0 ? NetProtocol.MusicStop : (byte)song));
-            metrics.EventsTx++;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeByteEvent(seq, NetProtocol.EvMusic, song < 0 ? NetProtocol.MusicStop : (byte)song));
             metrics.BeatsTx++;
         }
 
@@ -1749,8 +2073,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeEmptyEvent(txEventSeq++, NetProtocol.EvCheckpoint));
-            metrics.EventsTx++;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeEmptyEvent(seq, NetProtocol.EvCheckpoint));
             metrics.BeatsTx++;
         }
 
@@ -1766,8 +2089,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeByteEvent(txEventSeq++, NetProtocol.EvReset, mode));
-            metrics.EventsTx++;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeByteEvent(seq, NetProtocol.EvReset, mode));
             metrics.Resets++;
             if (NetHost.Current.NetLog)
             {
@@ -1781,14 +2103,20 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeEmptyEvent(txEventSeq++, NetProtocol.EvVictory));
-            metrics.EventsTx++;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeEmptyEvent(seq, NetProtocol.EvVictory));
             metrics.Victories++;
         }
 
         // Either peer: local pause menu pushed / every resume path. The receiving side
         // freezes its world with a hint overlay (no interactive menu -- you can't navigate
         // the peer's menu for them).
+        //
+        // PAUSE IS A SET since card 87242257. A client still announces its own pause level to
+        // its host; the HOST instead maintains, per client, the AGGREGATE "someone besides you
+        // holds a pause" (its own pause OR any other client's) and sends EvPause edges of THAT
+        // -- which is exactly the semantic every client's single RemotePaused bool already
+        // implements, and what keeps B frozen when A pauses, B pauses, A unpauses. At two peers
+        // the wire traffic is byte-identical to the old direct announce.
         public static void OnLocalPause(bool on)
         {
             localPaused = on && Active;
@@ -1796,12 +2124,82 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeByteEvent(txEventSeq++, NetProtocol.EvPause, (byte)(on ? 1 : 0)));
-            metrics.EventsTx++;
             if (on)
             {
                 metrics.Pauses++;
             }
+            if (isHost)
+            {
+                SyncPauseAggregateToPeers();
+                return;
+            }
+            SendEventToSessionPeers(seq => NetProtocol.EncodeByteEvent(seq, NetProtocol.EvPause, (byte)(on ? 1 : 0)));
+        }
+
+        // The world freezes while ANYONE ELSE holds a pause; the scene setter self-guards, so
+        // this only has to hand it the aggregate's edges. `remotePauseApplied` mirrors what the
+        // scene was last told, because a scene that Initializes mid-pause reads RemotePaused
+        // itself (GameScene.Initialize) and the flags can churn while no scene is up.
+        private static bool remotePauseApplied;
+
+        private static void SyncRemotePauseToScene()
+        {
+            bool any = AnyPeerPaused();
+            if (any == remotePauseApplied)
+            {
+                return;
+            }
+            remotePauseApplied = any;
+            NetScene.Current?.NetSetRemotePaused(any);
+        }
+
+        // HOST hub: push each client the edge of ITS aggregate (local pause OR any OTHER
+        // client's). Tracked per channel as PauseSentTo, so a no-change recompute sends nothing.
+        private static void SyncPauseAggregateToPeers()
+        {
+            if (!isHost)
+            {
+                return;
+            }
+            foreach (PeerChannel q in peers.Values)
+            {
+                if (!q.Up)
+                {
+                    continue;
+                }
+                bool forQ = localPaused;
+                if (!forQ)
+                {
+                    foreach (PeerChannel other in peers.Values)
+                    {
+                        if (other != q && other.RemotePaused)
+                        {
+                            forQ = true;
+                            break;
+                        }
+                    }
+                }
+                if (forQ != q.PauseSentTo)
+                {
+                    q.PauseSentTo = forQ;
+                    bool val = forQ;
+                    SendEventToPeer(q, seq => NetProtocol.EncodeByteEvent(seq, NetProtocol.EvPause, (byte)(val ? 1 : 0)));
+                }
+            }
+        }
+
+        // The stall banner is the same shape: per-peer flags, one aggregate to the scene.
+        private static bool stallBannerApplied;
+
+        private static void SyncStallBannerToScene()
+        {
+            bool any = PeerStalled;
+            if (any == stallBannerApplied)
+            {
+                return;
+            }
+            stallBannerApplied = any;
+            NetScene.Current?.NetSetPeerStalled(any);
         }
 
         // Either peer: the TeamChallenge tether broke on this screen (enemy hit / endpoint
@@ -1812,8 +2210,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            transport.SendReliable(NetProtocol.EncodeEmptyEvent(txEventSeq++, NetProtocol.EvTetherBreak));
-            metrics.EventsTx++;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeEmptyEvent(seq, NetProtocol.EvTetherBreak));
             metrics.TetherBreaks++;
         }
 
@@ -2027,7 +2424,7 @@ namespace EvilAliensWeb.Compat.Net
             // concrete type: 2c-iii measured moving it and DECLINED, so this cast is permanent
             // and is safe by construction -- see INetEntity's header for the argument.
             int extraLen = e.Descriptor.EncodeSpawnExtra((AlienDrawableGameComponent)e.Comp, extraScratch, 0);
-            transport.SendReliable(NetProtocol.EncodeSpawnEvent(txEventSeq++, e.Id, e.TypeIdx, state, extraScratch, extraLen));
+            SendEventToSessionPeers(seq => NetProtocol.EncodeSpawnEvent(seq, e.Id, e.TypeIdx, state, extraScratch, extraLen));
             // The spawn's base state carries hp too, and for a catch-up spawn it is the FIRST hp
             // the joiner ever applies -- so recording it here is what stops a freshly attached
             // peer reading as "never sent any hp" (card d108c459).
@@ -2082,8 +2479,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             // No award payload since v20 (card af96bcc2): each peer credits its own slots off
             // its own observation of the kill, so the event carries only the removal + FX facts.
-            transport.SendReliable(NetProtocol.EncodeDeathEvent(txEventSeq++, e.Id, killer, pos));
-            metrics.EventsTx++;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeDeathEvent(seq, e.Id, killer, pos));
             if (NetHost.Current.NetLog)
             {
                 Console.WriteLine("[net] tx death id=" + e.Id + " killer=" + killer);
@@ -2399,8 +2795,7 @@ namespace EvilAliensWeb.Compat.Net
         private static void SendScoreSync(long now)
         {
             lastScoreSyncTx = now;
-            transport.SendReliable(NetProtocol.EncodeScoreSync(txEventSeq++, scoreSyncSnapshotLives));
-            metrics.EventsTx++;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeScoreSync(seq, scoreSyncSnapshotLives));
         }
 
         // ---- client claims ----------------------------------------------------------------------
@@ -2414,8 +2809,7 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             // No translation: the host allocates every slot, so our oracle slot IS the wire slot.
-            transport.SendReliable(NetProtocol.EncodeClaimEvent(txEventSeq++, netId, killerSlot));
-            metrics.EventsTx++;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeClaimEvent(seq, netId, killerSlot));
             metrics.ClaimsTx++;
             if (NetHost.Current.NetLog)
             {
@@ -2459,11 +2853,12 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     continue;
                 }
-                // Every message resolves its sender's channel first: a hello creates it, and a
-                // stream frame from an unpaired sender does too (the stream IS the heartbeat --
-                // see HandleShipFrame's reconnect note). A refused sender (a third identity
-                // while the peer is live) is dropped wholesale.
-                PeerChannel p = GetOrCreatePeer(from);
+                // Every message resolves its sender's channel first: host-side a hello creates
+                // it, and a stream frame from an unpaired sender does too (the stream IS the
+                // heartbeat -- see HandleShipFrame's reconnect note); client-side only a
+                // host-role handshake frame can (the bus-medium rule -- see GetOrCreatePeer). A
+                // refused sender (over capacity, rejected, kicked) is dropped wholesale.
+                PeerChannel p = GetOrCreatePeer(from, data);
                 if (p == null)
                 {
                     continue;
@@ -2483,7 +2878,7 @@ namespace EvilAliensWeb.Compat.Net
                     HandleShipFrame(p, data);
                     break;
                 case NetProtocol.MsgHudState:
-                    HandleHudState(data);
+                    HandleHudState(p, data);
                     break;
                 case NetProtocol.MsgEvent:
                     HandleEvent(p, data);
@@ -2509,7 +2904,7 @@ namespace EvilAliensWeb.Compat.Net
             if (ver != ProtocolVersion || !NetProtocol.TryDecodeHandshake(data, out _, out _, out ulong peerHash, out byte peerFlags, out byte grantedSlot, out ulong helloPeerId, out byte peerBlockedSlots))
             {
                 Console.WriteLine("[net] peer protocol v" + ver + " != v" + ProtocolVersion);
-                SendRejectOnce(NetProtocol.RejectVersion);
+                RefusePairing(p, NetProtocol.RejectVersion);
                 return;
             }
             if (peerIsHost == isHost)
@@ -2523,7 +2918,7 @@ namespace EvilAliensWeb.Compat.Net
                 // Different binaries would desync subtly (types, descriptors, sim code) --
                 // refuse loudly instead. The usual cause is a stale-cached client.
                 Console.WriteLine("[net] peer build hash mismatch -- rejecting (update required)");
-                SendRejectOnce(NetProtocol.RejectBuild);
+                RefusePairing(p, NetProtocol.RejectBuild);
                 return;
             }
             // ?netallowdebug waives OUR OWN half of this only. The peer's bit still refuses --
@@ -2534,7 +2929,7 @@ namespace EvilAliensWeb.Compat.Net
             if (menuSession && ((peerFlags & NetProtocol.HelloFlagDebugActive) != 0 || localDebugRefuses))
             {
                 Console.WriteLine("[net] gameplay debug flags active in a menu session -- rejecting");
-                SendRejectOnce(NetProtocol.RejectFlags);
+                RefusePairing(p, NetProtocol.RejectFlags);
                 return;
             }
             p.PeerId = helloPeerId;
@@ -2547,7 +2942,7 @@ namespace EvilAliensWeb.Compat.Net
             if (isHost && IsPeerBlocked(helloPeerId))
             {
                 Console.WriteLine("[net] blocked peer tried to rejoin -- rejecting");
-                SendRejectOnce(NetProtocol.RejectBanned);
+                RefusePairing(p, NetProtocol.RejectBanned);
                 return;
             }
             // Slot allocation (card 4d904410). The host reserves the joiner's primary seat the
@@ -2558,7 +2953,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 if (!ReserveRemotePrimarySlot(p, peerBlockedSlots))
                 {
-                    return; // refused (no seat free on both sides) -- SendRejectOnce owns the wind-down
+                    return; // refused (no seat free on both sides) -- RefusePairing owned it
                 }
             }
             else if (grantedSlot != NetProtocol.SlotNone)
@@ -2567,7 +2962,9 @@ namespace EvilAliensWeb.Compat.Net
             }
             if (welcomeBack)
             {
-                transport.SendReliable(NetProtocol.EncodeWelcome(ProtocolVersion, isHost, localBuildHash, LocalHelloFlags(),
+                // ADDRESSED: the welcome carries THIS peer's granted seat, which is exactly the
+                // field that made the old broadcast wrong the moment a second joiner existed.
+                transport.SendReliableTo(p.Id, NetProtocol.EncodeWelcome(ProtocolVersion, isHost, localBuildHash, LocalHelloFlags(),
                     isHost ? p.PrimarySlot : NetProtocol.SlotNone, localPeerId, LocalBlockedSlots()));
             }
             if (!p.Up)
@@ -2648,12 +3045,13 @@ namespace EvilAliensWeb.Compat.Net
                 oracle.RemovePlayerAt(p.PrimarySlot, ControlDevice.Remote);
                 p.PrimarySlot = NetProtocol.SlotNone;
             }
-            int slot = oracle.GetPlayerIndex(ControlDevice.Remote);
+            int slot = FindLeftoverRemoteSeat(p);
             if (slot >= 0 && NetProtocol.SlotInMask(peerBlocked, slot))
             {
-                // A Remote registration the joiner cannot use (one that outlived a restarted
-                // session, or was re-seated by SpawnAllPlayers). Free it before re-picking, or we
-                // would hand out a second seat and leave this one squatting the roster.
+                // A leftover Remote registration the joiner cannot use (one that outlived a
+                // restarted session, or was re-seated by SpawnAllPlayers). Free it before
+                // re-picking, or we would hand out a second seat and leave this one squatting
+                // the roster.
                 oracle.RemovePlayerAt(slot, ControlDevice.Remote);
                 slot = -1;
             }
@@ -2671,7 +3069,7 @@ namespace EvilAliensWeb.Compat.Net
                     // and NetListing re-lists it.
                     Console.WriteLine("[net] no roster slot free for the joiner on both sides (peerBlocked="
                         + peerBlocked + ") -- rejecting");
-                    SendRejectOnce(NetProtocol.RejectFull);
+                    RefusePairing(p, NetProtocol.RejectFull);
                     return false;
                 }
                 if (!oracle.AddPlayerAt(slot, ControlDevice.Remote))
@@ -2682,6 +3080,35 @@ namespace EvilAliensWeb.Compat.Net
             p.PrimarySlot = (byte)slot;
             Console.WriteLine("[net] granted joiner primary slot=" + slot);
             return true;
+        }
+
+        // A Remote registration no OTHER channel claims (one that outlived a restarted session,
+        // or was re-seated by SpawnAllPlayers), reusable by `forPeer`. With several remote peers
+        // a bare GetPlayerIndex(Remote) scan would happily return a seat a LIVE peer is flying
+        // in -- the ambiguity every slot decision here now avoids by keying off the channels.
+        private static int FindLeftoverRemoteSeat(PeerChannel forPeer)
+        {
+            for (int i = 0; i < Oracle.MaxPlayers; i++)
+            {
+                if (!oracle.IsSeated(i) || oracle.Controller(i) != ControlDevice.Remote)
+                {
+                    continue;
+                }
+                bool claimed = false;
+                foreach (PeerChannel q in peers.Values)
+                {
+                    if (q != forPeer && !q.Refused && q.PrimarySlot == i)
+                    {
+                        claimed = true;
+                        break;
+                    }
+                }
+                if (!claimed)
+                {
+                    return i;
+                }
+            }
+            return -1;
         }
 
         // Our own roster as a slot mask, in the same shape as the peer's blockedSlots -- so the
@@ -2843,25 +3270,46 @@ namespace EvilAliensWeb.Compat.Net
             joinRequestPending = true;
             pendingJoinDevice = device;
             pendingJoinSpawn = spawnPlayer;
-            transport.SendReliable(NetProtocol.EncodeEmptyEvent(txEventSeq++, NetProtocol.EvJoinRequest));
-            metrics.EventsTx++;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeEmptyEvent(seq, NetProtocol.EvJoinRequest));
         }
 
-        // The one seat allocator, used for our own couch joins and for answering the peer's. It
-        // must never hand out the seat the joining peer's PRIMARY ship occupies: in the
-        // menu-lobby flow that reservation is made before the level launches and
-        // Game1.MenuFinished's ResetPlayers() wipes it, and SpawnPuppet only re-asserts it once
-        // the peer's first live sample lands (seconds later). A couch join landing in that window
-        // would take slot 1 and leave the remote player permanently unseatable.
+        // The one seat allocator, used for our own couch joins and for answering the peers'. It
+        // must never hand out a seat ANY peer's PRIMARY ship occupies: in the menu-lobby flow
+        // that reservation is made before the level launches and Game1.MenuFinished's
+        // ResetPlayers() wipes it, and SpawnPuppet only re-asserts it once the peer's first live
+        // sample lands (seconds later). A couch join landing in that window would take the seat
+        // and leave that remote player permanently unseatable.
         private static int AllocateSeat()
         {
-            return AllocateSeatFrom(oracle, localPrimarySlot, peer?.PrimarySlot ?? NetProtocol.SlotNone);
+            for (int slot = oracle.FirstFreeSlot(); slot >= 0; slot = oracle.FirstFreeSlot(slot + 1))
+            {
+                if (slot != localPrimarySlot && !AnyPeerHoldsPrimary(slot))
+                {
+                    return slot;
+                }
+            }
+            return -1;
         }
 
-        // The allocation itself, as a function of a roster and the two primary seats, so the
+        private static bool AnyPeerHoldsPrimary(int slot)
+        {
+            foreach (PeerChannel p in peers.Values)
+            {
+                if (!p.Refused && p.PrimarySlot == slot)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // The allocation itself, as a function of a roster and two primary seats, so the
         // reserve -> hold -> expire -> REALLOCATE cycle can be driven against a scratch Oracle
         // with no session (eaSlotTest). That cycle is the only proof that a seat the host
         // reclaims from an unclaimed grant is genuinely re-usable rather than merely released.
+        // (AllocateSeat above is the live N-peer form -- same walk, with EVERY channel's primary
+        // excluded instead of one parameter's; this stays the pure single-peer core the suite
+        // exercises.)
         internal static int AllocateSeatFrom(Oracle roster, int localPrimary, int peerPrimary)
         {
             for (int slot = roster.FirstFreeSlot(); slot >= 0; slot = roster.FirstFreeSlot(slot + 1))
@@ -2883,19 +3331,19 @@ namespace EvilAliensWeb.Compat.Net
             return nowMs > deadlineMs;
         }
 
-        // HOST: a client couch player pressed Start. Allocate a seat and answer; the seat is held
-        // as a RemoteFriend registration right away so the next allocation can't reuse it while
-        // the grant is still in flight.
-        private static void HandleJoinRequest()
+        // HOST: a client couch player pressed Start. Allocate a seat and answer -- ADDRESSED to
+        // the asking peer, so another client mid-join-request can never adopt a grant that was
+        // not its (card 87242257); the seat is held as a RemoteFriend registration right away so
+        // the next allocation can't reuse it while the grant is still in flight.
+        private static void HandleJoinRequest(PeerChannel from)
         {
             int slot = AllocateSeat();
             if (slot >= 0 && !oracle.AddPlayerAt(slot, ControlDevice.RemoteFriend))
             {
                 slot = -1;
             }
-            transport.SendReliable(NetProtocol.EncodeByteEvent(txEventSeq++, NetProtocol.EvSlotGrant,
-                slot < 0 ? NetProtocol.SlotNone : (byte)slot));
-            metrics.EventsTx++;
+            byte granted = slot < 0 ? NetProtocol.SlotNone : (byte)slot;
+            SendEventToPeer(from, seq => NetProtocol.EncodeByteEvent(seq, NetProtocol.EvSlotGrant, granted));
             if (slot >= 0)
             {
                 // Hold the reservation only until the peer's first stream for it arrives. The
@@ -3037,9 +3485,19 @@ namespace EvilAliensWeb.Compat.Net
             {
                 ships += (ships.Length > 0 ? "," : "") + p.Owner + ":" + p.Controller;
             }
-            byte peerPri = peer?.PrimarySlot ?? NetProtocol.SlotNone;
+            // One granted primary per channel; '+'-joined past the first, so a 2-peer log keeps
+            // its exact pre-11.9 shape (pri=0/1) and a 3-peer one reads pri=0/1+2.
+            string peerPris = "";
+            foreach (PeerChannel p in peers.Values)
+            {
+                if (p.Refused || p.PrimarySlot == NetProtocol.SlotNone)
+                {
+                    continue;
+                }
+                peerPris += (peerPris.Length > 0 ? "+" : "") + p.PrimarySlot;
+            }
             return (s.Length > 0 ? s : "-")
-                + " pri=" + localPrimarySlot + "/" + (peerPri == NetProtocol.SlotNone ? "-" : peerPri.ToString())
+                + " pri=" + localPrimarySlot + "/" + (peerPris.Length > 0 ? peerPris : "-")
                 + " ships=" + (ships.Length > 0 ? ships : "-");
         }
 
@@ -3169,6 +3627,72 @@ namespace EvilAliensWeb.Compat.Net
             pendingStopAt = NowMs + RejectGraceMs;
         }
 
+        // Refuse ONE pairing (card 87242257). With another peer already up the refusal is
+        // PER-PEER: a blocked griefer or stale-build straggler knocking on a live 3-player game
+        // must not end it -- the addressed reject needs no egress grace, because the session
+        // (and its transport) stays open. With nobody else up the pre-11.9 whole-session
+        // wind-down stands, notice included: a client refusing its host, an empty lobby, a
+        // listed game's first joiner -- there the session had nothing else to live for and the
+        // player is owed the reason.
+        private static void RefusePairing(PeerChannel p, byte reason)
+        {
+            if (!isHost || p == null || UpPeerCountExcept(p) == 0)
+            {
+                SendRejectOnce(reason);
+                return;
+            }
+            transport.SendReliableTo(p.Id, NetProtocol.EncodeReject(reason));
+            Console.WriteLine("[net] refused peer '" + p.Id + "' (reason=" + reason
+                + ") -- session continues with the others");
+            bool wasUp = p.Up;
+            p.Up = false;
+            p.Refused = true;
+            p.RemoveAtMs = NowMs + RefusedChannelSweepMs;
+            if (wasUp)
+            {
+                // It had a world footprint (a stream-first reconnect that then failed its
+                // handshake): free it and tell the others -- the departure path, minus the
+                // channel removal, which stays as the refusal latch.
+                byte mask = PeerSlotMask(p);
+                if (p.RemotePaused)
+                {
+                    p.RemotePaused = false;
+                    SyncRemotePauseToScene();
+                }
+                ClearPeerStalled(p);
+                if (kickOfferPeer == p)
+                {
+                    kickOfferPeer = null;
+                }
+                ReleasePeerSeats(p);
+                if (mask != 0)
+                {
+                    SendEventToSessionPeers(seq => NetProtocol.EncodeByteEvent(seq, NetProtocol.EvPeerLeft, mask));
+                }
+                SyncPauseAggregateToPeers();
+            }
+            else if (p.PrimarySlot != NetProtocol.SlotNone)
+            {
+                // A reservation made before the refusal (defensive -- today every reject fires
+                // before the seat is reserved).
+                oracle.RemovePlayerAt(p.PrimarySlot, ControlDevice.Remote);
+                p.PrimarySlot = NetProtocol.SlotNone;
+            }
+        }
+
+        private static int UpPeerCountExcept(PeerChannel except)
+        {
+            int n = 0;
+            foreach (PeerChannel q in peers.Values)
+            {
+                if (q.Up && q != except)
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
         private static void HandleReject(byte[] data)
         {
             if (data.Length < 2)
@@ -3211,7 +3735,9 @@ namespace EvilAliensWeb.Compat.Net
         {
             p.Up = true;
             p.LastRxStreamAt = NowMs;
-            Console.WriteLine("[net] peer connected (" + (isHost ? "join" : "host") + " side is up)");
+            p.PauseSentTo = false;
+            Console.WriteLine("[net] peer connected (" + (isHost ? "join" : "host") + " side is up)"
+                + (isHost && UpPeerCount() > 1 ? " -- " + UpPeerCount() + " peers" : ""));
             if (isHost)
             {
                 if (listedSession)
@@ -3220,26 +3746,39 @@ namespace EvilAliensWeb.Compat.Net
                     // already mid-level. Launch it into our current level+difficulty (it is a
                     // menu-session client that mirrors EvLaunch); its EvReady then triggers the
                     // live-world replay below plus the deep scenery catch-up (background ops /
-                    // music cue), and the 1 Hz EvScoreSync trues up score/lives.
+                    // music cue), and the 1 Hz EvScoreSync trues up score/lives. ADDRESSED: a
+                    // second joiner's arrival must not re-launch the peers already playing.
                     INetScene scene = NetScene.Current;
                     if (scene != null)
                     {
-                        transport.SendReliable(NetProtocol.EncodeLaunchEvent(txEventSeq++,
+                        SendEventToPeer(p, seq => NetProtocol.EncodeLaunchEvent(seq,
                             (byte)scene.Level, (byte)Settings.GetInstance().CurrentDifficulty));
-                        metrics.EventsTx++;
                         Console.WriteLine("[net] jip launch level=" + scene.Level
                             + " difficulty=" + Settings.GetInstance().CurrentDifficulty);
                     }
                 }
                 // Late joiner: replay the live NetId set so it can construct the already-
-                // alive world instead of starting from a death-before-spawn storm.
-                NetIdRegistry.ReplayLive();
+                // alive world instead of starting from a death-before-spawn storm. ADDRESSED
+                // to the newcomer -- the peers already caught up must not be re-blasted with
+                // the whole live set (card 87242257; the EvReady replay routes the same way).
+                replayTarget = p;
+                try
+                {
+                    NetIdRegistry.ReplayLive();
+                }
+                finally
+                {
+                    replayTarget = null;
+                }
+                // A held pause (ours or another client's) reaches the newcomer through the
+                // per-recipient aggregate.
+                SyncPauseAggregateToPeers();
+                return;
             }
             if (localPaused)
             {
-                // Re-announce a held pause across a reconnect so the peer re-freezes.
-                transport.SendReliable(NetProtocol.EncodeByteEvent(txEventSeq++, NetProtocol.EvPause, 1));
-                metrics.EventsTx++;
+                // Client: re-announce a held pause across a reconnect so the host re-freezes.
+                SendEventToPeer(p, seq => NetProtocol.EncodeByteEvent(seq, NetProtocol.EvPause, 1));
             }
         }
 
@@ -3258,33 +3797,99 @@ namespace EvilAliensWeb.Compat.Net
             scene?.NetApplyPeerLeft();
         }
 
-        // The other match-end shape: the peer goes but WE stay in our level, playing solo. Used
-        // whenever the host outlives the peer -- a JIP joiner dropping or leaving, and (card
-        // 0b8a300b) a kick, which is the same outcome the host asked for deliberately.
+        // The other match-end shape: every peer goes but WE stay in our level, playing solo.
         //
-        // Freeing the Remote seat matters as much as exploding the puppet: leave it registered
-        // and oracle.Players stays 2, so NetListing never re-lists and a phantom score panel
-        // lingers. Couch players the peer brought (card 4d904410) go the same way -- our level
-        // keeps running, so nothing else would ever purge their puppets or free their seats.
+        // Freeing the Remote seats matters as much as exploding the puppets: leave one
+        // registered and oracle.Players stays high, so NetListing never re-lists and a phantom
+        // score panel lingers. Couch players a peer brought (card 4d904410) go the same way --
+        // our level keeps running, so nothing else would ever purge their puppets or free their
+        // seats.
         private static void RevertToSinglePlayer(string reason)
         {
-            if (peer != null)
+            foreach (PeerChannel p in PeersSnapshot())
             {
-                ReleasePeerSeats(peer);
+                ReleasePeerSeats(p);
             }
             Stop(reason);
         }
 
-        // The visible half of the revert, without the teardown -- the kick path needs these two
-        // separable, because it must free the world NOW but keep the transport alive for the
-        // grace (Stop() closes it).
+        // THE MATCH-END POLICY'S CLIENT-DEPARTURE HALF (card 87242257, the design decision the
+        // card asked for): a CLIENT leaving -- clean EvLeave, drop verdict, closed tab -- frees
+        // its seats and play continues for everyone else; only the HOST leaving ends the match.
+        // The listedSession peer-loss semantic, generalised to every host-side session kind.
+        //
+        // The departed peer's seats are freed here AND on every remaining client (EvPeerLeft --
+        // they cannot infer "gone for good" from the relay going quiet, which is also what a
+        // hiccup looks like). When the LAST client goes: mid-level the host reverts to plain
+        // single-player (a listed game re-lists -- NetListing needs !Active); at the menus a
+        // pre-11.10 lobby with zero peers is a dead end, so the session stops with the notice.
+        private static void ReleaseDepartedPeer(PeerChannel p, string reason)
+        {
+            byte mask = PeerSlotMask(p);
+            if (p.RemotePaused)
+            {
+                p.RemotePaused = false;
+                SyncRemotePauseToScene();
+            }
+            ClearPeerStalled(p);
+            if (kickOfferPeer == p)
+            {
+                kickOfferPeer = null;
+            }
+            ReleasePeerSeats(p);
+            peers.Remove(p.Id);
+            if (mask != 0)
+            {
+                SendEventToSessionPeers(seq => NetProtocol.EncodeByteEvent(seq, NetProtocol.EvPeerLeft, mask));
+            }
+            SyncPauseAggregateToPeers();
+            if (AnyPeerUp())
+            {
+                Console.WriteLine("[net] " + reason + " -- " + UpPeerCount()
+                    + " peer(s) remain, playing on (seats freed: mask " + mask + ")");
+                return;
+            }
+            if (NetScene.Current != null)
+            {
+                RevertToSinglePlayer(reason);
+                return;
+            }
+            Stop(reason, "The other player left\nMatch ended");
+        }
+
+        // The departed peer's roster footprint -- its primary seat plus every couch/AI seat it
+        // streamed -- as the EvPeerLeft slot mask.
+        private static byte PeerSlotMask(PeerChannel p)
+        {
+            byte mask = 0;
+            if (p.PrimarySlot != NetProtocol.SlotNone && p.PrimarySlot < Oracle.MaxPlayers)
+            {
+                mask |= NetProtocol.SlotBit(p.PrimarySlot);
+            }
+            foreach (byte slot in p.Extras.Keys)
+            {
+                if (slot < Oracle.MaxPlayers)
+                {
+                    mask |= NetProtocol.SlotBit(slot);
+                }
+            }
+            return mask;
+        }
+
+        // The visible half of a peer's departure, without any teardown -- the kick path needs
+        // these separable, because it must free the world NOW but keep the transport alive for
+        // the egress grace (Stop() closes it). Seat release is SLOT-keyed: with several remote
+        // peers a ControlDevice.Remote scan is ambiguous, and each channel knows its own seat.
         private static void ReleasePeerSeats(PeerChannel p)
         {
             if (p.Primary.Puppet != null)
             {
                 ExplodePuppet(p.Primary);
             }
-            oracle.ReleasePlayer(ControlDevice.Remote);
+            if (p.PrimarySlot != NetProtocol.SlotNone)
+            {
+                oracle.RemovePlayerAt(p.PrimarySlot, ControlDevice.Remote);
+            }
             ReleaseAllFriendPuppets(p);
         }
 
@@ -3318,9 +3923,19 @@ namespace EvilAliensWeb.Compat.Net
             // peer's EvPause landed (NetSetRemotePaused defers to the local pause). Latching
             // regardless would burn the single offer on a menu nobody saw, and once the host
             // resumed into the peer's still-held pause it would be frozen with no way out:
-            // exactly the griefing hole this card closes.
+            // exactly the griefing hole this card closes. The kick TARGET latches with it: the
+            // menu is one shared surface (11.10 owns a per-peer kick UI), so it acts on the peer
+            // whose pause earned the offer.
             p.KickOfferShown = scene.NetShowKickMenu();
+            if (p.KickOfferShown)
+            {
+                kickOfferPeer = p;
+            }
         }
+
+        // The peer the showing kick menu is about (card 87242257) -- the pause-holder whose
+        // offer fired. Null whenever no offer is up.
+        private static PeerChannel kickOfferPeer;
 
         // Host action (card 0b8a300b): throw the peer out of the match and carry on playing.
         // `block` also refuses their rejoin for the rest of this level (see blockedPeers).
@@ -3332,31 +3947,68 @@ namespace EvilAliensWeb.Compat.Net
         // instead of being told what happened. Same reason the reject path has that grace.
         public static void KickPeer(bool block)
         {
-            if (!Active || !isHost || pendingStopAt != 0 || peer == null)
+            if (!Active || !isHost || pendingStopAt != 0)
             {
                 return;
             }
-            ApplyKickBlock(block, peer.PeerId);
-            transport.SendReliable(NetProtocol.EncodeByteEvent(txEventSeq++, NetProtocol.EvKick, (byte)(block ? 1 : 0)));
-            metrics.EventsTx++;
-            Console.WriteLine("[net] kicked the peer" + (block ? " (blocked for this level)" : ""));
-            // Release the freeze BEFORE the revert: the world is still pushed under the kicked
-            // player's pause, and NetSetRemotePaused(false) is what pops it.
-            if (peer.RemotePaused)
+            // The peer the offer was about; fall back through "a paused peer" to "the only up
+            // peer" so the ?netkickshot/eaKickTest shapes (no offer latched) keep working.
+            PeerChannel target = kickOfferPeer;
+            if (target == null || !target.Up)
             {
-                peer.RemotePaused = false;
-                NetScene.Current?.NetSetRemotePaused(false);
+                target = null;
+                foreach (PeerChannel p in peers.Values)
+                {
+                    if (p.Up && (target == null || p.RemotePaused))
+                    {
+                        target = p;
+                        if (p.RemotePaused)
+                        {
+                            break;
+                        }
+                    }
+                }
             }
-            peer.Up = false;
-            ReleasePeerSeats(peer);
-            // Deliberately NOT RevertToSinglePlayer() -- its Stop() would close the transport
-            // and abort the EvKick we just queued. The deadline below does the Stop() instead;
-            // until then the session is Active with no peer, which Update handles by taking the
-            // pendingStopAt branch and nothing else.
-            peer.KickOfferShown = false;
-            pendingStopReason = "kick teardown";
-            pendingStopNotice = null;
-            pendingStopAt = NowMs + RejectGraceMs;
+            if (target == null)
+            {
+                return;
+            }
+            kickOfferPeer = null;
+            ApplyKickBlock(block, target.PeerId);
+            SendEventToPeer(target, seq => NetProtocol.EncodeByteEvent(seq, NetProtocol.EvKick, (byte)(block ? 1 : 0)));
+            Console.WriteLine("[net] kicked the peer" + (block ? " (blocked for this level)" : ""));
+            // Release the freeze BEFORE the seat release: the world may still be pushed under
+            // the kicked player's pause, and the aggregate sync is what pops it (another peer's
+            // held pause keeps it frozen, correctly).
+            if (target.RemotePaused)
+            {
+                target.RemotePaused = false;
+                SyncRemotePauseToScene();
+            }
+            target.Up = false;
+            target.KickOfferShown = false;
+            byte mask = PeerSlotMask(target);
+            ReleasePeerSeats(target);
+            // The channel is kept, Refused, so the kicked player's still-flowing frames are
+            // dropped cheaply while the addressed EvKick gets its egress time; its bye (or the
+            // sweep) removes it. The rest of the session -- other peers included -- plays on.
+            target.Refused = true;
+            target.RemoveAtMs = NowMs + RefusedChannelSweepMs;
+            if (mask != 0)
+            {
+                SendEventToSessionPeers(seq => NetProtocol.EncodeByteEvent(seq, NetProtocol.EvPeerLeft, mask));
+            }
+            SyncPauseAggregateToPeers();
+            if (!AnyPeerUp())
+            {
+                // Nobody left. Deliberately NOT RevertToSinglePlayer() -- its Stop() would close
+                // the transport and abort the EvKick we just queued. The deadline does the
+                // Stop() instead; until then the session is Active with no peer, which Update
+                // handles by taking the pendingStopAt branch and nothing else.
+                pendingStopReason = "kick teardown";
+                pendingStopNotice = null;
+                pendingStopAt = NowMs + RejectGraceMs;
+            }
         }
 
         // "Keep Waiting": the host declined this offer, so hide the menu and start the delay
@@ -3364,12 +4016,14 @@ namespace EvilAliensWeb.Compat.Net
         // would otherwise get exactly one refusal and then a permanently frozen host.
         public static void RearmKickOffer()
         {
-            if (peer == null)
+            PeerChannel p = kickOfferPeer;
+            kickOfferPeer = null;
+            if (p == null)
             {
                 return;
             }
-            peer.RemotePauseAt = NowMs;
-            peer.KickOfferShown = false;
+            p.RemotePauseAt = NowMs;
+            p.KickOfferShown = false;
         }
 
         // The two halves of the block rule, factored out of KickPeer and HandleHello so
@@ -3409,7 +4063,8 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         // Drop the banner with no verdict attached -- used by the teardown paths, where the
-        // peer did NOT recover and saying so would be a lie.
+        // peer did NOT recover and saying so would be a lie. Banner via the aggregate: another
+        // peer still stalled keeps it up.
         private static void ClearPeerStalled(PeerChannel p)
         {
             if (!p.Stalled)
@@ -3417,7 +4072,7 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             p.Stalled = false;
-            NetScene.Current?.NetSetPeerStalled(false);
+            SyncStallBannerToScene();
         }
 
         // `recovered` distinguishes the two ways the banner drops: the stream actually came
@@ -3444,7 +4099,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             p.Stalled = true;
             Console.WriteLine("[net] peer stalled (stream quiet > " + PeerStallMs + "ms) -- grace running");
-            NetScene.Current?.NetSetPeerStalled(true);
+            SyncStallBannerToScene();
         }
 
         private static void PeerLost(PeerChannel p, string reason)
@@ -3455,28 +4110,39 @@ namespace EvilAliensWeb.Compat.Net
             }
             p.Up = false;
             Console.WriteLine("[net] peer lost (" + reason + ")");
-            if (menuSession)
+            if (!isHost)
             {
-                // Card 11.4 match-end semantics: any player leaving ends the match --
-                // menu-lobby sessions have no reconnect flow.
-                EndMatchPeerGone("peer lost: " + reason, "The other player disconnected\nMatch ended");
+                // The lost peer IS our host -- and the host leaving ends the match, the 11.9
+                // policy's other half (no host migration).
+                if (menuSession)
+                {
+                    EndMatchPeerGone("peer lost: " + reason, "The other player disconnected\nMatch ended");
+                    return;
+                }
+                DevSessionPeerDown(p);
                 return;
             }
+            if (menuSession || listedSession)
+            {
+                // A CLIENT departed: free its seats and play on (the card's design decision) --
+                // the session only ends when the last one goes, and even then only at the menus.
+                ReleaseDepartedPeer(p, "peer lost: " + reason);
+                return;
+            }
+            DevSessionPeerDown(p);
+        }
+
+        // The dev `?net=` shape: the session survives and the SAME pairing can resume, so the
+        // channel is kept -- its granted seat included -- and only the world-facing state is
+        // dropped, exactly as the singletons were.
+        private static void DevSessionPeerDown(PeerChannel p)
+        {
             ClearPeerStalled(p);
-            if (listedSession)
-            {
-                RevertToSinglePlayer("jip peer lost: " + reason);
-                return;
-            }
-            // The dev `?net=` shape: the session survives and the SAME pairing can resume, so
-            // the channel is kept -- its granted seat included -- and only the world-facing
-            // state is dropped, exactly as the singletons were.
             p.Primary.Alive = false;
             if (p.Primary.Puppet != null)
             {
                 // Remove the puppet NOW (with the death FX) -- ManagePuppet won't, it
-                // early-returns while the peer is down. 11.4 owns the real leave flow
-                // ("any player leaves -> the match ends").
+                // early-returns while the peer is down.
                 ExplodePuppet(p.Primary);
             }
             p.Primary.ClearSamples();
@@ -3487,7 +4153,8 @@ namespace EvilAliensWeb.Compat.Net
             {
                 // Never leave the world frozen by a peer that's gone.
                 p.RemotePaused = false;
-                NetScene.Current?.NetSetRemotePaused(false);
+                SyncRemotePauseToScene();
+                SyncPauseAggregateToPeers();
             }
         }
 
@@ -3758,12 +4425,18 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     return;
                 }
+                byte blastSlot = data[4];
+                int level = data[13];
+                // Hub relay (card 87242257): a client's bomb must detonate on EVERY screen, so
+                // the host re-emits it to the other clients under their own seqs -- before its
+                // own apply gates, since a beat this world cannot use right now may still be
+                // usable over there.
+                Vector2 blastPos = new Vector2(NetProtocol.ReadF32(data, 5), NetProtocol.ReadF32(data, 9));
+                RelayFromClient(p, seq => NetProtocol.EncodeBlastEvent(seq, blastSlot, blastPos, level));
                 if (NetScene.Current == null)
                 {
                     return;
                 }
-                byte blastSlot = data[4];
-                int level = data[13];
                 // Slot-tagged (v5): detonate the puppet that actually bombed -- the peer's
                 // primary or any of its couch/AI ships. Never one of OURS: any slot disagreement
                 // (a reconnect race, a refused move) would otherwise hand the peer a free bomb
@@ -3788,6 +4461,9 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     return;
                 }
+                // Hub relay (card 87242257): the buddy-is-coming-back ring belongs on every
+                // screen, not just the host's.
+                RelayFromClient(p, seq => NetProtocol.EncodeRespawnEvent(seq, respawnSlot, respawnPos, respawnMs));
                 if (NetScene.Current == null)
                 {
                     return;
@@ -3830,7 +4506,7 @@ namespace EvilAliensWeb.Compat.Net
             {
                 if (isHost)
                 {
-                    HandleJoinRequest();
+                    HandleJoinRequest(p);
                 }
                 break;
             }
@@ -3970,8 +4646,14 @@ namespace EvilAliensWeb.Compat.Net
                 // a no-op with a tick of scaled time in it.
                 //
                 // NetSetSlowmotion, never SetSlowmotion: the latter would send this straight back.
-                if (NetScene.Current == null || oracle == null
-                    || !NetProtocol.TryDecodeSlowmoEvent(data, out ushort slowmoMs))
+                if (!NetProtocol.TryDecodeSlowmoEvent(data, out ushort slowmoMs))
+                {
+                    return;
+                }
+                // Hub relay (card 87242257): the 1up slow motion is the WORLD's, so every peer's
+                // world scales together -- the very property that makes it safe at all.
+                RelayFromClient(p, seq => NetProtocol.EncodeSlowmoEvent(seq, slowmoMs));
+                if (NetScene.Current == null || oracle == null)
                 {
                     return;
                 }
@@ -4031,7 +4713,9 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 bool on = data[4] != 0;
                 p.RemotePaused = on;
-                NetScene.Current?.NetSetRemotePaused(on);
+                // Pause is a SET (card 87242257): the scene freezes on the aggregate's edges, so
+                // one peer unpausing under another's held pause keeps the world frozen.
+                SyncRemotePauseToScene();
                 if (on)
                 {
                     metrics.Pauses++;
@@ -4046,11 +4730,23 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     p.RemotePauseAt = 0;
                     p.KickOfferShown = false;
+                    if (kickOfferPeer == p)
+                    {
+                        // The offer's subject unpaused; let a later offer re-target whoever
+                        // still holds one.
+                        kickOfferPeer = null;
+                    }
                 }
+                // ...and the hub folds this client's pause into every OTHER client's
+                // per-recipient aggregate.
+                SyncPauseAggregateToPeers();
                 break;
             }
             case NetProtocol.EvTetherBreak:
             {
+                // Hub relay (card 87242257) -- moot while TeamChallenge stays 2-player, kept so
+                // the or-of-either-peer contract survives any future N-seat tether.
+                RelayFromClient(p, seq => NetProtocol.EncodeEmptyEvent(seq, NetProtocol.EvTetherBreak));
                 NetScene.Current?.NetApplyTetherBreak();
                 metrics.TetherBreaks++;
                 break;
@@ -4090,27 +4786,42 @@ namespace EvilAliensWeb.Compat.Net
                     return;
                 }
                 // The client's scene just came up (it may have out-warmed us): replay the
-                // live world so it isn't waiting on snapshot self-heals for spawn extras.
-                NetIdRegistry.ReplayLive();
-                // ...and the deep mid-level scenery our script already ran (card 45a4e48d).
-                // This is the seam, not PeerConnected: a join-in-progress peer has no
-                // GameScene at pairing time, and the Initialize that gives it one would
-                // clobber anything we sent earlier with the level's INITIAL background/music.
-                NetScene.Current?.NetReplayCatchUp();
+                // live world so it isn't waiting on snapshot self-heals for spawn extras --
+                // ADDRESSED to the peer that asked (card 87242257), so the peers already
+                // caught up are not re-blasted with the whole live set.
+                replayTarget = p;
+                try
+                {
+                    NetIdRegistry.ReplayLive();
+                    // ...and the deep mid-level scenery our script already ran (card 45a4e48d).
+                    // This is the seam, not PeerConnected: a join-in-progress peer has no
+                    // GameScene at pairing time, and the Initialize that gives it one would
+                    // clobber anything we sent earlier with the level's INITIAL background/music.
+                    NetScene.Current?.NetReplayCatchUp();
+                }
+                finally
+                {
+                    replayTarget = null;
+                }
                 break;
             }
             case NetProtocol.EvLeave:
             {
-                if (listedSession)
+                if (isHost && (menuSession || listedSession))
                 {
-                    RevertToSinglePlayer("jip peer left the match");
+                    // A CLIENT left cleanly: free its seats everywhere and play on -- the 11.9
+                    // match-end policy. ReleaseDepartedPeer owns all three shapes (peers
+                    // remain / last one mid-level / last one at the lobby).
+                    p.Up = false;
+                    ReleaseDepartedPeer(p, "peer left the match");
                     break;
                 }
-                // A shared victory/game-over also lands here (whichever scene terminates
-                // first sends the leave) -- EndMatchPeerGone treats that as a normal end and
-                // shows no notice. (A null scene there = the lobby/warm phase, i.e. a real
-                // walk-out, so the notice does show; our OWN finished level can't reach this
-                // -- its scene-down edge already stopped the session.)
+                // For a CLIENT this is the HOST leaving, which ends the match (no host
+                // migration). A shared victory/game-over also lands here (whichever scene
+                // terminates first sends the leave) -- EndMatchPeerGone treats that as a normal
+                // end and shows no notice. (A null scene there = the lobby/warm phase, i.e. a
+                // real walk-out, so the notice does show; our OWN finished level can't reach
+                // this -- its scene-down edge already stopped the session.)
                 EndMatchPeerGone("peer left the match", "The other player left\nMatch ended");
                 break;
             }
@@ -4133,6 +4844,47 @@ namespace EvilAliensWeb.Compat.Net
                     : "Removed from the game\nThe host kicked you");
                 break;
             }
+            case NetProtocol.EvPeerLeft:
+            {
+                // Card 87242257: another CLIENT left the match for good -- the host freed its
+                // seats, so free ours too. Host-sent only; a client must not be able to vacate
+                // anyone's seat on this screen.
+                if (isHost || data.Length < 5)
+                {
+                    return;
+                }
+                ApplyPeerLeft(p, data[4]);
+                break;
+            }
+            }
+        }
+
+        // Free a departed peer's roster footprint on a CLIENT: its ships arrive here as relayed
+        // extras on the HOST channel, so each masked slot's channel goes (puppet exploded -- the
+        // owner is gone for real, not hiccuping) and its RemoteFriend seat frees. Own slots are
+        // refused like every slot-carrying rx path; the HOST's own seat can never be masked
+        // (only clients depart this way).
+        private static void ApplyPeerLeft(PeerChannel host, byte mask)
+        {
+            for (int slot = 0; slot < Oracle.MaxPlayers; slot++)
+            {
+                if (!NetProtocol.SlotInMask(mask, slot) || OwnsSlot(slot))
+                {
+                    continue;
+                }
+                if (host.Extras.TryGetValue((byte)slot, out ShipChannel ch))
+                {
+                    if (ch.Puppet != null)
+                    {
+                        ExplodeFriend(host, ch, (byte)slot); // drops the channel too
+                    }
+                    else
+                    {
+                        host.Extras.Remove((byte)slot);
+                    }
+                }
+                oracle.RemovePlayerAt(slot, ControlDevice.RemoteFriend);
+                Console.WriteLine("[net] peer left -- freed slot " + slot);
             }
         }
 
@@ -4353,11 +5105,13 @@ namespace EvilAliensWeb.Compat.Net
                 ch.SeenAlive = false;
                 ch.HasLastPuppetPos = false;
             }
-            if (ch.Puppet == null)
+            if (ch.Puppet == null && p.PrimarySlot != NetProtocol.SlotNone)
             {
                 foreach (PlayerShip s in oracle.GetShips())
                 {
-                    if (s.Controller == ControlDevice.Remote)
+                    // BY SEAT, not by device alone: with several remote peers a bare Remote scan
+                    // would adopt whichever remote ship the list yields first -- someone else's.
+                    if (s.Controller == ControlDevice.Remote && s.Owner == p.PrimarySlot)
                     {
                         ch.Puppet = s;
                         // ADOPTED, not spawned by us, so we have NOT seen the peer alive on it.
@@ -4435,11 +5189,15 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            if (!oracle.DeviceIsPlaying(ControlDevice.Remote) && !oracle.AddPlayerAt(p.PrimarySlot, ControlDevice.Remote))
+            // The seat is THIS peer's granted slot, never "wherever a Remote device sits" -- a
+            // GetPlayerIndex(Remote) scan is ambiguous with several remote peers. Already seated
+            // as Remote (the handshake reservation, or a previous life) is the expected case.
+            bool seated = oracle.IsSeated(p.PrimarySlot) && oracle.Controller(p.PrimarySlot) == ControlDevice.Remote;
+            if (!seated && !oracle.AddPlayerAt(p.PrimarySlot, ControlDevice.Remote))
             {
                 return;
             }
-            int slot = oracle.GetPlayerIndex(ControlDevice.Remote);
+            int slot = p.PrimarySlot;
             PlayerShip ship = bin.Recycle<PlayerShip>();
             if (ship == null)
             {
@@ -4541,15 +5299,38 @@ namespace EvilAliensWeb.Compat.Net
         // quantity to lerp, and a stale sample would re-owe shots already fired.
         public static void DriveRemoteShip(PlayerShip ship, GameTime gameTime)
         {
-            if (!Active || peer == null)
+            if (!Active)
             {
                 return;
             }
-            ShipChannel ch = peer.Primary;
-            if (!ReferenceEquals(ch.Puppet, ship))
+            // Whose primary is this? By adopted puppet first, else by the seat -- the scene can
+            // respawn a Remote-seated ship behind our back (SpawnAllPlayers is card b4d0ba1d's
+            // subject) and the granted slot is the identity that survives that.
+            ShipChannel ch = null;
+            foreach (PeerChannel q in peers.Values)
             {
-                ch.Puppet = ship;
-                ch.HasLastPuppetPos = false;
+                if (ReferenceEquals(q.Primary.Puppet, ship))
+                {
+                    ch = q.Primary;
+                    break;
+                }
+            }
+            if (ch == null)
+            {
+                foreach (PeerChannel q in peers.Values)
+                {
+                    if (!q.Refused && q.PrimarySlot == ship.Owner)
+                    {
+                        ch = q.Primary;
+                        ch.Puppet = ship;
+                        ch.HasLastPuppetPos = false;
+                        break;
+                    }
+                }
+            }
+            if (ch == null)
+            {
+                return;
             }
             DriveShip(ch, ship);
         }

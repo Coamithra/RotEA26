@@ -3947,8 +3947,9 @@ public class PlayerShip : AlienDrawableGameComponent
 	//
 	// The bounce/asplode ROLLS live only on this locally-driven path (card 950bb70a): each
 	// outcome is recorded into an 8-bit ring beside the shot it belongs to (bit 0 = the shot
-	// FireAt just counted) and rides MsgShipState/MsgFriendState, so the puppet spends the
-	// owner's outcome (SpawnShotForced) instead of re-rolling -- which bullets pop a mini-blast
+	// FireAt just counted) and rides every MsgShipState ship frame (primary and extras alike
+	// since v23), so the puppet spends the owner's outcome (SpawnShotForced) instead of
+	// re-rolling -- which bullets pop a mini-blast
 	// used to be an independent coin flip per screen. Both Next(100) draws stay unconditional
 	// and in this order, so the offline RNG stream is byte-identical to the pre-card build.
 	private void SpawnShot(float direction)

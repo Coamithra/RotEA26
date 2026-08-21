@@ -354,7 +354,12 @@ namespace EvilAliensWeb.Compat.Net
                 peers[peer.Id] = peer;
                 return peer;
             }
-            if (extraSenderReported.Add(from))
+            // NOT SendRejectOnce: that helper queues a whole-session wind-down (pendingStopAt),
+            // so a stray third tab could end a live pairing. A per-peer reject that leaves the
+            // session standing is card 87242257's per-peer handshake work; until then the drop
+            // matches the transport contract (an unknown target is a silent drop). The report
+            // set is capped so a reconnect-looping tab cannot grow it for the session's life.
+            if (extraSenderReported.Count < 16 && extraSenderReported.Add(from))
             {
                 Console.WriteLine("[net] dropping frames from unexpected peer id '" + from
                     + "' -- this build pairs exactly one peer (N-peer sessions are card 87242257)");
@@ -1318,7 +1323,7 @@ namespace EvilAliensWeb.Compat.Net
             // from the HOST -- a client's own script never runs, and NetScriptHoldsShipSpawn
             // reads through the client-side override, so what a CLIENT puts here is an echo of
             // the host's own bit rather than a report about itself. Harmless because
-            // HandleShipState latches it only from a non-host peer; encoded unconditionally
+            // HandleShipFrame latches it only from a non-host peer; encoded unconditionally
             // rather than gated on the role so there is one expression, not two.
             bool scriptGate = NetScene.Current?.NetScriptHoldsShipSpawn ?? false;
             // Slot-keyed like every ship frame since v23; the PRIMARY flag is what marks this as
@@ -1463,9 +1468,9 @@ namespace EvilAliensWeb.Compat.Net
                 && seatedDevice.Value != ControlDevice.RemoteFriend;
         }
 
-        // The ship carried by the primary MsgShipState stream: the one in our granted primary
-        // slot. Every OTHER locally-owned ship (couch players, AI friends) rides the slot-tagged
-        // MsgFriendState stream instead.
+        // The ship carried by the PRIMARY-flagged ship frame: the one in our granted primary
+        // slot. Every OTHER locally-owned ship (couch players, AI friends) rides a slot-tagged
+        // MsgShipState frame with the primary flag clear instead (SendFriendStates).
         private static PlayerShip FindLocalShip()
         {
             foreach (PlayerShip s in oracle.GetShips())

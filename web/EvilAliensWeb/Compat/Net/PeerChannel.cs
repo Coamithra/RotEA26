@@ -44,8 +44,6 @@ namespace EvilAliensWeb.Compat.Net
         // Reliable-event ordering bookkeeping (seq-gap metric). -1 = nothing received yet.
         public int LastRxEventSeq = -1;
 
-        public bool ByeQueued;
-
         // The peer's primary ship -- a DISTINGUISHED channel rather than an Extras entry, because
         // its slot is SlotNone until the grant settles and can be re-granted mid-handshake
         // (ReserveRemotePrimarySlot's re-allocate path), and the heartbeat/alive-edge semantics
@@ -99,8 +97,13 @@ namespace EvilAliensWeb.Compat.Net
         public double RenderMs = double.NaN;
         public int ShotsPerSec = 8;
         public float BulletLife = 450f;
-        public long LastRxAt;
         public PlayerShip Puppet;
+
+        // Extras only: the resume-gap clear and the per-slot timeout read it
+        // (NetSession.Friends.cs). The primary never stamps it -- its death is the alive EDGE
+        // below and its liveness is the peer-level LastRxStreamAt, so on Primary this stays 0
+        // ("infinitely stale") and must not be consulted.
+        public long LastRxAt;
 
         // Primary only: the alive LEVEL off the newest in-order sample (was remoteAlive), and
         // whether the peer has reported alive=true while we held THIS puppet -- only then does

@@ -2118,7 +2118,7 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   the newest sample) read the dead-period samples FIRST, so the puppet materialised at the old
   death spot and lerped fast across the screen to the real spawn point: "the other player appears
   on the wrong position, then gets sync'd". A both-players-die reset makes the gap seconds long
-  and the two points arbitrarily far apart. `HandleShipState` now clears the buffer (+ render
+  and the two points arbitrarily far apart. `HandleShipFrame` now clears the buffer (+ render
   clock + the pop-metric baseline) on the rising edge, BEFORE adding the first alive sample.
   - **Skipping the dead `Add`s instead is NOT enough** -- `ShipStateBuffer.Add`'s trim always
     keeps the last two samples, so the bracketing pair straddling the death gap survives whatever
@@ -2592,7 +2592,7 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     2e0f908b), as two consoles with a couch partner each; the four-seat roster in the
     `?netlocal` bullet above IS that, measured. What does not exist is 3-4 separate MACHINES.
     The player dimension is already 4-wide everywhere (`Oracle.MaxPlayers`,
-    `ScoreVisualiser.SlotCount`, slot-keyed `MsgFriendState`, `EvScoreSync`, the claim
+    `ScoreVisualiser.SlotCount`, the slot-keyed extra-ship stream, `EvScoreSync`, the claim
     ledgers); only the peer dimension is 2-wide, across five layers. Feasibility answer,
     per-layer blocker list and the N-peer design (star/host-relay, forced by the no-TURN
     connection math) are in `plans/4p-online-coop.md`. Boss puppets are

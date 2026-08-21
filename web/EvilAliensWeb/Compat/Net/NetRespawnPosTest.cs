@@ -20,7 +20,7 @@ namespace EvilAliensWeb.Compat.Net
     // points arbitrarily far apart, which is the reported "appears on the wrong position, then
     // gets sync'd".
     //
-    // THE FIX (receiver-side only, no wire change): HandleShipState clears the buffer (+ render
+    // THE FIX (receiver-side only, no wire change): HandleShipFrame clears the buffer (+ render
     // clock) on the dead->alive RISING edge, before the first alive sample is added, so a new
     // life starts from its own samples and the interpolator can never bridge a death. Skipping
     // the dead Adds instead is NOT enough -- ShipStateBuffer's trim always keeps the last two

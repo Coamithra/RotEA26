@@ -361,10 +361,7 @@ namespace EvilAliensWeb.Compat.Net
         // role byte says host, because on a bus medium (BroadcastChannel) a client sees its
         // fellow clients' frames directly and must not bind to one.
         private static readonly Dictionary<string, PeerChannel> peers = new Dictionary<string, PeerChannel>();
-        // Iteration scratch: PeerLost / a kick removes channels mid-walk, so every loop that can
-        // mutate the set walks this copy. ONE list, so a walker must re-snapshot after calling
-        // anything that could itself snapshot (nothing today does).
-        private static readonly List<PeerChannel> peerScratch = new List<PeerChannel>(4);
+        // (Snapshots for set-mutating walks are FRESH lists -- see PeersSnapshot.)
         // Oracle.MaxPlayers minus the host's own seat: more peers than this can never all be
         // seated, so the surplus is refused at the door with an addressed RejectFull.
         private const int MaxRemotePeers = 3;
@@ -415,14 +412,15 @@ namespace EvilAliensWeb.Compat.Net
             return null;
         }
 
+        // A FRESH list per call, deliberately: PeerLost / a kick removes channels mid-walk, and
+        // a walk can NEST another (Update's liveness loop -> PeerLost -> ReleaseDepartedPeer ->
+        // RevertToSinglePlayer snapshots again), so one shared scratch list would be cleared
+        // under an enumerator that only escapes by the !Active guards -- a coincidence, not a
+        // contract. The cost is a handful of tiny allocations per tick at N <= 4, on a layer
+        // that allocates a packet every 33 ms anyway.
         private static List<PeerChannel> PeersSnapshot()
         {
-            peerScratch.Clear();
-            foreach (PeerChannel p in peers.Values)
-            {
-                peerScratch.Add(p);
-            }
-            return peerScratch;
+            return new List<PeerChannel>(peers.Values);
         }
 
         // Resolve a senderId to its channel, creating one where the role's rules allow. A DOWN,
@@ -477,11 +475,12 @@ namespace EvilAliensWeb.Compat.Net
                 return p;
             }
             // Over capacity: refuse at the door, ADDRESSED so the newcomer hears "Game full"
-            // instead of hanging on a silent drop, and once per id so a retry loop cannot spam
-            // the console (the set is capped so a reconnect-looping tab cannot grow it forever).
+            // instead of hanging on a silent drop. The reject goes out on EVERY knock (its
+            // hello retries at 1 Hz until it gets one); only the console line is capped, so a
+            // reconnect-looping tab cannot spam the log or grow the set forever.
+            transport.SendReliableTo(from, NetProtocol.EncodeReject(NetProtocol.RejectFull));
             if (extraSenderReported.Count < 16 && extraSenderReported.Add(from))
             {
-                transport.SendReliableTo(from, NetProtocol.EncodeReject(NetProtocol.RejectFull));
                 Console.WriteLine("[net] refusing peer id '" + from + "' -- session already holds "
                     + peers.Count + " peers (cap " + MaxRemotePeers + ")");
             }
@@ -2853,9 +2852,19 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     continue;
                 }
-                // Every message resolves its sender's channel first: host-side a hello creates
-                // it, and a stream frame from an unpaired sender does too (the stream IS the
-                // heartbeat -- see HandleShipFrame's reconnect note); client-side only a
+                // A REJECT is handled BEFORE the channel resolve, because it must not need a
+                // channel: the refused side often has none -- a client only creates its one
+                // channel from a host-role handshake, and an over-capacity newcomer was turned
+                // away at the door -- and dropping the reject there would replace "Game full" /
+                // "Update required" with a silent hang (review finding on card 87242257).
+                if (data[0] == NetProtocol.MsgReject)
+                {
+                    HandleReject(from, data);
+                    continue;
+                }
+                // Every other message resolves its sender's channel first: host-side a hello
+                // creates it, and a stream frame from an unpaired sender does too (the stream IS
+                // the heartbeat -- see HandleShipFrame's reconnect note); client-side only a
                 // host-role handshake frame can (the bus-medium rule -- see GetOrCreatePeer). A
                 // refused sender (over capacity, rejected, kicked) is dropped wholesale.
                 PeerChannel p = GetOrCreatePeer(from, data);
@@ -2870,9 +2879,6 @@ namespace EvilAliensWeb.Compat.Net
                     break;
                 case NetProtocol.MsgWelcome:
                     HandleHello(p, data, welcomeBack: false);
-                    break;
-                case NetProtocol.MsgReject:
-                    HandleReject(data);
                     break;
                 case NetProtocol.MsgShipState:
                     HandleShipFrame(p, data);
@@ -3281,40 +3287,47 @@ namespace EvilAliensWeb.Compat.Net
         // and leave that remote player permanently unseatable.
         private static int AllocateSeat()
         {
-            for (int slot = oracle.FirstFreeSlot(); slot >= 0; slot = oracle.FirstFreeSlot(slot + 1))
-            {
-                if (slot != localPrimarySlot && !AnyPeerHoldsPrimary(slot))
-                {
-                    return slot;
-                }
-            }
-            return -1;
-        }
-
-        private static bool AnyPeerHoldsPrimary(int slot)
-        {
+            List<int> peerPrimaries = new List<int>(4);
             foreach (PeerChannel p in peers.Values)
             {
-                if (!p.Refused && p.PrimarySlot == slot)
+                if (!p.Refused && p.PrimarySlot != NetProtocol.SlotNone)
                 {
-                    return true;
+                    peerPrimaries.Add(p.PrimarySlot);
                 }
             }
-            return false;
+            return AllocateSeatFrom(oracle, localPrimarySlot, peerPrimaries);
         }
 
-        // The allocation itself, as a function of a roster and two primary seats, so the
-        // reserve -> hold -> expire -> REALLOCATE cycle can be driven against a scratch Oracle
-        // with no session (eaSlotTest). That cycle is the only proof that a seat the host
+        // The allocation itself, as a function of a roster and the primary seats to exclude, so
+        // the reserve -> hold -> expire -> REALLOCATE cycle can be driven against a scratch
+        // Oracle with no session (eaSlotTest). That cycle is the only proof that a seat the host
         // reclaims from an unclaimed grant is genuinely re-usable rather than merely released.
-        // (AllocateSeat above is the live N-peer form -- same walk, with EVERY channel's primary
-        // excluded instead of one parameter's; this stays the pure single-peer core the suite
-        // exercises.)
+        // The single-peer overload is the suite's original surface; the list form is the ONE
+        // walk AllocateSeat ships, so the suite exercises the live path rather than a copy that
+        // could drift (review finding on card 87242257).
         internal static int AllocateSeatFrom(Oracle roster, int localPrimary, int peerPrimary)
+        {
+            return AllocateSeatFrom(roster, localPrimary, new[] { peerPrimary });
+        }
+
+        internal static int AllocateSeatFrom(Oracle roster, int localPrimary, IReadOnlyList<int> peerPrimaries)
         {
             for (int slot = roster.FirstFreeSlot(); slot >= 0; slot = roster.FirstFreeSlot(slot + 1))
             {
-                if (slot != peerPrimary && slot != localPrimary)
+                if (slot == localPrimary)
+                {
+                    continue;
+                }
+                bool held = false;
+                for (int i = 0; i < peerPrimaries.Count; i++)
+                {
+                    if (peerPrimaries[i] == slot)
+                    {
+                        held = true;
+                        break;
+                    }
+                }
+                if (!held)
                 {
                     return slot;
                 }
@@ -3644,6 +3657,15 @@ namespace EvilAliensWeb.Compat.Net
             transport.SendReliableTo(p.Id, NetProtocol.EncodeReject(reason));
             Console.WriteLine("[net] refused peer '" + p.Id + "' (reason=" + reason
                 + ") -- session continues with the others");
+            DetachRefusedPeer(p);
+        }
+
+        // Turn one channel into a refused husk: down, latched Refused (frames dropped until the
+        // sweep or its bye), seats freed, aggregates re-synced. Shared by RefusePairing and the
+        // INBOUND-reject mirror in HandleReject -- the refusal is symmetric by design, so both
+        // directions must leave the same state behind.
+        private static void DetachRefusedPeer(PeerChannel p)
+        {
             bool wasUp = p.Up;
             p.Up = false;
             p.Refused = true;
@@ -3693,10 +3715,35 @@ namespace EvilAliensWeb.Compat.Net
             return n;
         }
 
-        private static void HandleReject(byte[] data)
+        // Deliberately channel-OPTIONAL: the refused side often has no channel for the sender
+        // (a client pre-handshake, an over-capacity newcomer), and a reject means the most
+        // exactly then -- see DrainRx's early routing.
+        private static void HandleReject(string from, byte[] data)
         {
             if (data.Length < 2)
             {
+                return;
+            }
+            peers.TryGetValue(from ?? "", out PeerChannel p);
+            if (p != null && p.Refused)
+            {
+                return; // we already turned this one away; its symmetric reject is old news
+            }
+            if (!isHost && peers.Count > 0 && p == null)
+            {
+                return; // bus hygiene: once paired, a reject from anyone but our host is noise
+            }
+            // A HOST with OTHER peers up: one straggler refusing ITS pairing (a stale build's
+            // symmetric detection firing before our own refusal reached it, a mismatched dev
+            // tab) must not end a live match -- the receive-side mirror of RefusePairing.
+            if (isHost && UpPeerCountExcept(p) > 0)
+            {
+                Console.WriteLine("[net] peer " + (p != null ? "'" + p.Id + "' " : "")
+                    + "rejected its pairing (reason=" + data[1] + ") -- session continues with the others");
+                if (p != null)
+                {
+                    DetachRefusedPeer(p);
+                }
                 return;
             }
             Console.WriteLine("[net] peer rejected the pairing (reason=" + data[1] + ")");
@@ -5216,7 +5263,7 @@ namespace EvilAliensWeb.Compat.Net
                 // entered the world points `puppet` at a ship the world does not have, and the
                 // retry gate above is `puppet == null`. Leave it clear and retry next tick, once
                 // TopOfTickFlush has expired the filter; the seat we just took is reused via
-                // DeviceIsPlaying above (card 74403f83).
+                // the `seated` check above (card 74403f83).
                 // MEASURED WINDOW: one tick, not the session -- an earlier revision of this
                 // comment said "invisible for the rest of the session" and that is wrong.
                 // ManagePuppet opens by RELEASING a puppet the oracle does not hold

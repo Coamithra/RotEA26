@@ -829,13 +829,16 @@ transports: `NetWire`, BroadcastChannel tabs, and LocalSocketNet `--net-peers`.
   prints on the 5 s cadence whenever the session holds >1 channel: per peer -- id, state
   (up/stalled/paused/down/refused), granted seat, stream quiet, primary buffer depth, extras
   count, both event seqs.
-- **VERIFY with `eaNetNPeer()` / `eval NetNPeer`** (`Compat/Net/NetNPeerTest.cs`, 47 assertions;
-  a leg of `net_selftests.txt`): one real HOST session with TWO scripted joiners on a
-  `NetWire(3)`, then a real CLIENT with a scripted host -- menu-runnable and leave-no-trace, the
+- **VERIFY with `eaNetNPeer()` / `eval NetNPeer`** (`Compat/Net/NetNPeerTest.cs`, 52 assertions;
+  a leg of `net_selftests.txt`): one real HOST session with TWO scripted joiners (plus a
+  straggler for the per-peer reject legs) on a
+  `NetWire(4)`, then a real CLIENT with a scripted host -- menu-runnable and leave-no-trace, the
   `eaNetScenarios` shape. Its observables are the COLLECTORS on the scripted endpoints, because
   most of what this card changed is WHO receives WHAT, which is invisible in this process's
-  world. Mutation-tested four ways failing disjoint legs (dropping `EvPeerLeft`: 1; the relay
-  echoing to its source: 1; a global event seq: 2; the pre-card match-end policy: 8). The
+  world. Mutation-tested five ways failing disjoint legs (dropping `EvPeerLeft`: 1; the relay
+  echoing to its source: 1; a global event seq: 2; the pre-card match-end policy: 8; the
+  pre-review reject handling -- whole-session Stop on any inbound reject, channel-gated
+  delivery -- legs 1b/8b). The
   mid-level halves live in **`python tools/sim/net_npeer_smoke.py`** -- THREE eahl processes
   over LocalSocketNet (`--net-peers 2`, the `net_jip_sync` rig shape: `--nettime game`,
   `?net=jiphost` + two real `?net=jipjoin` menu-session joiners): mirror-image THREE-seat

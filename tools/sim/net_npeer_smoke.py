@@ -210,6 +210,10 @@ def main():
                   len(vals) > 0 and all(v == "0" for v in vals))
 
         print("[npsmoke] phase 2: joiner2 dies mid-level -- seats free, the match plays on")
+        # Anchor the phase-2 log assertions HERE: a "session stop" from before the kill (a
+        # jiphost re-arm, a joiner's own lobby teardown) is not what phase 2 is about.
+        host_mark = len(host.log)
+        j1_mark = len(j1.log)
         j2.kill()
         peers.remove(j2)
         for _ in range(40):     # ~20 sim-seconds: past the 3+5s drop verdict, well settled
@@ -225,9 +229,9 @@ def main():
             check("joiner1 freed it too -- the EvPeerLeft apply (roster %s)" % r12[0],
                   2 not in seats(r12[0]) and s_has(r12[0], 0, "Remote") and 1 in seats(r12[0]))
         check("the host said it plays on ('peer(s) remain, playing on')",
-              any("peer(s) remain, playing on" in ln for ln in host.log))
+              any("peer(s) remain, playing on" in ln for ln in host.log[host_mark:]))
         check("nobody called the MATCH ended (no 'session stop' on host/j1 after the kill)",
-              not any("session stop" in ln for ln in host.log + j1.log))
+              not any("session stop" in ln for ln in host.log[host_mark:] + j1.log[j1_mark:]))
     except RuntimeError as ex:
         print("RIG FAILURE: %s" % ex)
         return 2

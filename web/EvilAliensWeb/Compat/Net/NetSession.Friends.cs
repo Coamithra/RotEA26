@@ -425,8 +425,13 @@ namespace EvilAliensWeb.Compat.Net
                 else
                 {
                     p.Extras.Remove(slot);
-                    oracle.RemovePlayerAt(slot, ControlDevice.RemoteFriend);
                 }
+                // The seat frees on BOTH branches: ExplodeFriend deliberately keeps it (for a
+                // stream gap the owner is coming back), but this is the DEPARTURE path -- the
+                // owner is gone for good, and the remaining clients free the same seats off
+                // EvPeerLeft's mask, so keeping it here would leave host and client rosters
+                // permanently disagreeing on exactly these slots (review finding, card 87242257).
+                oracle.RemovePlayerAt(slot, ControlDevice.RemoteFriend);
             }
         }
 

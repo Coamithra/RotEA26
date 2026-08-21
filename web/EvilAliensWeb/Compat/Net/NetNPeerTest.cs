@@ -10,9 +10,11 @@ namespace EvilAliensWeb.Compat.Net
     // MENU, or `eval NetNPeer` under eahl. Committed as a leg of
     // tools/headless/probes/net_selftests.txt.
     //
-    // WHAT IT IS. One REAL session at a time on a NetWire(3) -- first a HOST hub with TWO
-    // scripted joiners, then a CLIENT with a scripted host -- covering exactly what going past
-    // two peers added: per-peer hello/welcome with grants serialized against races, the host
+    // WHAT IT IS. One REAL session at a time on an in-process wire -- first a HOST hub with TWO
+    // scripted joiners (plus a straggler for the per-peer reject legs), then a CLIENT with a
+    // scripted host -- covering exactly what going past
+    // two peers added: per-peer hello/welcome with grants serialized against races, per-peer
+    // rejects that leave a live match standing, the host
     // relay of client ship/HUD state, symmetric events re-emitted under per-recipient seqs,
     // pause as a set, the per-peer liveness verdict, and the new match-end policy (a client
     // leaving frees its seats and play continues; only the last one leaving ends anything).
@@ -34,6 +36,7 @@ namespace EvilAliensWeb.Compat.Net
     {
         private const string Room = "npeer";
         private const string Room2 = "npeer2";
+        private const string Room3 = "npeer3";
 
         private const ulong TokenA = 0xA11CE0001UL;
         private const ulong TokenB = 0xB0B0B0002UL;
@@ -147,10 +150,11 @@ namespace EvilAliensWeb.Compat.Net
         private static void RunHostLegs(StringBuilder sb, Action<string, bool> Check,
             Game game, Oracle oracle, PinnedNetHost clock)
         {
-            NetWire wire = new NetWire(3);
+            NetWire wire = new NetWire(4);
             InMemoryTransport ours = wire[0];
             InMemoryTransport joinerA = wire[1];
             InMemoryTransport joinerB = wire[2];
+            InMemoryTransport straggler = wire[3];
             // The scripted joiners ADDRESS the host (SendStreamTo/SendReliableTo ours.Id),
             // exactly as production clients do since this card -- the in-process wire is a
             // bus, and broadcasting would land each joiner's raw frames in the other's
@@ -198,6 +202,28 @@ namespace EvilAliensWeb.Compat.Net
             // wrongness the addressed handshake removes.
             Check("joiner A saw only its own welcome (welcomes=" + Welcomes(atA) + ")", Welcomes(atA) == 1);
             Check("joiner B saw only its own welcome (welcomes=" + Welcomes(atB) + ")", Welcomes(atB) == 1);
+
+            sb.Append(" 1b. per-peer rejects -- a straggler must not end the live match\n");
+            // A stale-build machine knocking on a live 3-player game: refused PER-PEER on the
+            // way in, told why (the addressed MsgReject), and its own SYMMETRIC reject -- which
+            // pre-review tore the whole session down through Stop() -- is old news.
+            Collector atS = new Collector();
+            atS.Attach(straggler);
+            straggler.Open(Room);
+            straggler.SendReliable(NetProtocol.EncodeHello((byte)(NetSession.ProtocolVersion + 1), false,
+                NetSession.LocalBuildHash, 0, NetProtocol.SlotNone, 0xBAD, 0));
+            wire.Pump();
+            NetSession.Update();
+            wire.Pump();
+            Check("a bad-version straggler was refused with the match intact (upPeers="
+                + NetSession.UpPeerCountNow + ")", NetSession.Active && NetSession.UpPeerCountNow == 2);
+            Check("...and was TOLD why (addressed MsgReject reached it)",
+                atS.Count((d, r) => r && d.Length >= 2 && d[0] == NetProtocol.MsgReject) >= 1);
+            straggler.SendReliableTo(ours.Id, NetProtocol.EncodeReject(NetProtocol.RejectVersion));
+            wire.Pump();
+            NetSession.Update();
+            Check("...and its own symmetric reject ends nothing either",
+                NetSession.Active && NetSession.UpPeerCountNow == 2);
 
             sb.Append(" 2. host relay -- A's ship reaches B as a slot-keyed extra, never echoes to A\n");
             int shipsAtABefore = ShipFrames(atA, slotA);
@@ -372,6 +398,21 @@ namespace EvilAliensWeb.Compat.Net
 
             NetSession.Stop("netnpeer client legs done");
             Check("client session stopped cleanly", !NetSession.Active);
+
+            sb.Append(" 8b. a reject reaches a client with NO channel yet -- 'Game full', not a hang\n");
+            // The over-capacity door turns a newcomer away with an addressed RejectFull before
+            // any handshake, so the newcomer has no channel -- and a reject that needed one
+            // would be silently dropped, leaving the player hanging on "Connecting" instead of
+            // being told. DrainRx therefore routes MsgReject before the channel resolve.
+            NetWire wire2 = new NetWire(2);
+            NetSession.StartForTest(game, host: false, wire2[0], Room3);
+            wire2[1].Open(Room3);
+            wire2[1].SendReliableTo(wire2[0].Id, NetProtocol.EncodeReject(NetProtocol.RejectFull));
+            wire2.Pump();
+            NetSession.Update();
+            Check("the pre-channel reject ended the pairing attempt (no silent hang)", !NetSession.Active);
+            string fullNotice = NetSession.TakeMenuNotice();
+            Check("...and the menus get the reason", fullNotice != null && fullNotice.Contains("full"));
         }
 
         // ---- frame-reading helpers ------------------------------------------------------------

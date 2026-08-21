@@ -232,13 +232,17 @@ expect \[nettp\] 25 passed, 0 failed
 # contiguous at every endpoint, pause as a per-recipient aggregate (A-on/B-on/A-off holds B's
 # freeze), the per-peer timeout freeing exactly the dead peer's seats with EvPeerLeft at the
 # survivor, and the 11.9 match-end policy (a client's departure leaves the session ALIVE; the
-# last one leaving at the menus stops it with the notice). Mutation-tested four ways, each
-# failing disjoint legs: dropping the EvPeerLeft emission (1), the relay echoing to its source
-# (1), a global event seq instead of per-recipient (2), and the pre-card match-end policy --
-# EndMatchPeerGone on any client loss -- which fails 8 across the liveness/policy/client legs.
+# last one leaving at the menus stops it with the notice). The review legs 1b/8b pin the reject
+# paths both ways: a straggler's refusal (and its own symmetric MsgReject) leaves a live match
+# standing, and a reject reaches a client that has NO channel yet -- "Game full", never a hang.
+# Mutation-tested five ways, each failing disjoint legs: dropping the EvPeerLeft emission (1),
+# the relay echoing to its source (1), a global event seq instead of per-recipient (2), the
+# pre-card match-end policy -- EndMatchPeerGone on any client loss -- which fails 8 across the
+# liveness/policy/client legs, and the pre-review reject handling (whole-session Stop on any
+# inbound reject + channel-gated delivery), which fails 1b/8b.
 # The mid-level halves (revert-to-single-player, relayed-puppet spawns) need a scene and live in
 # tools/sim/net_npeer_smoke.py, the three-process eahl rig.
-expect \[netnpeer\] ALL PASS -- 47 passed, 0 failed
+expect \[netnpeer\] ALL PASS -- 52 passed, 0 failed
 # The host pause menu's Online Play decision (card 0d6ffe70), in two halves that fail
 # differently. `hostmenu` is the PURE sweep -- all 32 combinations of the five booleans through
 # the real NetHostMenu.Entries, plus the properties no `if` restates (entry 0 is never a kick,

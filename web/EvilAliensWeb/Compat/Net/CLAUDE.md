@@ -26,10 +26,17 @@ inputs; the other peer's ship is an interpolated puppet.
   heartbeat frame); `MsgFriendState` is RETIRED (0x11 reserved). One receive path routes by the
   flag, one `DriveShip` drives every remote ship; the primary-vs-extra asymmetries (alive-edge vs
   timeout death, respawn clear vs resume-gap clear) are per-CHANNEL behaviour now. Deliberately
-  BEHAVIOUR-NEUTRAL at 2 peers -- the session still pairs exactly one peer (a second senderId is
-  dropped with a console note); the N-peer session semantics are cards `87242257`+. Also folded
+  BEHAVIOUR-NEUTRAL at 2 peers. Also folded
   in (card a5b1e941): `MsgHudState` carries the combo TIMER's remaining time, so the observer's
   combo readout fades in phase with the owner's.
+- **Stage 11.9 -- the N-PEER SESSION (card `87242257`, protocol v24):** the session genuinely
+  holds a peer SET on the star topology -- a host hub with up to 3 clients, per-peer
+  hello/welcome + roster grants, per-peer liveness, pause as a set, the host relay of client
+  ship/HUD state and symmetric events, ADDRESSED catch-up, and the NEW MATCH-END POLICY (host
+  leaves -> match ends; a client leaving frees its seats everywhere -- `EvPeerLeft` -- and play
+  continues). See the "N-PEER SESSION" section below for all of it. The menu-lobby/browser UX
+  and >2-capacity signaling rooms stay card `0257f8ba` (11.10), so the REAL WebRTC path still
+  pairs 2 machines until then; the N-peer session is exercised on the dev transports.
 - **Stage 11.5 round 1** (card `4717d3cf`): the hardening pass -- powerup pickups replicate to
   the collector's HUD slot, ONE match-end path, a drop-verdict grace window with a
   waiting-for-peer banner, and the WebcamAliens net-lobby refusal explains itself. The graceful
@@ -99,9 +106,11 @@ inputs; the other peer's ship is an interpolated puppet.
 
 **Remaining.** The TURN go/no-go and interpolation/jitter feel are the only Stage 11.5 pieces
 still open, and both are gated on real-network playtests this rig cannot run -- card `4717d3cf`
-sits in the board's "For me" column for exactly that, and card `6fb406bc` (Stage 11.11) carries
-the same TURN question. N-peer online (3-4 separate MACHINES) is designed but unbuilt:
-`plans/4p-online-coop.md`, Stages 11.7-11.11 in "Later". Open net cards in Backlog: `ac375753`
+sits in the board's "For me" column for exactly that (TURN itself is since DECIDED deferred --
+owner ruling, see `plans/4p-online-coop.md`'s banner). N-peer online (3-4 separate MACHINES) is
+BUILT at the session layer (11.7-11.9 shipped); what remains of the epic is the lobby/browser UX
++ capacity>2 rooms (`0257f8ba`, 11.10) and the hardening pass (`6fb406bc`, 11.11 -- relayed-channel
+interp delay, N=4 soak, multi-process rig matrix). Open net cards in Backlog: `ac375753`
 (two-window net pass), `25ad0659` (headless net sim + de-static refactor) and `1cd47879` (a
 single-tab live browser pass -- only its IndexOutOfRange block is net). Deferred to "Later" rather than
 stage-sequenced: `816a8286` (replicate mechanical-friend ships), `1ec29347` (mid-boss arrival
@@ -165,8 +174,8 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     every per-peer departure -- with one exception: `WebRtcTransport`'s TERMINAL whole-link
     failure keeps its legacy "phase:reason" string (all peers are gone in that case), so a
     consumer routing byes by id must treat an unrecognized string as "every peer".
-    `NetSession.StartWith` still DISCARDS the senderId and collapses the bye to a bool -- that
-    is card `b2828be8`/`87242257`'s work, not a gap here.
+    (`NetSession` keys its channels off the senderId since `b2828be8` and routes byes by it --
+    honouring the unrecognized-string rule -- since `87242257`.)
   - **`webrtc.js` holds a MAP of peer entries, not singletons** -- host: one `{pc, chS, chR}`
     triple per joiner, keyed by the server's joiner id (1..3, monotone, never reused); joiner:
     exactly one entry (the host). SenderIds: `"1".."3"` host-side, `"h"` joiner-side.
@@ -174,10 +183,9 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     now closes when the room is FULL (`connectedCount == max-1`), which at max 2 is exactly the
     old first-peer close; a bigger host keeps it open (and beating) to admit later joiners. A
     single peer's loss on a bigger host is the new `peergone` phase (detail = its id) and the
-    JS layer plays on -- note two bounds on that claim: once the room FILLED the ws is closed
+    JS layer plays on -- note one bound on that claim: once the room FILLED the ws is closed
     and the server room is gone, so a lost peer is NOT replaceable until the lobby card
-    (`0257f8ba`); and `NetSession` still collapses every bye to "the peer is gone", so per-peer
-    session survival is card `87242257`'s work, not shipped behaviour. Every shipped flow
+    (`0257f8ba`). (Per-peer session survival itself shipped with card `87242257`.) Every shipped flow
     (joiner, max-2 host, last-peer-gone) keeps the old terminal `closed`/`failed` behaviour
     exactly. Listed/JIP rooms stay capacity 2 until card `0257f8ba`.
     **GOTCHA (found live on the 3-tab rig, fixed): a `{t:gone,id}` from the server means "that
@@ -591,13 +599,17 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   the peer's own symmetric detection) actually egress; the peer's inbound reject during the
   grace ends our side early. The detection itself is symmetric (each side derives the notice
   from the peer's hello), so the frame is belt-and-braces; the grace is what makes it land.
-  Match-end: any player leaving a MENU session (quit, tab close, drop, game-over
-  wind-down) ends it for both -- scene-down edge or `PeerLost` sends
+  Match-end, AS 11.4 SHIPPED IT: any player leaving a MENU session (quit, tab close, drop,
+  game-over wind-down) ends it for both -- scene-down edge or `PeerLost` sends
   `EvLeave`/notice, `NetSession.Stop()` tears down (registries disabled, state reset,
   restartable), `GameScene.NetApplyPeerLeft` force-exits a running level (except in
   Victory/GameOver, which finish locally), and the menus surface `TakeMenuNotice()`.
   **A level FINISHED is the one exception since card 3b6c12e7 -- see the level-end bullet
   below; it used to be in that list, and "one match per lobby" is no longer true.**
+  **AND SINCE CARD 87242257 (Stage 11.9) THE "ends it for both" HALF IS SUPERSEDED TOO: only
+  the HOST leaving ends the match; a CLIENT leaving frees its seats and everyone else plays
+  on** -- the N-PEER SESSION section below owns the policy, N=2 included (a menu-session host
+  whose partner drops now keeps playing solo, reverting to single-player like a listed host).
   `EvReady` (client scene-up edge -> host `ReplayLive`) covers the lobby launch race
   where one peer out-warms the other; world messages are gated client-side while no
   GameScene is up. URL `?net=` sessions keep the old semantics (session survives peer
@@ -731,6 +743,111 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     must produce. NORTH has no end-to-end route at all (it ships on `ClassicAliens`, a challenge
     level whose victory a rig cannot reach), so the pure sweep is the only thing covering it.
 
+## N-PEER SESSION (card 87242257, Stage 11.9, protocol v24)
+
+The session layer holds a peer SET on the star `plans/4p-online-coop.md` fixed: the host is the
+hub (up to `MaxRemotePeers` 3 channels -- `Oracle.MaxPlayers` minus its own seat), a client holds
+exactly one channel (its host). World authority is untouched -- snapshots/events fan out, claims
+arrive from any client, the ledgers were already per-(netId, slot). The menu lobby and the real
+WebRTC rooms stay capacity 2 until card `0257f8ba` (11.10), so this is exercised on the dev
+transports: `NetWire`, BroadcastChannel tabs, and LocalSocketNet `--net-peers`.
+
+- **THE MATCH-END POLICY (the card's design decision, adopted as proposed and UNIFORM, N=2
+  included).** Host leaves -> the match ends for every client, no host migration (host
+  scene-down sends `EvLeave` to all + `Stop()`; a client losing its host takes the existing
+  `EndMatchPeerGone`). A CLIENT leaving -- clean `EvLeave`, drop verdict, bye, kick -- frees its
+  seats and play continues for everyone else: `ReleaseDepartedPeer` releases its primary + couch
+  seats (SLOT-keyed -- see below), removes the channel, tells the remaining clients with
+  `EvPeerLeft` (slot mask; their `ExplodeFriend`-kept seats would otherwise leak) and
+  recomputes the pause/stall aggregates. When the LAST client goes: mid-level the host reverts
+  to plain single-player (`RevertToSinglePlayer` -- a listed game re-lists); at the menus a
+  pre-11.10 lobby with zero peers is a dead end, so the session Stops with the notice.
+  **Consequence at N=2, deliberate:** a menu-session host whose partner drops now keeps playing
+  solo instead of being thrown to the menu. A clean level FINISH still keeps every pairing
+  alive (card 3b6c12e7; `ResetPerMatchState` loops the channels).
+- **EVERY SLOT DECISION KEYS OFF `p.PrimarySlot`, never a `ControlDevice.Remote` scan** --
+  `GetPlayerIndex(Remote)` / `DeviceIsPlaying(Remote)` / `ReleasePlayer(Remote)` are ambiguous
+  with two remote peers, and every one of them was load-bearing in the 2-peer code
+  (`ReserveRemotePrimarySlot`'s leftover-seat reuse, `SpawnPuppet`'s seat take, `ManagePuppet`'s
+  adoption, the seat release). Grants are serialized by construction: each hello's reservation
+  lands in the oracle before the next hello drains, so two joiners in one tick get distinct
+  seats; `AllocateSeat` additionally excludes every channel's primary, and the leftover-Remote
+  reuse only takes a seat no OTHER channel claims (`FindLeftoverRemoteSeat`).
+- **PER-RECIPIENT RELIABLE EVENT SEQS (`PeerChannel.TxEventSeq`).** Addressed sends under one
+  global counter would open a false `seqGap` at every peer that was not the target, and
+  seqGap=0 is a health bar. Every reliable event goes through `SendEventToPeer` /
+  `SendEventToSessionPeers` (encoder = `seq => Encode*(seq, ...)`); a "broadcast" is N addressed
+  sends, each contiguous on its own channel, byte-identical to the old broadcast at one peer.
+  The `replayTarget` latch inside the session helper is the ADDRESSED CATCH-UP: `EvReady` (and
+  `PeerConnected`'s initial replay + JIP `EvLaunch`, and `MsgWelcome`, and `EvSlotGrant`) reach
+  only the peer they are about, so a late joiner's `ReplayLive`/`NetReplayCatchUp` burst no
+  longer re-blasts every already-caught-up peer -- the 4p plan's named hazard.
+- **THE HOST RELAY (the hub duty; `RelayPeerShips` + the `HandleHudState` relay +
+  `RelayFromClient`).** On the 33 ms cadence the host re-encodes every up peer's primary (only
+  while its alive latch is set) and each fresh extras channel as NON-primary slot-keyed
+  `MsgShipState` frames -- host clock, own relay seq, samples off the channel's NEWEST buffered
+  frame so the cumulative shot count and roll rings cross UNALTERED -- and `SendStreamTo`s every
+  other up peer. A recipient cannot tell a relayed client primary from a host couch ship, which
+  is the point of v23's one ship path; death propagates as the extras semantic (the relay stops,
+  the 500 ms timeout explodes the puppet). A client's `MsgHudState` is relayed verbatim to the
+  others; `EvBlast` / `EvRespawn` / `EvSlowmo` / `EvTetherBreak` are re-emitted under each
+  recipient's own seq, addressed so the SOURCE never hears its own event back. The relayed
+  channel's extra interpolation hop (~150 ms budget) is card `6fb406bc`'s (11.11).
+- **PAUSE IS A SET.** `p.RemotePaused` per channel; the scene freezes on the AGGREGATE's edges
+  (`SyncRemotePauseToScene`; the scene setters self-guard). The host relays each client X the
+  per-recipient aggregate `localPaused || anyOtherClientPaused(X)` as `EvPause` edges
+  (`PauseSentTo` per channel) -- exactly the semantic a client's single bool already implements,
+  and what keeps B frozen through A-pauses/B-pauses/A-unpauses. At N=2 the wire is
+  byte-identical to the old direct announce. The 120 s paused-peer backstop widens on ANY held
+  pause (a frozen world backgrounds everyone's tab). Kick offers tick per paused channel and
+  latch their TARGET (`kickOfferPeer`); `KickPeer` kicks that peer only -- addressed `EvKick`,
+  seats freed, `EvPeerLeft` to the rest, the whole session wound down (after the egress grace)
+  only when nobody remains. 11.10 owns a per-peer kick UI; today's menu acts on the offer's
+  subject.
+- **PER-PEER LIVENESS.** The stall/timeout ladder runs per channel; the `NetWaitOverlay` banner
+  rides the aggregate (any up peer stalled). A timeout verdict is `PeerLost(p)` -- on a host in
+  a menu/listed session that is the client-departure path above, not a match end. The `?net=`
+  dev shape keeps its channel-preserved resume semantics per peer (`DevSessionPeerDown`).
+- **THE DOOR (`GetOrCreatePeer`) IS ROLE-ASYMMETRIC, and the client half is the bus rule.** A
+  HOST creates a channel from any first frame (stream-first reconnect kept), re-keys a down
+  unrefused channel for a reconnecting identity, and refuses an over-cap sender with an
+  addressed `RejectFull` + one console line. A CLIENT only creates its one channel from a
+  Hello/Welcome whose role byte says HOST: on a bus medium (BroadcastChannel) a client sees its
+  fellow clients' hellos and streams directly and must not bind to one -- and it ADDRESSES its
+  own post-pairing traffic to the host (`SendStreamToSession` / the event helpers), so a 3-tab
+  loopback rig carries no client-to-client noise. Belt-and-braces on top:
+  `HandleExtraShipFrame` refuses a slot the receiver owns (by NUMBER for the primary slot too --
+  the grant exists before the seat does), so nothing off the wire can ever drive a locally-owned
+  ship.
+- **PER-PEER REJECTS.** With another peer already up, a refused pairing (version/build/flags/
+  banned/full) is PER-PEER: addressed `MsgReject`, channel latched `Refused` (frames dropped
+  cheaply, swept after 30 s or on its bye), session untouched -- a blocked griefer knocking on a
+  live 3-player game costs it nothing. With nobody up the pre-11.9 whole-session wind-down +
+  notice stands (client role, empty lobby, listed first joiner).
+- **METRICS.** The `[net]` line is unchanged at <=1 peer (every probe that greps it is
+  untouched); `pri=` grows `+slot` per extra peer (`pri=0/1+2`). A second `[netpeers]` line
+  prints on the 5 s cadence whenever the session holds >1 channel: per peer -- id, state
+  (up/stalled/paused/down/refused), granted seat, stream quiet, primary buffer depth, extras
+  count, both event seqs.
+- **VERIFY with `eaNetNPeer()` / `eval NetNPeer`** (`Compat/Net/NetNPeerTest.cs`, 52 assertions;
+  a leg of `net_selftests.txt`): one real HOST session with TWO scripted joiners (plus a
+  straggler for the per-peer reject legs) on a
+  `NetWire(4)`, then a real CLIENT with a scripted host -- menu-runnable and leave-no-trace, the
+  `eaNetScenarios` shape. Its observables are the COLLECTORS on the scripted endpoints, because
+  most of what this card changed is WHO receives WHAT, which is invisible in this process's
+  world. Mutation-tested five ways failing disjoint legs (dropping `EvPeerLeft`: 1; the relay
+  echoing to its source: 1; a global event seq: 2; the pre-card match-end policy: 8; the
+  pre-review reject handling -- whole-session Stop on any inbound reject, channel-gated
+  delivery -- legs 1b/8b). The
+  mid-level halves live in **`python tools/sim/net_npeer_smoke.py`** -- THREE eahl processes
+  over LocalSocketNet (`--net-peers 2`, the `net_jip_sync` rig shape: `--nettime game`,
+  `?net=jiphost` + two real `?net=jipjoin` menu-session joiners): mirror-image THREE-seat
+  rosters on all three consoles, all three worlds holding all three ships (the relay's only
+  end-to-end proof), `dupBad=0` throughout, then joiner2 killed mid-level -- host and the
+  surviving joiner free exactly its seats (`EvPeerLeft` end to end) and the match plays on with
+  no `session stop`. A smoke, not a differ -- entity-level convergence stays
+  `net_jip_sync.py`'s (2-process), and the N=4 soak is 11.11's.
+
 ## Protocol, NetIds & the replicable set
 
 - **PROTOCOL CHANGES ARE CHEAP -- never contort a design to avoid wire bytes (user ruling,
@@ -861,6 +978,11 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   fixed-width entry also grows a `[comboLeft:1]` remaining-time byte (HudSlotBytes 16 -> 17,
   folding card a5b1e941). A FORCED bump three ways over: a v22 peer mis-parses every ship frame
   in both directions and every HUD entry after the first.
+  **v24** (card 87242257, Stage 11.9) adds `EvPeerLeft` (event 27, `[slotMask:1]` via the byte
+  event) -- the host tells the remaining clients a departed peer's seats are free, which the
+  new match-end policy makes a fact they cannot infer from the relay going quiet. The same card
+  makes the host->client `EvPause` carry a per-recipient AGGREGATE ("someone besides you holds
+  a pause") rather than the host's own pause alone; payload unchanged.
   **A BUMP IS BOOKKEEPING, NOT COMPATIBILITY -- and several notes in this list can read
   otherwise.** `OnHandshake` refuses `ver != ProtocolVersion` outright with `RejectVersion`
   before a single snapshot is exchanged, and the build-hash equality check behind it would
@@ -2585,17 +2707,16 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     that no `Purge<T>` covers, and level scenes are re-added singletons, so an orphan would
     both draw over the menus and poison the next play of that level.
 - **Known limits (by design -- next cards):** a dead local player will NOT respawn while the
-  remote puppet lives (LoseLife triggers on AllShipsDead); the session is exactly two PEERS
-  (see the sub-bullet below); DevCommentEvent commentary is not replicated (profile-local
-  setting).
-  - **Two PEERS is not two PLAYERS -- 4-player online co-op already works today** (card
-    2e0f908b), as two consoles with a couch partner each; the four-seat roster in the
-    `?netlocal` bullet above IS that, measured. What does not exist is 3-4 separate MACHINES.
-    The player dimension is already 4-wide everywhere (`Oracle.MaxPlayers`,
-    `ScoreVisualiser.SlotCount`, the slot-keyed extra-ship stream, `EvScoreSync`, the claim
-    ledgers); only the peer dimension is 2-wide, across five layers. Feasibility answer,
-    per-layer blocker list and the N-peer design (star/host-relay, forced by the no-TURN
-    connection math) are in `plans/4p-online-coop.md`. Boss puppets are
+  remote puppet lives (LoseLife triggers on AllShipsDead); DevCommentEvent commentary is not
+  replicated (profile-local setting).
+  - **The SESSION holds up to four machines since card 87242257 (Stage 11.9)** -- see the
+    N-PEER SESSION section -- but the REAL-NETWORK path still pairs two until card `0257f8ba`
+    (11.10) raises the lobby/browser room capacity, so "3-4 strangers over WebRTC" is not yet
+    reachable by a player. The player dimension was already 4-wide everywhere
+    (`Oracle.MaxPlayers`, `ScoreVisualiser.SlotCount`, the slot-keyed ship stream,
+    `EvScoreSync`, the claim ledgers -- and 4-player online as two consoles with a couch
+    partner each has worked since card 2e0f908b). The design is `plans/4p-online-coop.md`
+    (star/host-relay, forced by the no-TURN connection math). Boss puppets are
   best-effort (the harness caveat): deep Update-reached attack poses may diverge until their
   state extras grow. **The multi-phase DEATHS are no longer part of that** (cards 303bfb5b /
   13aa596c): a remote death whose `KilledBy` defers its own removal now RELEASES the puppet to

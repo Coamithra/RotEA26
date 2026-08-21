@@ -38,6 +38,10 @@ namespace EvilAliensWeb.Compat.Net
         public long RemoteShipExplosions;
 
         // reliable event lane
+        // EventsTx counts SENDS, per recipient, since card 87242257 (a reliable "broadcast" is
+        // one addressed send per up peer, each with its own channel seq) -- so at N peers one
+        // logical event moves it by N, and comparing it against a single peer's EventsRx only
+        // adds up at N=1... which is every 2-peer log, where the two read exactly as before.
         public long EventsTx;
         public long EventsRx;
         public long DupSpawns;          // EvSpawn that produced no puppet == the 3 below

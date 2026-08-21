@@ -6,11 +6,11 @@ namespace EvilAliensWeb.Compat.Net
 {
     // Card b2828be8 (Stage 11.8): everything NetSession knows about ONE remote peer, lifted out
     // of ~20 static singletons so the session can hold peers in a dictionary keyed by the
-    // transport senderId (real on every transport since card 583a3ef8). The session still pairs
-    // EXACTLY ONE peer -- that is this card's acceptance criterion -- so the dictionary holds at
-    // most one entry today; what changed is that nothing below the static facade assumes it.
-    // N-peer session semantics (per-peer hello/roster negotiation, the drop ladder as a set,
-    // host relay) are card 87242257's work, not this one's.
+    // transport senderId (real on every transport since card 583a3ef8). Since card 87242257
+    // (Stage 11.9) the session genuinely holds a SET of these -- a host hub carries up to three
+    // (Oracle.MaxPlayers minus its own seat), a client exactly one (its host) -- and the
+    // handshake, liveness ladder, pause bookkeeping and reliable-event sequencing below are all
+    // per-channel for that reason.
     internal sealed class PeerChannel
     {
         // The transport senderId this peer's frames arrive under -- the address, per
@@ -44,6 +44,28 @@ namespace EvilAliensWeb.Compat.Net
         // Reliable-event ordering bookkeeping (seq-gap metric). -1 = nothing received yet.
         public int LastRxEventSeq = -1;
 
+        // The reliable-event seq WE stamp on frames sent TO this peer (card 87242257). Per
+        // RECIPIENT rather than the old session-global counter, because addressed sends (a
+        // welcome, a slot grant, a replay catch-up, a relayed event) would otherwise open a
+        // false seqGap at every peer that was not the target. A broadcast is now N addressed
+        // sends, each contiguous on its own channel.
+        public ushort TxEventSeq;
+
+        // Per-peer hello cadence clock (the handshake retries until THIS peer's slot settles;
+        // another peer's being mid-negotiation must not retrigger ours).
+        public long LastHelloTx;
+
+        // HOST only: the last "someone besides you holds a pause" value sent to this peer --
+        // the per-recipient aggregate the pause-as-a-set relay sends edges of (card 87242257).
+        public bool PauseSentTo;
+
+        // The channel was refused (per-peer reject, or a kick): its frames are dropped without
+        // touching the session, and the channel itself is swept at RemoveAtMs or on its bye --
+        // whichever comes first. A refused sender that keeps talking costs one dictionary probe
+        // per frame and nothing else.
+        public bool Refused;
+        public long RemoveAtMs;
+
         // The peer's primary ship -- a DISTINGUISHED channel rather than an Extras entry, because
         // its slot is SlotNone until the grant settles and can be re-granted mid-handshake
         // (ReserveRemotePrimarySlot's re-allocate path), and the heartbeat/alive-edge semantics
@@ -75,6 +97,7 @@ namespace EvilAliensWeb.Compat.Net
             RemotePaused = false;
             RemotePauseAt = 0;
             KickOfferShown = false;
+            PauseSentTo = false;
             foreach (ShipChannel ch in Extras.Values)
             {
                 ch.Puppet = null;

@@ -691,6 +691,17 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetScenarioTest.Run();
 		}
 
+		// JS bridge for the N-peer session suite (eaNetNPeer in wwwroot/index.html, card
+		// 87242257): one real HOST session with TWO scripted joiners over a NetWire(3), then a
+		// real CLIENT with a scripted host -- per-peer grants, the host relay, per-recipient
+		// event seqs, pause as a set, the per-peer liveness verdict and the new match-end
+		// policy. Menu-only and leave-no-trace.
+		[JSInvokable("debugNetNPeer")]
+		public static string NetNPeer()
+		{
+			return EvilAliensWeb.Compat.Net.NetNPeerTest.Run();
+		}
+
 		// JS bridge for the transient-feedback beats (eaNetFx in wwwroot/index.html; cards
 		// 43e85936 / 57ea30cd / ee939dd1 / 8d063d33 / c146422f). Real EvFx frames from a
 		// scripted host over a NetWire into a real client session, asserting the EFFECT on the

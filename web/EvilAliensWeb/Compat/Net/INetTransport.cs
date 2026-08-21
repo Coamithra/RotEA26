@@ -39,17 +39,16 @@ namespace EvilAliensWeb.Compat.Net
         // (payload, arrivedOnReliableLane, senderId). Fired from JS callbacks -- consumers
         // should queue and drain on the game tick rather than mutating game state directly.
         // The senderId is real on every implementation since card 583a3ef8 (WebRtcTransport
-        // used to hard-code a literal); NetSession still discards it while the protocol is
-        // 2-peer -- the per-peer stages start reading it.
+        // used to hard-code a literal), and it is NetSession's peer-channel KEY since card
+        // b2828be8 -- the address a hub routes by (card 87242257).
         event Action<byte[], bool, string> OnData;
 
         // Best-effort "peer is going away" (pagehide). A silent drop must still be caught
         // by a stream timeout above this layer. The string names the DEPARTING PEER (its
         // OnData senderId) on every per-peer departure -- with one exception: WebRtcTransport's
         // TERMINAL whole-link failure still reports its legacy "phase:reason" string, and in
-        // that case every peer is gone at once. So a consumer routing byes by id (the per-peer
-        // stages, card 87242257) must treat an unrecognized string as "all peers", never drop
-        // it. NetSession still collapses the whole event to a bool today.
+        // that case every peer is gone at once. NetSession routes byes by id since card
+        // 87242257 and treats an unrecognized string as "all peers", per this contract.
         event Action<string> OnPeerBye;
     }
 }

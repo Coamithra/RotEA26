@@ -776,6 +776,14 @@
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetScenarios')); }
             catch (e) { console.warn('[debug] eaNetScenarios failed (game not booted yet?): ' + e.message); }
         };
+        // Debug: the N-peer session suite (card 87242257) — one real HOST session with two
+        // scripted joiners over an in-process wire, then a real CLIENT with a scripted host:
+        // per-peer grants, the host relay, per-recipient event seqs, pause as a set, the
+        // per-peer drop verdict and the match-end policy. Run from the MAIN MENU.
+        window.eaNetNPeer = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetNPeer')); }
+            catch (e) { console.warn('[debug] eaNetNPeer failed (game not booted yet?): ' + e.message); }
+        };
 
         // Debug: the teleport marker (card e79bb994) — the host's snapshot frames read off a
         // real wire, and a real client session's puppet snapping a marked entry instead of

@@ -125,6 +125,23 @@ namespace EvilAliensWeb.Compat.Net
         // progression) as well as the difficulty.
         public const byte EvRespawn = 26;
 
+        // Card 87242257 (Stage 11.9, protocol v24), HOST -> clients, reliable: "the peer that
+        // owned these roster seats left the match -- free them". Payload is one SLOT MASK byte
+        // (EncodeByteEvent; bit i = oracle slot i), covering the departed peer's primary AND its
+        // couch seats in one beat. The receiver drops each masked slot it does not own: the
+        // extras channel goes (its puppet exploded, since the ship's owner is gone for real, not
+        // hiccuping), and the RemoteFriend seat frees so rosters agree on every peer again --
+        // without this, a client's seats for a departed peer leaked for the rest of the level
+        // (ExplodeFriend deliberately KEEPS a seat, because for a mere stream gap the owner is
+        // coming back).
+        //
+        // Host-only like EvSpawn: only the hub can see a peer depart at all, and a client's own
+        // departure is its EvLeave. It exists because the new match-end policy (host leaves ->
+        // match ends; a CLIENT leaving frees its seats and play continues) makes "this player is
+        // gone for good" a fact the remaining clients cannot infer from the relay going quiet --
+        // that is also what a wifi hiccup looks like.
+        public const byte EvPeerLeft = 27;
+
         // "No slot" -- a refused join grant. 0xFF can never be a real slot (Oracle.MaxPlayers is 4)
         // and matches KillerNone's convention.
         public const byte SlotNone = 0xFF;

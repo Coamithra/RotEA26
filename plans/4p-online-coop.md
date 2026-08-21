@@ -3,7 +3,9 @@
 Card `2e0f908b`: *"Can the networking be extended to allow up to 4 players to play together
 online?"*
 
-> **STATUS 2026-08-21 — the epic is ACTIVE (11.7 and 11.8 SHIPPED; next up Stage 11.9, card `87242257`), and this doc was written 2026-07-24 against a codebase that has since moved. The architecture below STANDS (star topology, `PeerChannel`, unified ship paths, negotiated signaling capacity, the listed-session match-end shape); the following specifics are corrected here rather than rewritten in place:**
+> **STATUS 2026-08-21 — the epic is ACTIVE (11.7, 11.8 and 11.9 SHIPPED; next up Stage 11.10, card `0257f8ba`), and this doc was written 2026-07-24 against a codebase that has since moved. The architecture below STANDS (star topology, `PeerChannel`, unified ship paths, negotiated signaling capacity, the listed-session match-end shape); the following specifics are corrected here rather than rewritten in place:**
+>
+> - **Stage 11.9 SHIPPED (card `87242257`, protocol v24):** the session holds a peer SET (host hub, cap 3), §E's match-end decision was adopted AS PROPOSED and uniformly (host leaves → match ends; a client leaving frees its seats everywhere via the new `EvPeerLeft` beat and play continues, N=2 included), the host relays client ship/HUD state as non-primary slot-keyed frames and re-emits symmetric events under per-recipient event seqs, catch-up is ADDRESSED, pause is a per-recipient aggregate set. Details: `Compat/Net/CLAUDE.md` → "N-PEER SESSION". Verified by `eaNetNPeer()` (in `net_selftests`) + `tools/sim/net_npeer_smoke.py` (three eahl processes, mirror 3-seat rosters, survivable mid-level departure).
 >
 > - **Stage 11.6 is RETIRED — its work shipped as card `25ad0659`.** The in-process wire exists (`NetWire`/`InMemoryTransport`, N ≤ 8 endpoints, `NetWireTest` runs an N=4 leg), the scenario harness exists (ONE real session + scripted wire peers — that card measured that two independent WORLDS in one process are impossible, and unnecessary), and the de-static `NetContext` was measured and DECLINED as optional. The N-peer regression net is therefore "extend the scenario-harness pattern + the multi-process eahl rigs", not a de-static refactor. The epic starts at 11.7.
 > - **Protocol is v23 now, not v5** — §B's "bump 5 → 6" reads as "bump whatever is current". The per-version changelog lives at `NetSession.ProtocolVersion`.
@@ -216,7 +218,7 @@ do not reuse `12.x`).
 | ~~**11.6**~~ | RETIRED — shipped as card `25ad0659` (see the status banner) |
 | **11.7** (`583a3ef8`) | Transport addressing + N-peer signaling room, capacity negotiated (webrtc.js, `INetTransport`, signal server, `LocalSocketNet` multi-client, 3-tab loopback rig). Behaviour-neutral for 2-peer; protocol version unchanged |
 | ~~**11.8**~~ (`b2828be8`) | SHIPPED (protocol v22 → v23): `PeerChannel` + one slot-keyed ship path, behaviour-neutral at 2 peers; `net_jip_sync.py` stayed green |
-| **11.9** (`87242257`) | N-peer session: per-peer hello/welcome + roster negotiation (grants serialized against races), per-peer liveness/drop ladder, pause as a set, host relay of client ship/HUD state (symmetric events re-emitted under the host's own event seq), ADDRESSED catch-up, the new match-end policy, per-peer `[net]` metrics |
+| ~~**11.9**~~ (`87242257`) | SHIPPED (protocol v23 → v24): the N-peer session -- see the status banner |
 | **11.10** (`0257f8ba`) | Lobby + game-browser UX for 3–4 (host roster, start-when-ready, capacity-aware listing — the `!NetSession.Active` term goes, JIP into slots 3/4, per-peer kick target) |
 | **11.11** (`6fb406bc`) | Hardening: relayed-channel interp delay, bandwidth soak at N=4, multi-process eahl rigs, `bufferedAmount` back-pressure. TURN stays deferred (owner decision — see banner) |
 

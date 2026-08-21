@@ -62,6 +62,9 @@ namespace EvilAliensWeb.Headless
         internal bool NetTimeGame;
         // --net-port: override the port LocalSocketNet derives from ?room=. 0 = derive.
         internal int NetPort;
+        // --net-peers: how many clients the listening side serves at once (card 583a3ef8).
+        // 1 = the old one-peer behaviour and the default; the N-peer rigs raise it.
+        internal int NetPeers = 1;
     }
 
     internal static class Program
@@ -526,6 +529,7 @@ namespace EvilAliensWeb.Headless
                     case "--fake-no-audio-device": opt.FakeNoAudioDevice = true; break;
                     case "--real-mouse": opt.RealMouse = true; break;
                     case "--net-port": opt.NetPort = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture); break;
+                    case "--net-peers": opt.NetPeers = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture); break;
                     case "--nettime":
                     {
                         string mode = Next(args, ref i);
@@ -636,6 +640,8 @@ OPTIONS
                     time and would otherwise starve the wire (card 054947f3)
   --net-port <n>    port for the ?net= localhost loopback (default: derived from ?room=, so
                     two processes sharing a room agree with no extra configuration)
+  --net-peers <n>   how many clients a listening (?net=host/jiphost) run serves at once,
+                    1..3 (default 1 -- the classic two-process rig; the N-peer rigs raise it)
   --software        rasterize on the CPU via Mesa llvmpipe, for machines with no GPU
   --mesa <dll>      path to Mesa's opengl32.dll (implies --software)
   --jscalls         dump which browser (ea*) calls the game made

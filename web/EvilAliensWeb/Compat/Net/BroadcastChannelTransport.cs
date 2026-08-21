@@ -35,6 +35,18 @@ namespace EvilAliensWeb.Compat.Net
             NetInterop.Send(payload, reliable: true);
         }
 
+        // Addressed sends ride the same channel with a `to` field the receiving tabs filter on
+        // (index.html eaNet). The senderId a tab reports IS its address, per the interface.
+        public void SendStreamTo(string peerId, byte[] payload)
+        {
+            NetInterop.Send(payload, reliable: false, to: peerId);
+        }
+
+        public void SendReliableTo(string peerId, byte[] payload)
+        {
+            NetInterop.Send(payload, reliable: true, to: peerId);
+        }
+
         public void Close()
         {
             if (!open)

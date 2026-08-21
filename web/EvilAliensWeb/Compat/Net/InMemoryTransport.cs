@@ -113,6 +113,26 @@ namespace EvilAliensWeb.Compat.Net
             return reached;
         }
 
+        // Addressed dispatch (card 583a3ef8): deliver to the ONE endpoint whose Id matches, same
+        // room, open. Returns the enqueue count (0 or 1) so TxFanout stays the "how many did this
+        // call reach" arithmetic the counters' header promises -- an addressed send to an unknown,
+        // closed or wrong-room id is a SILENT DROP (TxSent moves, TxFanout does not), which is the
+        // closed-DataChannel semantic the interface pins. Sending to yourself is likewise a drop:
+        // no real transport can loop a packet back, so the rig must not either.
+        internal int DispatchTo(InMemoryTransport from, string toId, byte[] payload, bool reliable)
+        {
+            for (int i = 0; i < endpoints.Length; i++)
+            {
+                InMemoryTransport to = endpoints[i];
+                if (to != from && to.IsOpen && to.Room == from.Room && to.Id == toId)
+                {
+                    to.Enqueue((byte[])payload.Clone(), reliable, from.Id);
+                    return 1;
+                }
+            }
+            return 0;
+        }
+
         // A departing endpoint's "bye" reaches its room-mates only. Mirrors the JS pagehide frame
         // (webrtc.js) / NetInterop's bye, which is likewise best-effort and per-room.
         internal void DispatchBye(InMemoryTransport from)
@@ -199,6 +219,16 @@ namespace EvilAliensWeb.Compat.Net
             Send(payload, reliable: true);
         }
 
+        public void SendStreamTo(string peerId, byte[] payload)
+        {
+            SendTo(peerId, payload, reliable: false);
+        }
+
+        public void SendReliableTo(string peerId, byte[] payload)
+        {
+            SendTo(peerId, payload, reliable: true);
+        }
+
         private void Send(byte[] payload, bool reliable)
         {
             // A send on a closed endpoint is DROPPED, not thrown: NetSession.Stop() closes the
@@ -210,6 +240,18 @@ namespace EvilAliensWeb.Compat.Net
             }
             TxSent++;
             TxFanout += wire.Dispatch(this, payload, reliable);
+        }
+
+        private void SendTo(string peerId, byte[] payload, bool reliable)
+        {
+            if (!IsOpen || payload == null)
+            {
+                return;
+            }
+            // TxSent counts the CALL even when the target is unknown/closed -- that is what makes
+            // the silent drop assertable (TxSent moved, TxFanout did not).
+            TxSent++;
+            TxFanout += wire.DispatchTo(this, peerId, payload, reliable);
         }
 
         public void Close()

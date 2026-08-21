@@ -21,13 +21,17 @@
 // every join. The HOST binds the listener ONCE and keeps it for the process lifetime, and
 // `Close()` deliberately does NOT stop it -- that call is `eaNet.close`, which a listed host
 // reaches on every match teardown (`NetSession.Stop`), so stopping the listener there would
-// rebind it on the next re-arm and expose the port to a lingering TIME_WAIT. It serves ONE peer
-// at a time: when that peer's socket closes, the peer-bye is raised and the listener is still
-// accepting, so join N+1 connects to the same port with no teardown at all. The CLIENT only ever
-// dials out on an ephemeral port, which is the side that may cycle freely. A second client
-// arriving while one is connected is refused and CLOSED rather than queued: the protocol is
-// 2-peer, and silently holding a third socket open would make a rig bug look like a network
-// stall. `Shutdown()` is the process-exit door, and nothing in a run calls it.
+// rebind it on the next re-arm and expose the port to a lingering TIME_WAIT. It serves up to
+// `--net-peers` clients at once (card 583a3ef8; DEFAULT 1, which is exactly the old
+// one-peer-at-a-time behaviour every existing rig was written against): when a peer's socket
+// closes its bye is raised and the listener is still accepting, so join N+1 connects to the
+// same port with no teardown at all. The CLIENT only ever dials out on an ephemeral port, which
+// is the side that may cycle freely. A client arriving OVER capacity is refused and CLOSED
+// rather than queued -- silently holding an extra socket open would make a rig bug look like a
+// network stall. Accepted peers get monotone ids ("peer1", "peer2", ...) that are never reused
+// in a process, mirroring the signal server's no-reuse rule; the dialling side's one remote
+// keeps the legacy id "peer". `Shutdown()` is the process-exit door, and nothing in a run
+// calls it.
 // ---------------------------------------------------------------------------
 using System;
 using System.Collections.Generic;
@@ -54,22 +58,56 @@ namespace EvilAliensWeb.Headless
         // process startup, which no virtual clock knows about.
         private const int ConnectTimeoutMs = 15000;
 
+        private sealed class PeerSock
+        {
+            internal Socket Socket;
+            internal string Id;
+            internal readonly List<byte> Rx = new List<byte>(4096);
+        }
+
         private static bool _enabled;
         private static bool _listen;
         private static int _port;
         private static string _room;
         private static TcpListener _listener;
-        private static Socket _peer;
-        private static readonly List<byte> _rx = new List<byte>(4096);
+        private static readonly List<PeerSock> _peers = new List<PeerSock>();
         private static readonly byte[] _scratch = new byte[8192];
         private static int _portOverride;
+        private static int _maxPeers = 1;
+        private static int _nextPeerNo = 1;   // monotone per process, never reused
 
         internal static bool Enabled => _enabled;
         internal static int Port => _port;
-        internal static bool PeerConnected => _peer != null && _peer.Connected;
+        internal static bool PeerConnected
+        {
+            get
+            {
+                for (int i = 0; i < _peers.Count; i++)
+                {
+                    if (_peers[i].Socket != null && _peers[i].Socket.Connected)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
 
         // Called from Program's argument parsing; 0 = derive the port from the room name.
         internal static void SetPortOverride(int port) => _portOverride = port;
+
+        // --net-peers: how many clients the listening side serves at once. Clamped 1..3 (the
+        // 4-machine ceiling is host + 3); 1 is the old behaviour and the default. The clamp is
+        // REPORTED -- a run silently serving a different peer count than it was asked for is
+        // exactly the mislabelled-measurement class the repo's flag rules exist for.
+        internal static void SetMaxPeers(int max)
+        {
+            _maxPeers = Math.Max(1, Math.Min(3, max));
+            if (_maxPeers != max)
+            {
+                Log("--net-peers " + max + " is out of range -- clamped to " + _maxPeers + " (1..3)");
+            }
+        }
 
         // Which end dials. Derived from the boot role rather than from who opened first, so the
         // two processes cannot both try to bind (or both try to connect) when a race decides the
@@ -115,7 +153,7 @@ namespace EvilAliensWeb.Headless
 
         internal static void Open(string room)
         {
-            if (!_enabled || _listener != null || _peer != null)
+            if (!_enabled || _listener != null || _peers.Count > 0)
             {
                 return;
             }
@@ -156,7 +194,7 @@ namespace EvilAliensWeb.Headless
                     {
                         s.NoDelay = true;
                         s.Connect(IPAddress.Loopback, _port);
-                        _peer = s;
+                        _peers.Add(new PeerSock { Socket = s, Id = "peer" });
                         break;
                     }
                     catch (SocketException)
@@ -168,7 +206,7 @@ namespace EvilAliensWeb.Headless
                         System.Threading.Thread.Sleep(50);
                     }
                 }
-                if (_peer == null)
+                if (_peers.Count == 0)
                 {
                     Log("FAILED to reach 127.0.0.1:" + _port + " (room '" + _room + "') after "
                         + ConnectTimeoutMs + "ms -- is the host process up?");
@@ -180,9 +218,12 @@ namespace EvilAliensWeb.Headless
             }
         }
 
-        internal static void Send(string b64, bool reliable)
+        // `to` null/empty = every connected peer (the eaNet broadcast); a peer id = only the
+        // matching socket (the addressed-send plumbing, card 583a3ef8). An unknown id is a
+        // silent drop, per the INetTransport contract.
+        internal static void Send(string b64, bool reliable, string to = null)
         {
-            if (_peer == null || !_peer.Connected || string.IsNullOrEmpty(b64))
+            if (_peers.Count == 0 || string.IsNullOrEmpty(b64))
             {
                 return;
             }
@@ -194,33 +235,47 @@ namespace EvilAliensWeb.Headless
             frame[3] = (byte)((body.Length >> 16) & 0xFF);
             frame[4] = (byte)((body.Length >> 24) & 0xFF);
             Buffer.BlockCopy(body, 0, frame, HeaderBytes, body.Length);
-            try
+            // Backwards over a list DropPeer removes from, and re-checked per peer: a send
+            // failure mid-loop must not skip the remaining peers.
+            for (int i = _peers.Count - 1; i >= 0; i--)
             {
-                int sent = 0;
-                while (sent < frame.Length)
+                PeerSock p = _peers[i];
+                if (p.Socket == null || !p.Socket.Connected)
                 {
-                    sent += _peer.Send(frame, sent, frame.Length - sent, SocketFlags.None);
+                    continue;
                 }
-            }
-            catch (SocketException)
-            {
-                DropPeer();
+                if (!string.IsNullOrEmpty(to) && p.Id != to)
+                {
+                    continue;
+                }
+                try
+                {
+                    int sent = 0;
+                    while (sent < frame.Length)
+                    {
+                        sent += p.Socket.Send(frame, sent, frame.Length - sent, SocketFlags.None);
+                    }
+                }
+                catch (SocketException)
+                {
+                    DropPeer(p);
+                }
             }
         }
 
         // eaNet.close -- the SESSION is over, not the process. A listed host reaches this on every
         // match teardown and then re-arms, so the listener stays up (see the header); only the
-        // peer socket goes.
+        // peer sockets go.
         internal static void Close()
         {
-            DropPeer();
+            DropAllPeers();
         }
 
         // Process exit. Unused by the game -- kept so the listener has a defined door out and the
         // asymmetry with Close() is a decision rather than an omission.
         internal static void Shutdown()
         {
-            DropPeer();
+            DropAllPeers();
             if (_listener != null)
             {
                 _listener.Stop();
@@ -240,98 +295,117 @@ namespace EvilAliensWeb.Headless
                 return;
             }
             AcceptIfWaiting();
-            if (_peer == null)
+            // Backwards: a dead socket is dropped (removed) mid-loop. The bound is re-checked
+            // per iteration because PumpPeer delivers into game code synchronously, and a
+            // handler that reaches eaNet.close drops EVERY peer (DropAllPeers) -- an index
+            // taken before that would throw.
+            for (int i = _peers.Count - 1; i >= 0; i--)
             {
-                return;
+                if (i < _peers.Count)
+                {
+                    PumpPeer(_peers[i]);
+                }
             }
+        }
+
+        private static void PumpPeer(PeerSock p)
+        {
             try
             {
-                while (_peer.Available > 0)
+                while (p.Socket.Available > 0)
                 {
-                    int n = _peer.Receive(_scratch, 0, Math.Min(_scratch.Length, _peer.Available), SocketFlags.None);
+                    int n = p.Socket.Receive(_scratch, 0, Math.Min(_scratch.Length, p.Socket.Available), SocketFlags.None);
                     if (n <= 0)
                     {
-                        DropPeer();
+                        DropPeer(p);
                         return;
                     }
                     for (int i = 0; i < n; i++)
                     {
-                        _rx.Add(_scratch[i]);
+                        p.Rx.Add(_scratch[i]);
                     }
                 }
                 // A graceful close reads as "readable, zero bytes". Available == 0 with the
                 // socket still polling readable is exactly that, and is how a killed client
                 // process is noticed at all -- there is no pagehide out here.
-                if (_peer.Poll(0, SelectMode.SelectRead) && _peer.Available == 0)
+                if (p.Socket.Poll(0, SelectMode.SelectRead) && p.Socket.Available == 0)
                 {
-                    DropPeer();
+                    DropPeer(p);
                     return;
                 }
             }
             catch (SocketException)
             {
-                DropPeer();
+                DropPeer(p);
                 return;
             }
-            DeliverComplete();
+            DeliverComplete(p);
         }
 
         private static void AcceptIfWaiting()
         {
-            if (_listener == null || !_listener.Pending())
+            while (_listener != null && _listener.Pending())
             {
-                return;
+                Socket s = _listener.AcceptSocket();
+                s.NoDelay = true;
+                if (_peers.Count >= _maxPeers)
+                {
+                    // See the socket-reuse note in the file header: refuse rather than queue.
+                    Log("refused peer " + (_peers.Count + 1) + " -- capacity is " + _maxPeers
+                        + " (raise with --net-peers)");
+                    s.Close();
+                    continue;
+                }
+                var p = new PeerSock { Socket = s, Id = "peer" + _nextPeerNo++ };
+                _peers.Add(p);
+                Log("peer connected (" + p.Id + ")");
             }
-            Socket s = _listener.AcceptSocket();
-            s.NoDelay = true;
-            if (_peer != null)
-            {
-                // See the socket-reuse note in the file header: refuse rather than queue.
-                Log("refused a second peer -- the protocol is 2-peer and one is already connected");
-                s.Close();
-                return;
-            }
-            _peer = s;
-            _rx.Clear();
-            Log("peer connected");
         }
 
-        private static void DeliverComplete()
+        private static void DeliverComplete(PeerSock p)
         {
-            while (_rx.Count >= HeaderBytes)
+            List<byte> rx = p.Rx;
+            while (rx.Count >= HeaderBytes)
             {
-                int len = _rx[1] | (_rx[2] << 8) | (_rx[3] << 16) | (_rx[4] << 24);
-                if (len < 0 || _rx.Count < HeaderBytes + len)
+                int len = rx[1] | (rx[2] << 8) | (rx[3] << 16) | (rx[4] << 24);
+                if (len < 0 || rx.Count < HeaderBytes + len)
                 {
                     return;
                 }
-                bool reliable = _rx[0] == LaneReliable;
+                bool reliable = rx[0] == LaneReliable;
                 var body = new char[len];
                 for (int i = 0; i < len; i++)
                 {
-                    body[i] = (char)_rx[HeaderBytes + i];
+                    body[i] = (char)rx[HeaderBytes + i];
                 }
-                _rx.RemoveRange(0, HeaderBytes + len);
+                rx.RemoveRange(0, HeaderBytes + len);
                 // The SAME entry point the browser's JS callback uses, so the frame reaches
                 // BroadcastChannelTransport through production code rather than a side door.
-                NetInterop.Data(new string(body), reliable, "peer");
+                NetInterop.Data(new string(body), reliable, p.Id);
             }
         }
 
-        private static void DropPeer()
+        private static void DropPeer(PeerSock p)
         {
-            if (_peer == null)
+            if (!_peers.Remove(p))
             {
                 return;
             }
-            try { _peer.Close(); } catch (SocketException) { }
-            _peer = null;
-            _rx.Clear();
-            Log("peer disconnected");
+            try { p.Socket.Close(); } catch (SocketException) { }
+            p.Rx.Clear();
+            Log("peer disconnected (" + p.Id + ")");
             // The transport contract's peer-bye. On the host this is what ends a match when the
             // orchestrator kills the client process between joins; the listener stays up, so the
             // next client connects with nothing to reset.
-            NetInterop.PeerBye("peer");
+            NetInterop.PeerBye(p.Id);
+        }
+
+        private static void DropAllPeers()
+        {
+            for (int i = _peers.Count - 1; i >= 0; i--)
+            {
+                DropPeer(_peers[i]);
+            }
         }
 
         private static void Log(string s) => Console.WriteLine("[eahl] net      " + s);

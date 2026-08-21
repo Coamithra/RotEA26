@@ -15,7 +15,9 @@ namespace EvilAliensWeb.Compat.Net
     {
         private static IJSInProcessRuntime _js;
 
-        internal static event Action<byte[], bool> OnData;
+        // (payload, reliableLane, peerId). The peerId is JS's per-connection key ("1".."3"
+        // on the host side, "h" on a joiner) -- the same string SendTo takes as the address.
+        internal static event Action<byte[], bool, string> OnData;
         internal static event Action<string, string> OnPhase; // (phase, detail)
         internal static event Action<string> OnCodeEntry;     // "" = cancelled
 
@@ -39,9 +41,11 @@ namespace EvilAliensWeb.Compat.Net
             _js = js as IJSInProcessRuntime;
         }
 
-        internal static void Host(string signalUrl)
+        // maxPeers = total machines including this one, clamped 2..4 in JS; 2 (the default)
+        // is every shipped flow. >2 is inert until the session layer is N-peer (card 87242257).
+        internal static void Host(string signalUrl, int maxPeers = 2)
         {
-            _js?.InvokeVoid("eaRtc.host", signalUrl);
+            _js?.InvokeVoid("eaRtc.host", signalUrl, maxPeers);
         }
 
         internal static void Join(string signalUrl, string code)
@@ -52,6 +56,11 @@ namespace EvilAliensWeb.Compat.Net
         internal static void Send(byte[] payload, bool reliable)
         {
             _js?.InvokeVoid("eaRtc.send", Convert.ToBase64String(payload), reliable);
+        }
+
+        internal static void SendTo(string peerId, byte[] payload, bool reliable)
+        {
+            _js?.InvokeVoid("eaRtc.sendTo", peerId, Convert.ToBase64String(payload), reliable);
         }
 
         internal static void Close()
@@ -152,7 +161,7 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         [JSInvokable("rtcData")]
-        public static void Data(string b64, bool reliable)
+        public static void Data(string b64, bool reliable, string peerId)
         {
             if (string.IsNullOrEmpty(b64))
             {
@@ -167,11 +176,12 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
-            OnData?.Invoke(bytes, reliable);
+            OnData?.Invoke(bytes, reliable, peerId ?? "");
         }
 
         // phases: contacting, code (detail = the room code), peer, connected,
-        // failed (detail = reason), closed (peer channel closed / bye).
+        // failed (detail = reason), closed (peer channel closed / bye),
+        // peergone (detail = the departed peer's id -- N-peer hosts only, card 583a3ef8).
         [JSInvokable("rtcPhase")]
         public static void Phase(string phase, string detail)
         {

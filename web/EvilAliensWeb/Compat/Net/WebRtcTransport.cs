@@ -61,6 +61,16 @@ namespace EvilAliensWeb.Compat.Net
             WebRtcInterop.Send(payload, reliable: true);
         }
 
+        public void SendStreamTo(string peerId, byte[] payload)
+        {
+            WebRtcInterop.SendTo(peerId, payload, reliable: false);
+        }
+
+        public void SendReliableTo(string peerId, byte[] payload)
+        {
+            WebRtcInterop.SendTo(peerId, payload, reliable: true);
+        }
+
         public void Close()
         {
             if (!open)
@@ -73,14 +83,26 @@ namespace EvilAliensWeb.Compat.Net
             WebRtcInterop.Close();
         }
 
-        private void Forward(byte[] payload, bool reliable)
+        private void Forward(byte[] payload, bool reliable, string peerId)
         {
-            OnData?.Invoke(payload, reliable, "peer");
+            // The senderId is JS's real per-connection id since card 583a3ef8 (it was the
+            // hard-coded literal "peer"). NetSession still discards it while the protocol is
+            // 2-peer; the per-peer stages key their channels off it.
+            OnData?.Invoke(payload, reliable, peerId);
         }
 
         private void ForwardPhase(string phase, string detail)
         {
-            if (phase == "closed" || phase == "failed")
+            // 'peergone' is a PER-PEER departure (N-peer hosts only) and its detail IS the
+            // departed peer's id -- the OnPeerBye contract. 'closed'/'failed' are the whole
+            // link going down (all peers gone at once) and keep their legacy "phase:reason"
+            // string: NetSession collapses any bye to a bool today, and the per-peer stages
+            // must treat an unrecognized bye string as "every peer" (INetTransport's doc).
+            if (phase == "peergone")
+            {
+                OnPeerBye?.Invoke(detail);
+            }
+            else if (phase == "closed" || phase == "failed")
             {
                 OnPeerBye?.Invoke(phase + ":" + detail);
             }

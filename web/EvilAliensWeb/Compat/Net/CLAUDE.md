@@ -140,6 +140,58 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   carried by card `4717d3cf` (Stage 11.5, "For me") and card `6fb406bc` (Stage 11.11)).
   Nothing above the interface may assume loopback
   reliability.
+- **The transport layer is N-PEER since card `583a3ef8` (Stage 11.7) -- the SESSION above it is
+  still 2-peer.** The first card of the `plans/4p-online-coop.md` epic, and deliberately
+  behaviour-neutral for every shipped flow (protocol version unchanged, `NetSession` untouched).
+  What changed, outermost first:
+  - **`INetTransport` grew addressed sends** -- `SendStreamTo(peerId, ...)` /
+    `SendReliableTo(peerId, ...)`. The senderId `OnData` reports IS the address (no separate
+    naming scheme); an unknown/departed/self/wrong-room target is a SILENT drop, the
+    closed-DataChannel semantic. The unaddressed pair is documented as fan-out over all
+    connected peers (≡ unicast at one peer). `OnPeerBye` now carries the DEPARTING PEER's id on
+    every per-peer departure -- with one exception: `WebRtcTransport`'s TERMINAL whole-link
+    failure keeps its legacy "phase:reason" string (all peers are gone in that case), so a
+    consumer routing byes by id must treat an unrecognized string as "every peer".
+    `NetSession.StartWith` still DISCARDS the senderId and collapses the bye to a bool -- that
+    is card `b2828be8`/`87242257`'s work, not a gap here.
+  - **`webrtc.js` holds a MAP of peer entries, not singletons** -- host: one `{pc, chS, chR}`
+    triple per joiner, keyed by the server's joiner id (1..3, monotone, never reused); joiner:
+    exactly one entry (the host). SenderIds: `"1".."3"` host-side, `"h"` joiner-side.
+    `eaRtc.host(url, max)` requests room capacity (clamped 2..4, default 2); the signaling WS
+    now closes when the room is FULL (`connectedCount == max-1`), which at max 2 is exactly the
+    old first-peer close; a bigger host keeps it open (and beating) to admit later joiners. A
+    single peer's loss on a bigger host is the new `peergone` phase (detail = its id) and the
+    JS layer plays on -- note two bounds on that claim: once the room FILLED the ws is closed
+    and the server room is gone, so a lost peer is NOT replaceable until the lobby card
+    (`0257f8ba`); and `NetSession` still collapses every bye to "the peer is gone", so per-peer
+    session survival is card `87242257`'s work, not shipped behaviour. Every shipped flow
+    (joiner, max-2 host, last-peer-gone) keeps the old terminal `closed`/`failed` behaviour
+    exactly. Listed/JIP rooms stay capacity 2 until card `0257f8ba`.
+    **GOTCHA (found live on the 3-tab rig, fixed): a `{t:gone,id}` from the server means "that
+    SIGNALING seat emptied", not "that peer left"** -- a joiner deliberately closes its ws the
+    moment P2P is up (the shipped flow), so post-connect the frame is EXPECTED and must be
+    ignored (the link's own liveness governs: bye frame, channel close, the C# stream timeout);
+    only a PRE-connect gone tears the pending pc down. Routing it to `peerGone` unconditionally
+    killed every freshly-connected peer ~instantly. Consequence: an N-room's signaling seats
+    only ever hold pre-P2P joiners (each vacates on connect and the room re-advertises), so seat
+    count is NOT session membership -- session capacity is the host roster's job (card `87242257`).
+  - **The signal server holds host + up to 3 joiners, capacity HOST-REQUESTED** (optional `max`
+    in `{t:host}`, clamped 2..4, default 2 -- so a shipped client's room can never admit a 3rd
+    machine; the card's gotcha). Joiners get monotone ids; the host's `{t:peer}` gains `id` (the
+    one wire-visible delta to old clients, provably ignored); relay frames carry `from`
+    (joiner->host, max>2 rooms) / require `to` (host->joiner, max>2 rooms) while max-2 rooms
+    keep today's VERBATIM relay byte-for-byte; a joiner dropping from a max>2 room frees its
+    seat (`{t:gone,id}`, room survives and re-lists) where max-2 teardown is unchanged. Either
+    deploy order (site first / server first) is protocol-safe -- enumerated in
+    `plans/4p-online-coop.md` and pinned by `server/signal/test_signal.py` (50 cases).
+  - **`tools/headless/LocalSocketNet` serves up to `--net-peers <1..3>` clients** (default 1 =
+    the old behaviour, so `net_jip_sync.py` and every committed probe run unchanged); accepted
+    peers get monotone ids `peer1..`, the dialling side's one remote keeps `"peer"`.
+  - Pinned by `NetWireTest` section 1b (addressed sends at N=4 -- reach EXACTLY the target, the
+    others get NOTHING, the silent-drop counter arithmetic, room isolation, the impairment
+    pass-through; floor 110 in `ProbeNetWire` / `net_wire.txt` / `net_selftests.txt`) and by
+    `test_signal.py`'s N-join/leave/fan-out/capacity cases with the old byte-equality cases kept
+    verbatim as the shipped-protocol mutation controls.
 - **Impl #3 `InMemoryTransport` (card 25ad0659) is the HEADLESS one: N endpoints in ONE process,
   no browser and no JS.** Created only by `NetWire(int peers)` (its owner and switch, max 8);
   `wire[i]` is the endpoint. `NetSession.StartWith` already takes an arbitrary `INetTransport`, so

@@ -123,6 +123,18 @@ namespace EvilAliensWeb.Compat.Net
             inner.SendReliable(payload);
         }
 
+        // Addressed sends forward verbatim like the unaddressed pair -- impairment is RX-ONLY
+        // (see the header), so the decorator has nothing to do on any TX path.
+        public void SendStreamTo(string peerId, byte[] payload)
+        {
+            inner.SendStreamTo(peerId, payload);
+        }
+
+        public void SendReliableTo(string peerId, byte[] payload)
+        {
+            inner.SendReliableTo(peerId, payload);
+        }
+
         // Full reset, not just a queue drain: card 11.5 adds a real disconnect/reconnect path,
         // and a stale lastReliableRelease would pin every post-reconnect reliable packet to the
         // old session's clock (releasing them all at once, or never).

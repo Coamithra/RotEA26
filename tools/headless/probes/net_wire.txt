@@ -47,6 +47,7 @@ eval NetWireTest
 
 expect \[netwire\] in-process wire \+ wire-level codec round trips
 expect 1\. transport contract
+expect 1b\. addressed sends
 expect 2\. NetImpairment composed over an endpoint
 expect 3\. codec round trips through the wire
 expect 4\. stream-lane reorder \+ dedup
@@ -90,6 +91,13 @@ expect 5\. scaled-i16 motion rates
 # beside it. The DURATION is the field that carries the risk: it is what the far peer's copy of
 # the respawn clock actually runs for, and it is not a constant (it falls out of the dying
 # player's respawntimebonus as well as the difficulty).
-expect \[netwire\] 96 passed, 0 failed
+# Card 583a3ef8 raised it 96 -> 110: section 1b, the addressed sends (SendStreamTo /
+# SendReliableTo). The legs worth naming: an addressed send reaches EXACTLY its target and the
+# other endpoints receive NOTHING (a fan-out masquerading as unicast passes every broadcast-era
+# assertion, so the negative is the section's whole point); every way to address nobody --
+# unknown id, self, closed target, right id in the wrong room -- is a SILENT drop with TxSent
+# moving and TxFanout not (the closed-DataChannel semantic INetTransport pins); and the
+# NetImpairment decorator passes both addressed lanes through verbatim (impairment is RX-only).
+expect \[netwire\] 110 passed, 0 failed
 expect-not FAIL
 quit

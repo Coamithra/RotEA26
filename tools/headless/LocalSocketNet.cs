@@ -97,10 +97,16 @@ namespace EvilAliensWeb.Headless
         internal static void SetPortOverride(int port) => _portOverride = port;
 
         // --net-peers: how many clients the listening side serves at once. Clamped 1..3 (the
-        // 4-machine ceiling is host + 3); 1 is the old behaviour and the default.
+        // 4-machine ceiling is host + 3); 1 is the old behaviour and the default. The clamp is
+        // REPORTED -- a run silently serving a different peer count than it was asked for is
+        // exactly the mislabelled-measurement class the repo's flag rules exist for.
         internal static void SetMaxPeers(int max)
         {
             _maxPeers = Math.Max(1, Math.Min(3, max));
+            if (_maxPeers != max)
+            {
+                Log("--net-peers " + max + " is out of range -- clamped to " + _maxPeers + " (1..3)");
+            }
         }
 
         // Which end dials. Derived from the boot role rather than from who opened first, so the
@@ -289,10 +295,16 @@ namespace EvilAliensWeb.Headless
                 return;
             }
             AcceptIfWaiting();
-            // Backwards: a dead socket is dropped (removed) mid-loop.
+            // Backwards: a dead socket is dropped (removed) mid-loop. The bound is re-checked
+            // per iteration because PumpPeer delivers into game code synchronously, and a
+            // handler that reaches eaNet.close drops EVERY peer (DropAllPeers) -- an index
+            // taken before that would throw.
             for (int i = _peers.Count - 1; i >= 0; i--)
             {
-                PumpPeer(_peers[i]);
+                if (i < _peers.Count)
+                {
+                    PumpPeer(_peers[i]);
+                }
             }
         }
 

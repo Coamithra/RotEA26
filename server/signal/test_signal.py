@@ -728,8 +728,12 @@ async def run_tests(url: str) -> None:
 
     # 27. addressed relay host->joiner (max>2): the frame lands on EXACTLY the
     #     addressed seat, VERBATIM (`to` included -- byte equality); the other
-    #     seat hears nothing (the negative control); a missing, boolean or
-    #     unknown `to` -> bad.
+    #     seat hears nothing (the negative control); a missing or boolean `to`
+    #     (protocol misuse) -> bad; a well-formed `to` naming an UNKNOWN /
+    #     vacated seat is a SILENT DROP, never `bad` -- a joiner frees its seat
+    #     the moment P2P is up while the host's trickle ICE for it can still be
+    #     in flight, and `bad` is terminal on the client, so answering it here
+    #     tore down every connected peer (found on the 3-tab Chrome rig).
     try:
         assert n_host is not None and len(n_joiners) == 3, "no room from case 25"
         frame = json.dumps({"t": "sdp", "desc": {"type": "offer", "sdp": "v=0"}, "to": 2})
@@ -741,14 +745,25 @@ async def run_tests(url: str) -> None:
             await asyncio.wait_for(n_joiners[0].recv(), 0.5)
             silent = False
         all_bad = True
-        for extra in ({}, {"to": True}, {"to": 99}):
+        for extra in ({}, {"to": True}):
             await send(n_host, {"t": "sdp", "d": 1, **extra})
             r = await recv_json(n_host)
             if r != {"t": "error", "reason": "bad"}:
                 all_bad = False
+        # Unknown seat: no reply to the host (a `bad` here is the regression)
+        # and nothing delivered to any seated joiner.
+        await send(n_host, {"t": "sdp", "d": 1, "to": 99})
+        dropped = True
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(n_host.recv(), 0.5)
+            dropped = False
+        for j in n_joiners:
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(j.recv(), 0.3)
+                dropped = False
         record("host->joiner relay is addressed, verbatim, and validated",
-               hit and silent and all_bad,
-               f"hit={hit} silent={silent} bad={all_bad} got={got!r}")
+               hit and silent and all_bad and dropped,
+               f"hit={hit} silent={silent} bad={all_bad} unknownDropped={dropped} got={got!r}")
     except Exception as e:
         record("host->joiner relay is addressed, verbatim, and validated", False, repr(e))
 

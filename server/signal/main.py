@@ -204,9 +204,19 @@ class Room:
 
     def listable(self) -> bool:
         # A free joiner seat is the join-eligibility invariant, mirrored
-        # server-side: a full room is never advertised (11.4 "join -> full").
-        # For max == 2 this is exactly the old `joiner is None`, so shipped
-        # 2-peer rooms list and delist identically.
+        # server-side. For max == 2 this is exactly the old `joiner is None`,
+        # so shipped 2-peer rooms list and delist identically (a paired 2-room
+        # is never advertised -- 11.4 "join -> full").
+        #
+        # For max > 2, SEATS ARE SIGNALING SLOTS, NOT SESSION MEMBERSHIP: a
+        # joiner vacates its seat the moment P2P is up (it closes its ws), so
+        # a room whose players are all connected reads as all-free here and
+        # would re-advertise. This is deliberate -- the server cannot know how
+        # many P2P links actually hold -- and the definitive member bound is
+        # the HOST's: its client stops offering (and closes this room) once it
+        # holds max-1 connected peers, and the host session's roster is the
+        # authority above that (plans/4p-online-coop.md, card 87242257). So
+        # this predicate bounds concurrent PAIRING attempts, nothing more.
         return self.listed and len(self.joiners) < self.max - 1
 
     def listing_entry(self) -> dict:
@@ -589,10 +599,10 @@ async def ws_endpoint(ws: WebSocket):
                         await _send_json(target_ws, {"t": "pong", "id": msg.get("id")})
 
             elif t in RELAY_TYPES:
-                if room is None or not room.joiners:
-                    # Not in a room, or a host with nobody seated yet -- the
-                    # shipped "refused until paired" rule. A joiner passes by
-                    # construction (its own seat makes joiners non-empty).
+                if room is None or (not room.joiners and room.max == 2):
+                    # Not in a room, or a 2-room host with nobody seated yet --
+                    # the shipped "refused until paired" rule. A joiner passes
+                    # by construction (its own seat makes joiners non-empty).
                     await bad()
                 elif ws is room.host:
                     if room.max == 2:
@@ -608,16 +618,23 @@ async def ws_endpoint(ws: WebSocket):
                         # subclass of int -- reject it so {"to": true} can't
                         # route to seat 1 (the `ref` pattern in pong).
                         to = msg.get("to")
-                        peer = (room.joiners.get(to)
-                                if isinstance(to, int) and not isinstance(to, bool)
-                                else None)
-                        if peer is None:
+                        if not isinstance(to, int) or isinstance(to, bool):
+                            # Malformed addressing is protocol misuse.
                             await bad()
                         else:
-                            # Still the ORIGINAL text: the addressed joiner
-                            # gets the frame verbatim, `to` included.
-                            with contextlib.suppress(Exception):
-                                await peer.send_text(text)
+                            # A well-formed `to` naming a VACATED seat is a
+                            # timing artifact, not misuse: a joiner closes its
+                            # ws the moment P2P is up, freeing the seat, while
+                            # the host's trickle ICE for that peer can still be
+                            # in flight -- and `bad` is terminal on the client,
+                            # so answering it here tore down every connected
+                            # peer. Silent drop, like a closed DataChannel.
+                            peer = room.joiners.get(to)
+                            if peer is not None:
+                                # Still the ORIGINAL text: the addressed joiner
+                                # gets the frame verbatim, `to` included.
+                                with contextlib.suppress(Exception):
+                                    await peer.send_text(text)
                 else:
                     if room.max == 2:
                         # Shipped 2-peer path, byte-identical.

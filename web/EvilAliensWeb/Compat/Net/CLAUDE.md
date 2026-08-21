@@ -160,9 +160,13 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     `eaRtc.host(url, max)` requests room capacity (clamped 2..4, default 2); the signaling WS
     now closes when the room is FULL (`connectedCount == max-1`), which at max 2 is exactly the
     old first-peer close; a bigger host keeps it open (and beating) to admit later joiners. A
-    single peer's loss on a bigger host is the new `peergone` phase (detail = its id) and play
-    continues; every shipped flow (joiner, max-2 host, last-peer-gone) keeps the old terminal
-    `closed`/`failed` behaviour exactly. Listed/JIP rooms stay capacity 2 until card `0257f8ba`.
+    single peer's loss on a bigger host is the new `peergone` phase (detail = its id) and the
+    JS layer plays on -- note two bounds on that claim: once the room FILLED the ws is closed
+    and the server room is gone, so a lost peer is NOT replaceable until the lobby card
+    (`0257f8ba`); and `NetSession` still collapses every bye to "the peer is gone", so per-peer
+    session survival is card `87242257`'s work, not shipped behaviour. Every shipped flow
+    (joiner, max-2 host, last-peer-gone) keeps the old terminal `closed`/`failed` behaviour
+    exactly. Listed/JIP rooms stay capacity 2 until card `0257f8ba`.
     **GOTCHA (found live on the 3-tab rig, fixed): a `{t:gone,id}` from the server means "that
     SIGNALING seat emptied", not "that peer left"** -- a joiner deliberately closes its ws the
     moment P2P is up (the shipped flow), so post-connect the frame is EXPECTED and must be

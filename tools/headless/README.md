@@ -293,9 +293,12 @@ dial. The port is derived from `?room=` so both sides agree with no configuratio
 overrides it, and a bind clash is reported and survived rather than killing the run.
 
 **`--net-peers <1..3>` raises how many clients the listening side serves at once** (card
-583a3ef8; default 1 = the classic two-process rig, byte-identical behaviour). Accepted peers get
-monotone ids (`peer1`, `peer2`, ... -- never reused in a process); a client arriving over
-capacity is refused and closed, with the refusal log line naming the flag. This is the plumbing
+583a3ef8; default 1 = the classic two-process rig, behaviourally identical -- note the accepted
+peer's senderId is now `peer1` rather than the old `peer` and the connect/disconnect log lines
+name it, but nothing consumes either: `NetSession` discards the senderId while the protocol is
+2-peer and no committed probe greps those lines). Accepted peers get monotone ids (`peer1`,
+`peer2`, ... -- never reused in a process); a client arriving over capacity is refused and
+closed, with the refusal log line naming the flag. This is the plumbing
 for the 3-4-process N-peer rigs (`plans/4p-online-coop.md`); until the session layer is N-peer
 (card 87242257) a >1 setting only exercises the transport.
 

@@ -147,11 +147,14 @@ window.eaRtc = (() => {
     };
 
     // ONE peer's link died (bye frame, channel close, ICE failure, connect timeout, or a
-    // {t:gone,id} seat-free from the server). Escalation keeps every shipped flow exactly as
-    // it was: the joiner has only the host, a roomMax==2 host has only its joiner, and a host
-    // with nothing left and no open ws to admit more is over -- those take the terminal
-    // fail/closed path unchanged. A bigger host otherwise reports 'peergone' and plays on
-    // (the seat re-opens server-side; the ws may still be up for a fresh join).
+    // pre-connect {t:gone,id} seat-free from the server). Escalation keeps every shipped flow
+    // exactly as it was: the joiner has only the host, a roomMax==2 host has only its joiner,
+    // and a host with nothing left and no open ws to admit more is over -- those take the
+    // terminal fail/closed path unchanged. A bigger host otherwise reports 'peergone' and
+    // plays on. NOTE the hole until the lobby card (0257f8ba): once the room FILLED the ws is
+    // closed and the server room is gone, so a peer lost after that is NOT replaceable -- and
+    // NetSession still collapses every bye to "the peer is gone" (per-peer session behaviour
+    // is card 87242257), so today 'peergone' only keeps the JS layer alive.
     const peerGone = (p, kind) => {
         if (!peers.has(p.key)) return;
         killPeer(p);
@@ -263,6 +266,15 @@ window.eaRtc = (() => {
                     // The server tags each arrival with its joiner id; an old server sends none
                     // and only ever delivers one arrival, so default to 1.
                     const key = Number.isInteger(m.id) ? m.id : 1;
+                    // Capacity race guard: the server's seats only bound concurrent PAIRING
+                    // attempts (a joiner vacates its seat on connect), so an arrival can land
+                    // here while the map already holds roomMax-1 peers -- e.g. a 4th joiner
+                    // racing the 3rd's channels opening. No offer = it times out server-side;
+                    // there is no decline frame to send it.
+                    if (peers.size >= roomMax - 1) {
+                        phase('peerover', String(key));
+                        return;
+                    }
                     phase('peer', roomMax > 2 ? String(key) : '');
                     await startAsHost(newPeer(key));
                 } else {
@@ -304,7 +316,14 @@ window.eaRtc = (() => {
                 }
                 else if (!anyConnected()) fail('gone');
             }
-            else if (m.t === 'error') fail(m.reason || 'server');
+            else if (m.t === 'error') {
+                // Terminal only while nothing is connected (the shipped rule -- and in shipped
+                // flows the ws is closed post-connect, so this branch was unreachable then). An
+                // N-host keeps its ws open, and a server complaint about signaling -- e.g. a
+                // relay frame that raced a vacated seat -- must not tear down live P2P links.
+                if (!anyConnected()) fail(m.reason || 'server');
+                else console.warn('[rtc] server error ignored post-connect: ' + (m.reason || 'server'));
+            }
         } catch (e) {
             console.warn('[rtc] signal handling failed: ' + e.message);
             fail('protocol');

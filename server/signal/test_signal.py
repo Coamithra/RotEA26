@@ -22,6 +22,11 @@ is connected, and no single room re-pulled within the per-room floor.
 The gates get their own cases; the by-hand rotation half keeps a browser
 socket open and zeroes the floor, so its exact-rotation assertions still
 mean what they always did.
+
+Stage 11.7 (N-peer rooms) adds cases 25-32 at the end: host-requested
+capacity, seat ids, addressed/stamped relay in max>2 rooms, and the
+seat-freeing teardown -- with the untouched 2-peer cases above standing
+as the byte-for-byte shipped-protocol pins (see the section banner).
 """
 
 import asyncio
@@ -63,6 +68,33 @@ async def host_room(url):
     msg = await recv_json(ws)
     assert msg.get("t") == "code", msg
     return ws, msg["code"]
+
+
+async def host_n(url, max_):
+    """Host a room with an explicit capacity request; return (ws, code)."""
+    ws = await websockets.connect(url)
+    await send(ws, {"t": "host", "max": max_})
+    msg = await recv_json(ws)
+    assert msg.get("t") == "code", msg
+    return ws, msg["code"]
+
+
+async def join_ok(url, code):
+    """Join a room; assert the joiner-side frame is the shipped bare peer."""
+    ws = await websockets.connect(url)
+    await send(ws, {"t": "join", "code": code})
+    msg = await recv_json(ws)
+    assert msg == {"t": "peer"}, msg
+    return ws
+
+
+async def join_refused(url, code, reason):
+    """Attempt a join, return True iff it is refused with exactly `reason`."""
+    ws = await websockets.connect(url)
+    await send(ws, {"t": "join", "code": code})
+    msg = await recv_json(ws)
+    await ws.close()
+    return msg == {"t": "error", "reason": reason}
 
 
 async def barrier(ws) -> None:
@@ -116,13 +148,41 @@ def unit_tests() -> None:
     u.created = u.last_beat = time.monotonic() - (main.ROOM_TTL_SECONDS + 1)
     record("unlisted room keeps from-creation expiry", u.expired())
 
-    # listable() == listed AND empty joiner slot (mirrors join-eligibility).
+    # listable() == listed AND a free joiner seat (mirrors join-eligibility).
+    # These two max==2 rows ARE the old-behaviour equivalence: 0 joiners is the
+    # old `joiner is None`, 1 joiner is the old occupied slot -- shipped 2-peer
+    # rooms must list and delist identically.
     l = main.Room("CCCCC", None)
     record("fresh room is not listable", not l.listable())
     l.listed = True
     record("listed + empty slot is listable", l.listable())
-    l.joiner = object()
+    l.joiners[1] = object()
     record("full room is not listable", not l.listable())
+
+    # ---- Stage 11.7: listable() truth table over (listed, max, joiners) -----
+    # The rule is `listed and len(joiners) < max - 1`. Rows with cap == 2
+    # restate the equivalence above; rows with cap > 2 are the new capacity
+    # awareness (a max=4 room with 1 or 2 joiners still advertises).
+    bad_rows = []
+    for listed in (False, True):
+        for cap in (2, 3, 4):
+            for n in range(4):
+                r = main.Room("EEEEE", None, cap)
+                r.listed = listed
+                for _ in range(min(n, cap - 1)):
+                    r.joiners[r.next_joiner_id] = object()
+                    r.next_joiner_id += 1
+                seated = len(r.joiners)
+                expect = listed and seated < cap - 1
+                if r.listable() != expect:
+                    bad_rows.append(f"(listed={listed},max={cap},joiners={seated})")
+    record("listable() truth table over (listed, max, joiners)",
+           not bad_rows, " ".join(bad_rows))
+
+    # _room_max: garbage/absent -> 2, clamped to [2, 4].
+    got = [main._room_max(v) for v in (None, "x", 0, 1, 2, 3, 4, 9, "3", True)]
+    record("_room_max clamps to [2,4] and defaults garbage to 2",
+           got == [2, 2, 2, 2, 2, 3, 4, 4, 3, 2], repr(got))
 
     # ---- card e7404647: thumbnail freshness on the Room object --------------
     s = main.Room("DDDDD", None)
@@ -180,13 +240,21 @@ async def run_tests(url: str) -> None:
         await send(joiner, {"t": "join", "code": f"  {code.lower()} "})
         j = await recv_json(joiner)
         h = await recv_json(host)
+        # Stage 11.7's ONE deliberate wire-visible delta: the HOST's peer frame
+        # now carries the joiner's seat id (yes, even in a default max==2 room
+        # -- the shipped host's JS reads only the fields it knows). The JOINER
+        # frame stays byte-identical, so its exact-equality assert stays.
         record("host+join both receive peer",
-               j == {"t": "peer"} and h == {"t": "peer"}, f"joiner={j} host={h}")
+               j == {"t": "peer"} and h.get("t") == "peer"
+               and isinstance(h.get("id"), int),
+               f"joiner={j} host={h}")
     except Exception as e:
         record("host+join both receive peer", False, repr(e))
         return
 
-    # 4. sdp/ice relay, both directions, verbatim
+    # 4. sdp/ice relay, both directions, verbatim. UNMODIFIED since Stage 11.7
+    #    on purpose: this byte-equality is the mutation control proving max==2
+    #    rooms are never augmented (no `from` stamp, no re-serialization).
     try:
         sdp = json.dumps({"t": "sdp", "desc": {"type": "offer", "sdp": "v=0\r\n..."}, "x": 1})
         await host.send(sdp)
@@ -201,7 +269,9 @@ async def run_tests(url: str) -> None:
     except Exception as e:
         record("sdp/ice relayed verbatim both directions", False, repr(e))
 
-    # 5. third joiner -> full
+    # 5. third joiner -> full. Since Stage 11.7 this is ALSO the default-
+    #    capacity pin: the host above sent no `max`, so its room must refuse a
+    #    second joiner exactly like every shipped 2-peer build expects.
     try:
         third = await websockets.connect(url)
         await send(third, {"t": "join", "code": code})
@@ -221,7 +291,8 @@ async def run_tests(url: str) -> None:
     except Exception as e:
         record("unknown type -> error bad", False, repr(e))
 
-    # 7. disconnect -> survivor gets gone
+    # 7. disconnect -> survivor gets gone. With case 8 this pins the max==2
+    #    teardown (room dies whole, bare {t:gone}) -- unchanged by Stage 11.7.
     try:
         await joiner.close()
         msg = await recv_json(host)
@@ -599,6 +670,198 @@ async def run_tests(url: str) -> None:
     # The browser socket the by-hand half held open for the card-97b31562 gate.
     if pull_bws is not None:
         await pull_bws.close()
+
+    # ---- Stage 11.7: N-peer rooms (host + up to 3 joiners) ------------------
+    # The shipped 2-peer protocol is pinned by UNMODIFIED cases above:
+    #  - case 5 is the default-capacity pin (a host that sends no `max` still
+    #    refuses a second joiner with `full`);
+    #  - case 4's byte-equality is the mutation control against augmenting
+    #    max==2 relay frames;
+    #  - cases 7/8 pin the max==2 teardown (room dies whole, bare {t:gone});
+    #  - case 14 pins the max==2 delist-at-one-joiner listable() equivalence.
+    # Cases 25/27/28/30/31 share ONE max=4 room, built in 25 and torn down by
+    # 31's host drop; 26/29/32 are self-contained.
+
+    # 25. max=4 happy path: three joins seat with distinct MONOTONE host-side
+    #     ids, every joiner-side frame stays the shipped bare peer, and the
+    #     fourth join is refused exactly like a full 2-peer room.
+    n_host = None
+    n_code = None
+    n_joiners: list = []
+    try:
+        n_host, n_code = await host_n(url, 4)
+        ids = []
+        for _ in range(3):
+            n_joiners.append(await join_ok(url, n_code))
+            hmsg = await recv_json(n_host)
+            ids.append(hmsg.get("id") if hmsg.get("t") == "peer" else None)
+        full4 = await join_refused(url, n_code, "full")
+        record("max=4 seats 3 joiners with monotone ids, 4th -> full",
+               ids == [1, 2, 3] and full4, f"ids={ids} full={full4}")
+    except Exception as e:
+        record("max=4 seats 3 joiners with monotone ids, 4th -> full", False, repr(e))
+
+    # 26. capacity clamps: 9 behaves as 4 (three joiners land, the fourth is
+    #     refused), 1 and garbage behave as the shipped 2 (the SECOND joiner
+    #     is refused).
+    try:
+        h9, c9 = await host_n(url, 9)
+        nine = [await join_ok(url, c9) for _ in range(3)]
+        for _ in range(3):
+            await recv_json(h9)  # drain the host-side peer frames
+        ok9 = await join_refused(url, c9, "full")
+        for ws_ in (h9, *nine):
+            await ws_.close()
+        ok_low = True
+        for m in (1, "x"):
+            hm, cm = await host_n(url, m)
+            jm = await join_ok(url, cm)
+            await recv_json(hm)
+            if not await join_refused(url, cm, "full"):
+                ok_low = False
+            await jm.close()
+            await hm.close()
+        record("max clamps: 9 -> 4, 1 and garbage -> 2", ok9 and ok_low,
+               f"nine={ok9} low={ok_low}")
+    except Exception as e:
+        record("max clamps: 9 -> 4, 1 and garbage -> 2", False, repr(e))
+
+    # 27. addressed relay host->joiner (max>2): the frame lands on EXACTLY the
+    #     addressed seat, VERBATIM (`to` included -- byte equality); the other
+    #     seat hears nothing (the negative control); a missing, boolean or
+    #     unknown `to` -> bad.
+    try:
+        assert n_host is not None and len(n_joiners) == 3, "no room from case 25"
+        frame = json.dumps({"t": "sdp", "desc": {"type": "offer", "sdp": "v=0"}, "to": 2})
+        await n_host.send(frame)
+        got = await asyncio.wait_for(n_joiners[1].recv(), TIMEOUT)
+        hit = got == frame
+        silent = True  # seat 1 must NOT receive the frame addressed to seat 2
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(n_joiners[0].recv(), 0.5)
+            silent = False
+        all_bad = True
+        for extra in ({}, {"to": True}, {"to": 99}):
+            await send(n_host, {"t": "sdp", "d": 1, **extra})
+            r = await recv_json(n_host)
+            if r != {"t": "error", "reason": "bad"}:
+                all_bad = False
+        record("host->joiner relay is addressed, verbatim, and validated",
+               hit and silent and all_bad,
+               f"hit={hit} silent={silent} bad={all_bad} got={got!r}")
+    except Exception as e:
+        record("host->joiner relay is addressed, verbatim, and validated", False, repr(e))
+
+    # 28. augmented relay joiner->host (max>2): the parsed frame arrives with
+    #     `from` == the sender's seat id and every original field intact.
+    try:
+        assert n_host is not None and len(n_joiners) == 3, "no room from case 25"
+        await send(n_joiners[1], {"t": "sdp", "d": "answer-blob", "x": 5})
+        got = await recv_json(n_host)
+        record("joiner->host relay is stamped with from=<seat id>",
+               got == {"t": "sdp", "d": "answer-blob", "x": 5, "from": 2}, repr(got))
+    except Exception as e:
+        record("joiner->host relay is stamped with from=<seat id>", False, repr(e))
+
+    # 29. a stray `to` from a new-style host in a max==2 room is IGNORED and
+    #     the frame relayed verbatim to the sole joiner -- never `bad`. (The
+    #     no-`to` verbatim path is case 4.)
+    try:
+        h2, c2 = await host_room(url)
+        j2 = await join_ok(url, c2)
+        await recv_json(h2)  # the host-side peer frame
+        frame = json.dumps({"t": "sdp", "d": "x", "to": 1})
+        await h2.send(frame)
+        got = await asyncio.wait_for(j2.recv(), TIMEOUT)
+        record("a stray `to` in a max==2 room rides along verbatim",
+               got == frame, repr(got))
+        await j2.close()
+        await recv_json(h2)  # the {t:gone} from the joiner's close
+        await h2.close()
+    except Exception as e:
+        record("a stray `to` in a max==2 room rides along verbatim", False, repr(e))
+
+    # 30. mid-session joiner leave (max=4): the seat is FREED, the room
+    #     SURVIVES (a later addressed relay still lands), a listed room
+    #     re-appears in browse, and a new join gets a FRESH id -- never a
+    #     reused one.
+    try:
+        assert n_host is not None and len(n_joiners) == 3, "no room from case 25"
+        await send(n_host, {"t": "list", "level": 1, "difficulty": 0,
+                            "players": 3, "proto": "4", "hash": "h1"})
+        await barrier(n_host)
+        bws, listing = await browse(url)
+        full_hidden = all(r.get("code") != n_code for r in listing)
+        await bws.close()
+        await n_joiners[0].close()  # seat 1 leaves
+        gone = await recv_json(n_host)
+        ok_gone = gone == {"t": "gone", "id": 1}
+        bws, listing = await browse(url)
+        reappeared = any(r.get("code") == n_code for r in listing)
+        await bws.close()
+        frame = json.dumps({"t": "ice", "cand": "candidate:1", "to": 3})
+        await n_host.send(frame)
+        survives = (await asyncio.wait_for(n_joiners[2].recv(), TIMEOUT)) == frame
+        n_joiners.append(await join_ok(url, n_code))
+        fresh = await recv_json(n_host)
+        ok_fresh = fresh == {"t": "peer", "id": 4}  # NOT 1: ids are never reused
+        record("joiner leave frees the seat: gone+id, room survives, fresh id",
+               full_hidden and ok_gone and reappeared and survives and ok_fresh,
+               f"hidden={full_hidden} gone={gone} reappeared={reappeared} "
+               f"survives={survives} fresh={fresh}")
+    except Exception as e:
+        record("joiner leave frees the seat: gone+id, room survives, fresh id",
+               False, repr(e))
+
+    # 31. host drop (max=4): the room dies and EVERY seated joiner gets the
+    #     shipped bare {t:gone}; the code then answers nocode.
+    try:
+        assert n_host is not None and len(n_joiners) == 4, "no room from case 25/30"
+        await n_host.close()
+        gones = [await recv_json(jw) for jw in n_joiners[1:]]
+        fan = all(g == {"t": "gone"} for g in gones)
+        dead = await join_refused(url, n_code, "nocode")
+        record("host drop fans {t:gone} out to every joiner, room deleted",
+               fan and dead, f"gones={gones} dead={dead}")
+        for jw in n_joiners[1:]:
+            await jw.close()
+    except Exception as e:
+        record("host drop fans {t:gone} out to every joiner, room deleted",
+               False, repr(e))
+
+    # 32. capacity-aware listable(): a max=4 listed room with ONE joiner still
+    #     appears in browse AND is still a thumbnail-pull candidate (it is
+    #     still advertised, so it should keep being pulled); with all three
+    #     seats taken it delists and stops being a candidate. Case 14 is the
+    #     unmodified max==2 control.
+    try:
+        ph, pcode = await host_n(url, 4)
+        await send(ph, {"t": "list", "level": 2, "difficulty": 1, "players": 1,
+                        "proto": "4", "hash": "h1", "shots": 1})
+        await barrier(ph)
+        pj = [await join_ok(url, pcode)]
+        await recv_json(ph)
+        bws, listing = await browse(url)
+        open_listed = any(r.get("code") == pcode for r in listing)
+        await bws.close()
+        cand_open = any(r.code == pcode for r in main._pull_candidates())
+        pj.append(await join_ok(url, pcode))
+        await recv_json(ph)
+        pj.append(await join_ok(url, pcode))
+        await recv_json(ph)
+        bws, listing = await browse(url)
+        full_hidden = all(r.get("code") != pcode for r in listing)
+        await bws.close()
+        cand_full = any(r.code == pcode for r in main._pull_candidates())
+        record("a part-full max=4 room browses + pulls; a full one delists",
+               open_listed and cand_open and full_hidden and not cand_full,
+               f"browse@1={open_listed} cand@1={cand_open} "
+               f"hidden@3={full_hidden} cand@3={cand_full}")
+        for ws_ in (ph, *pj):
+            await ws_.close()
+    except Exception as e:
+        record("a part-full max=4 room browses + pulls; a full one delists",
+               False, repr(e))
 
 
 async def main_async() -> int:

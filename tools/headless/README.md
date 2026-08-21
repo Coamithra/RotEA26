@@ -292,6 +292,13 @@ boot role, never by who started first: `?net=host`/`?net=jiphost` listen, `?net=
 dial. The port is derived from `?room=` so both sides agree with no configuration; `--net-port`
 overrides it, and a bind clash is reported and survived rather than killing the run.
 
+**`--net-peers <1..3>` raises how many clients the listening side serves at once** (card
+583a3ef8; default 1 = the classic two-process rig, byte-identical behaviour). Accepted peers get
+monotone ids (`peer1`, `peer2`, ... -- never reused in a process); a client arriving over
+capacity is refused and closed, with the refusal log line naming the flag. This is the plumbing
+for the 3-4-process N-peer rigs (`plans/4p-online-coop.md`); until the session layer is N-peer
+(card 87242257) a >1 setting only exercises the transport.
+
 **`--nettime game` is required for such a run.** It advances the net layer's clock by one `--fps`
 step per frame instead of reading the wall clock -- without it `--nodraw`'s ~17x real time makes
 the wire's cadences fire ~17x too rarely per unit of world motion, and any comparison between the

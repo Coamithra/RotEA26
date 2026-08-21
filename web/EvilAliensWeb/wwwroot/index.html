@@ -160,6 +160,10 @@
                     ch.onmessage = (ev) => {
                         const m = ev.data;
                         if (!m || m.from === myId) return;
+                        // Addressed frame for another tab (card 583a3ef8): the medium is a
+                        // broadcast, so unicast is receiver-side filtering on the same per-tab
+                        // id the sender saw as our senderId.
+                        if (m.to && m.to !== myId) return;
                         try {
                             if (m.kind === 'bye') DotNet.invokeMethod('EvilAliensWeb', 'netPeerBye', String(m.from));
                             else if (m.kind === 'data') DotNet.invokeMethod('EvilAliensWeb', 'netData', String(m.b64), !!m.rel, String(m.from));
@@ -170,7 +174,7 @@
                     window.addEventListener('pagehide', bye);
                     console.log('[net] eaNet open room=' + room + ' id=' + myId);
                 },
-                send(b64, rel) { if (ch) ch.postMessage({ from: myId, kind: 'data', b64: b64, rel: !!rel }); },
+                send(b64, rel, to) { if (ch) ch.postMessage({ from: myId, kind: 'data', b64: b64, rel: !!rel, to: to || null }); },
                 close() { if (ch) { bye(); window.removeEventListener('pagehide', bye); ch.close(); ch = null; } }
             };
         })();

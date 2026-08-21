@@ -17,20 +17,39 @@ namespace EvilAliensWeb.Compat.Net
         // Hello/Welcome), so Open just attaches to the medium.
         void Open(string room);
 
-        // Unreliable-class lane (~30 Hz ship stream, later world snapshots).
+        // Unreliable-class lane (~30 Hz ship stream, later world snapshots). The unaddressed
+        // forms FAN OUT to every connected peer -- with one peer up (today's whole protocol)
+        // they are indistinguishable from unicast.
         void SendStream(byte[] payload);
 
         // Ordered + guaranteed lane (handshake, spawn/death/blast events).
         void SendReliable(byte[] payload);
 
+        // Addressed sends (card 583a3ef8, the N-peer stages). `peerId` is the same opaque,
+        // session-stable token OnData reports as senderId -- that identity IS the address;
+        // there is no separate naming scheme. A send to an unknown or departed peer is a
+        // SILENT DROP (the closed-DataChannel semantic the unaddressed forms already have),
+        // never a throw.
+        void SendStreamTo(string peerId, byte[] payload);
+
+        void SendReliableTo(string peerId, byte[] payload);
+
         void Close();
 
         // (payload, arrivedOnReliableLane, senderId). Fired from JS callbacks -- consumers
         // should queue and drain on the game tick rather than mutating game state directly.
+        // The senderId is real on every implementation since card 583a3ef8 (WebRtcTransport
+        // used to hard-code a literal); NetSession still discards it while the protocol is
+        // 2-peer -- the per-peer stages start reading it.
         event Action<byte[], bool, string> OnData;
 
         // Best-effort "peer is going away" (pagehide). A silent drop must still be caught
-        // by a stream timeout above this layer.
+        // by a stream timeout above this layer. The string names the DEPARTING PEER (its
+        // OnData senderId) on every per-peer departure -- with one exception: WebRtcTransport's
+        // TERMINAL whole-link failure still reports its legacy "phase:reason" string, and in
+        // that case every peer is gone at once. So a consumer routing byes by id (the per-peer
+        // stages, card 87242257) must treat an unrecognized string as "all peers", never drop
+        // it. NetSession still collapses the whole event to a bool today.
         event Action<string> OnPeerBye;
     }
 }

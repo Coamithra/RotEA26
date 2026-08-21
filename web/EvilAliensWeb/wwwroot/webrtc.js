@@ -10,15 +10,27 @@
 // message types start at 0x01) -- sent on pagehide so a clean tab close drops the peer
 // instantly; silent deaths are still caught by the C# stream timeout.
 //
-// Signaling protocol (server/signal/main.py): {t:host} -> {t:code}; {t:join,code};
-// {t:peer} both sides when paired; then {t:sdp}/{t:ice} relayed verbatim; {t:gone} on a
-// member leaving; {t:error,reason}. The WS is closed once both channels are open -- the
-// server is out of the loop and gameplay is pure P2P.
+// Signaling protocol (server/signal/main.py): {t:host[,max]} -> {t:code}; {t:join,code};
+// {t:peer} to the joiner / {t:peer,id} to the host when paired; then {t:sdp}/{t:ice}
+// relayed (verbatim in a 2-room; `from`-tagged joiner->host and `to`-addressed host->joiner
+// in a bigger room); {t:gone[,id]} on a member leaving; {t:error,reason}. The WS is closed
+// once the room is FULL (for the shipped 2-room: once the first peer's channels are up) --
+// the server is out of the loop and gameplay is pure P2P.
+//
+// N-PEER (card 583a3ef8): the connection state is a MAP of peer entries, not singletons.
+// The host holds one {pc, chS, chR} triple per joiner (server joiner ids 1..3, monotone);
+// a joiner holds exactly one entry -- the host. The senderId C# sees ("1".."3" host-side,
+// "h" joiner-side) is also the address eaRtc.sendTo takes. Every shipped flow runs at
+// roomMax 2 and is behaviourally identical; only eaRtc.host(url, max>2) -- console-driven
+// until the session layer speaks N-peer -- reaches the rest.
 window.eaRtc = (() => {
     const STUN = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
     const CONNECT_TIMEOUT_MS = 20000;
-    let ws = null, pc = null, chS = null, chR = null;
-    let isHost = false, connected = false, finished = false, connectTimer = null;
+    const HOST_KEY = 0;   // the joiner's single peer entry: the host
+    let ws = null;
+    let peers = new Map();          // key -> {key, pc, chS, chR, connected, connectTimer}
+    let roomMax = 2;                // what host() asked for; join/list flows always 2
+    let isHost = false, finished = false;
     let overlay = null;
 
     // Public game browser (card 2001fbd8). A LISTED single-player host keeps this same
@@ -73,8 +85,16 @@ window.eaRtc = (() => {
 
     const sendSignal = (obj) => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); };
 
+    // The peer-id string C# sees as OnData's senderId AND takes as sendTo's address.
+    const peerIdStr = (key) => isHost ? String(key) : 'h';
+    const anyConnected = () => { for (const p of peers.values()) if (p.connected) return true; return false; };
+    const connectedCount = () => { let n = 0; for (const p of peers.values()) if (p.connected) n++; return n; };
+    const soleJoinerKey = () => { for (const k of peers.keys()) return k; return null; };
+
     const bye = () => {
-        try { if (chR && chR.readyState === 'open') chR.send(new Uint8Array([0])); } catch (e) { }
+        for (const p of peers.values()) {
+            try { if (p.chR && p.chR.readyState === 'open') p.chR.send(new Uint8Array([0])); } catch (e) { }
+        }
     };
 
     const stopBeat = () => { if (beatTimer) { clearInterval(beatTimer); beatTimer = null; } };
@@ -101,75 +121,128 @@ window.eaRtc = (() => {
         return shotCanvas.getContext('2d', { willReadFrequently: true });
     };
 
+    const killPeer = (p) => {
+        if (p.connectTimer) { clearTimeout(p.connectTimer); p.connectTimer = null; }
+        const kill = (ch) => { if (ch) { try { ch.onclose = null; ch.close(); } catch (e) { } } };
+        kill(p.chS); kill(p.chR); p.chS = p.chR = null;
+        if (p.pc) { try { p.pc.onconnectionstatechange = null; p.pc.close(); } catch (e) { } p.pc = null; }
+        p.connected = false;
+    };
+
     const teardown = () => {
         window.removeEventListener('pagehide', bye);
         stopBeat();
         listing = false;
-        if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
         if (ws) { try { ws.onclose = null; ws.close(); } catch (e) { } ws = null; }
-        const kill = (ch) => { if (ch) { try { ch.onclose = null; ch.close(); } catch (e) { } } };
-        kill(chS); kill(chR); chS = chR = null;
-        if (pc) { try { pc.onconnectionstatechange = null; pc.close(); } catch (e) { } pc = null; }
-        connected = false;
+        for (const p of peers.values()) killPeer(p);
+        peers.clear();
     };
 
-    const wireChannel = (ch, rel) => {
+    // The signaling socket's job ends when the room is full; the beat and the listing role
+    // end with it (a full game has nothing to advertise).
+    const signalingDone = () => {
+        stopBeat();
+        listing = false;
+        if (ws) { try { ws.onclose = null; ws.close(); } catch (e) { } ws = null; }
+    };
+
+    // ONE peer's link died (bye frame, channel close, ICE failure, connect timeout, or a
+    // {t:gone,id} seat-free from the server). Escalation keeps every shipped flow exactly as
+    // it was: the joiner has only the host, a roomMax==2 host has only its joiner, and a host
+    // with nothing left and no open ws to admit more is over -- those take the terminal
+    // fail/closed path unchanged. A bigger host otherwise reports 'peergone' and plays on
+    // (the seat re-opens server-side; the ws may still be up for a fresh join).
+    const peerGone = (p, kind) => {
+        if (!peers.has(p.key)) return;
+        killPeer(p);
+        peers.delete(p.key);
+        const wsUp = !!(ws && ws.readyState === WebSocket.OPEN);
+        if (!isHost || roomMax <= 2 || (peers.size === 0 && !wsUp)) {
+            if (kind === 'bye' || kind === 'channel') {
+                if (!finished) { finished = true; phase('closed', kind); teardown(); }
+            } else {
+                fail(kind);
+            }
+            return;
+        }
+        phase('peergone', peerIdStr(p.key));
+    };
+
+    const wireChannel = (p, ch, rel) => {
         ch.binaryType = 'arraybuffer';
         ch.onmessage = (ev) => {
             const u8 = new Uint8Array(ev.data);
-            if (rel && u8.length === 1 && u8[0] === 0) { // JS-level bye frame
-                if (!finished) { finished = true; phase('closed', 'bye'); teardown(); }
-                return;
-            }
-            invoke('rtcData', b64FromBuf(ev.data), rel);
+            if (rel && u8.length === 1 && u8[0] === 0) { peerGone(p, 'bye'); return; } // JS-level bye frame
+            invoke('rtcData', b64FromBuf(ev.data), rel, peerIdStr(p.key));
         };
         ch.onopen = () => {
-            if (connected || finished) return;
-            if (chS && chS.readyState === 'open' && chR && chR.readyState === 'open') {
-                connected = true;
-                if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
-                // The listing role is over -- a peer arrived, the game is now full.
-                stopBeat();
-                listing = false;
-                // Signaling's job is done -- gameplay never touches the server again.
-                if (ws) { try { ws.onclose = null; ws.close(); } catch (e) { } ws = null; }
-                phase('connected');
+            if (p.connected || finished) return;
+            if (p.chS && p.chS.readyState === 'open' && p.chR && p.chR.readyState === 'open') {
+                p.connected = true;
+                if (p.connectTimer) { clearTimeout(p.connectTimer); p.connectTimer = null; }
+                // Room full? For roomMax 2 (every shipped flow) the first peer IS full, so this
+                // is exactly the old "first connect -> stop beating, drop the listing, close the
+                // ws". A bigger host keeps the ws (and its beat) so later joiners still arrive.
+                if (!isHost || connectedCount() >= roomMax - 1) signalingDone();
+                phase('connected', isHost && roomMax > 2 ? peerIdStr(p.key) : '');
             }
         };
         ch.onclose = () => {
-            if (!finished && connected) { finished = true; phase('closed', 'channel'); teardown(); }
+            if (!finished && p.connected) peerGone(p, 'channel');
         };
     };
 
-    const makePc = () => {
-        pc = new RTCPeerConnection({ iceServers: STUN });
-        pc.onicecandidate = (ev) => { if (ev.candidate) sendSignal({ t: 'ice', c: ev.candidate.toJSON() }); };
-        pc.onconnectionstatechange = () => {
-            if (pc && (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') && !connected) fail('ice');
+    const makePc = (p) => {
+        p.pc = new RTCPeerConnection({ iceServers: STUN });
+        p.pc.onicecandidate = (ev) => {
+            if (!ev.candidate) return;
+            // The host addresses each joiner; a joiner only ever talks to the host, so its
+            // outbound frames keep exactly the shipped shape (no `to` -- and an old server
+            // relays the host's `to` along verbatim, where the old joiner ignores it).
+            if (isHost) sendSignal({ t: 'ice', c: ev.candidate.toJSON(), to: p.key });
+            else sendSignal({ t: 'ice', c: ev.candidate.toJSON() });
+        };
+        p.pc.onconnectionstatechange = () => {
+            if (p.pc && (p.pc.connectionState === 'failed' || p.pc.connectionState === 'disconnected') && !p.connected) peerGone(p, 'ice');
         };
         // No TURN in v1: symmetric-NAT pairs (~10-15%) never complete ICE -- surface a
         // clean "could not connect" instead of hanging forever.
-        connectTimer = setTimeout(() => { if (!connected) fail('timeout'); }, CONNECT_TIMEOUT_MS);
+        p.connectTimer = setTimeout(() => { if (!p.connected) peerGone(p, 'timeout'); }, CONNECT_TIMEOUT_MS);
         window.addEventListener('pagehide', bye);
     };
 
-    const startAsHost = async () => {
-        makePc();
-        chS = pc.createDataChannel('s', { ordered: false, maxRetransmits: 0 });
-        chR = pc.createDataChannel('r');
-        wireChannel(chS, false);
-        wireChannel(chR, true);
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        sendSignal({ t: 'sdp', d: pc.localDescription });
+    const newPeer = (key) => {
+        const p = { key, pc: null, chS: null, chR: null, connected: false, connectTimer: null };
+        peers.set(key, p);
+        return p;
     };
 
-    const startAsJoiner = () => {
-        makePc();
-        pc.ondatachannel = (ev) => {
-            if (ev.channel.label === 's') { chS = ev.channel; wireChannel(chS, false); }
-            else if (ev.channel.label === 'r') { chR = ev.channel; wireChannel(chR, true); }
+    const startAsHost = async (p) => {
+        makePc(p);
+        p.chS = p.pc.createDataChannel('s', { ordered: false, maxRetransmits: 0 });
+        p.chR = p.pc.createDataChannel('r');
+        wireChannel(p, p.chS, false);
+        wireChannel(p, p.chR, true);
+        const offer = await p.pc.createOffer();
+        await p.pc.setLocalDescription(offer);
+        sendSignal({ t: 'sdp', d: p.pc.localDescription, to: p.key });
+    };
+
+    const startAsJoiner = (p) => {
+        makePc(p);
+        p.pc.ondatachannel = (ev) => {
+            if (ev.channel.label === 's') { p.chS = ev.channel; wireChannel(p, p.chS, false); }
+            else if (ev.channel.label === 'r') { p.chR = ev.channel; wireChannel(p, p.chR, true); }
         };
+    };
+
+    // Which peer does an inbound relayed frame belong to? The joiner has exactly one (the
+    // host). The host reads the server's `from` tag; absent (old server, or a 2-room's
+    // verbatim relay) there is only one joiner it can mean.
+    const routeInbound = (m) => {
+        if (!isHost) return peers.get(HOST_KEY) || null;
+        const key = Number.isInteger(m.from) ? m.from : soleJoinerKey();
+        return key === null ? null : (peers.get(key) || null);
     };
 
     const onSignalMessage = async (ev) => {
@@ -185,7 +258,18 @@ window.eaRtc = (() => {
                     if (!beatTimer) beatTimer = setInterval(() => sendSignal({ t: 'beat' }), BEAT_MS);
                 }
             }
-            else if (m.t === 'peer') { phase('peer'); if (isHost) await startAsHost(); else startAsJoiner(); }
+            else if (m.t === 'peer') {
+                if (isHost) {
+                    // The server tags each arrival with its joiner id; an old server sends none
+                    // and only ever delivers one arrival, so default to 1.
+                    const key = Number.isInteger(m.id) ? m.id : 1;
+                    phase('peer', roomMax > 2 ? String(key) : '');
+                    await startAsHost(newPeer(key));
+                } else {
+                    phase('peer');
+                    startAsJoiner(newPeer(HOST_KEY));
+                }
+            }
             // A browser is pinging us (relayed by the server). Auto-pong in JS without
             // touching C#, so the measured RTT is the network, not our frame pacing.
             else if (m.t === 'ping') sendSignal({ t: 'pong', id: m.id, ref: m.ref });
@@ -196,15 +280,30 @@ window.eaRtc = (() => {
             // arriving at a room that has since gone private answers nothing.
             else if (m.t === 'shot') { if (listing) invoke('rtcShotRequest'); }
             else if (m.t === 'sdp') {
-                await pc.setRemoteDescription(m.d);
+                const p = routeInbound(m);
+                if (!p || !p.pc) return;
+                await p.pc.setRemoteDescription(m.d);
                 if (!isHost) {
-                    const answer = await pc.createAnswer();
-                    await pc.setLocalDescription(answer);
-                    sendSignal({ t: 'sdp', d: pc.localDescription });
+                    const answer = await p.pc.createAnswer();
+                    await p.pc.setLocalDescription(answer);
+                    sendSignal({ t: 'sdp', d: p.pc.localDescription });
                 }
             }
-            else if (m.t === 'ice') { if (pc) await pc.addIceCandidate(m.c); }
-            else if (m.t === 'gone') { if (!connected) fail('gone'); }
+            else if (m.t === 'ice') { const p = routeInbound(m); if (p && p.pc) await p.pc.addIceCandidate(m.c); }
+            else if (m.t === 'gone') {
+                // With an id: that joiner's SIGNALING seat freed (bigger rooms only). A joiner
+                // deliberately closes its ws the moment P2P is up -- the shipped 2-room flow --
+                // so post-connect this is EXPECTED and the live link's own liveness (bye frame,
+                // channel close, the C# stream timeout) governs; acting on it here killed every
+                // freshly-connected peer (measured on the 3-tab rig). Pre-connect it means the
+                // joiner really is gone, so the pending pc is torn down. Bare: the whole room
+                // died (host drop / 2-room teardown); pre-P2P that is terminal exactly as before.
+                if (Number.isInteger(m.id)) {
+                    const p = peers.get(m.id);
+                    if (p && !p.connected) peerGone(p, 'gone');
+                }
+                else if (!anyConnected()) fail('gone');
+            }
             else if (m.t === 'error') fail(m.reason || 'server');
         } catch (e) {
             console.warn('[rtc] signal handling failed: ' + e.message);
@@ -223,25 +322,45 @@ window.eaRtc = (() => {
         // kill a viable pairing with InvalidStateError.
         let chain = Promise.resolve();
         ws.onmessage = (ev) => { chain = chain.then(() => onSignalMessage(ev)); };
-        ws.onerror = () => { if (!connected) fail('signal'); };
-        ws.onclose = () => { if (!connected && !finished) fail('signal'); };
+        ws.onerror = () => { if (!anyConnected()) fail('signal'); };
+        ws.onclose = () => { if (!anyConnected() && !finished) fail('signal'); };
     };
 
     return {
-        host(signalUrl) {
-            if (ws || pc) return;
+        // `max` (card 583a3ef8): total machines including us, clamped 2..4, default 2 --
+        // sent to the server so an old client's room can never admit more than its build
+        // handles. Values above 2 are console-rig territory until the session layer is
+        // N-peer (plans/4p-online-coop.md, 11.9).
+        host(signalUrl, max) {
+            if (ws || peers.size) return;
             isHost = true;
+            roomMax = Math.max(2, Math.min(4, Number(max) || 2));
             phase('contacting');
-            openSignaling(signalUrl, () => sendSignal({ t: 'host' }));
+            openSignaling(signalUrl, () => sendSignal({ t: 'host', max: roomMax }));
         },
         join(signalUrl, code) {
-            if (ws || pc) return;
+            if (ws || peers.size) return;
             isHost = false;
+            roomMax = 2;
             phase('contacting');
             openSignaling(signalUrl, () => sendSignal({ t: 'join', code: String(code || '') }));
         },
         send(b64, rel) {
-            const ch = rel ? chR : chS;
+            for (const p of peers.values()) {
+                const ch = rel ? p.chR : p.chS;
+                if (ch && ch.readyState === 'open') {
+                    try { ch.send(bufFromB64(b64)); } catch (e) { }
+                }
+            }
+        },
+        // Addressed send: peerKey is the same string C# saw as the senderId ("1".."3" on the
+        // host, "h" on a joiner). Unknown/departed peer or closed channel = silent drop, the
+        // INetTransport contract.
+        sendTo(peerKey, b64, rel) {
+            const key = isHost ? Number(peerKey) : (peerKey === 'h' ? HOST_KEY : NaN);
+            const p = peers.get(key);
+            if (!p) return;
+            const ch = rel ? p.chR : p.chS;
             if (ch && ch.readyState === 'open') {
                 try { ch.send(bufFromB64(b64)); } catch (e) { }
             }
@@ -298,7 +417,7 @@ window.eaRtc = (() => {
         // (level/difficulty/players changed) -- idempotent on the server.
         list(signalUrl, level, difficulty, players, proto) {
             listMeta = { level, difficulty, players, proto: String(proto) };
-            if (ws || pc) {
+            if (ws || peers.size) {
                 // Signaling socket already up: this is the metadata-update path (or a
                 // no-op if a non-listing session owns the socket).
                 if (listing) sendList();
@@ -306,6 +425,7 @@ window.eaRtc = (() => {
             }
             listing = true;
             isHost = true;
+            roomMax = 2;   // listed / JIP rooms stay 2-machine until card 0257f8ba (11.10)
             phase('contacting');
             openSignaling(signalUrl, () => sendSignal({ t: 'host' }));
         },
@@ -329,7 +449,7 @@ window.eaRtc = (() => {
             listing = false;
             listMeta = null;
             stopBeat();
-            if (!connected && !pc && ws) { try { ws.onclose = null; ws.close(); } catch (e) { } ws = null; }
+            if (!anyConnected() && peers.size === 0 && ws) { try { ws.onclose = null; ws.close(); } catch (e) { } ws = null; }
         },
 
         // Host side, card e7404647: answer a pull. `b64` is raw RGBA straight out of

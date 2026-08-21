@@ -1,17 +1,19 @@
 # RotEA signaling server
 
-Tiny FastAPI WebSocket server that pairs two browsers by room code and relays
+Tiny FastAPI WebSocket server that pairs browsers by room code and relays
 their WebRTC SDP/ICE blobs. Once the peers' DataChannels connect, the clients
-close their sockets — the server holds no game state. 2 peers max per room,
-200 rooms max, 10-minute room TTL.
+close their sockets — the server holds no game state. A room is one host plus
+up to 3 joiners at host-requested capacity (Stage 11.7; `max` clamped to
+[2,4], default 2 — a shipped 2-peer client's protocol is byte-for-byte
+unchanged). 200 rooms max, 10-minute room TTL.
 
 ## Protocol (JSON text frames on `/ws`)
 
 | Client sends | Server replies / behavior |
 |---|---|
-| `{"t":"host"}` | `{"t":"code","code":"ABCDE"}` — creates a room (alphabet `23456789ABCDEFGHJKLMNPQRSTUVWXYZ`) |
-| `{"t":"join","code":"ABCDE"}` | on success, **both** members get `{"t":"peer"}`; code is trimmed + case-insensitive |
-| `{"t":"sdp",...}` / `{"t":"ice",...}` | relayed **verbatim** to the other room member (only after pairing) |
+| `{"t":"host","max":N}` | `{"t":"code","code":"ABCDE"}` — creates a room (alphabet `23456789ABCDEFGHJKLMNPQRSTUVWXYZ`). `max` is optional: total machines **including the host**, clamped to [2,4]; absent or garbage → 2 |
+| `{"t":"join","code":"ABCDE"}` | on success the joiner gets `{"t":"peer"}` (byte-identical to the shipped protocol) and the **host** gets `{"t":"peer","id":J}` — J is the joiner's seat id, monotone per room and **never reused** (a leave+rejoin gets a fresh id, so a stale `to` can't route to the wrong socket). The `id` field is Stage 11.7's one wire-visible delta in max==2 rooms; the shipped host JS reads only the fields it knows. Code is trimmed + case-insensitive |
+| `{"t":"sdp",...}` / `{"t":"ice",...}` | relayed (refused with `bad` until someone is seated). **max==2 room:** the original frame goes **verbatim** to the other member, exactly the shipped protocol — a stray `to` from a new-style host rides along, ignored. **max>2 room:** host→joiner must address a seat with `"to":J` (missing / non-int / unknown → `bad`) and is forwarded **verbatim**, `to` included; joiner→host is forwarded re-serialized with `"from":J` stamped in |
 | anything else / malformed | `{"t":"error","reason":"bad"}` (socket stays open) |
 
 Server-initiated / error frames:
@@ -19,10 +21,11 @@ Server-initiated / error frames:
 | Frame | Meaning |
 |---|---|
 | `{"t":"error","reason":"nocode"}` | unknown or expired room code — retry with another code |
-| `{"t":"error","reason":"full"}` | room already has 2 members |
+| `{"t":"error","reason":"full"}` | no free seat — the room already holds `max`−1 joiners (2 members total in a default room) |
 | `{"t":"error","reason":"busy"}` | server at the 200-room cap |
 | `{"t":"error","reason":"expired"}` | room hit its 10-minute TTL; server closes the socket |
-| `{"t":"gone"}` | the other member disconnected; room deleted |
+| `{"t":"gone"}` | the room died under you: the host dropped (fanned out to every joiner), or — in a max==2 room — the sole joiner dropped (sent to the host; the exact shipped teardown) |
+| `{"t":"gone","id":J}` | max>2 room only, to the host: joiner J dropped. Its seat is freed and the room **survives**; a listed room re-advertises the free seat automatically |
 
 One socket can host/join at most one room (a second attempt gets `bad`).
 `GET /health` returns `{"ok": true, "rooms": <count>, "listed": <count>,
@@ -40,7 +43,7 @@ it never constructs a game session.
 | `{"t":"list","level":L,"difficulty":D,"players":P,"proto":..,"hash":..}` | host only: mark the room listed + set metadata + refresh TTL. Idempotent (also the update path). No reply. |
 | `{"t":"unlist"}` | host only: hide from browse; the room stays joinable by code |
 | `{"t":"beat"}` | host only: refresh the room's TTL (send ~every 30 s while listed) |
-| `{"t":"browse","proto":..,"hash":..}` | `{"t":"rooms","rooms":[{code,level,difficulty,players,ageSec},…]}` — only **listable** (listed + not full) rooms whose `proto` **and** `hash` match |
+| `{"t":"browse","proto":..,"hash":..}` | `{"t":"rooms","rooms":[{code,level,difficulty,players,ageSec},…]}` — only **listable** (listed + a free joiner seat; for max==2 exactly the old "not full") rooms whose `proto` **and** `hash` match |
 | `{"t":"ping","code":..,"id":..}` | browser only (after browse): forwarded to that room's host as `{"t":"ping","id":..,"ref":<opaque>}` |
 | `{"t":"pong","id":..,"ref":..}` | host only: routed back to the originating browser as `{"t":"pong","id":..}` |
 

@@ -3,6 +3,14 @@
 Card `2e0f908b`: *"Can the networking be extended to allow up to 4 players to play together
 online?"*
 
+> **STATUS 2026-08-21 — the epic is ACTIVE (card `583a3ef8`, Stage 11.7 in progress), and this doc was written 2026-07-24 against a codebase that has since moved. The architecture below STANDS (star topology, `PeerChannel`, unified ship paths, negotiated signaling capacity, the listed-session match-end shape); the following specifics are corrected here rather than rewritten in place:**
+>
+> - **Stage 11.6 is RETIRED — its work shipped as card `25ad0659`.** The in-process wire exists (`NetWire`/`InMemoryTransport`, N ≤ 8 endpoints, `NetWireTest` runs an N=4 leg), the scenario harness exists (ONE real session + scripted wire peers — that card measured that two independent WORLDS in one process are impossible, and unnecessary), and the de-static `NetContext` was measured and DECLINED as optional. The N-peer regression net is therefore "extend the scenario-harness pattern + the multi-process eahl rigs", not a de-static refactor. The epic starts at 11.7.
+> - **Protocol is v22 now, not v5** — §B's "bump 5 → 6" reads as "bump whatever is current". The per-version changelog lives at `NetSession.ProtocolVersion`.
+> - **`NetSession` is 4,472 + 388 lines (`NetSession.Friends.cs`) with ~20 peer-scoped singletons**, not 2.6k/16 — the JIP/listing/game-browser/host-menu/metrics machinery (cards `2001fbd8`, `0b8a300b`, `0d6ffe70`, …) all post-dates this doc and is enumerated in `Compat/Net/CLAUDE.md`. Two additions to §A's singleton list that matter: `CaptureBaseState` read-and-clears the per-entity teleport latch, so a snapshot turn must encode ONCE and send the same bytes to every client (never re-capture per recipient); and `ReplayLive()`/`NetReplayCatchUp()` are unaddressed broadcasts, so a late joiner's catch-up needs the ADDRESSED sends or it re-blasts every already-caught-up peer.
+> - **TURN is decided: STUN-only stays** (owner decision, 2026-08-21). §"Topology"'s go/no-go is resolved as a deferred follow-up card, gated on real-world lobby-formation failure reports — 11.11 loses that item.
+> - **A two-process eahl rig exists** (`tools/headless/LocalSocketNet.cs` + `tools/sim/net_jip_sync.py`) and is the thing the multi-process N-peer rigs extend; `?netpeers=` still does not exist and 11.7 deliberately adds no flag (a >2 capacity on a live session is knowingly broken until 11.9 — the transport-layer N rig is console-driven `eaRtc` on plain boots).
+
 ## Answer, in one line
 
 **Four players online already ships today** — as **two consoles with a couch partner each**.
@@ -139,15 +147,24 @@ mid-upgrade peers cannot pair; `ProtocolVersion` is *also* the public game-brows
 filter (`NetListing` / `NetGameBrowser`), so a bumped build stops seeing already-deployed games;
 and the site deploys manually, so that split is a deliberate act, not an accident.
 
-**C. Transport addressing.** `INetTransport` grows `SendStreamTo(peerId, …)` /
+**C. Transport addressing.** *(SHIPPED -- card `583a3ef8`, Stage 11.7.)* `INetTransport` grows `SendStreamTo(peerId, …)` /
 `SendReliableTo(peerId, …)` (existing broadcast methods become fan-out over the peer set), and
 `OnData`'s `senderId` starts carrying a real id. `webrtc.js` holds a map of peer id →
 `{pc, chS, chR}`. `BroadcastChannelTransport` gets the same treatment — the loopback rig must
-support 3–4 tabs, since that is where this gets developed.
+support 3–4 tabs, since that is where this gets developed. *(As shipped: senderIds are `"1".."3"`
+host-side / `"h"` joiner-side on WebRTC, the per-tab random id on BroadcastChannel; `OnPeerBye`
+carries the departing peer's id except WebRtcTransport's terminal whole-link failure, which keeps
+its legacy "phase:reason" string -- a bye router must treat an unrecognized string as "every
+peer". `tools/headless/LocalSocketNet` got the same treatment behind `--net-peers <1..3>`,
+default 1. Details: `Compat/Net/CLAUDE.md` → "Transport & artificial impairment".)*
 
-**D. Signaling.** A room becomes host + up to 3 joiners: N−1 offer/answer exchanges, each joiner
+**D. Signaling.** *(SHIPPED -- card `583a3ef8`, Stage 11.7; the deployed server still needs the
+manual `server/signal/README.md` update flow.)* A room becomes host + up to 3 joiners: N−1 offer/answer exchanges, each joiner
 signalling only with the host (star). The room is full at 4. `test_signal.py` extends to cover a
-3rd/4th join, a mid-session leave, and the full-room refusal.
+3rd/4th join, a mid-session leave, and the full-room refusal. *(As shipped: optional `max` in
+`{t:host}` clamped 2..4 default 2, monotone never-reused joiner ids, `{t:peer,id}` to the host,
+`from`/`to` tagging only in max>2 rooms with max-2 relay kept byte-verbatim, `{t:gone,id}`
+seat-free vs whole-room `gone`, capacity-aware `listable()`; 50 test cases, mutation-tested.)*
 
 > **Capacity must be negotiated, not assumed.** The signal server is one shared deployment on the
 > Hetzner box and the site deploys independently, so a server that accepts 4 members would let a
@@ -192,12 +209,12 @@ do not reuse `12.x`).
 
 | Card | Scope |
 |---|---|
-| **11.6** | Headless N-peer sim + de-static core (subsumes the deferred `net-headless-sim` card) |
-| **11.7** | Transport addressing + N-peer signaling room, capacity negotiated (webrtc.js, `INetTransport`, signal server, 3-tab loopback rig) |
-| **11.8** | `PeerChannel` refactor + converge the primary/friend ship paths, `ProtocolVersion` 5 → 6 — **still 2 peers on the wire**, so it must be behaviour-neutral |
-| **11.9** | N-peer session: per-peer hello/welcome + roster negotiation, per-peer liveness, the new match-end policy |
-| **11.10** | Lobby + game-browser UX for 3–4 (host roster, start-when-ready, JIP into slots 3/4) |
-| **11.11** | Hardening: relayed-channel interp delay, bandwidth soak, **TURN go/no-go re-decided** |
+| ~~**11.6**~~ | RETIRED — shipped as card `25ad0659` (see the status banner) |
+| **11.7** (`583a3ef8`) | Transport addressing + N-peer signaling room, capacity negotiated (webrtc.js, `INetTransport`, signal server, `LocalSocketNet` multi-client, 3-tab loopback rig). Behaviour-neutral for 2-peer; protocol version unchanged |
+| **11.8** (`b2828be8`) | `PeerChannel` refactor + converge the primary/friend ship paths, `ProtocolVersion` bump — **still 2 peers on the wire**, so it must be behaviour-neutral; the scenario harness + `net_jip_sync.py` are the safety net |
+| **11.9** (`87242257`) | N-peer session: per-peer hello/welcome + roster negotiation (grants serialized against races), per-peer liveness/drop ladder, pause as a set, host relay of client ship/HUD state (symmetric events re-emitted under the host's own event seq), ADDRESSED catch-up, the new match-end policy, per-peer `[net]` metrics |
+| **11.10** (`0257f8ba`) | Lobby + game-browser UX for 3–4 (host roster, start-when-ready, capacity-aware listing — the `!NetSession.Active` term goes, JIP into slots 3/4, per-peer kick target) |
+| **11.11** (`6fb406bc`) | Hardening: relayed-channel interp delay, bandwidth soak at N=4, multi-process eahl rigs, `bufferedAmount` back-pressure. TURN stays deferred (owner decision — see banner) |
 
 ## Out of scope
 

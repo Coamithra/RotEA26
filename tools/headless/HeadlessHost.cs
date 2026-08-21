@@ -98,6 +98,7 @@ namespace EvilAliensWeb.Headless
             // boot role, not by who opened first, and it must be set before Game1.Initialize
             // reaches NetSession.Start -- which is the first eaNet.open.
             LocalSocketNet.SetPortOverride(_opt.NetPort);
+            LocalSocketNet.SetMaxPeers(_opt.NetPeers);
             LocalSocketNet.ConfigureFromRole(DebugFlags.NetRole);
             if (_opt.NetTimeGame)
             {

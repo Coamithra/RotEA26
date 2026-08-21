@@ -48,6 +48,9 @@ namespace EvilAliensWeb.Compat.Net
             sb.Append(" 1. transport contract\n");
             SectionContract(Check);
 
+            sb.Append(" 1b. addressed sends (card 583a3ef8)\n");
+            SectionAddressed(Check);
+
             sb.Append(" 2. NetImpairment composed over an endpoint\n");
             SectionImpairment(Check);
 
@@ -233,6 +236,98 @@ namespace EvilAliensWeb.Compat.Net
             closeRx[1].SendReliable(new byte[] { 2 });
             closeRx.Pump();
             check("a closed endpoint receives nothing more", closeRx[0].RxDelivered == beforeClose);
+        }
+
+        // ---- 1b. addressed sends (card 583a3ef8) ------------------------------------------
+
+        // The N-peer stages' unicast: SendStreamTo/SendReliableTo must reach EXACTLY the named
+        // endpoint, and every way to address nothing (unknown id, self, closed target, right id
+        // in the wrong room) must be a SILENT drop with TxSent moving and TxFanout not -- the
+        // closed-DataChannel semantic INetTransport pins. A fan-out that quietly delivered a
+        // "unicast" to everyone would satisfy every broadcast-era assertion, which is why the
+        // negative "the others received NOTHING" legs carry this section.
+        private static void SectionAddressed(Action<string, bool> check)
+        {
+            NetWire wire = new NetWire(4);
+            Recorder[] rec = new Recorder[4];
+            for (int i = 0; i < 4; i++)
+            {
+                rec[i] = new Recorder(wire[i]);
+                wire[i].Open("mesh");
+            }
+
+            wire[0].SendStreamTo(wire[2].Id, new byte[] { 0x11 });
+            wire.Pump();
+            check("an addressed stream send reaches exactly its target",
+                rec[2].Count == 1 && rec[2].Payloads[0][0] == 0x11);
+            check("the other two endpoints received nothing",
+                rec[1].Count == 0 && rec[3].Count == 0);
+            check("it arrives on the stream lane", rec[2].Count == 1 && !rec[2].Reliable[0]);
+            check("its senderId is still the sender", rec[2].Count == 1 && rec[2].From[0] == wire[0].Id);
+
+            wire[0].SendReliableTo(wire[3].Id, new byte[] { 0x22 });
+            wire.Pump();
+            check("an addressed reliable send reaches exactly its target, on the reliable lane",
+                rec[3].Count == 1 && rec[3].Reliable[0] && rec[1].Count == 0 && rec[2].Count == 1);
+
+            // Counter arithmetic: +1 fanout per addressed enqueue, +N-1 per broadcast -- which is
+            // what makes the silent drops below assertable at all.
+            long sent0 = wire[0].TxSent;
+            long fan0 = wire[0].TxFanout;
+            wire[0].SendStreamTo(wire[1].Id, new byte[] { 1 });
+            check("an addressed send moves TxSent by 1 and TxFanout by 1",
+                wire[0].TxSent == sent0 + 1 && wire[0].TxFanout == fan0 + 1);
+            wire[0].SendStream(new byte[] { 2 });
+            check("a broadcast beside it still moves TxFanout by N-1",
+                wire[0].TxSent == sent0 + 2 && wire[0].TxFanout == fan0 + 4);
+
+            long sent1 = wire[0].TxSent;
+            long fan1 = wire[0].TxFanout;
+            wire[0].SendStreamTo("nope", new byte[] { 3 });
+            check("an unknown peer id is a silent drop (TxSent moved, TxFanout did not)",
+                wire[0].TxSent == sent1 + 1 && wire[0].TxFanout == fan1);
+            wire[0].SendStreamTo(wire[0].Id, new byte[] { 4 });
+            check("addressing yourself is a silent drop", wire[0].TxFanout == fan1);
+            wire[3].Close();
+            wire[0].SendReliableTo(wire[3].Id, new byte[] { 5 });
+            check("a closed target is a silent drop", wire[0].TxFanout == fan1);
+            wire.Pump();
+            // rec[1]: the addressed {1} + the broadcast {2}. rec[2]: 0x11 + the broadcast.
+            // rec[3]: closed before the pump, so still only 0x22. The three dropped sends
+            // delivered nowhere.
+            check("none of the dropped sends delivered anywhere",
+                rec[1].Count == 2 && rec[2].Count == 2 && rec[3].Count == 1);
+
+            // Room isolation holds for addressed sends: the right id in the WRONG room is the
+            // same silent drop, with the same-room target as the positive control.
+            NetWire rooms = new NetWire(3);
+            Recorder q1 = new Recorder(rooms[1]);
+            Recorder q2 = new Recorder(rooms[2]);
+            rooms[0].Open("alpha");
+            rooms[1].Open("alpha");
+            rooms[2].Open("beta");
+            long fanR = rooms[0].TxFanout;
+            rooms[0].SendReliableTo(rooms[2].Id, new byte[] { 6 });
+            rooms.Pump();
+            check("an addressed send to a right id in the WRONG room is a silent drop",
+                q2.Count == 0 && rooms[0].TxFanout == fanR);
+            rooms[0].SendReliableTo(rooms[1].Id, new byte[] { 7 });
+            rooms.Pump();
+            check("the same-room target still receives (positive control)",
+                q1.Count == 1 && q1.Payloads[0][0] == 7);
+
+            // The NetImpairment decorator passes addressed sends through verbatim on both lanes
+            // (TX is untouched by design -- impairment is RX-only).
+            NetWire impWire = new NetWire(2);
+            NetImpairment imp = new NetImpairment(impWire[0], 0f, 0f, 0f);
+            Recorder impRx = new Recorder(impWire[1]);
+            impWire[0].Open("room");
+            impWire[1].Open("room");
+            imp.SendStreamTo(impWire[1].Id, new byte[] { 8 });
+            imp.SendReliableTo(impWire[1].Id, new byte[] { 9 });
+            impWire.Pump();
+            check("addressed sends pass through the NetImpairment decorator on both lanes",
+                impRx.Count == 2 && !impRx.Reliable[0] && impRx.Reliable[1]);
         }
 
         // ---- 2. NetImpairment over a real endpoint ----------------------------------------

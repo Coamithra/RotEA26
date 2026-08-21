@@ -27,9 +27,12 @@ namespace EvilAliensWeb.Compat.Net
             _js?.InvokeVoid("eaNet.open", room);
         }
 
-        internal static void Send(byte[] payload, bool reliable)
+        // `to` null/empty = broadcast (every other tab in the room); a peer id = only the tab
+        // whose eaNet id matches delivers it (the tabs filter, the medium still carries it --
+        // BroadcastChannel has no unicast, and does not need one for a dev rig).
+        internal static void Send(byte[] payload, bool reliable, string to = null)
         {
-            _js?.InvokeVoid("eaNet.send", Convert.ToBase64String(payload), reliable);
+            _js?.InvokeVoid("eaNet.send", Convert.ToBase64String(payload), reliable, to);
         }
 
         internal static void Close()

@@ -129,7 +129,10 @@ namespace EvilAliensWeb.Headless
                     LocalSocketNet.Open(Str(args, 0));
                     return null;
                 case "eaNet.send":
-                    LocalSocketNet.Send(Str(args, 0), args.Length > 1 && args[1] is bool b && b);
+                    // Third arg = the optional addressed-send target (card 583a3ef8);
+                    // null/empty = broadcast, exactly like the browser's eaNet.
+                    LocalSocketNet.Send(Str(args, 0), args.Length > 1 && args[1] is bool b && b,
+                        args.Length > 2 ? Str(args, 2) : null);
                     return null;
                 case "eaNet.close":
                     LocalSocketNet.Close();

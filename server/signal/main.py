@@ -1,8 +1,17 @@
 """RotEA online co-op signaling server.
 
-Pairs two browsers via a 5-char room code, then relays their WebRTC
-SDP/ICE messages verbatim until the DataChannel connects and the
+Pairs browsers via a 5-char room code, then relays their WebRTC
+SDP/ICE messages verbatim until the DataChannels connect and the
 clients hang up. See README.md for the protocol table.
+
+Stage 11.7 (transport addressing + N-peer room) grows a room from
+exactly host+joiner to host + up to 3 joiners, at HOST-REQUESTED
+capacity ({"t":"host","max":N}, clamped to [2,4]). The default stays 2,
+so a shipped 2-peer client's whole protocol -- join/full, verbatim
+relay, teardown -- is byte-for-byte unaffected. Joiners get monotone
+per-room seat ids (never reused); in a max>2 room the host addresses a
+relay frame with `to` and receives joiner frames stamped with `from`,
+and a joiner leaving frees its seat instead of killing the room.
 
 Card 2001fbd8 (public game browser) grows this into a lightweight
 registry: a host may LIST its room (level/difficulty/players + a
@@ -96,23 +105,41 @@ def _as_str(v) -> str:
     return "" if v is None else str(v)
 
 
+def _room_max(v) -> int:
+    """Host-requested room capacity: total machines INCLUDING the host.
+
+    Garbage / absent / non-numeric falls back to the shipped default of 2 --
+    anything a shipped 2-peer client could send lands there. Clamped to
+    [2, 4]: the co-op epic tops out at 4 machines per session.
+    """
+    return max(2, min(4, _as_int(v, 2)))
+
+
 class Room:
-    __slots__ = ("code", "host", "joiner", "created", "last_beat",
+    __slots__ = ("code", "host", "max", "joiners", "next_joiner_id",
+                 "created", "last_beat",
                  "listed", "level", "difficulty", "players", "proto", "hash",
                  "shots", "shot", "shot_at", "shot_seq", "last_pull_seq",
                  "last_pull_at")
 
-    def __init__(self, code: str, host: WebSocket):
+    def __init__(self, code: str, host: WebSocket, max_members: int = 2):
         self.code = code
         self.host = host
-        self.joiner: WebSocket | None = None
+        # Stage 11.7: capacity incl. the host, host-requested at {t:host}.
+        self.max = max_members
+        # Joiner seats, keyed by a per-room id that is MONOTONE and never
+        # reused -- a leave+rejoin gets a fresh id, so a stale `to` from the
+        # host can never route to the wrong (newer) socket. Insertion-ordered
+        # by construction (dict), which keeps members() deterministic.
+        self.joiners: dict[int, WebSocket] = {}
+        self.next_joiner_id = 1
         self.created = time.monotonic()
         # TTL counts from the last sign of life. Unlisted (11.4 lobby) rooms
         # never beat, so last_beat stays == created and their expiry is the
         # unchanged 10-minute-from-creation behaviour. A listed game beats
         # while it lives, so a long level never vanishes mid-play.
         self.last_beat = self.created
-        # Listing metadata (card 2001fbd8). `listed` + an empty joiner slot is
+        # Listing metadata (card 2001fbd8). `listed` + a free joiner seat is
         # what makes a room show in a browse; the rest is display + build filter.
         self.listed = False
         self.level = 0
@@ -176,9 +203,11 @@ class Room:
         return time.monotonic() - self.created
 
     def listable(self) -> bool:
-        # An empty joiner slot is the join-eligibility invariant, mirrored
+        # A free joiner seat is the join-eligibility invariant, mirrored
         # server-side: a full room is never advertised (11.4 "join -> full").
-        return self.listed and self.joiner is None
+        # For max == 2 this is exactly the old `joiner is None`, so shipped
+        # 2-peer rooms list and delist identically.
+        return self.listed and len(self.joiners) < self.max - 1
 
     def listing_entry(self) -> dict:
         return {
@@ -198,12 +227,7 @@ class Room:
         }
 
     def members(self) -> list[WebSocket]:
-        return [ws for ws in (self.host, self.joiner) if ws is not None]
-
-    def other(self, ws: WebSocket) -> WebSocket | None:
-        if ws is self.host:
-            return self.joiner
-        return self.host
+        return [ws for ws in (self.host, *self.joiners.values()) if ws is not None]
 
 
 # All mutation happens on the single event loop with no awaits between
@@ -359,6 +383,7 @@ async def health():
 async def ws_endpoint(ws: WebSocket):
     await ws.accept()
     room: Room | None = None       # the room this socket hosts/joined, if any
+    joiner_id: int | None = None   # this socket's seat id, if it joined
     browser_id: int | None = None  # set once this socket sends {t:browse}
     ping_times: list[float] = []    # per-socket ping timestamps (rate limiting)
     shotget_times: list[float] = []  # ditto for thumbnail fetches (card e7404647)
@@ -403,9 +428,10 @@ async def ws_endpoint(ws: WebSocket):
                     await _send_json(ws, {"t": "error", "reason": "busy"})
                 else:
                     code = _new_code()
-                    room = Room(code, ws)
+                    room = Room(code, ws, _room_max(msg.get("max")))
                     rooms[code] = room
-                    log.info("room %s created (%d rooms open)", code, len(rooms))
+                    log.info("room %s created, max %d (%d rooms open)",
+                             code, room.max, len(rooms))
                     await _send_json(ws, {"t": "code", "code": code})
 
             elif t == "join":
@@ -419,14 +445,24 @@ async def ws_endpoint(ws: WebSocket):
                     target = None
                 if target is None:
                     await _send_json(ws, {"t": "error", "reason": "nocode"})
-                elif target.joiner is not None:
+                elif len(target.joiners) >= target.max - 1:
                     await _send_json(ws, {"t": "error", "reason": "full"})
                 else:
-                    target.joiner = ws
+                    joiner_id = target.next_joiner_id
+                    target.next_joiner_id += 1
+                    target.joiners[joiner_id] = ws
                     room = target
-                    log.info("room %s paired", code)
-                    for member in room.members():
-                        await _send_json(member, {"t": "peer"})
+                    log.info("room %s joiner %d seated (%d/%d)", code,
+                             joiner_id, len(room.joiners) + 1, room.max)
+                    # The joiner's frame stays byte-identical to the shipped
+                    # protocol. The HOST's frame now carries the joiner's seat
+                    # id -- even in a max==2 room. This is the ONE deliberate
+                    # wire-visible delta of Stage 11.7: the shipped host's JS
+                    # reads only the fields it knows, so the extra field is
+                    # inert there, and one peer-frame shape keeps the host
+                    # path un-forked.
+                    await _send_json(ws, {"t": "peer"})
+                    await _send_json(room.host, {"t": "peer", "id": joiner_id})
 
             elif t == "list":
                 # Set metadata + advertise. Idempotent: also the update path when
@@ -553,13 +589,46 @@ async def ws_endpoint(ws: WebSocket):
                         await _send_json(target_ws, {"t": "pong", "id": msg.get("id")})
 
             elif t in RELAY_TYPES:
-                peer = room.other(ws) if (room is not None and room.joiner is not None) else None
-                if peer is None:
+                if room is None or not room.joiners:
+                    # Not in a room, or a host with nobody seated yet -- the
+                    # shipped "refused until paired" rule. A joiner passes by
+                    # construction (its own seat makes joiners non-empty).
                     await bad()
+                elif ws is room.host:
+                    if room.max == 2:
+                        # Shipped 2-peer path: the ORIGINAL text, verbatim, to
+                        # the sole joiner. A stray `to` from a new-style host
+                        # rides along harmlessly (the shipped joiner reads only
+                        # the fields it knows); byte-identity is the contract.
+                        peer = next(iter(room.joiners.values()))
+                        with contextlib.suppress(Exception):
+                            await peer.send_text(text)
+                    else:
+                        # max > 2: the host must address a seat. bool is a
+                        # subclass of int -- reject it so {"to": true} can't
+                        # route to seat 1 (the `ref` pattern in pong).
+                        to = msg.get("to")
+                        peer = (room.joiners.get(to)
+                                if isinstance(to, int) and not isinstance(to, bool)
+                                else None)
+                        if peer is None:
+                            await bad()
+                        else:
+                            # Still the ORIGINAL text: the addressed joiner
+                            # gets the frame verbatim, `to` included.
+                            with contextlib.suppress(Exception):
+                                await peer.send_text(text)
                 else:
-                    # Verbatim: forward the original text frame untouched.
-                    with contextlib.suppress(Exception):
-                        await peer.send_text(text)
+                    if room.max == 2:
+                        # Shipped 2-peer path, byte-identical.
+                        with contextlib.suppress(Exception):
+                            await room.host.send_text(text)
+                    else:
+                        # max > 2: stamp WHICH seat this came from. A max>2
+                        # host is by definition a new client, so forwarding the
+                        # re-serialized parsed frame (send_json) is safe here.
+                        msg["from"] = joiner_id
+                        await _send_json(room.host, msg)
 
             else:
                 await bad()
@@ -572,8 +641,24 @@ async def ws_endpoint(ws: WebSocket):
         # Tear down the room this socket belonged to; guard against the
         # room having already been replaced/expired under the same code.
         if room is not None and rooms.get(room.code) is room:
-            del rooms[room.code]
-            log.info("room %s closed (%d rooms open)", room.code, len(rooms))
-            survivor = room.other(ws)
-            if survivor is not None:
-                await _send_json(survivor, {"t": "gone"})
+            if ws is room.host:
+                # Host gone -> the room dies; every joiner is told. The
+                # per-recipient frame is the shipped bare {t:gone}.
+                del rooms[room.code]
+                log.info("room %s closed (%d rooms open)", room.code, len(rooms))
+                for peer in room.joiners.values():
+                    await _send_json(peer, {"t": "gone"})
+            elif room.max == 2:
+                # Shipped 2-peer behaviour, exactly: joiner gone -> room dies,
+                # host gets the bare {t:gone}.
+                del rooms[room.code]
+                log.info("room %s closed (%d rooms open)", room.code, len(rooms))
+                await _send_json(room.host, {"t": "gone"})
+            else:
+                # max > 2: the seat is freed and the room SURVIVES. listable()
+                # recomputes, so a listed room re-advertises the free seat on
+                # its own; the id is never reused (next_joiner_id is monotone).
+                room.joiners.pop(joiner_id, None)
+                log.info("room %s joiner %s left (%d/%d)", room.code,
+                         joiner_id, len(room.joiners) + 1, room.max)
+                await _send_json(room.host, {"t": "gone", "id": joiner_id})

@@ -301,7 +301,10 @@ namespace EvilAliensWeb.Compat.Net
                     .Append(" pts=").Append((int)score.PointScore(slot));
                 if (slot < ScoreVisualiser.SlotCount)
                 {
-                    score.NetReadHudState(slot, levels, out int combo,
+                    // The combo TIMER's remaining fraction (v23) is deliberately NOT dumped: it
+                    // is a sub-second cosmetic clock, so two dumps taken at different world
+                    // instants would disagree on every live combo and the differ would cry wolf.
+                    score.NetReadHudState(slot, levels, out int combo, out _,
                         out Powerup.PowerupType? activeType, out float progress);
                     sb.Append(" combo=").Append(combo)
                         .Append(" pu=").Append(activeType.HasValue ? activeType.Value.ToString() : "none")

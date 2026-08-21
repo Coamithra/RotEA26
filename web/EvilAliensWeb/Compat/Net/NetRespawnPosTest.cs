@@ -167,9 +167,9 @@ namespace EvilAliensWeb.Compat.Net
         // wire cannot disagree about layout or units.
         private static ShipSample Sample(uint ms, Vector2 pos, bool alive)
         {
-            byte[] frame = NetProtocol.EncodeShipState(1, ms, pos, Vector2.Zero, 4.712389f, alive,
+            byte[] frame = NetProtocol.EncodeShipState(1, primary: true, 1, ms, pos, Vector2.Zero, 4.712389f, alive,
                 shotCount: 0, shotsPerSec: 8, bulletLife: 450f);
-            NetProtocol.TryDecodeShipState(frame, out _, out ShipSample s, out _, out _);
+            NetProtocol.TryDecodeShipState(frame, out _, out _, out _, out ShipSample s, out _, out _);
             return s;
         }
 
@@ -276,7 +276,7 @@ namespace EvilAliensWeb.Compat.Net
             // gate on the alive latch it reads as a fake falling edge -- the healthy puppet
             // explodes, and the next alive packet's fake rising edge wipes the fresh buffer.
             long explodedBefore = NetSession.Metrics.RemoteShipExplosions;
-            peer.SendStream(NetProtocol.EncodeShipState((ushort)(shipSeq - 40), shipMs - 1000,
+            peer.SendStream(NetProtocol.EncodeShipState(1, primary: true, (ushort)(shipSeq - 40), shipMs - 1000,
                 DeathAt, Vector2.Zero, 4.712389f, alive: false, shotCount: 0, shotsPerSec: 8,
                 bulletLife: 450f));
             wire.Pump();
@@ -421,10 +421,10 @@ namespace EvilAliensWeb.Compat.Net
             clockCarry -= step;
             shipMs += (uint)step;
             friendMs += (uint)step;
-            peer.SendStream(NetProtocol.EncodeShipState(shipSeq++, shipMs, SpawnAt, Vector2.Zero,
+            peer.SendStream(NetProtocol.EncodeShipState(1, primary: true, shipSeq++, shipMs, SpawnAt, Vector2.Zero,
                 4.712389f, alive: true, shotCount: 0, shotsPerSec: 8, bulletLife: 450f));
-            peer.SendStream(NetProtocol.EncodeFriendState(FriendSlot, friendSeq++, friendMs, pos,
-                Vector2.Zero, 4.712389f, shotCount: 0, shotsPerSec: 8, bulletLife: 450f));
+            peer.SendStream(NetProtocol.EncodeShipState(FriendSlot, primary: false, friendSeq++, friendMs, pos,
+                Vector2.Zero, 4.712389f, alive: true, shotCount: 0, shotsPerSec: 8, bulletLife: 450f));
             wire.Pump();
             clock.Advance(step);
             NetSession.Update();
@@ -439,7 +439,7 @@ namespace EvilAliensWeb.Compat.Net
             long step = (long)clockCarry;
             clockCarry -= step;
             shipMs += (uint)step;
-            peer.SendStream(NetProtocol.EncodeShipState(shipSeq++, shipMs, pos, Vector2.Zero,
+            peer.SendStream(NetProtocol.EncodeShipState(1, primary: true, shipSeq++, shipMs, pos, Vector2.Zero,
                 4.712389f, alive, shotCount: 0, shotsPerSec: 8, bulletLife: 450f));
             wire.Pump();
             clock.Advance(step);

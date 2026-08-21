@@ -679,8 +679,8 @@ namespace EvilAliensWeb.Compat.Net
             byte asplodeBits = 0, byte bounceBits = 0)
         {
             long step = AdvanceClock(ref shipMs, ref clockCarry);
-            peer.SendStream(NetProtocol.EncodeShipState(shipSeq++, shipMs, PeerAt, Vector2.Zero,
-                4.712389f, alive: true, shotCount: shotCount, shotsPerSec, 450f,
+            peer.SendStream(NetProtocol.EncodeShipState(1, primary: true, shipSeq++, shipMs, PeerAt, Vector2.Zero,
+                4.712389f, alive: true, shotCount: shotCount, shotsPerSec: shotsPerSec, bulletLife: 450f,
                 scriptGate: false, asplodeBits: asplodeBits, bounceBits: bounceBits));
             wire.Pump();
             clock.Advance(step);

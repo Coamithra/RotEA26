@@ -359,9 +359,10 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 	// powerup types (OneUp's level never moves, so it is not on the wire).
 	// Mirrors NetSetHudState's shape: null = no powerup active on that slot, so a read/set
 	// round trip needs no conversion and no HudPowerupNone handling of its own.
-	internal void NetReadHudState(int player, int[] levels, out int combo, out Powerup.PowerupType? activeType, out float progress)
+	internal void NetReadHudState(int player, int[] levels, out int combo, out float comboLeft, out Powerup.PowerupType? activeType, out float progress)
 	{
 		combo = 0;
+		comboLeft = 0f;
 		activeType = null;
 		progress = 0f;
 		if (player < 0 || player >= scores.Count)
@@ -370,6 +371,10 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		}
 		ScoreInfo info = scores[player];
 		combo = info.combo;
+		// The combo TIMER's remaining fraction (v23, folding card a5b1e941): what drives the
+		// readout's fade alpha, so the observer can park its own timer in phase with ours
+		// instead of refreshing it to full on every packet.
+		comboLeft = info.combotimer.Normalized;
 		if (info.powerupactive)
 		{
 			activeType = info.powerup;
@@ -389,7 +394,7 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 	// owns, with its own local combo, so this figure is display-plus-bookkeeping -- the combo
 	// readout, its fade, and the powerup bar. The slot's SCORE arrives separately on the same
 	// packet and is adopted verbatim by NetSetScore.
-	internal void NetSetHudState(int player, int combo, Powerup.PowerupType? activeType, float progress, int[] levels)
+	internal void NetSetHudState(int player, int combo, float comboLeft, Powerup.PowerupType? activeType, float progress, int[] levels)
 	{
 		if (player < 0 || player >= scores.Count || levels == null)
 		{
@@ -398,13 +403,17 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		ScoreInfo info = scores[player];
 		info.combo = combo;
 		// The readout's alpha is driven by combotimer.TimeLeft, and SustainCombo no longer runs
-		// for this slot -- so without refreshing it here a replicated combo would draw at the
-		// floor alpha and then be zeroed by the timer's own expiry. Refreshed only while the
-		// owner reports a live combo, so it still fades out ~1s after theirs lapses.
+		// for this slot -- so without touching it here a replicated combo would draw at the
+		// floor alpha and then be zeroed by the timer's own expiry. Since v23 (folding card
+		// a5b1e941) the timer is PARKED at the owner's replicated remaining time rather than
+		// refreshed to full: the alpha ramp tracks the owner's and the fade-out lands when
+		// theirs does (~one 100 ms packet stale), instead of up to a full second late. Applied
+		// only while the owner reports a live combo -- their own expiry zeroes the combo, so
+		// the next packet carries combo == 0 and this slot's timer is left to lapse on its own.
 		if (combo > 0)
 		{
 			info.combotimer.Start();
-			info.combotimer.Reset();
+			info.combotimer.SetNormalized(comboLeft);
 		}
 		// Levels FIRST: a level change zeroes the bar (NetSetLevel), so applying progress before
 		// them would have a catch-up packet snap the bar empty for an interval.

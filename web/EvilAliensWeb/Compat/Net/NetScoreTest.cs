@@ -251,11 +251,11 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 slots[0] = slot;
                 scores[0] = 123456.75f; // exactly representable; a .75 catches a quantised path
-                byte[] hud = NetProtocol.EncodeHudState(slots, combos, types, progress, levels, options, scores, 1);
+                byte[] hud = NetProtocol.EncodeHudState(slots, combos, new float[NetProtocol.MaxSlots], types, progress, levels, options, scores, 1);
                 var rxLevels = new int[NetProtocol.HudLevelCount];
                 var rxOptions = new int[NetProtocol.HudOptionLayers];
                 bool decoded = NetProtocol.TryDecodeHudState(hud, 0, rxLevels, rxOptions,
-                    out byte rxSlot, out _, out _, out _, out float rxScore);
+                    out byte rxSlot, out _, out _, out _, out _, out float rxScore);
                 Check(decoded && rxSlot == slot && rxScore == 123456.75f,
                     "the declared total rides MsgHudState bit-exact (" + F(rxScore) + ")");
 

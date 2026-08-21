@@ -17,6 +17,19 @@ inputs; the other peer's ship is an interpolated puppet.
   (11.2); level-script beat replication, host-broadcast reset/victory, replicated pause,
   TeamChallenge soft tether (11.3); real WebRTC transport, room-code signaling on the shared
   VPS, menu-driven Host/Join lobby, build-hash handshake, match-end semantics (11.4).
+- **Stage 11.8 -- `PeerChannel` + ONE ship path (card `b2828be8`, protocol v23):** the ~20
+  per-peer singletons (`PeerUp`, liveness, stall, remote pause + kick clock, the granted primary
+  slot, identity token, script gate, event seq, the ship buffer/puppet) live on an internal
+  `PeerChannel` keyed by transport senderId, and `ShipChannel` unifies `FriendChannel` with the
+  primary-remote state -- the static public API is a facade over it. On the wire EVERY ship frame
+  is the slot-keyed `MsgShipState` (34 B, leading slot byte, `ShipFlagPrimary` marks the sender's
+  heartbeat frame); `MsgFriendState` is RETIRED (0x11 reserved). One receive path routes by the
+  flag, one `DriveShip` drives every remote ship; the primary-vs-extra asymmetries (alive-edge vs
+  timeout death, respawn clear vs resume-gap clear) are per-CHANNEL behaviour now. Deliberately
+  BEHAVIOUR-NEUTRAL at 2 peers -- the session still pairs exactly one peer (a second senderId is
+  dropped with a console note); the N-peer session semantics are cards `87242257`+. Also folded
+  in (card a5b1e941): `MsgHudState` carries the combo TIMER's remaining time, so the observer's
+  combo readout fades in phase with the owner's.
 - **Stage 11.5 round 1** (card `4717d3cf`): the hardening pass -- powerup pickups replicate to
   the collector's HUD slot, ONE match-end path, a drop-verdict grace window with a
   waiting-for-peer banner, and the WebcamAliens net-lobby refusal explains itself. The graceful
@@ -753,9 +766,10 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   vacuity controls on positive legs, e.g. NetMotionTest's spawn-anchor control), but this class
   of code and test does not grow.
 
-- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v15):** the 3
-  layers -- `MsgShipState` (~30 Hz real-time cadence: pos, vel px/ms, last-fire aim, alive flag,
-  CUMULATIVE shot count, shotsPerSec, bulletLife -- 31 B), `MsgWorldSnapshot` (see the
+- **Protocol (`Compat/Net/NetProtocol`, little-endian binary, 1-byte type, v23):** the 3
+  layers -- `MsgShipState` (~30 Hz real-time cadence, EVERY locally-owned ship slot-keyed since
+  v23: slot, flags (alive / scriptGate / PRIMARY), pos, vel px/ms, last-fire aim, CUMULATIVE
+  shot count, shotsPerSec, bulletLife, roll rings -- 34 B), `MsgWorldSnapshot` (see the
   World-snapshots bullet below), `MsgEvent` envelope with a monotone ushort seq
   (EvSpawn full base state + spawn extras / EvDeath netId+killer+pos+per-slot award / EvBlast
   pos+level / EvClaim netId+killerSlot / EvScoreSync lives+scores) + `MsgHello`/
@@ -841,6 +855,12 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   CONNECTED to the junkboss -- card 1210e14e, see "THE SAME ROCKS, A 20%-SMALL HITBOX". The
   block is APPEND-ONLY and length-guarded (snapshot entries are length-prefixed and
   `ApplyStateExtra` gates on `len`), which keeps the DECODER robust and the bump mechanical.
+  **v23** (card b2828be8, Stage 11.8) folds the two ship messages into ONE slot-keyed
+  `MsgShipState` (34 B: leading slot byte, flags gaining `ShipFlagPrimary` for the sender's
+  heartbeat frame) and RETIRES `MsgFriendState` (0x11 reserved, never reuse); `MsgHudState`'s
+  fixed-width entry also grows a `[comboLeft:1]` remaining-time byte (HudSlotBytes 16 -> 17,
+  folding card a5b1e941). A FORCED bump three ways over: a v22 peer mis-parses every ship frame
+  in both directions and every HUD entry after the first.
   **A BUMP IS BOOKKEEPING, NOT COMPATIBILITY -- and several notes in this list can read
   otherwise.** `OnHandshake` refuses `ver != ProtocolVersion` outright with `RejectVersion`
   before a single snapshot is exchanged, and the build-hash equality check behind it would
@@ -1709,8 +1729,10 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     simulation, not just the `AddExp` branch.** Gating only `AddExp` leaves `AddCombo`
     incrementing between the owner's 100ms packets and the 1s `combotimer` zeroing a live combo
     whenever OUR re-fired bullets miss, i.e. the replicated value fighting a local one.
-    `NetSetHudState` therefore also refreshes that slot's `combotimer` while the owner reports a
-    live combo, because the readout's alpha is driven by its `TimeLeft`.
+    `NetSetHudState` therefore also PARKS that slot's `combotimer` at the owner's replicated
+    remaining time while the owner reports a live combo (v23; it used to refresh it to FULL,
+    which kept the readout lit but ran the fade-out up to ~1 s late and out of phase),
+    because the readout's alpha is driven by its `TimeLeft`.
     It asks the ROSTER, not a live ship -- a slot's combo and levels outlive its ship (they
     persist across a death and respawn), so a ship-keyed test would flip while the player waits
     to come back. **Offline it is true for every slot**, which is what keeps single-player and
@@ -1718,8 +1740,11 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     so the test can table-drive `Remote`/`RemoteFriend`/unseated -- offline the predicate is
     unconditionally true, so a live-roster-only test could never reach those cases at all.
   - **`MsgHudState` (0x12, stream lane, ~10 Hz, BIDIRECTIONAL) carries the owner's version**:
-    `[type][count]` then `[slot][combo:2][activeType][progress][level x 5][optionCount x 2]` per
-    owned slot. Protocol **v9**, the option counts **v16** (card c5228350 -- the bullet above). **combo is a USHORT and that is load-bearing** -- the host SPENDS the
+    `[type][count]` then `[slot][combo:2][comboLeft:1][activeType][progress][level x 5]
+    [optionCount x 2][score:f32]` per owned slot. Protocol **v9**, the option counts **v16**
+    (card c5228350 -- the bullet above), `comboLeft` **v23** (card b2828be8 folding a5b1e941:
+    the combo timer's remaining fraction, so the observer parks its timer in phase with the
+    owner's). **combo is a USHORT and that is load-bearing** -- the host SPENDS the
     adopted figure (`AwardScoreToAll` -> `comboModify`), so a byte would cap a client's real
     400x combo at 255 and underpay it; combos past 255 are expected (1000 precached combo
     strings, an explicit `>= 1000` draw fallback). Levels cover the leading 5 `Powerup.PowerupType` values -- `OneUp`'s level is
@@ -1937,8 +1962,9 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     ORDINAL among seated slots, so a dense offline roster spawns exactly where it always did).
     `Oracle.AddPlayer` returns the slot it seated; `GameScene.SpawnPlayer` takes it explicitly
     (`oracle.Players - 1` only agreed while dense).
-  - `MsgFriendState` is now BIDIRECTIONAL and carries every locally-owned non-primary ship
-    (AI friends *and* couch players) -- `ControlDevice.RemoteFriend` means "network-driven
+  - The extra-ship stream is BIDIRECTIONAL and carries every locally-owned non-primary ship
+    (AI friends *and* couch players; since v23 it rides `MsgShipState` with the primary flag
+    clear) -- `ControlDevice.RemoteFriend` means "network-driven
     extra ship", whoever owns it. `EvBlast` gained a slot byte (a couch player's bomb used to
     detonate on the peer's PRIMARY puppet) and `EvScoreSync` widened from 2 slots to 4.
   - `DriveFriendShip` ADOPTS a ship the scene spawned into its slot (`SpawnAllPlayers` respawns
@@ -2519,10 +2545,11 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
 - **AI "friend" ships replicate (host-authoritative), follow-up to card 11.2:** the Mechanical
   Friends cheat is re-enabled in net sessions -- but ONLY the host adds AI friends (it runs the
   real AI, whose enemy kills already replicate), and only after the client's Remote ship has
-  taken its slot. The host streams each friend (`MsgFriendState`, slot-tagged) and the client
+  taken its slot. The host streams each friend (a slot-tagged `MsgShipState` with the primary
+  flag clear since v23) and the client
   shows it as a `ControlDevice.RemoteFriend` puppet (`Compat/Net/NetSession.Friends.cs`): its own
-  per-slot jitter buffer/interpolation clock (a copy of the single-remote path, kept ISOLATED so
-  it can't regress it), IDENTITY slot mapping (the puppet lands in the host's slot so per-slot
+  per-slot jitter buffer/interpolation clock (`ShipChannel`, the same class the primary uses
+  since card b2828be8 -- the asymmetries are per-channel behaviour), IDENTITY slot mapping (the puppet lands in the host's slot so per-slot
   score/lives sync lines up), bullets re-fired locally, death via a per-slot stream timeout. The
   budget is `Settings.Friends + 1` TOTAL ships incl. the remote (so a 2-human session needs the
   cheat >= 2 to spawn any AI friend). The whole path is dormant unless the cheat is on.

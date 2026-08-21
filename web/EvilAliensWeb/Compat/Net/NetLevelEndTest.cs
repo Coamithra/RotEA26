@@ -448,7 +448,7 @@ namespace EvilAliensWeb.Compat.Net
 
         private static byte[] ScriptedShipState(float x, float y)
         {
-            return NetProtocol.EncodeShipState(shipSeq++, 0u,
+            return NetProtocol.EncodeShipState(0, primary: true, shipSeq++, 0u,
                 new Vector2(x, y), Vector2.Zero,
                 0f, alive: true, shotCount: 0, shotsPerSec: 5, bulletLife: 1000f);
         }

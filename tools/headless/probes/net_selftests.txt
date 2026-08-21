@@ -153,8 +153,9 @@ expect \[netsnap\] PASS \(49 passed, 0 failed\)
 # per-slot HUD wire format + OwnsSlot + the real PowerupData exp curve (card 1a3ad45a), plus the
 # per-layer option counts v16 appended to that entry (card c5228350) and their decode-boundary
 # clamp -- asserted off a RAW packet, since the encoder clamps too and a value put through it can
-# never reach the decoder's guard.
-expect -> ALL PASS \(41 passed, 0 failed\)
+# never reach the decoder's guard. 41 -> 43 with the v23 comboLeft byte (card b2828be8 folding
+# a5b1e941): its wire round trip, and NetSetHudState PARKING the timer instead of refreshing it.
+expect -> ALL PASS \(43 passed, 0 failed\)
 # the one-writer-per-slot score policy, with the max() ratchet AND the deleted two-writer
 # settle as its negative controls, plus the v20 wire legs (card af96bcc2)
 expect \[netscore\] PASS \(11/11\)

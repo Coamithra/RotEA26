@@ -828,15 +828,15 @@ namespace EvilAliensWeb.Compat.Net
         private static byte[] ShipFrame(ref ushort seq, ref uint senderMs, bool alive = true)
         {
             senderMs += 33; // advance, or ShipStateBuffer refuses the sample as stale
-            return NetProtocol.EncodeShipState(seq++, senderMs, RemoteShipPos, Vector2.Zero,
+            return NetProtocol.EncodeShipState(1, primary: true, seq++, senderMs, RemoteShipPos, Vector2.Zero,
                 FacingUp, alive, shotCount: 0, shotsPerSec: 8, bulletLife: 450f);
         }
 
         private static byte[] FriendFrame(ref ushort seq, ref uint senderMs)
         {
             senderMs += 33; // as above -- the channel has its own buffer and its own clock
-            return NetProtocol.EncodeFriendState(FriendSlot, seq++, senderMs, FriendShipPos,
-                Vector2.Zero, FacingUp, shotCount: 0, shotsPerSec: 8, bulletLife: 450f);
+            return NetProtocol.EncodeShipState(FriendSlot, primary: false, seq++, senderMs, FriendShipPos,
+                Vector2.Zero, FacingUp, alive: true, shotCount: 0, shotsPerSec: 8, bulletLife: 450f);
         }
 
         // Hand the level back a roster it can play on. It is NOT the roster the suite found --

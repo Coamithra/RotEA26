@@ -141,8 +141,8 @@ namespace EvilAliensWeb.Compat.Net
             NetSession.Update();
             Check("the scripted client paired", NetSession.PeerUp);
 
-            peer.SendStream(NetProtocol.EncodeShipState(shipSeq++, shipMs += 33,
-                new Vector2(400f, 300f), Vector2.Zero, 4.712389f, alive: true, shotCount: 0, 8, 450f));
+            peer.SendStream(NetProtocol.EncodeShipState(1, primary: true, shipSeq++, shipMs += 33,
+                new Vector2(400f, 300f), Vector2.Zero, 4.712389f, alive: true, shotCount: 0, shotsPerSec: 8, bulletLife: 450f));
             wire.Pump();
             NetSession.Update();
             int peerSlot = oracle.GetPlayerIndex(ControlDevice.Remote);

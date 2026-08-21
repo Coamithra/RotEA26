@@ -15,7 +15,7 @@
 # save it -- ShipStateBuffer.Add always keeps the last two samples, so the bracketing pair
 # straddling the death gap survives whatever the gap length.
 #
-# THE FIX (receiver-side, no wire change, both roles): NetSession.HandleShipState clears the
+# THE FIX (receiver-side, no wire change, both roles): NetSession.HandleShipFrame clears the
 # buffer (+ render clock + the pop-metric baseline) on the dead->alive RISING edge, before the
 # first alive sample is added, so a new life starts from its own samples and the interpolator can
 # never bridge a death. The friend/couch channel's half is card 14c5943e (section 3 below): its

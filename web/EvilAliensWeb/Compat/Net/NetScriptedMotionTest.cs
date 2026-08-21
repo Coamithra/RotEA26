@@ -534,7 +534,7 @@ namespace EvilAliensWeb.Compat.Net
                 // cover a whole fly-by cycle outlives the pairing unless the scripted peer
                 // heartbeats. `alive: false` is the documented shape: the ship stream doubles as
                 // the heartbeat and is sent even with no live ship, so this spawns no puppet.
-                peer.SendStream(NetProtocol.EncodeShipState(peerSeq++,
+                peer.SendStream(NetProtocol.EncodeShipState(1, primary: true, peerSeq++,
                     (uint)(t * ticksPerTurn * (long)Math.Round(TickMs)), Nowhere, Vector2.Zero,
                     0f, alive: false, 0, 0, 0f));
                 clock.Advance(ticksPerTurn * (long)Math.Round(TickMs));

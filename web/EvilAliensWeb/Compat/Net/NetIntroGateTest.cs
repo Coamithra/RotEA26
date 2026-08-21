@@ -425,7 +425,7 @@ namespace EvilAliensWeb.Compat.Net
         private static byte[] ShipFrame(ref ushort seq, ref uint senderMs, bool gate)
         {
             senderMs += 33; // advance, or ShipStateBuffer refuses the sample as stale
-            return NetProtocol.EncodeShipState(seq++, senderMs, RemoteShipPos, Vector2.Zero,
+            return NetProtocol.EncodeShipState(0, primary: true, seq++, senderMs, RemoteShipPos, Vector2.Zero,
                 FacingUp, alive: true, shotCount: 0, shotsPerSec: 8, bulletLife: 450f,
                 scriptGate: gate);
         }
@@ -448,7 +448,7 @@ namespace EvilAliensWeb.Compat.Net
 
             private void OnData(byte[] data, bool reliable, string from)
             {
-                if (NetProtocol.TryDecodeShipState(data, out _, out ShipSample s, out _, out _))
+                if (NetProtocol.TryDecodeShipState(data, out _, out _, out _, out ShipSample s, out _, out _))
                 {
                     LastShipGate = s.ScriptGate;
                 }

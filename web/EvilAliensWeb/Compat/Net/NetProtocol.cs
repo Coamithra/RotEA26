@@ -21,12 +21,15 @@ namespace EvilAliensWeb.Compat.Net
         public const byte MsgHello = 0x01;
         public const byte MsgWelcome = 0x02;
         public const byte MsgReject = 0x03;
+        // EVERY locally-owned ship, slot-keyed, ~30 Hz stream lane (card b2828be8, protocol
+        // v23). The sender's primary carries ShipFlagPrimary and is the heartbeat (streamed
+        // even shipless, alive=false); couch players and AI friends ride the same layout with
+        // the flag clear, one frame per living ship. BIDIRECTIONAL.
         public const byte MsgShipState = 0x10;
-        // Every locally-owned ship that ISN'T the sender's primary: the host's AI "friend" ships
-        // (Mechanical Friends cheat) and, since card 4d904410, either peer's couch players. Same
-        // body as MsgShipState with a leading slot byte so several stream in parallel;
-        // BIDIRECTIONAL (it was host -> client while AI friends were the only case).
-        // Stream lane, ~30 Hz.
+        // RETIRED (card b2828be8, v23): the pre-v23 slot-keyed extra-ship stream, folded into
+        // MsgShipState above once every ship frame carried its slot. The id is RESERVED and must
+        // never be reused -- an old build's frames must decode as "unknown type", not as
+        // something else.
         public const byte MsgFriendState = 0x11;
         // Card 1a3ad45a: the per-slot HUD state its OWNER is authoritative for -- combo counter,
         // active powerup, bar progress and per-type levels. Bidirectional (each peer sends the
@@ -137,8 +140,14 @@ namespace EvilAliensWeb.Compat.Net
         // phase (the EvFx bullet's own rule), because a 30Hz resend is self-healing against
         // loss/reorder, and because it needs no level-entry ordering and no JIP catch-up leg:
         // the stream is already flowing before a joiner's level even loads.
-        // ONLY THE HOST'S BIT IS HONOURED -- see NetSession.HandleShipState.
+        // ONLY THE HOST'S BIT IS HONOURED -- see NetSession.HandleShipFrame.
         public const byte ShipFlagScriptGate = 1 << 1;
+        // Card b2828be8 (v23): this frame carries the sender's PRIMARY ship -- the heartbeat
+        // stream, the one whose alive flag is an edge (death explosion / respawn buffer clear)
+        // and whose ScriptGate bit means anything. A flag rather than a slot comparison so the
+        // receiver's routing is self-describing across the slot-settle race and any mid-session
+        // re-grant: the primary channel is a distinguished thing, whichever seat it is in.
+        public const byte ShipFlagPrimary = 1 << 2;
 
         // ---- wire enum validation (card 88f87ba2) -------------------------------------
         //
@@ -373,65 +382,27 @@ namespace EvilAliensWeb.Compat.Net
         // is what puts the mini-blasts on the SAME bullets on both screens. Eight bits cover
         // every owed shot by construction (NetMaxCatchUpShots is 6; a bigger delta is a resync
         // that fires nothing).
-        public static byte[] EncodeShipState(ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, bool alive, byte shotCount, int shotsPerSec, float bulletLife, bool scriptGate = false, byte asplodeBits = 0, byte bounceBits = 0)
+        // ONE layout for every ship on the wire since v23 (card b2828be8):
+        //   [0x10][slot:1][flags:1][shotsPerSec:1][bulletLife:1][seq:2][t:4]
+        //   [posX:f32][posY:f32][velX:f32][velY:f32][aim:f32][shotCount:1][asplode:1][bounce:1]
+        // = 34 bytes. `slot` first so the identity leads; `primary` (ShipFlagPrimary) marks the
+        // sender's heartbeat frame -- the one streamed even shipless, whose `alive` is an edge
+        // and whose ScriptGate bit is honoured. An extra ship (couch player, AI friend) sends
+        // primary=false with alive=true always: a dead extra simply stops being sent and the
+        // receiver's per-slot timeout explodes its puppet, exactly as MsgFriendState worked.
+        //
+        // slot and primary are NOT defaulted, deliberately (the ResolveBaseVelocity rule): a
+        // caller written to the pre-v23 signature must fail to compile rather than silently
+        // send slot 0 / primary false.
+        public const int ShipStateBytes = 34;
+
+        public static byte[] EncodeShipState(byte slot, bool primary, ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, bool alive, byte shotCount, int shotsPerSec, float bulletLife, bool scriptGate = false, byte asplodeBits = 0, byte bounceBits = 0)
         {
-            byte[] b = new byte[33];
+            byte[] b = new byte[ShipStateBytes];
             b[0] = MsgShipState;
-            b[1] = (byte)((alive ? ShipFlagAlive : 0) | (scriptGate ? ShipFlagScriptGate : 0));
-            b[2] = (byte)Math.Clamp(shotsPerSec, 1, 255);
-            b[3] = (byte)Math.Clamp((int)(bulletLife / 10f), 0, 255);
-            WriteU16(b, 4, seq);
-            WriteU32(b, 6, senderMs);
-            WriteF32(b, 10, pos.X);
-            WriteF32(b, 14, pos.Y);
-            WriteF32(b, 18, vel.X);
-            WriteF32(b, 22, vel.Y);
-            WriteF32(b, 26, aim);
-            b[30] = shotCount;
-            b[31] = asplodeBits;
-            b[32] = bounceBits;
-            return b;
-        }
-
-        public static bool TryDecodeShipState(byte[] b, out ushort seq, out ShipSample sample, out int shotsPerSec, out float bulletLife)
-        {
-            seq = 0;
-            sample = default;
-            shotsPerSec = 8;
-            bulletLife = 450f;
-            if (b.Length < 33 || b[0] != MsgShipState)
-            {
-                return false;
-            }
-            shotsPerSec = b[2];
-            bulletLife = b[3] * 10f;
-            seq = ReadU16(b, 4);
-            sample.T = ReadU32(b, 6);
-            sample.Pos = new Vector2(ReadF32(b, 10), ReadF32(b, 14));
-            sample.Vel = new Vector2(ReadF32(b, 18), ReadF32(b, 22));
-            sample.Aim = ReadF32(b, 26);
-            sample.Alive = (b[1] & ShipFlagAlive) != 0;
-            sample.ScriptGate = (b[1] & ShipFlagScriptGate) != 0;
-            sample.ShotCount = b[30];
-            sample.AsplodeBits = b[31];
-            sample.BounceBits = b[32];
-            return true;
-        }
-
-        // Friend (host AI ship) stream: MsgShipState body shifted one byte right for the leading
-        // player-slot. `alive` is implicit (a live friend is streamed; a dead/gone one simply stops
-        // being sent, and the client's per-slot timeout explodes its puppet), so no alive flag --
-        // and since card a45b78f6 no flags byte at all, the firing level having been the only bit
-        // it ever carried.
-        // The v21 roll rings ride at the same trailing offsets as MsgShipState's -- see
-        // EncodeShipState; DriveFriendShip feeds the identical NetApplyRemoteState, so a couch
-        // player's and an AI friend's asploding bullets sync the same way the primary's do.
-        public static byte[] EncodeFriendState(byte slot, ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, byte shotCount, int shotsPerSec, float bulletLife, byte asplodeBits = 0, byte bounceBits = 0)
-        {
-            byte[] b = new byte[33];
-            b[0] = MsgFriendState;
             b[1] = slot;
-            b[2] = shotCount;
+            b[2] = (byte)((alive ? ShipFlagAlive : 0) | (scriptGate ? ShipFlagScriptGate : 0)
+                | (primary ? ShipFlagPrimary : 0));
             b[3] = (byte)Math.Clamp(shotsPerSec, 1, 255);
             b[4] = (byte)Math.Clamp((int)(bulletLife / 10f), 0, 255);
             WriteU16(b, 5, seq);
@@ -441,23 +412,26 @@ namespace EvilAliensWeb.Compat.Net
             WriteF32(b, 19, vel.X);
             WriteF32(b, 23, vel.Y);
             WriteF32(b, 27, aim);
-            b[31] = asplodeBits;
-            b[32] = bounceBits;
+            b[31] = shotCount;
+            b[32] = asplodeBits;
+            b[33] = bounceBits;
             return b;
         }
 
-        public static bool TryDecodeFriendState(byte[] b, out byte slot, out ushort seq, out ShipSample sample, out int shotsPerSec, out float bulletLife)
+        public static bool TryDecodeShipState(byte[] b, out byte slot, out bool primary, out ushort seq, out ShipSample sample, out int shotsPerSec, out float bulletLife)
         {
             slot = 0;
+            primary = false;
             seq = 0;
             sample = default;
             shotsPerSec = 8;
             bulletLife = 450f;
-            if (b.Length < 33 || b[0] != MsgFriendState)
+            if (b.Length < ShipStateBytes || b[0] != MsgShipState)
             {
                 return false;
             }
             slot = b[1];
+            primary = (b[2] & ShipFlagPrimary) != 0;
             shotsPerSec = b[3];
             bulletLife = b[4] * 10f;
             seq = ReadU16(b, 5);
@@ -465,10 +439,11 @@ namespace EvilAliensWeb.Compat.Net
             sample.Pos = new Vector2(ReadF32(b, 11), ReadF32(b, 15));
             sample.Vel = new Vector2(ReadF32(b, 19), ReadF32(b, 23));
             sample.Aim = ReadF32(b, 27);
-            sample.Alive = true;
-            sample.ShotCount = b[2];
-            sample.AsplodeBits = b[31];
-            sample.BounceBits = b[32];
+            sample.Alive = (b[2] & ShipFlagAlive) != 0;
+            sample.ScriptGate = (b[2] & ShipFlagScriptGate) != 0;
+            sample.ShotCount = b[31];
+            sample.AsplodeBits = b[32];
+            sample.BounceBits = b[33];
             return true;
         }
 
@@ -485,12 +460,19 @@ namespace EvilAliensWeb.Compat.Net
         // count cannot be flattened into: a total would let the observer hang the owner's outer
         // ring on the inner orbit.
         public const int HudOptionLayers = 2;
-        // slot+combo:2+activeType+progress+levels+optionCounts+score:f32
+        // slot+combo:2+comboLeft:1+activeType+progress+levels+optionCounts+score:f32
         // The trailing f32 is the slot's TOTAL SCORE, owner-declared (v20, card af96bcc2) --
         // the one-writer model's true-up. f32 rather than a quantised int because the score is
         // already an f32 in ScoreVisualiser and the replica adopts it VERBATIM; any narrowing
         // here would make the two peers disagree by the quantum forever.
-        public const int HudSlotBytes = 5 + HudLevelCount + HudOptionLayers + 4;
+        //
+        // comboLeft (v23, card b2828be8 folding a5b1e941): the owner's combo TIMER, as the
+        // 0..255-quantised fraction of its 1 s window still remaining. The observer's
+        // SustainCombo no longer runs for a slot it does not own, so its combotimer used to be
+        // refreshed to FULL on every live-combo packet -- the readout's fade-out was up to ~1 s
+        // late and its alpha ramp never tracked the owner's. One byte parks the observer's
+        // timer at the owner's actual remaining time (ScoreVisualiser.NetSetHudState).
+        public const int HudSlotBytes = 6 + HudLevelCount + HudOptionLayers + 4;
         // Hostile-peer bound on a decoded option count. Real play sits far below it (a pickup
         // adds 1, 2 or 2x2 and options are shot off again), so this is only what stops a garbled
         // or malicious byte asking for 255 real components per layer. Clamped rather than
@@ -501,7 +483,7 @@ namespace EvilAliensWeb.Compat.Net
         public const byte HudPowerupNone = 0xFF;
 
         // MsgHudState: [0x12][count:1] then `count` fixed-width HudSlotBytes entries:
-        //   [slot:1][combo:2][activeType:1][progress:1][level x HudLevelCount]
+        //   [slot:1][combo:2][comboLeft:1][activeType:1][progress:1][level x HudLevelCount]
         //   [optionCount x HudOptionLayers][score:f32]
         //
         // The option counts (v16, card c5228350) make the owner AUTHORITATIVE over that slot's
@@ -517,7 +499,7 @@ namespace EvilAliensWeb.Compat.Net
         // and combos well past 255 are expected (ScoreVisualiser precaches 1000 combo strings and
         // drawPlayerScore has an explicit >= 1000 fallback). Saturation at ushort is unreachable
         // in play. progress is the active bar's 0..1 fill quantised to a byte.
-        public static byte[] EncodeHudState(byte[] slots, int[] combos, byte[] activeTypes, float[] progress, int[][] levels, int[][] optionCounts, float[] scores, int count)
+        public static byte[] EncodeHudState(byte[] slots, int[] combos, float[] comboLeft, byte[] activeTypes, float[] progress, int[][] levels, int[][] optionCounts, float[] scores, int count)
         {
             byte[] b = new byte[2 + HudSlotBytes * count];
             b[0] = MsgHudState;
@@ -528,6 +510,7 @@ namespace EvilAliensWeb.Compat.Net
                 b[off++] = slots[i];
                 WriteU16(b, off, (ushort)Math.Clamp(combos[i], 0, ushort.MaxValue));
                 off += 2;
+                b[off++] = (byte)Math.Clamp((int)MathF.Round(comboLeft[i] * 255f), 0, 255);
                 b[off++] = activeTypes[i];
                 b[off++] = (byte)Math.Clamp((int)MathF.Round(progress[i] * 255f), 0, 255);
                 for (int t = 0; t < HudLevelCount; t++)
@@ -551,10 +534,11 @@ namespace EvilAliensWeb.Compat.Net
         // slot has no powerup active", which covers the explicit HudPowerupNone sentinel and any
         // value we do not recognise in one answer, so the consumer has one case to handle
         // instead of two tests it could get individually wrong.
-        internal static bool TryDecodeHudState(byte[] b, int index, int[] levels, int[] optionCounts, out byte slot, out int combo, out Powerup.PowerupType? activeType, out float progress, out float scoreTotal)
+        internal static bool TryDecodeHudState(byte[] b, int index, int[] levels, int[] optionCounts, out byte slot, out int combo, out float comboLeft, out Powerup.PowerupType? activeType, out float progress, out float scoreTotal)
         {
             slot = 0;
             combo = 0;
+            comboLeft = 0f;
             activeType = null;
             progress = 0f;
             scoreTotal = 0f;
@@ -566,22 +550,23 @@ namespace EvilAliensWeb.Compat.Net
             int off = 2 + HudSlotBytes * index;
             slot = b[off];
             combo = ReadU16(b, off + 1);
-            activeType = TryPowerupType(b[off + 3], out Powerup.PowerupType active) ? active : (Powerup.PowerupType?)null;
-            progress = b[off + 4] / 255f;
+            comboLeft = b[off + 3] / 255f;
+            activeType = TryPowerupType(b[off + 4], out Powerup.PowerupType active) ? active : (Powerup.PowerupType?)null;
+            progress = b[off + 5] / 255f;
             for (int t = 0; t < HudLevelCount; t++)
             {
-                levels[t] = b[off + 5 + t];
+                levels[t] = b[off + 6 + t];
             }
             // Clamped HERE, at the decode boundary, not in the apply loop: the byte is off a
             // stranger's wire (the public game browser) and it drives real component spawns.
             for (int layer = 0; layer < HudOptionLayers; layer++)
             {
-                optionCounts[layer] = Math.Clamp((int)b[off + 5 + HudLevelCount + layer], 0, HudMaxOptionsPerLayer);
+                optionCounts[layer] = Math.Clamp((int)b[off + 6 + HudLevelCount + layer], 0, HudMaxOptionsPerLayer);
             }
             // The owner's declared TOTAL for this slot (v20, one writer per slot), adopted
             // verbatim by the replica. No range validation, per the CLIENT-TRUSTS-HOST ruling --
             // a peer declaring nonsense is out of scope (card 2da92af9's surface).
-            scoreTotal = ReadF32(b, off + 5 + HudLevelCount + HudOptionLayers);
+            scoreTotal = ReadF32(b, off + 6 + HudLevelCount + HudOptionLayers);
             return true;
         }
 
@@ -1548,9 +1533,10 @@ namespace EvilAliensWeb.Compat.Net
         public float Aim;
         public bool Alive;
         // Card 8a7772d6. Like Alive this is a LEVEL the receiver reads off the newest sample,
-        // not a quantity anything interpolates -- it rides here rather than in a fifth `out`
-        // because the decoder already carries the alive bit this way. Always false out of
-        // TryDecodeFriendState: an AI friend has no level script.
+        // not a quantity anything interpolates -- it rides here rather than in another `out`
+        // because the decoder already carries the alive bit this way. Only honoured on a
+        // PRIMARY-flagged frame from the host (NetSession.HandleShipFrame): an extra ship has
+        // no level script.
         public bool ScriptGate;
         // Cumulative wrapping count of the shots the OWNER's ship has actually spawned (card
         // a45b78f6). The receiver fires the wrapped delta; it is not a rate and never resets

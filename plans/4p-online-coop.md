@@ -3,10 +3,10 @@
 Card `2e0f908b`: *"Can the networking be extended to allow up to 4 players to play together
 online?"*
 
-> **STATUS 2026-08-21 — the epic is ACTIVE (card `583a3ef8`, Stage 11.7 in progress), and this doc was written 2026-07-24 against a codebase that has since moved. The architecture below STANDS (star topology, `PeerChannel`, unified ship paths, negotiated signaling capacity, the listed-session match-end shape); the following specifics are corrected here rather than rewritten in place:**
+> **STATUS 2026-08-21 — the epic is ACTIVE (11.7 and 11.8 SHIPPED; next up Stage 11.9, card `87242257`), and this doc was written 2026-07-24 against a codebase that has since moved. The architecture below STANDS (star topology, `PeerChannel`, unified ship paths, negotiated signaling capacity, the listed-session match-end shape); the following specifics are corrected here rather than rewritten in place:**
 >
 > - **Stage 11.6 is RETIRED — its work shipped as card `25ad0659`.** The in-process wire exists (`NetWire`/`InMemoryTransport`, N ≤ 8 endpoints, `NetWireTest` runs an N=4 leg), the scenario harness exists (ONE real session + scripted wire peers — that card measured that two independent WORLDS in one process are impossible, and unnecessary), and the de-static `NetContext` was measured and DECLINED as optional. The N-peer regression net is therefore "extend the scenario-harness pattern + the multi-process eahl rigs", not a de-static refactor. The epic starts at 11.7.
-> - **Protocol is v22 now, not v5** — §B's "bump 5 → 6" reads as "bump whatever is current". The per-version changelog lives at `NetSession.ProtocolVersion`.
+> - **Protocol is v23 now, not v5** — §B's "bump 5 → 6" reads as "bump whatever is current". The per-version changelog lives at `NetSession.ProtocolVersion`.
 > - **`NetSession` is 4,472 + 388 lines (`NetSession.Friends.cs`) with ~20 peer-scoped singletons**, not 2.6k/16 — the JIP/listing/game-browser/host-menu/metrics machinery (cards `2001fbd8`, `0b8a300b`, `0d6ffe70`, …) all post-dates this doc and is enumerated in `Compat/Net/CLAUDE.md`. Two additions to §A's singleton list that matter: `CaptureBaseState` read-and-clears the per-entity teleport latch, so a snapshot turn must encode ONCE and send the same bytes to every client (never re-capture per recipient); and `ReplayLive()`/`NetReplayCatchUp()` are unaddressed broadcasts, so a late joiner's catch-up needs the ADDRESSED sends or it re-blasts every already-caught-up peer.
 > - **TURN is decided: STUN-only stays** (owner decision, 2026-08-21). §"Topology"'s go/no-go is resolved as a deferred follow-up card, gated on real-world lobby-formation failure reports — 11.11 loses that item.
 > - **A two-process eahl rig exists** (`tools/headless/LocalSocketNet.cs` + `tools/sim/net_jip_sync.py`) and is the thing the multi-process N-peer rigs extend; `?netpeers=` still does not exist and 11.7 deliberately adds no flag (a >2 capacity on a live session is knowingly broken until 11.9 — the transport-layer N rig is console-driven `eaRtc` on plain boots).
@@ -122,7 +122,9 @@ be re-decided as part of this, not after.
 
 ## Design
 
-**A. `PeerChannel` — the layer-4 refactor.** Lift the 16 singleton members into a
+**A. `PeerChannel` — the layer-4 refactor.** *(SHIPPED -- card `b2828be8`, Stage 11.8, protocol
+v23: `PeerChannel` + `ShipChannel` in `Compat/Net/PeerChannel.cs`, keyed by the 11.7 senderIds,
+static facade unchanged; details in `Compat/Net/CLAUDE.md`.)* Lift the 16 singleton members into a
 `PeerChannel` keyed by peer id, held in a `Dictionary<string, PeerChannel>` the way
 `friendChannels` already is. Per peer: handshake state (hello/welcome, build hash, flags),
 liveness (`lastRxStreamAt`, stall, timeout), `peerPrimarySlot`, pause flag, event seq. The static
@@ -134,7 +136,9 @@ public API (~60 external call sites across `GameScene`, `PlayerShip`, `KillableA
 > one splits per *peer* inside a single session. They share only the static-facade-over-instance
 > shape — and the de-static half lands first (card 11.6 below), which is what makes (A) tractable.
 
-**B. Converge the two ship paths.** Today `MsgShipState` means "the sender's primary" (identity
+**B. Converge the two ship paths.** *(SHIPPED -- same card: one slot-keyed `MsgShipState` with a
+PRIMARY flag, `MsgFriendState` retired, one receive/drive path; the a5b1e941 combo-timer byte rode
+the same bump.)* Before it, `MsgShipState` meant "the sender's primary" (identity
 implicit — there is only one sender) and `MsgFriendState` is the slot-tagged general case. With
 N peers "implicit sender" stops being meaningful, so fold the primary into the slot-keyed form:
 **every ship on the wire carries its slot**, and one code path drives every remote ship. The
@@ -211,7 +215,7 @@ do not reuse `12.x`).
 |---|---|
 | ~~**11.6**~~ | RETIRED — shipped as card `25ad0659` (see the status banner) |
 | **11.7** (`583a3ef8`) | Transport addressing + N-peer signaling room, capacity negotiated (webrtc.js, `INetTransport`, signal server, `LocalSocketNet` multi-client, 3-tab loopback rig). Behaviour-neutral for 2-peer; protocol version unchanged |
-| **11.8** (`b2828be8`) | `PeerChannel` refactor + converge the primary/friend ship paths, `ProtocolVersion` bump — **still 2 peers on the wire**, so it must be behaviour-neutral; the scenario harness + `net_jip_sync.py` are the safety net |
+| ~~**11.8**~~ (`b2828be8`) | SHIPPED (protocol v22 → v23): `PeerChannel` + one slot-keyed ship path, behaviour-neutral at 2 peers; `net_jip_sync.py` stayed green |
 | **11.9** (`87242257`) | N-peer session: per-peer hello/welcome + roster negotiation (grants serialized against races), per-peer liveness/drop ladder, pause as a set, host relay of client ship/HUD state (symmetric events re-emitted under the host's own event seq), ADDRESSED catch-up, the new match-end policy, per-peer `[net]` metrics |
 | **11.10** (`0257f8ba`) | Lobby + game-browser UX for 3–4 (host roster, start-when-ready, capacity-aware listing — the `!NetSession.Active` term goes, JIP into slots 3/4, per-peer kick target) |
 | **11.11** (`6fb406bc`) | Hardening: relayed-channel interp delay, bandwidth soak at N=4, multi-process eahl rigs, `bufferedAmount` back-pressure. TURN stays deferred (owner decision — see banner) |

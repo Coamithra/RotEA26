@@ -492,7 +492,7 @@ namespace EvilAliensWeb.Compat.Net
             int fromSlot, int toSlot, int options0, int options1)
         {
             int[] levels = new int[NetProtocol.HudLevelCount];
-            score.NetReadHudState(fromSlot, levels, out int combo, out Powerup.PowerupType? type,
+            score.NetReadHudState(fromSlot, levels, out int combo, out float comboLeft, out Powerup.PowerupType? type,
                 out float progress);
             byte[] slots = { (byte)toSlot };
             int[] combos = { combo };
@@ -500,7 +500,7 @@ namespace EvilAliensWeb.Compat.Net
             float[] progressRow = { progress };
             int[][] levelRows = { levels };
             int[][] optionRows = { new[] { options0, options1 } };
-            peer.SendStream(NetProtocol.EncodeHudState(slots, combos, types, progressRow, levelRows,
+            peer.SendStream(NetProtocol.EncodeHudState(slots, combos, new float[] { comboLeft }, types, progressRow, levelRows,
                 optionRows, new float[] { 0f }, 1));
             wire.Pump();
             NetSession.Update();
@@ -538,7 +538,7 @@ namespace EvilAliensWeb.Compat.Net
         {
             Array.Clear(levels, 0, levels.Length);
             levels[(int)Powerup.PowerupType.Option] = level;
-            score.NetSetHudState(slot, 0, Powerup.PowerupType.Option, 0f, levels);
+            score.NetSetHudState(slot, 0, 0f, Powerup.PowerupType.Option, 0f, levels);
         }
 
         private static int Census<T>(Game game)
@@ -569,8 +569,8 @@ namespace EvilAliensWeb.Compat.Net
         private static byte[] ShipFrame(ref ushort seq, ref uint senderMs)
         {
             senderMs += 33;
-            return NetProtocol.EncodeShipState(seq++, senderMs, new Vector2(400f, 300f),
-                Vector2.Zero, 4.712389f, alive: true, shotCount: 0, 8, 450f);
+            return NetProtocol.EncodeShipState(1, primary: true, seq++, senderMs, new Vector2(400f, 300f),
+                Vector2.Zero, 4.712389f, alive: true, shotCount: 0, shotsPerSec: 8, bulletLife: 450f);
         }
 
         private static void Teardown(StringBuilder sb, Action<string, bool> Check, Oracle oracle,

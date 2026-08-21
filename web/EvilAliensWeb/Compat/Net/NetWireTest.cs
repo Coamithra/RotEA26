@@ -457,32 +457,35 @@ namespace EvilAliensWeb.Compat.Net
             // MsgShipState (stream lane, ~30 Hz). senderMs is the sample time the jitter buffer
             // sorts on, so it is part of the layout that matters most.
             // The v21 roll rings ride as two ASYMMETRIC bytes, so a swap between them (or either
-            // landing on the neighbouring field) cannot pass.
+            // landing on the neighbouring field) cannot pass. Since v23 every frame leads with
+            // its slot and the flags byte carries PRIMARY -- pinned SET here with a non-zero
+            // slot, and CLEAR below on the extra-ship leg.
             byte[] ship = Round(NetProtocol.EncodeShipState(
-                4242, 1234567u, new Vector2(123.5f, -45.25f), new Vector2(0.125f, -0.5f),
+                1, primary: true, 4242, 1234567u, new Vector2(123.5f, -45.25f), new Vector2(0.125f, -0.5f),
                 1.75f, alive: true, shotCount: 200, shotsPerSec: 17, bulletLife: 640f,
                 scriptGate: false, asplodeBits: 0xA5, bounceBits: 0x3C), reliable: false);
             bool shipOk = false;
-            if (ship != null && NetProtocol.TryDecodeShipState(ship, out ushort shipSeq,
-                out ShipSample s, out int sps, out float blife))
+            if (ship != null && NetProtocol.TryDecodeShipState(ship, out byte shipSlot, out bool shipPrimary,
+                out ushort shipSeq, out ShipSample s, out int sps, out float blife))
             {
-                shipOk = shipSeq == 4242 && s.T == 1234567.0
+                shipOk = shipSlot == 1 && shipPrimary && shipSeq == 4242 && s.T == 1234567.0
                     && Near(s.Pos.X, 123.5f) && Near(s.Pos.Y, -45.25f)
                     && Near(s.Vel.X, 0.125f) && Near(s.Vel.Y, -0.5f)
                     && Near(s.Aim, 1.75f) && s.Alive && s.ShotCount == 200 && !s.ScriptGate
                     && sps == 17 && Near(blife, 640f)
                     && s.AsplodeBits == 0xA5 && s.BounceBits == 0x3C;
             }
-            check("MsgShipState round-trips every field", shipOk);
+            check("MsgShipState round-trips every field (slot + primary flag included)", shipOk);
 
-            // Card 8a7772d6's script-gate bit. It shares the flags byte with `alive`, so the
-            // leg above pins it CLEAR while alive is SET, and this one pins it SET while alive
-            // is CLEAR -- either half alone passes a bit wired to the wrong mask.
+            // Card 8a7772d6's script-gate bit. It shares the flags byte with `alive` (and, since
+            // v23, `primary`), so the leg above pins it CLEAR while alive is SET, and this one
+            // pins it SET while alive is CLEAR -- either half alone passes a bit wired to the
+            // wrong mask.
             byte[] gated = Round(NetProtocol.EncodeShipState(
-                1, 5u, Vector2.Zero, Vector2.Zero, 0f, alive: false, shotCount: 0,
+                0, primary: true, 1, 5u, Vector2.Zero, Vector2.Zero, 0f, alive: false, shotCount: 0,
                 shotsPerSec: 8, bulletLife: 450f, scriptGate: true), reliable: false);
             bool gateOk = false;
-            if (gated != null && NetProtocol.TryDecodeShipState(gated, out _,
+            if (gated != null && NetProtocol.TryDecodeShipState(gated, out _, out _, out _,
                 out ShipSample gs, out _, out _))
             {
                 gateOk = gs.ScriptGate && !gs.Alive;
@@ -515,25 +518,26 @@ namespace EvilAliensWeb.Compat.Net
                 tooLong != null && NetProtocol.TryDecodeSlowmoEvent(tooLong, out ushort clampedMs)
                     && clampedMs == NetProtocol.MaxSlowmoMs);
 
-            // The two ship messages share a body with the friend one shifted right by a byte for
-            // the slot -- exactly the shape where an off-by-one reads the neighbouring field and
-            // still decodes, so both are pinned.
-            byte[] friend = Round(NetProtocol.EncodeFriendState(
-                3, 77, 999u, new Vector2(-8f, 16f), new Vector2(-0.25f, 0.75f),
-                -2.5f, shotCount: 137, shotsPerSec: 5, bulletLife: 300f,
-                asplodeBits: 0x81, bounceBits: 0x42), reliable: false);
+            // The extra-ship frame is the SAME message with the primary flag clear since v23
+            // (card b2828be8) -- one layout, so the leg pins a different slot, the flag CLEAR,
+            // and alive SET (an extra is only ever streamed while alive; its death is the
+            // receiver's timeout).
+            byte[] friend = Round(NetProtocol.EncodeShipState(
+                3, primary: false, 77, 999u, new Vector2(-8f, 16f), new Vector2(-0.25f, 0.75f),
+                -2.5f, alive: true, shotCount: 137, shotsPerSec: 5, bulletLife: 300f,
+                scriptGate: false, asplodeBits: 0x81, bounceBits: 0x42), reliable: false);
             bool friendOk = false;
-            if (friend != null && NetProtocol.TryDecodeFriendState(friend, out byte fslot,
+            if (friend != null && NetProtocol.TryDecodeShipState(friend, out byte fslot, out bool fprimary,
                 out ushort fseq, out ShipSample fs, out int fsps, out float fblife))
             {
-                friendOk = fslot == 3 && fseq == 77 && fs.T == 999.0
+                friendOk = fslot == 3 && !fprimary && fseq == 77 && fs.T == 999.0
                     && Near(fs.Pos.X, -8f) && Near(fs.Pos.Y, 16f)
                     && Near(fs.Vel.X, -0.25f) && Near(fs.Vel.Y, 0.75f)
                     && Near(fs.Aim, -2.5f) && fs.Alive && fs.ShotCount == 137
                     && fsps == 5 && Near(fblife, 300f)
                     && fs.AsplodeBits == 0x81 && fs.BounceBits == 0x42;
             }
-            check("MsgFriendState round-trips every field (slot-shifted body)", friendOk);
+            check("an extra-ship frame round-trips every field (primary flag clear)", friendOk);
 
             // MsgHudState: variable-length, two slots, and a combo past 255 -- the value whose
             // width is load-bearing because the host SPENDS it (AwardScoreToAll -> comboModify).
@@ -555,7 +559,11 @@ namespace EvilAliensWeb.Compat.Net
             };
             // v20: the owner-declared totals, distinct per entry so a cross-entry swap cannot pass.
             float[] scoreTotals = new float[] { 9001.5f, 17f };
-            byte[] hud = Round(NetProtocol.EncodeHudState(slots, combos, types, progress, levels, optionCounts, scoreTotals, 2), reliable: false);
+            // v23: the combo timer's remaining fraction, distinct per entry AND distinct from
+            // `progress` on entry 0 (0.75 against 0), so a swap with the bar cannot pass. The
+            // byte quantisation makes the round trip exact at n/255 values only.
+            float[] comboLefts = new float[] { 0.6f, 1f };
+            byte[] hud = Round(NetProtocol.EncodeHudState(slots, combos, comboLefts, types, progress, levels, optionCounts, scoreTotals, 2), reliable: false);
             // One scratch array PER ENTRY. TryDecodeHudState writes the levels of whichever entry
             // it was asked for, so a shared buffer makes every later assertion depend on decode
             // ORDER -- which is the exact latent defect this commit fixes in NetComboTest. Cheap
@@ -567,17 +575,18 @@ namespace EvilAliensWeb.Compat.Net
             bool hudOk = hud != null
                 && NetProtocol.TryDecodeHudCount(hud, out int hudCount) && hudCount == 2
                 && NetProtocol.TryDecodeHudState(hud, 0, outLevels, outOptions, out byte hslot, out int hcombo,
-                    out EvilAliens.Powerup.PowerupType? hactive, out float hprog, out float hscore)
+                    out float hleft, out EvilAliens.Powerup.PowerupType? hactive, out float hprog, out float hscore)
                 && hslot == 1 && hcombo == 400 && hscore == 9001.5f && hactive.HasValue && (byte)hactive.Value == 2
-                && Near(hprog, 0f)
+                && Near(hprog, 0f) && Math.Abs(hleft - 0.6f) < 1f / 255f
                 && outLevels[0] == 1 && outLevels[1] == 2 && outLevels[2] == 3 && outLevels[3] == 4
                 && outLevels[4] == 0
                 && outOptions[0] == 4 && outOptions[1] == 2;
-            check("MsgHudState round-trips entry 0 (combo > 255 and the per-layer option counts survive)", hudOk);
+            check("MsgHudState round-trips entry 0 (combo > 255, comboLeft and the per-layer option counts survive)", hudOk);
             bool hud1Ok = hud != null
                 && NetProtocol.TryDecodeHudState(hud, 1, outLevels1, outOptions1, out byte h1slot, out int h1combo,
-                    out EvilAliens.Powerup.PowerupType? h1active, out float h1prog, out float h1score)
+                    out float h1left, out EvilAliens.Powerup.PowerupType? h1active, out float h1prog, out float h1score)
                 && h1slot == 2 && h1combo == 3 && h1score == 17f && !h1active.HasValue && Near(h1prog, 1f)
+                && Near(h1left, 1f)
                 && outOptions1[0] == 0 && outOptions1[1] == 1;
             check("MsgHudState entry 1 decodes, and HudPowerupNone reads as no powerup", hud1Ok);
 
@@ -818,9 +827,9 @@ namespace EvilAliensWeb.Compat.Net
             // follows. Every positive leg above would pass on a decoder with no length check, so
             // without these the section proves only that encode and decode agree.
             check("a truncated MsgShipState is refused",
-                !NetProtocol.TryDecodeShipState(Truncate(ship), out _, out _, out _, out _));
-            check("a truncated MsgFriendState is refused",
-                !NetProtocol.TryDecodeFriendState(Truncate(friend), out _, out _, out _, out _, out _));
+                !NetProtocol.TryDecodeShipState(Truncate(ship), out _, out _, out _, out _, out _, out _));
+            check("a truncated extra-ship frame is refused",
+                !NetProtocol.TryDecodeShipState(Truncate(friend), out _, out _, out _, out _, out _, out _));
             check("a truncated MsgHudState is refused (count vs bytes)",
                 !NetProtocol.TryDecodeHudCount(Truncate(hud), out _));
             check("a truncated handshake is refused",
@@ -856,10 +865,12 @@ namespace EvilAliensWeb.Compat.Net
                 && okKind == NetFxKind.EnemyHitFlash);
             // A frame of the right length whose TYPE byte is wrong must also be refused -- the
             // lanes are shared, so every decoder is handed frames of other types routinely.
-            byte[] mistyped = ship != null ? (byte[])ship.Clone() : new byte[31];
+            // MsgFriendState is the RETIRED pre-v23 id, which makes it the perfect wrong type:
+            // an old build's extra-ship frame must decode as nothing at all.
+            byte[] mistyped = ship != null ? (byte[])ship.Clone() : new byte[NetProtocol.ShipStateBytes];
             mistyped[0] = NetProtocol.MsgFriendState;
-            check("a correctly-sized frame of the wrong type is refused",
-                !NetProtocol.TryDecodeShipState(mistyped, out _, out _, out _, out _));
+            check("a correctly-sized frame of the wrong (retired) type is refused",
+                !NetProtocol.TryDecodeShipState(mistyped, out _, out _, out _, out _, out _, out _));
         }
 
         // ---- 4. stream-lane reorder + dedup ----------------------------------------------
@@ -882,7 +893,7 @@ namespace EvilAliensWeb.Compat.Net
             int refused = 0;
             wire[1].OnData += (payload, reliable, from) =>
             {
-                if (NetProtocol.TryDecodeShipState(payload, out _, out ShipSample s, out _, out _))
+                if (NetProtocol.TryDecodeShipState(payload, out _, out _, out _, out ShipSample s, out _, out _))
                 {
                     if (buffer.Add(s)) { accepted++; } else { refused++; }
                 }
@@ -896,7 +907,7 @@ namespace EvilAliensWeb.Compat.Net
             for (int i = 0; i < order.Length; i++)
             {
                 wire[0].SendStream(NetProtocol.EncodeShipState(
-                    (ushort)i, order[i], new Vector2(order[i], 0f), Vector2.Zero, 0f,
+                    0, primary: true, (ushort)i, order[i], new Vector2(order[i], 0f), Vector2.Zero, 0f,
                     alive: true, shotCount: 0, shotsPerSec: 8, bulletLife: 450f));
             }
             wire.Pump();
@@ -913,9 +924,9 @@ namespace EvilAliensWeb.Compat.Net
             uint[] sorted = new uint[] { 0u, 33u, 66u, 99u, 132u, 165u };
             for (int i = 0; i < sorted.Length; i++)
             {
-                byte[] frame = NetProtocol.EncodeShipState((ushort)i, sorted[i], Vector2.Zero,
+                byte[] frame = NetProtocol.EncodeShipState(0, primary: true, (ushort)i, sorted[i], Vector2.Zero,
                     Vector2.Zero, 0f, alive: true, shotCount: 0, shotsPerSec: 8, bulletLife: 450f);
-                if (NetProtocol.TryDecodeShipState(frame, out _, out ShipSample s, out _, out _)
+                if (NetProtocol.TryDecodeShipState(frame, out _, out _, out _, out ShipSample s, out _, out _)
                     && monotone.Add(s))
                 {
                     monoAccepted++;

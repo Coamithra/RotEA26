@@ -634,7 +634,7 @@ namespace EvilAliensWeb.Compat
 				if (i < EvilAliens.ScoreVisualiser.SlotCount)
 				{
 					int[] levels = new int[EvilAliensWeb.Compat.Net.NetProtocol.HudLevelCount];
-					sv.NetReadHudState(i, levels, out _, out EvilAliens.Powerup.PowerupType? activeType, out float progress);
+					sv.NetReadHudState(i, levels, out _, out _, out EvilAliens.Powerup.PowerupType? activeType, out float progress);
 					sb.Append(" own=").Append(EvilAliensWeb.Compat.Net.NetSession.OwnsSlot(i) ? 1 : 0)
 						.Append(" pu=").Append(!activeType.HasValue
 							? "none"

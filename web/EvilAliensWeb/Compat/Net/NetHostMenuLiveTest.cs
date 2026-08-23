@@ -11,9 +11,10 @@ namespace EvilAliensWeb.Compat.Net
     // HostMenuLive`). MENU-runnable and leave-no-trace -- the eaNetScenarios shape.
     //
     // WHAT IT COVERS THAT NetHostMenuTest CANNOT, which is the whole reason it exists.
-    // That suite sweeps Entries() over 32 SYNTHETIC states and is deliberately Game-free, so it
-    // can say nothing about `CurrentState()` -- five static reads that could be wired to the
-    // wrong statics (or to a stale copy) and still leave every one of its 47 assertions green.
+    // That suite sweeps Entries() over SYNTHETIC states (the 32 boolean combinations x the seat
+    // masks since card 0257f8ba) and is deliberately Game-free, so it can say nothing about
+    // `CurrentState()` -- six static reads that could be wired to the wrong statics (or to a
+    // stale copy) and still leave every one of its sweep assertions green.
     // The consequence of that failing is the card's whole feature silently not appearing: a
     // host with a griefer in their game pauses and finds no Online Play row, which looks exactly
     // like a host who never had one. So this pairs a REAL host session with a scripted peer over
@@ -118,27 +119,35 @@ namespace EvilAliensWeb.Compat.Net
                     NetHostMenu.State live = NetHostMenu.CurrentState();
                     Check("CurrentState reads the LIVE session (" + Describe(live) + ")",
                         live.SessionActive && live.IsHost && live.PeerUp);
-                    List<NetHostMenu.Entry> rows = NetHostMenu.Entries(live);
+                    // The scripted client's hello was granted the classic slot 1, and the seat
+                    // mask must read it back off the LIVE channels (card 0257f8ba) -- that read
+                    // (UpPeerPrimarySlotsMask) is exactly what the synthetic sweep cannot cover.
+                    Check("the live seat mask names the granted slot (peerSlots=" + live.PeerSlotsMask + ")",
+                        live.PeerSlotsMask == 0b0010);
+                    List<NetHostMenu.Row> rows = NetHostMenu.Entries(live);
                     Check("the pause menu would carry the Online Play row", NetHostMenu.Available(live));
-                    Check("rows are Back,Kick,KickAndBlock (got " + Render(rows) + ")",
-                        rows.Count == 3 && rows[0] == NetHostMenu.Entry.Back
-                        && rows[1] == NetHostMenu.Entry.Kick && rows[2] == NetHostMenu.Entry.KickAndBlock);
-                    // A listing cannot coexist with a session, so the room toggle must be absent --
-                    // NetHostMenuTest asserts the same disjointness over synthetic states; this is
-                    // the one place the two halves are read off the SAME live world.
-                    Check("... and NOT the room toggle, because a session is never listed",
-                        !rows.Contains(NetHostMenu.Entry.RoomToggle) && !NetListing.CouldList);
-                    Check("the caption names the joined player, singular (2-peer protocol)",
-                        NetHostMenu.Caption(live) == "Another player has joined your game");
+                    Check("rows are Back,Kick@1,KickAndBlock@1 (got " + Render(rows) + ")",
+                        rows.Count == 3 && rows[0].Kind == NetHostMenu.Entry.Back
+                        && rows[1].Kind == NetHostMenu.Entry.Kick && rows[1].Slot == 1
+                        && rows[2].Kind == NetHostMenu.Entry.KickAndBlock && rows[2].Slot == 1);
+                    // No room toggle here: this session rides an in-process wire, and a listing
+                    // can only ever feed strangers into the REAL WebRTC transport
+                    // (NetSession.HostOpenToJoinInProgress) -- so CouldList must read false even
+                    // though a host session as such is listable since card 0257f8ba.
+                    Check("... and NOT the room toggle (in-process transport is never listable)",
+                        !HasRow(rows, NetHostMenu.Entry.RoomToggle) && !NetListing.CouldList);
+                    Check("the caption names the joined player, singular",
+                        NetHostMenu.Caption(live).StartsWith("Another player has joined your game", StringComparison.Ordinal));
 
                     // ---- 4. the kick the menu row makes ---------------------------------------
                     sb.Append(" 4. the kick row's action reaches the peer\n");
                     peerReliable.Clear();
-                    // Verbatim the call GameScene.NetHostMenuKick makes. Going through KickPeer
-                    // rather than a paraphrase is the point: a handler wired to the wrong overload
-                    // (block instead of no-block) is a real mistake, and eaKickTest owns the rules
-                    // on the other side of this call.
-                    NetSession.KickPeer(block: false);
+                    // Verbatim the call GameScene.NetHostMenuKick makes for a seat-named row
+                    // (card 0257f8ba). Going through KickPeerAt rather than a paraphrase is the
+                    // point: a handler wired to the wrong overload (block instead of no-block,
+                    // or the wrong seat) is a real mistake, and eaKickTest owns the rules on the
+                    // other side of this call.
+                    NetSession.KickPeerAt(1, block: false);
                     wire.Pump();
                     Check("the peer is gone (PeerUp=" + NetSession.PeerUp + ")", !NetSession.PeerUp);
                     Check("an EvKick frame really reached the peer (" + peerReliable.Count
@@ -206,9 +215,21 @@ namespace EvilAliensWeb.Compat.Net
             return false;
         }
 
-        private static string Render(List<NetHostMenu.Entry> e)
+        private static string Render(List<NetHostMenu.Row> e)
         {
             return e.Count == 0 ? "(none)" : string.Join(",", e);
+        }
+
+        private static bool HasRow(List<NetHostMenu.Row> rows, NetHostMenu.Entry kind)
+        {
+            foreach (NetHostMenu.Row r in rows)
+            {
+                if (r.Kind == kind)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private static string Describe(NetHostMenu.State s)

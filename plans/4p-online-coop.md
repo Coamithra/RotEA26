@@ -3,7 +3,9 @@
 Card `2e0f908b`: *"Can the networking be extended to allow up to 4 players to play together
 online?"*
 
-> **STATUS 2026-08-21 — the epic is ACTIVE (11.7, 11.8 and 11.9 SHIPPED; next up Stage 11.10, card `0257f8ba`), and this doc was written 2026-07-24 against a codebase that has since moved. The architecture below STANDS (star topology, `PeerChannel`, unified ship paths, negotiated signaling capacity, the listed-session match-end shape); the following specifics are corrected here rather than rewritten in place:**
+> **STATUS 2026-08-23 — the epic is ACTIVE (11.7–11.10 SHIPPED; next up Stage 11.11, card `6fb406bc`), and this doc was written 2026-07-24 against a codebase that has since moved. The architecture below STANDS (star topology, `PeerChannel`, unified ship paths, negotiated signaling capacity, the listed-session match-end shape); the following specifics are corrected here rather than rewritten in place:**
+>
+> - **Stage 11.10 SHIPPED (card `0257f8ba`, protocol v25):** §G as designed — four-machine rooms in the menu lobby AND the listing (webrtc.js `LIST_ROOM_MAX`; a >2 host keeps its signaling ws for the room's life), the host lobby panel (room code + live roster + Start Game; launch no longer implicit on pairing), the join-side roster (`EvLobbyRoster`), a peerless lobby that survives, listing that composes with a host session (the `!NetSession.Active` term is gone; a mid-level menu-lobby game ADOPTS its own room as the listing), JIP into slots 3/4 (`PeerConnected` launches late arrivals on any menu/listed session with a live scene), and the per-peer kick rows (`KickPeerAt`). Details: `Compat/Net/CLAUDE.md` → "LOBBY & CAPACITY".
 >
 > - **Stage 11.9 SHIPPED (card `87242257`, protocol v24):** the session holds a peer SET (host hub, cap 3), §E's match-end decision was adopted AS PROPOSED and uniformly (host leaves → match ends; a client leaving frees its seats everywhere via the new `EvPeerLeft` beat and play continues, N=2 included), the host relays client ship/HUD state as non-primary slot-keyed frames and re-emits symmetric events under per-recipient event seqs, catch-up is ADDRESSED, pause is a per-recipient aggregate set. Details: `Compat/Net/CLAUDE.md` → "N-PEER SESSION". Verified by `eaNetNPeer()` (in `net_selftests`) + `tools/sim/net_npeer_smoke.py` (three eahl processes, mirror 3-seat rosters, survivable mid-level departure).
 >
@@ -219,7 +221,7 @@ do not reuse `12.x`).
 | **11.7** (`583a3ef8`) | Transport addressing + N-peer signaling room, capacity negotiated (webrtc.js, `INetTransport`, signal server, `LocalSocketNet` multi-client, 3-tab loopback rig). Behaviour-neutral for 2-peer; protocol version unchanged |
 | ~~**11.8**~~ (`b2828be8`) | SHIPPED (protocol v22 → v23): `PeerChannel` + one slot-keyed ship path, behaviour-neutral at 2 peers; `net_jip_sync.py` stayed green |
 | ~~**11.9**~~ (`87242257`) | SHIPPED (protocol v23 → v24): the N-peer session -- see the status banner |
-| **11.10** (`0257f8ba`) | Lobby + game-browser UX for 3–4 (host roster, start-when-ready, capacity-aware listing — the `!NetSession.Active` term goes, JIP into slots 3/4, per-peer kick target) |
+| ~~**11.10**~~ (`0257f8ba`) | SHIPPED (protocol v24 → v25): lobby + game-browser UX for 3–4 — see the status banner |
 | **11.11** (`6fb406bc`) | Hardening: relayed-channel interp delay, bandwidth soak at N=4, multi-process eahl rigs, `bufferedAmount` back-pressure. TURN stays deferred (owner decision — see banner) |
 
 ## Out of scope

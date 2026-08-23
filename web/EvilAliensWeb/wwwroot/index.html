@@ -868,6 +868,13 @@
             try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugMenuCensus')); }
             catch (e) { console.warn('[debug] eaMenuCensus failed (game not booted yet?): ' + e.message); }
         };
+        // eaNetLobbyShow(mask) (card 0257f8ba): put the HOST lobby panel up with a debug roster
+        // mask, offline — its real trigger is the first WebRTC peer pairing, so this is the only
+        // way to reach it (and its Start gate / cancel path) with no server and no second tab.
+        window.eaNetLobbyShow = (mask) => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetLobbyShow', Number.isInteger(mask) ? mask : 3)); }
+            catch (e) { console.warn('[debug] eaNetLobbyShow failed (game not booted yet?): ' + e.message); }
+        };
 
         // Debug: the INetEntity seam (card 25ad0659 step 2c-ii) — that every explicit forward
         // on AlienDrawableGameComponent fronts the member it claims to (driven to DISTINCT

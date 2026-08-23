@@ -142,6 +142,11 @@ internal class MenuScene : Scene
 
 	private NetStatusMenu netStatusMenu;
 
+	// Card 0257f8ba: the HOST's lobby panel -- room code + live roster + "Start Game"/"Cancel".
+	// Launch used to be implicit on the first pairing; with four-machine rooms the host waits
+	// here while friends arrive and starts when ready.
+	private NetLobbyMenu netLobbyMenu;
+
 	private MenuSub1 netPickMenu;
 
 	// Public game browser (card 2001fbd8): the "Join Online Game" carousel. browsingGames =
@@ -169,6 +174,8 @@ internal class MenuScene : Scene
 	}
 
 	private bool netStatusShown;
+
+	private bool netLobbyShown;
 
 	private bool netNoticeUp;
 
@@ -431,6 +438,15 @@ internal class MenuScene : Scene
 		netStatusMenu.AddEntry("Cancel");
 		netStatusMenu.AddEntryEvent(netStatus_CancelSelected);
 		netStatusMenu.OnExit += netStatus_CancelSelected;
+		// Card 0257f8ba: the host's lobby panel. Start Game leads -- it is the panel's whole
+		// purpose and merely advances to the level pick, so a reflexive Enter costs nothing
+		// irreversible; Esc/Back takes the Cancel path like every other lobby screen.
+		netLobbyMenu = new NetLobbyMenu(base.Game, "");
+		netLobbyMenu.AddEntry("Start Game");
+		netLobbyMenu.AddEntryEvent(netLobby_StartSelected);
+		netLobbyMenu.AddEntry("Cancel");
+		netLobbyMenu.AddEntryEvent(netLobby_CancelSelected);
+		netLobbyMenu.OnExit += netLobby_CancelSelected;
 		netPickMenu = new MenuSub1(base.Game);
 		netPickMenu.AddEntry("Missions");
 		netPickMenu.AddEntryEvent(netPick_MissionsSelected);
@@ -594,6 +610,14 @@ internal class MenuScene : Scene
 			if (!EvilAliensWeb.Compat.Net.NetSession.IsHost || !EvilAliensWeb.Compat.Net.NetSession.PeerUp)
 			{
 				sender.Remove();
+				// Card 0257f8ba: a lobby OUTLIVES its last guest now, so a host whose peers all
+				// left mid-pick still has a live session and an open room -- back to the roster
+				// panel ("waiting for players"), not to the main menu over a zombie session.
+				if (EvilAliensWeb.Compat.Net.NetSession.IsHost)
+				{
+					ShowNetLobby();
+					return;
+				}
 				// The session died between the level pick and the difficulty pick, so the launch
 				// is aborted and NetUpdate's notice branch redraws the flow on a later tick --
 				// but ONLY if a notice is actually pending. Without one, removing this menu leaves
@@ -1119,8 +1143,88 @@ internal class MenuScene : Scene
 
 	private void netPick_CancelSelected(MenuSub1 sender)
 	{
-		EvilAliensWeb.Compat.Net.NetLobby.Cancel();
 		netPickMenu.Remove();
+		// Card 0257f8ba: with a live session the level pick backs out to the LOBBY PANEL --
+		// cancelling a pick must not tear down a room with connected friends in it. With no
+		// session behind the pick (it died underneath), the old path: end the flow, back to
+		// Host/Join.
+		if (EvilAliensWeb.Compat.Net.NetSession.IsHost)
+		{
+			ShowNetLobby();
+			return;
+		}
+		EvilAliensWeb.Compat.Net.NetLobby.Cancel();
+		netMenu.Show();
+	}
+
+	// ---- the host lobby panel (card 0257f8ba) ----------------------------------------
+
+	private void ShowNetLobby()
+	{
+		HideNetStatus();
+		netLobbyMenu.SetText(HostLobbyPanelText());
+		if (!netLobbyShown)
+		{
+			netLobbyMenu.Show();
+			netLobbyShown = true;
+		}
+	}
+
+	private void HideNetLobby()
+	{
+		if (netLobbyShown)
+		{
+			netLobbyMenu.RemoveInstantly();
+			netLobbyShown = false;
+		}
+		netDebugLobbyMask = null;
+	}
+
+	// Test seam (card 0257f8ba): put the host lobby panel up with a debug roster mask, offline.
+	// Reaching it for real needs a paired WebRTC peer -- the one precondition a headless run
+	// cannot produce -- and everything around it (the census, the Start gate, Esc's cancel path,
+	// the per-tick retext) is then the real code. The NetDebugForceNetMode idiom; returns the
+	// panel's rendered text so the probe can assert the roster end to end.
+	internal string NetDebugShowLobby(int mask)
+	{
+		netDebugLobbyMask = mask;
+		netMode = true;
+		mainMenu.RemoveInstantly();
+		ShowNetLobby();
+		return HostLobbyPanelText();
+	}
+
+	// Test seam only (NetDebugShowLobby): a fake roster mask so the panel can be driven with no
+	// peer and no server. Null in every real flow; cleared when the panel goes down.
+	private int? netDebugLobbyMask;
+
+	private string HostLobbyPanelText()
+	{
+		// The DEBUG code only ever shows under the test seam -- the real panel is unreachable
+		// before the lobby has a room code (the Hosting phase precedes it).
+		string code = EvilAliensWeb.Compat.Net.NetLobby.RoomCode;
+		if (code == "" && netDebugLobbyMask.HasValue)
+		{
+			code = "DEBUG";
+		}
+		return EvilAliensWeb.Compat.Net.NetLobby.HostLobbyText(
+			code, netDebugLobbyMask ?? EvilAliensWeb.Compat.Net.NetSession.LobbyRosterMask);
+	}
+
+	private void netLobby_StartSelected(MenuSub1 sender)
+	{
+		if (!EvilAliensWeb.Compat.Net.NetSession.IsHost || !EvilAliensWeb.Compat.Net.NetSession.PeerUp)
+		{
+			return; // nobody aboard (the last guest just left) -- nothing to start yet
+		}
+		HideNetLobby();
+		netPickMenu.Show();
+	}
+
+	private void netLobby_CancelSelected(MenuSub1 sender)
+	{
+		HideNetLobby();
+		EvilAliensWeb.Compat.Net.NetLobby.Cancel();
 		netMenu.Show();
 	}
 
@@ -1148,6 +1252,7 @@ internal class MenuScene : Scene
 	private void CloseNetFlowMenus()
 	{
 		HideNetStatus();
+		HideNetLobby();
 		netMenu.RemoveInstantly();
 		netPickMenu.RemoveInstantly();
 		onlineGamesMenu.RemoveInstantly();
@@ -1188,6 +1293,7 @@ internal class MenuScene : Scene
 	private void ResetNetFlowState()
 	{
 		HideNetStatus();
+		HideNetLobby();
 		netMode = false;
 		netNoticeUp = false;
 		browsingGames = false;
@@ -1225,7 +1331,9 @@ internal class MenuScene : Scene
 		}
 		else
 		{
-			ShowNetStatus("Connected!\nThe host is choosing a mission...");
+			ShowNetStatus(EvilAliensWeb.Compat.Net.NetLobby.ClientLobbyText(
+				EvilAliensWeb.Compat.Net.NetSession.LobbyRosterMask,
+				EvilAliensWeb.Compat.Net.NetSession.LocalPrimarySlot));
 		}
 	}
 
@@ -1301,6 +1409,13 @@ internal class MenuScene : Scene
 			NetLaunchMirror(level, difficulty);
 			return;
 		}
+		if (netLobbyShown)
+		{
+			// Card 0257f8ba: the host lobby panel is up -- keep its roster text live (peers
+			// join and leave underneath it). Its entries drive everything else.
+			netLobbyMenu.SetText(HostLobbyPanelText());
+			return;
+		}
 		if (!netStatusShown)
 		{
 			return;
@@ -1311,8 +1426,10 @@ internal class MenuScene : Scene
 			netStatusMenu.SetText("Contacting server...");
 			break;
 		case EvilAliensWeb.Compat.Net.NetLobby.LobbyPhase.Hosting:
+			// Card 0257f8ba: the room takes up to three friends now, so the wording is plural
+			// -- the roster panel (with Start) replaces this the moment the first one arrives.
 			netStatusMenu.SetText("Room code:  " + EvilAliensWeb.Compat.Net.NetLobby.RoomCode
-				+ "\nTell your friend!\nWaiting for them to join...");
+				+ "\nTell your friends!\nWaiting for players to join...");
 			break;
 		case EvilAliensWeb.Compat.Net.NetLobby.LobbyPhase.Prompting:
 			netStatusMenu.SetText("Enter the room code");
@@ -1331,12 +1448,18 @@ internal class MenuScene : Scene
 			}
 			else if (EvilAliensWeb.Compat.Net.NetLobby.IsHosting)
 			{
-				HideNetStatus();
-				netPickMenu.Show();
+				// Card 0257f8ba: the first friend is in -- to the LOBBY PANEL (roster +
+				// Start Game), not straight to the level pick. Launch used to be implicit
+				// on this very edge; now the host starts when everyone is aboard.
+				ShowNetLobby();
 			}
 			else
 			{
-				netStatusMenu.SetText("Connected!\nThe host is choosing a mission...");
+				// The join side's waiting panel shows who else is in (the host's
+				// EvLobbyRoster beat; -1 until the first one lands).
+				netStatusMenu.SetText(EvilAliensWeb.Compat.Net.NetLobby.ClientLobbyText(
+					EvilAliensWeb.Compat.Net.NetSession.LobbyRosterMask,
+					EvilAliensWeb.Compat.Net.NetSession.LocalPrimarySlot));
 			}
 			break;
 		case EvilAliensWeb.Compat.Net.NetLobby.LobbyPhase.Idle:

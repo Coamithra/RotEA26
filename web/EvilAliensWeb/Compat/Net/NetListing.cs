@@ -16,10 +16,18 @@ namespace EvilAliensWeb.Compat.Net
     // they can never disagree. Listable == ANY empty player slot (oracle.Players <
     // Oracle.MaxPlayers -- card 4d904410 relaxed this from "exactly one player" once couch
     // players could coexist with an online peer) + the setting on + no cheats/debug flags + a
-    // net-eligible level + no session already up.
+    // net-eligible level. The old "+ no session already up" term is GONE (card 0257f8ba):
+    // rooms hold up to four machines now, so a HOST session with a free seat keeps advertising
+    // -- a 3rd/4th stranger joins the running match through the same room, and a menu-lobby
+    // game mid-level lists itself on the very room its friends joined by (the session's own
+    // signaling socket is ADOPTED -- see Tick). NetSession.HostOpenToJoinInProgress bounds
+    // which sessions qualify; a CLIENT, or any session off the real WebRTC transport, never
+    // lists.
     //
-    // On pairing (a browser joins our code -> eaRtc drives the host handshake -> the "connected"
-    // phase), NetSession.StartListedSession attaches a real host session to the running level.
+    // On the FIRST pairing (a browser joins our code -> eaRtc drives the host handshake -> the
+    // "connected" phase), NetSession.StartListedSession attaches a real host session to the
+    // running level; later pairings flow straight into that session's transport and need
+    // nothing from this file.
     //
     // Ticked once per game tick from Game1.UpdateInner (right after NetSession.Update); a plain
     // menu/attract boot has no GameScene up, so it is a single early return there.
@@ -53,6 +61,11 @@ namespace EvilAliensWeb.Compat.Net
         private static int curLevel = -1, curDiff = -1, curPlayers = -1;
         private static long retryAfter;      // backoff so a down server isn't hammered each tick
         private const long RetryBackoffMs = 5000;
+        // Card 0257f8ba: a listing can now ride a live session's own signaling socket, and a
+        // session's teardown closes that socket WITH it -- silently, because a deliberate
+        // eaRtc.close() suppresses the phase callbacks. This edge detector is what resets the
+        // listing state when that happens; a fresh room is opened on the next eligible tick.
+        private static bool sessionWasActive;
 
         private static long NowMs => Environment.TickCount64;
 
@@ -87,6 +100,16 @@ namespace EvilAliensWeb.Compat.Net
             }
             DrainPhases();
 
+            // A session teardown takes the signaling socket (and so any listing riding it) down
+            // with the transport, and the deliberate close fires no phase -- detect the edge
+            // and start over (card 0257f8ba). Backoff so the re-open cannot race the teardown.
+            if (sessionWasActive && !NetSession.Active && open)
+            {
+                ResetListing();
+                retryAfter = NowMs + RetryBackoffMs;
+            }
+            sessionWasActive = NetSession.Active;
+
             GameScene scene = GameScene.NetActiveScene;
             CouldList = ComputeEligibleIgnoringSetting(scene);
             Eligible = CouldList && Settings.GetInstance().AllowOnlineJoins;
@@ -103,10 +126,24 @@ namespace EvilAliensWeb.Compat.Net
                         return; // still backing off from a failed attempt
                     }
                     open = true;
-                    waitingForCode = true;
-                    Listed = false;
-                    RoomCode = "";
                     curLevel = lvl; curDiff = diff; curPlayers = players;
+                    if (NetSession.Active)
+                    {
+                        // Card 0257f8ba: the session already owns a live signaling room -- the
+                        // menu lobby's, or a listed room that kept its socket -- so ADOPT it
+                        // rather than opening a second one (eaRtc.list starts advertising and
+                        // beating on the socket it already has). No 'code' phase will ever
+                        // fire on this path; the code is the room the session opened on.
+                        waitingForCode = false;
+                        RoomCode = NetSession.SessionRoomCode;
+                        Listed = true;
+                    }
+                    else
+                    {
+                        waitingForCode = true;
+                        Listed = false;
+                        RoomCode = "";
+                    }
                     WebRtcInterop.List(DebugFlags.NetSignal, lvl, diff, players, NetSession.ProtocolVersion);
                 }
                 else if (!waitingForCode && !Listed && RoomCode != "")
@@ -124,17 +161,22 @@ namespace EvilAliensWeb.Compat.Net
             }
             else if (open)
             {
-                if (scene == null || NetSession.Active)
+                if (scene == null && !NetSession.Active)
                 {
-                    // Level exited, or a session took over: drop the room entirely.
+                    // Level exited with nothing else keeping the room: drop it entirely. (Card
+                    // 0257f8ba: a SESSION being up is no longer this branch -- its room stays,
+                    // whether the ineligibility is a full roster, the setting, or the lobby
+                    // between levels, so a freed seat or the next mission re-lists the same
+                    // code. The session's own teardown is what ends that room, caught by the
+                    // Active edge above.)
                     WebRtcInterop.EndListing();
                     ResetListing();
                 }
                 else if (Listed)
                 {
-                    // In-level but no longer eligible (the roster filled up, the option was
-                    // turned off, a cheat was enabled): hide it but keep the code + beat so
-                    // re-eligibility re-lists the same room.
+                    // No longer eligible (the roster filled up, the option was turned off, a
+                    // cheat was enabled, the lobby is between levels): hide it but keep the
+                    // code + beat so re-eligibility re-lists the same room.
                     WebRtcInterop.Unlist();
                     Listed = false;
                 }
@@ -179,9 +221,14 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return false;                              // only while a level is up
             }
-            if (NetSession.Active)
+            if (NetSession.Active && !NetSession.HostOpenToJoinInProgress)
             {
-                return false;                              // already in a session (JIP done / lobby / URL)
+                // Card 0257f8ba: a HOST session on the real WebRTC transport stays listable --
+                // its room takes late joiners into the running match. Everything else that is
+                // Active (a client, a `?net=` dev shape, a scenario transport) still refuses:
+                // a stranger can only ever ARRIVE through eaRtc, so advertising a session that
+                // does not read that transport would strand them against a silent wall.
+                return false;
             }
             if (!IsNetEligibleLevel(scene.Level))
             {
@@ -228,12 +275,15 @@ namespace EvilAliensWeb.Compat.Net
                     Listed = true; // JS advertises (sends list) the moment it has the code
                     break;
                 case "connected":
-                    // A stranger paired with our listed game. The signaling WS has closed
-                    // (channels up); start the host session attached to the running level.
+                    // A stranger paired with our listed game: start the host session attached
+                    // to the running level. Card 0257f8ba: the listing STAYS -- the room holds
+                    // four machines and its socket stays open, so later strangers keep
+                    // arriving through the same code (their frames flow straight into the
+                    // session's transport; this handler has nothing to do for them). Tick's
+                    // players count drives the metadata from here, and the roster filling up
+                    // is what unlists it.
                     if (!NetSession.Active && game != null)
                     {
-                        open = false;
-                        Listed = false;
                         waitingForCode = false;
                         NetSession.StartListedSession(game, new WebRtcTransport(attachOnly: true), RoomCode);
                     }

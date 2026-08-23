@@ -946,6 +946,23 @@ namespace EvilAliensWeb.Compat
 			return "[menunetmode] netMode=true on the live MenuScene";
 		}
 
+		// Put the HOST LOBBY PANEL up with a debug roster mask (card 0257f8ba), offline. The
+		// panel's real trigger is the first WebRTC peer pairing -- the one precondition a
+		// headless run cannot produce -- so this seam supplies it; the census, the Start gate
+		// (no session, so Start must refuse) and Esc's cancel path are then the real code.
+		// `mask` bit i = seat i taken; default 3 = host + one guest. Returns the panel's text,
+		// newlines as '|' (the eaNetNotice convention), so a probe can grep the roster.
+		[JSInvokable("debugNetLobbyShow")]
+		public static string NetLobbyShow(int mask = 3)
+		{
+			EvilAliens.MenuScene scene = LiveMenuScene();
+			if (scene == null)
+			{
+				return "[netlobby] no live MenuScene -- boot ?menu first";
+			}
+			return "[netlobby] " + scene.NetDebugShowLobby(mask).Replace("\n", "|");
+		}
+
 		// Read the live MenuScene's net-flow UI state (card c337222a). None of those four fields
 		// is visible in a frame, so this is the only observable for "did a level launch leave the
 		// menu believing it is still inside the Online Co-op flow".

@@ -20,9 +20,13 @@
 // N-PEER (card 583a3ef8): the connection state is a MAP of peer entries, not singletons.
 // The host holds one {pc, chS, chR} triple per joiner (server joiner ids 1..3, monotone);
 // a joiner holds exactly one entry -- the host. The senderId C# sees ("1".."3" host-side,
-// "h" joiner-side) is also the address eaRtc.sendTo takes. Every shipped flow runs at
-// roomMax 2 and is behaviourally identical; only eaRtc.host(url, max>2) -- console-driven
-// until the session layer speaks N-peer -- reaches the rest.
+// "h" joiner-side) is also the address eaRtc.sendTo takes.
+//
+// Since card 0257f8ba (Stage 11.10) rooms above 2 are PRODUCTION, not console-rig territory:
+// the menu lobby hosts at 4 and listed/JIP rooms open at 4 too (LIST_ROOM_MAX). A >2 host
+// KEEPS its signaling ws (and beat) for the room's whole life -- even while momentarily full
+// -- so late joiners can still arrive and a freed seat can re-list under the same code; only
+// the max-2 flows keep the old close-on-full behaviour byte-identical.
 window.eaRtc = (() => {
     const STUN = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
     const CONNECT_TIMEOUT_MS = 20000;
@@ -43,6 +47,8 @@ window.eaRtc = (() => {
     let fallbackPeerId = '';
     const pingSentAt = new Map(); // room code -> performance.now() of its last ping
     const BEAT_MS = 30000, BROWSE_REFRESH_MS = 4000;
+    // Card 0257f8ba: listed / JIP rooms hold up to 4 machines (mirrors Oracle.MaxPlayers).
+    const LIST_ROOM_MAX = 4;
 
     // Room thumbnails (card e7404647). The SERVER decides when a shot is taken --
     // it pulls, we answer, and a client that is never pulled sends nothing ever.
@@ -150,11 +156,10 @@ window.eaRtc = (() => {
     // pre-connect {t:gone,id} seat-free from the server). Escalation keeps every shipped flow
     // exactly as it was: the joiner has only the host, a roomMax==2 host has only its joiner,
     // and a host with nothing left and no open ws to admit more is over -- those take the
-    // terminal fail/closed path unchanged. A bigger host otherwise reports 'peergone' and
-    // plays on. NOTE the hole until the lobby card (0257f8ba): once the room FILLED the ws is
-    // closed and the server room is gone, so a peer lost after that is NOT replaceable -- and
-    // NetSession still collapses every bye to "the peer is gone" (per-peer session behaviour
-    // is card 87242257), so today 'peergone' only keeps the JS layer alive.
+    // terminal fail/closed path unchanged. A bigger host otherwise reports 'peergone' (the
+    // per-peer session behaviour is card 87242257's) and plays on -- and since card 0257f8ba
+    // its ws stays open for the room's whole life, so the departed peer's seat really is
+    // replaceable: a fresh joiner arrives through the same still-registered room.
     const peerGone = (p, kind) => {
         if (!peers.has(p.key)) return;
         killPeer(p);
@@ -183,10 +188,13 @@ window.eaRtc = (() => {
             if (p.chS && p.chS.readyState === 'open' && p.chR && p.chR.readyState === 'open') {
                 p.connected = true;
                 if (p.connectTimer) { clearTimeout(p.connectTimer); p.connectTimer = null; }
-                // Room full? For roomMax 2 (every shipped flow) the first peer IS full, so this
-                // is exactly the old "first connect -> stop beating, drop the listing, close the
-                // ws". A bigger host keeps the ws (and its beat) so later joiners still arrive.
-                if (!isHost || connectedCount() >= roomMax - 1) signalingDone();
+                // For roomMax 2 the first peer IS full, so this is exactly the old "first
+                // connect -> stop beating, drop the listing, close the ws". A bigger host
+                // NEVER closes it (card 0257f8ba) -- not even while momentarily full: seats
+                // free again when a peer leaves mid-match, and a closed ws would mean the
+                // server room (and its code) died with the third arrival. The joiner side is
+                // unchanged: its ws has done its whole job once P2P is up.
+                if (!isHost || (roomMax <= 2 && connectedCount() >= roomMax - 1)) signalingDone();
                 phase('connected', isHost && roomMax > 2 ? peerIdStr(p.key) : '');
             }
         };
@@ -437,16 +445,27 @@ window.eaRtc = (() => {
         list(signalUrl, level, difficulty, players, proto) {
             listMeta = { level, difficulty, players, proto: String(proto) };
             if (ws || peers.size) {
-                // Signaling socket already up: this is the metadata-update path (or a
-                // no-op if a non-listing session owns the socket).
+                // Signaling socket already up. Since card 0257f8ba a HOST with a live room can
+                // ADOPT it as a listing -- a menu-lobby game mid-level with a free seat starts
+                // advertising (and beating: the lobby flow never armed one, and the room's TTL
+                // counts from the last beat) on the socket it already has, so the SAME code the
+                // friends joined by is what strangers find in the browser. Anything else --
+                // a joiner, a session whose ws already closed -- stays the metadata-update
+                // path it always was.
+                if (!listing && isHost && ws && ws.readyState === WebSocket.OPEN && !finished) {
+                    listing = true;
+                    sendList();
+                    if (!beatTimer) beatTimer = setInterval(() => sendSignal({ t: 'beat' }), BEAT_MS);
+                    return;
+                }
                 if (listing) sendList();
                 return;
             }
             listing = true;
             isHost = true;
-            roomMax = 2;   // listed / JIP rooms stay 2-machine until card 0257f8ba (11.10)
+            roomMax = LIST_ROOM_MAX;   // card 0257f8ba: a listed room takes up to 3 strangers
             phase('contacting');
-            openSignaling(signalUrl, () => sendSignal({ t: 'host' }));
+            openSignaling(signalUrl, () => sendSignal({ t: 'host', max: roomMax }));
         },
         // Update metadata / re-advertise after an unlist, without reopening the socket.
         relist(level, difficulty, players) {

@@ -203,6 +203,20 @@ namespace EvilAliensWeb.Compat.Net
             Check("joiner A saw only its own welcome (welcomes=" + Welcomes(atA) + ")", Welcomes(atA) == 1);
             Check("joiner B saw only its own welcome (welcomes=" + Welcomes(atB) + ")", Welcomes(atB) == 1);
 
+            sb.Append(" 1a. the lobby roster beat (EvLobbyRoster, card 0257f8ba)\n");
+            // Both waiting screens must know who is in. The final mask everyone holds is the
+            // host's seat + both grants; A's addressed copy at ITS PeerConnected predates B's
+            // seat, so it is the LAST mask that is asserted -- the edge-triggered broadcast is
+            // what brings A up to date, and a beat that never fired leaves the list empty.
+            byte fullMask = (byte)(NetProtocol.SlotBit(0) | NetProtocol.SlotBit(slotA) | NetProtocol.SlotBit(slotB));
+            List<byte[]> rosterAtA = atA.Events(NetProtocol.EvLobbyRoster);
+            List<byte[]> rosterAtB = atB.Events(NetProtocol.EvLobbyRoster);
+            Check("joiner A was told the full lobby roster (beats=" + rosterAtA.Count + " last mask="
+                + (rosterAtA.Count > 0 ? rosterAtA[rosterAtA.Count - 1][4].ToString() : "-") + ")",
+                rosterAtA.Count > 0 && rosterAtA[rosterAtA.Count - 1][4] == fullMask);
+            Check("joiner B was told it too (beats=" + rosterAtB.Count + ")",
+                rosterAtB.Count > 0 && rosterAtB[rosterAtB.Count - 1][4] == fullMask);
+
             sb.Append(" 1b. per-peer rejects -- a straggler must not end the live match\n");
             // A stale-build machine knocking on a live 3-player game: refused PER-PEER on the
             // way in, told why (the addressed MsgReject), and its own SYMMETRIC reject -- which
@@ -318,15 +332,24 @@ namespace EvilAliensWeb.Compat.Net
             Check("B's event seqs are contiguous from 0 (" + EventCount(atB) + " events)", SeqsContiguous(atB));
             Check("...and both endpoints actually received events", EventCount(atA) >= 3 && EventCount(atB) >= 3);
 
-            sb.Append(" 7. the last client leaves at the menus -- session ends with the notice\n");
+            sb.Append(" 7. the last client leaves at the menus -- the LOBBY SURVIVES (card 0257f8ba)\n");
             joinerA.SendReliableTo(ours.Id, NetProtocol.EncodeEmptyEvent(NextSeq(ref seqA), NetProtocol.EvLeave));
             wire.Pump();
             NetSession.Update();
-            Check("the session stopped (no peers left, no level up)", !NetSession.Active);
+            // The pre-0257f8ba policy -- Stop + "match ended" notice -- was the dead end 11.10
+            // removes: a menu-lobby HOST keeps its session (and, in production, its still-open
+            // signaling room) and waits for new players. The Stop survives only for the
+            // non-lobby shapes; this session is asMenuSession, so it must idle peerless.
+            Check("the session SURVIVED with zero peers (the lobby waits for new players)",
+                NetSession.Active && !NetSession.PeerUp);
             string notice = NetSession.TakeMenuNotice();
-            Check("the menus get the leave notice", !string.IsNullOrEmpty(notice));
+            Check("no leave notice reaches the menus (nothing ended)", string.IsNullOrEmpty(notice));
             Check("A's seat was freed with it", !oracle.IsSeated(slotA));
             Check("no reset leaked from the whole exchange", NetSession.Metrics.Resets == resetsBefore);
+            // Wound down DELIBERATELY -- the lobby no longer ends itself, so the suite must, or
+            // the client legs' StartForTest would early-return against this session.
+            NetSession.Stop("netnpeer host legs done");
+            Check("teardown: the host-legs session is stopped", !NetSession.Active);
         }
 
         // ---- the CLIENT side ----------------------------------------------------------------
@@ -368,6 +391,16 @@ namespace EvilAliensWeb.Compat.Net
             wire.Pump();
             NetSession.Update();
             Check("a non-host sender's pause is dropped, not applied", !NetSession.RemotePaused);
+
+            // The lobby roster beat, receive side (card 0257f8ba): stored for the waiting panel,
+            // with "no beat yet" reading -1 as the control -- a mask invented before the first
+            // beat would put a fictitious roster on the join screen.
+            Check("no roster beat yet reads -1", NetSession.LobbyRosterMask == -1);
+            scriptedHost.SendReliable(NetProtocol.EncodeByteEvent(hostSeq++, NetProtocol.EvLobbyRoster, 0b0111));
+            wire.Pump();
+            NetSession.Update();
+            Check("the host's EvLobbyRoster is stored for the panel (mask=" + NetSession.LobbyRosterMask + ")",
+                NetSession.LobbyRosterMask == 0b0111);
 
             // A relayed extras frame for OUR OWN slot is refused; one for another client's slot
             // builds a channel (its puppet needs a level, which the smoke rig owns).

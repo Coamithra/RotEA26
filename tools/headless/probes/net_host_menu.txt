@@ -45,7 +45,7 @@ mark
 
 # The state this probe is about, before touching anything.
 eval HostMenu
-expect \[hostmenu\] session=False host=False peer=False couldList=True allowJoins=True listed=ABCDE available=True rows=RoomToggle,Back
+expect \[hostmenu\] session=False host=False peer=False peerSlots=0 couldList=True allowJoins=True listed=ABCDE available=True rows=RoomToggle,Back
 
 # Pause. MenuCensus, not a screenshot: a menu drawn UNDER another still eats every keypress,
 # which is what card 72143c11 cost, and a picture cannot tell the two apart.

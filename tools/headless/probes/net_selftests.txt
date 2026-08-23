@@ -242,18 +242,19 @@ expect \[nettp\] 25 passed, 0 failed
 # inbound reject + channel-gated delivery), which fails 1b/8b.
 # The mid-level halves (revert-to-single-player, relayed-puppet spawns) need a scene and live in
 # tools/sim/net_npeer_smoke.py, the three-process eahl rig.
-expect \[netnpeer\] ALL PASS -- 52 passed, 0 failed
-# The host pause menu's Online Play decision (card 0d6ffe70), in two halves that fail
-# differently. `hostmenu` is the PURE sweep -- all 32 combinations of the five booleans through
-# the real NetHostMenu.Entries, plus the properties no `if` restates (entry 0 is never a kick,
-# the room and kick shapes never coexist, Available agrees with Entries); it also runs under
-# logic_probe as ProbeHostMenu. `hostmenulive` is what that sweep structurally cannot see:
-# CurrentState() reading the LIVE statics, which could be wired to the wrong ones and leave all
-# 47 of the sweep's assertions green while the row silently never appears for anyone. It pairs a
-# real host session with a scripted peer, then makes the exact KickPeer call the Kick row makes
-# and asserts the EvKick frame reached the peer and the row RETRACTED.
-expect \[hostmenu\] 47 passed, 0 failed
-expect \[hostmenulive\] 18 passed, 0 failed
+expect \[netnpeer\] ALL PASS -- 57 passed, 0 failed
+# The host pause menu's Online Play decision (cards 0d6ffe70 / 0257f8ba), in two halves that
+# fail differently. `hostmenu` is the PURE sweep -- the 32 boolean combinations x the per-peer
+# seat masks through the real NetHostMenu.Entries, plus the properties no `if` restates (entry 0
+# is never a kick, the kick rows cover the mask exactly, Available agrees with Entries); it also
+# runs under logic_probe as ProbeHostMenu. `hostmenulive` is what that sweep structurally cannot
+# see: CurrentState() reading the LIVE statics (the seat mask included), which could be wired to
+# the wrong ones and leave every sweep assertion green while the row silently never appears for
+# anyone. It pairs a real host session with a scripted peer, then makes the exact KickPeerAt
+# call the seat-named Kick row makes and asserts the EvKick frame reached the peer and the row
+# RETRACTED.
+expect \[hostmenu\] 98 passed, 0 failed
+expect \[hostmenulive\] 19 passed, 0 failed
 # The impairment wrapper's per-lane policy (card 40334a8f) -- the RELIABLE lane takes delay only
 # and its release times are clamped monotone, so jitter can never drop or reorder it. That clamp
 # ONLY bites under jitter, which is why this needs its own leg: eaNetWire.test()'s section 2 runs

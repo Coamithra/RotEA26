@@ -9,22 +9,22 @@ namespace EvilAliensWeb.Compat.Net
     // online game, reachable whenever they want it rather than only when a griefer hands it to
     // them.
     //
-    // It is the SECOND door onto machinery that already existed, not new machinery:
-    //   - kick / kick+block is NetSession.KickPeer(bool) (card 0b8a300b), until now reachable
-    //     only from NetKickMenu, i.e. only once the PEER had held a pause for 4s. A peer who
-    //     never pauses (blocking shots, hogging powerups, idling in a corner) was unkickable --
-    //     that gap is deferred card 98217618, and this menu closes it.
+    // It is a door onto machinery that exists elsewhere, not new machinery:
+    //   - kick / kick+block is NetSession.KickPeer / KickPeerAt (cards 0b8a300b / 0257f8ba).
+    //     Since card 0257f8ba a session holds up to three remote machines, so the kick rows are
+    //     PER PEER, named by seat ("Kick Player 2") -- "kick the other player" stopped being a
+    //     well-formed request. A peer whose seat has not settled yet keeps the old slotless
+    //     pair, which falls back to KickPeer's only-up-peer resolution.
     //   - open / close the room is Settings.AllowOnlineJoins, which NetListing already watches:
     //     off -> Unlist() keeping the room code, on -> Relist() with the SAME code. So closing
-    //     and re-opening mid-run is free and does not renumber anyone's room.
+    //     and re-opening mid-run is free and does not renumber anyone's room. Since card
+    //     0257f8ba a HOST session with a free seat is itself listable, so this row now appears
+    //     MID-SESSION too -- it is how a host stops a 3rd/4th stranger from joining a running
+    //     match without kicking anyone.
     // Consequently this file adds NO protocol, NO wire bytes and NO server call of its own.
     //
     // The submenu is HOST-ONLY. A client has nothing to offer here: it cannot kick (kicking the
-    // host is just leaving, which "Exit to Main Menu" already does) and it owns no listing.
-    //
-    // The two shapes are MUTUALLY EXCLUSIVE by construction, which is why Entries() never has to
-    // mix them: NetListing.ComputeEligibleIgnoringSetting refuses while NetSession.Active, so a
-    // game with a peer in it is never listable and a listable game never has a peer.
+    // host is just leaving, which the pause menu already does) and it owns no listing.
     internal sealed class NetHostMenu : MenuSub1
     {
         // What a row DOES. The menu is rebuilt on every Show (the state it reflects changes
@@ -38,8 +38,31 @@ namespace EvilAliensWeb.Compat.Net
             KickAndBlock,
         }
 
+        // A row: what it does and, for the kick rows, WHOSE seat it is about (card 0257f8ba).
+        // Slot is NetProtocol.SlotNone for everything except a seat-named kick row -- including
+        // the fallback kick pair for a peer whose slot exchange has not settled, whose SlotNone
+        // routes through KickPeer's own target resolution.
+        internal readonly struct Row
+        {
+            internal readonly Entry Kind;
+            internal readonly byte Slot;
+
+            internal Row(Entry kind, byte slot = NetProtocol.SlotNone)
+            {
+                Kind = kind;
+                Slot = slot;
+            }
+
+            // The rows= rendering in Dump() -- an interface (net_host_menu.txt greps it), so a
+            // slotless row prints exactly the pre-card name and only seat-named kicks differ.
+            public override string ToString()
+            {
+                return Slot == NetProtocol.SlotNone ? Kind.ToString() : Kind + "@" + Slot;
+            }
+        }
+
         // Everything Entries() is allowed to look at, so the decision is a pure function of
-        // named booleans and can be swept as DATA (NetHostMenuTest / ProbeHostMenu) instead of
+        // named values and can be swept as DATA (NetHostMenuTest / ProbeHostMenu) instead of
         // needing a paused level and a live peer per case.
         internal readonly struct State
         {
@@ -48,14 +71,19 @@ namespace EvilAliensWeb.Compat.Net
             internal readonly bool PeerUp;
             internal readonly bool CouldList;
             internal readonly bool AllowJoins;
+            // Bit i = an UP peer's granted primary seat is oracle slot i (card 0257f8ba). 0
+            // with PeerUp means "a peer whose seat has not settled" -- the slotless fallback.
+            internal readonly byte PeerSlotsMask;
 
-            internal State(bool sessionActive, bool isHost, bool peerUp, bool couldList, bool allowJoins)
+            internal State(bool sessionActive, bool isHost, bool peerUp, bool couldList, bool allowJoins,
+                           byte peerSlotsMask = 0)
             {
                 SessionActive = sessionActive;
                 IsHost = isHost;
                 PeerUp = peerUp;
                 CouldList = couldList;
                 AllowJoins = allowJoins;
+                PeerSlotsMask = peerSlotsMask;
             }
         }
 
@@ -67,35 +95,77 @@ namespace EvilAliensWeb.Compat.Net
                 NetSession.IsHost,
                 NetSession.PeerUp,
                 NetListing.CouldList,
-                Settings.GetInstance().AllowOnlineJoins);
+                Settings.GetInstance().AllowOnlineJoins,
+                NetSession.Active ? NetSession.UpPeerPrimarySlotsMask() : (byte)0);
         }
 
         // THE decision. Order matters: entry 0 is what a reflexive Enter hits, so it is never
-        // destructive -- the room toggle (harmless and instantly reversible) leads its shape, and
-        // the kick shape leads with Back instead. Same reasoning as NetKickMenu preselecting
-        // "Keep Waiting", one level up.
-        internal static List<Entry> Entries(State s)
+        // destructive -- every shape leads with Back or the room toggle (harmless and instantly
+        // reversible), never a kick. Same reasoning as NetKickMenu preselecting "Keep Waiting".
+        //
+        // Since card 0257f8ba the session shape and the room shape COMPOSE: a host session with
+        // a free seat is listable (NetListing's !Active term is gone), so a paused host can
+        // close its room against further strangers AND kick a peer from the same menu.
+        internal static List<Row> Entries(State s)
         {
-            List<Entry> entries = new List<Entry>();
+            List<Row> rows = new List<Row>();
             if (s.SessionActive)
             {
-                // Kicking is the host's call about the peer in their game. PeerUp gates it rather
-                // than SessionActive alone: between StartWith and the handshake completing (and
-                // during the post-kick RejectGraceMs teardown) a session is Active with nobody in
-                // it, and KickPeer would be a no-op offered as a live option.
-                if (s.IsHost && s.PeerUp)
+                if (!s.IsHost)
                 {
-                    entries.Add(Entry.Back);
-                    entries.Add(Entry.Kick);
-                    entries.Add(Entry.KickAndBlock);
+                    // A client gets nothing: leaving IS its "kick the host", and the pause menu
+                    // already offers that.
+                    return rows;
                 }
+                // Kicking is the host's call about the peers in their game. PeerUp gates it
+                // rather than SessionActive alone: between StartWith and the handshake
+                // completing (and during the post-kick RejectGraceMs teardown) a session is
+                // Active with nobody in it, and a kick would be a no-op offered as live.
+                if (s.PeerUp)
+                {
+                    rows.Add(new Row(Entry.Back));
+                    if (s.PeerSlotsMask == 0)
+                    {
+                        // Seat not settled yet: the pre-0257f8ba slotless pair (KickPeer
+                        // resolves "the only up peer" itself).
+                        rows.Add(new Row(Entry.Kick));
+                        rows.Add(new Row(Entry.KickAndBlock));
+                    }
+                    else
+                    {
+                        for (byte slot = 0; slot < Oracle.MaxPlayers; slot++)
+                        {
+                            if (NetProtocol.SlotInMask(s.PeerSlotsMask, slot))
+                            {
+                                rows.Add(new Row(Entry.Kick, slot));
+                                rows.Add(new Row(Entry.KickAndBlock, slot));
+                            }
+                        }
+                    }
+                }
+                if (s.CouldList)
+                {
+                    // The room toggle joins the session shape (card 0257f8ba). After Back when
+                    // kick rows exist, leading otherwise -- entry 0 stays non-destructive either
+                    // way.
+                    if (rows.Count == 0)
+                    {
+                        rows.Add(new Row(Entry.RoomToggle));
+                        rows.Add(new Row(Entry.Back));
+                    }
+                    else
+                    {
+                        rows.Insert(1, new Row(Entry.RoomToggle));
+                    }
+                }
+                return rows;
             }
-            else if (s.CouldList)
+            if (s.CouldList)
             {
-                entries.Add(Entry.RoomToggle);
-                entries.Add(Entry.Back);
+                rows.Add(new Row(Entry.RoomToggle));
+                rows.Add(new Row(Entry.Back));
             }
-            return entries;
+            return rows;
         }
 
         // Whether the pause menu should offer "Online Play" at all. An empty submenu must never
@@ -105,9 +175,9 @@ namespace EvilAliensWeb.Compat.Net
             return Entries(s).Count > 0;
         }
 
-        internal static string Label(Entry e, State s)
+        internal static string Label(Row r, State s)
         {
-            switch (e)
+            switch (r.Kind)
             {
             case Entry.RoomToggle:
                 // Deliberately the SAME wording as the Options entry it toggles, because it is
@@ -115,9 +185,13 @@ namespace EvilAliensWeb.Compat.Net
                 // closing the room here keeps future games unlisted too.
                 return "Allow Online Joins: " + MenuScene.boolToGameString(s.AllowJoins);
             case Entry.Kick:
-                return "Kick Other Player";
+                return r.Slot == NetProtocol.SlotNone
+                    ? "Kick Other Player"
+                    : "Kick Player " + (r.Slot + 1);
             case Entry.KickAndBlock:
-                return "Kick and Block Player";
+                return r.Slot == NetProtocol.SlotNone
+                    ? "Kick and Block Player"
+                    : "Kick and Block Player " + (r.Slot + 1);
             default:
                 return "Back";
             }
@@ -128,11 +202,24 @@ namespace EvilAliensWeb.Compat.Net
         {
             if (s.SessionActive)
             {
-                // Singular on purpose. The protocol is 2-peer, so there is exactly one other
-                // MACHINE to kick; any couch players it brought (card 4d904410) are seated
-                // through that peer and leave with it. There is no per-seat kick and this
-                // wording must not imply one.
-                return "Another player has joined your game";
+                int n = CountBits(s.PeerSlotsMask);
+                // The kick rows name seats, so the caption counts MACHINES: any couch players a
+                // peer brought are seated through it and leave with it -- there is still no
+                // per-seat kick, and this wording must not imply one.
+                string who = n <= 1
+                    ? "Another player has joined your game"
+                    : n + " other players have joined your game";
+                if (!s.CouldList)
+                {
+                    return who;
+                }
+                // The room shape rides along mid-session (card 0257f8ba): say whether MORE
+                // strangers can arrive, since that is what the toggle governs here.
+                return who + "\n" + (s.AllowJoins
+                    ? (NetListing.Listed && NetListing.RoomCode != ""
+                        ? "Listed online  -  room " + NetListing.RoomCode
+                        : "Your game is open to more players")
+                    : "Your game is closed to new players");
             }
             if (!s.AllowJoins)
             {
@@ -141,6 +228,19 @@ namespace EvilAliensWeb.Compat.Net
             return NetListing.Listed && NetListing.RoomCode != ""
                 ? "Listed online  -  room " + NetListing.RoomCode
                 : "Your game is open to online players";
+        }
+
+        private static int CountBits(byte mask)
+        {
+            int n = 0;
+            for (int i = 0; i < 8; i++)
+            {
+                if ((mask & (1 << i)) != 0)
+                {
+                    n++;
+                }
+            }
+            return n;
         }
 
         // The LIVE decision, as one line (eaHostMenu() / `eval HostMenu`). NetHostMenuTest drives
@@ -152,10 +252,11 @@ namespace EvilAliensWeb.Compat.Net
         internal static string Dump()
         {
             State s = CurrentState();
-            List<Entry> entries = Entries(s);
+            List<Row> entries = Entries(s);
             return "[hostmenu] session=" + s.SessionActive
                 + " host=" + s.IsHost
                 + " peer=" + s.PeerUp
+                + " peerSlots=" + s.PeerSlotsMask
                 + " couldList=" + s.CouldList
                 + " allowJoins=" + s.AllowJoins
                 + " listed=" + (NetListing.Listed ? (NetListing.RoomCode == "" ? "yes" : NetListing.RoomCode) : "no")
@@ -163,7 +264,7 @@ namespace EvilAliensWeb.Compat.Net
                 + " rows=" + (entries.Count == 0 ? "(none)" : string.Join(",", entries));
         }
 
-        private readonly List<Entry> live = new List<Entry>();
+        private readonly List<Row> live = new List<Row>();
 
         internal NetHostMenu(Game game)
             : base(game)
@@ -179,8 +280,10 @@ namespace EvilAliensWeb.Compat.Net
         // which the caller must treat as "do not open" -- the pause entry is gated on the same
         // predicate, so a false here means the state changed between the pause opening and the
         // row being chosen (a peer that dropped, a level that ended).
+        // The kick callback carries the row's SEAT (SlotNone = the slotless fallback) and
+        // whether it is the blocking variant.
         internal bool Rebuild(State s, ItemSelected onBack, ItemSelected onRoomToggle,
-                              ItemSelected onKick, ItemSelected onKickAndBlock)
+                              System.Action<byte, bool> onKickSlot)
         {
             live.Clear();
             live.AddRange(Entries(s));
@@ -189,20 +292,26 @@ namespace EvilAliensWeb.Compat.Net
                 return false;
             }
             RemoveAllEntries();
-            foreach (Entry e in live)
+            foreach (Row r in live)
             {
-                AddEntry(Label(e, s));
-                switch (e)
+                AddEntry(Label(r, s));
+                switch (r.Kind)
                 {
                 case Entry.RoomToggle:
                     AddEntryEvent(onRoomToggle);
                     break;
                 case Entry.Kick:
-                    AddEntryEvent(onKick);
+                {
+                    byte slot = r.Slot;
+                    AddEntryEvent(_ => onKickSlot(slot, false));
                     break;
+                }
                 case Entry.KickAndBlock:
-                    AddEntryEvent(onKickAndBlock);
+                {
+                    byte slot = r.Slot;
+                    AddEntryEvent(_ => onKickSlot(slot, true));
                     break;
+                }
                 default:
                     AddEntryEvent(onBack);
                     break;
@@ -218,9 +327,9 @@ namespace EvilAliensWeb.Compat.Net
         {
             for (int i = 0; i < live.Count; i++)
             {
-                if (live[i] == Entry.RoomToggle)
+                if (live[i].Kind == Entry.RoomToggle)
                 {
-                    SetEntry(i, Label(Entry.RoomToggle, s));
+                    SetEntry(i, Label(live[i], s));
                     return;
                 }
             }
@@ -228,24 +337,24 @@ namespace EvilAliensWeb.Compat.Net
 
         // The rows are chosen ONCE, when the submenu opens; the state behind them is not frozen
         // with them. A stranger completing a join-in-progress (or a peer dropping) while this is
-        // on screen would otherwise leave the wrong shape up -- a room toggle over a game that is
-        // now in a session, or two Kick rows that no-op through KickPeer's !Active early return,
-        // both looking perfectly live. Rebuilding in place would move the selection under the
-        // player's fingers, so retract instead: doExit() raises OnExit, which is the same path
-        // "Back" takes, so the caller returns to a pause menu whose own rows are rebuilt there.
+        // on screen would otherwise leave the wrong shape up -- kick rows for a departed seat, a
+        // missing pair for a fresh arrival, both looking perfectly live. Rebuilding in place
+        // would move the selection under the player's fingers, so retract instead: doExit()
+        // raises OnExit, which is the same path "Back" takes, so the caller returns to a pause
+        // menu whose own rows are rebuilt there.
         //
         // The CAPTION is deliberately NOT frozen either way -- it reports the room code and the
         // open/closed state, which the toggle on this very menu changes and which must update.
         public override void Update(GameTime gameTime)
         {
             base.Update(gameTime);
-            if (live.Count > 0 && !SameEntries(live, Entries(CurrentState())))
+            if (live.Count > 0 && !SameRows(live, Entries(CurrentState())))
             {
                 doExit();
             }
         }
 
-        private static bool SameEntries(List<Entry> a, List<Entry> b)
+        private static bool SameRows(List<Row> a, List<Row> b)
         {
             if (a.Count != b.Count)
             {
@@ -253,7 +362,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             for (int i = 0; i < a.Count; i++)
             {
-                if (a[i] != b[i])
+                if (a[i].Kind != b[i].Kind || a[i].Slot != b[i].Slot)
                 {
                     return false;
                 }

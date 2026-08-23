@@ -42,6 +42,8 @@ import time
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 EAHL = os.path.join(REPO, "tools", "headless", "bin", "Debug", "net8.0", "eahl.exe")
+if not os.path.exists(EAHL):
+    EAHL = EAHL[:-4]  # a non-Windows build names the exe `eahl`
 
 # The dump's own format version. Bumped in NetJipDump.cs when a line's SHAPE changes, and
 # checked rather than assumed -- a differ silently comparing half a world is the failure this

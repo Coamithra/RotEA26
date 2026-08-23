@@ -1440,7 +1440,7 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 	{
 		EvilAliensWeb.Compat.Net.NetHostMenu.State state = EvilAliensWeb.Compat.Net.NetHostMenu.CurrentState();
 		if (!netHostMenu.Rebuild(state, netHostMenu_BackSelected, netHostMenu_RoomToggleSelected,
-			netHostMenu_KickSelected, netHostMenu_KickAndBlockSelected))
+			NetHostMenuKick))
 		{
 			// The state moved between the pause opening and this row being chosen (the peer
 			// dropped, the level ended). Drop the now-stale row and stay on the pause menu
@@ -1475,23 +1475,23 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		netHostMenu.RefreshRoomToggleLabel(EvilAliensWeb.Compat.Net.NetHostMenu.CurrentState());
 	}
 
-	private void netHostMenu_KickSelected(MenuSub1 sender)
+	// Card 0d6ffe70's half of card 0b8a300b's machinery: the same kick, reached deliberately
+	// from our OWN pause rather than handed to us by a remote one. Since card 0257f8ba the row
+	// names its target's SEAT (up to three remote machines) -- SlotNone is the fallback pair for
+	// a peer whose seat has not settled, routed through KickPeer's own target resolution.
+	// Unlike NetKick above there is no freeze of the peer's to release -- ours is the pause that
+	// is up, and it stays up, so we simply go back to the pause menu (whose rows rebuild: with
+	// the last peer gone the "Online Play" row may be gone with it).
+	private void NetHostMenuKick(byte slot, bool block)
 	{
-		NetHostMenuKick(block: false);
-	}
-
-	private void netHostMenu_KickAndBlockSelected(MenuSub1 sender)
-	{
-		NetHostMenuKick(block: true);
-	}
-
-	// Card 0d6ffe70's half of card 0b8a300b's machinery: the same KickPeer, reached deliberately
-	// from our OWN pause rather than handed to us by a remote one. Unlike NetKick above there is
-	// no freeze of the peer's to release -- ours is the pause that is up, and it stays up, so we
-	// simply go back to the pause menu with the "Online Play" row gone.
-	private void NetHostMenuKick(bool block)
-	{
-		EvilAliensWeb.Compat.Net.NetSession.KickPeer(block);
+		if (slot == EvilAliensWeb.Compat.Net.NetProtocol.SlotNone)
+		{
+			EvilAliensWeb.Compat.Net.NetSession.KickPeer(block);
+		}
+		else
+		{
+			EvilAliensWeb.Compat.Net.NetSession.KickPeerAt(slot, block);
+		}
 		NetHideHostMenu(returnToPause: true);
 	}
 

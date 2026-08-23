@@ -420,10 +420,11 @@ namespace EvilAliensWeb.Compat.Net
                 NetSession.FriendChannelExists(OtherClientSlot));
 
             // Card 6fb406bc: the interpolation cushion follows the frame's relayed bit. The
-            // slot-2 channel above was built from UNFLAGGED frames (a host couch ship, one hop)
-            // and is the negative control; a channel built from ShipFlagRelayed frames (another
-            // client's ship via the hub) latches the wider budget. The latch changes no pixel
-            // and no counter, so this readback is its only observable.
+            // slot-2 channel above was built from frames with the bit CLEAR -- the shape a host
+            // COUCH ship's frames have in production (this rig reused the other-client's-seat
+            // frames, which a real hub would have flagged) -- and is the negative control; a
+            // channel built from ShipFlagRelayed frames latches the wider budget. The latch
+            // changes no pixel and no counter, so this readback is its only observable.
             Check("a DIRECT extras channel renders on InterpDelayMs (" + NetSession.InterpDelayMs + "ms)",
                 NetSession.FriendInterpDelayMs(OtherClientSlot) == NetSession.InterpDelayMs);
             const byte RelayedSlot = 3;

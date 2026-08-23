@@ -94,6 +94,13 @@ namespace EvilAliensWeb.Compat.Net
         // to its up-peer count each send cadence. Addressed sends count once. RX counts at
         // ARRIVAL, before this wrapper's own loss roll -- the bytes crossed the wire whether or
         // not the impairment then eats the packet (Dropped reports that separately).
+        //
+        // CAVEAT: TX counts what the session OFFERED, one layer above webrtc.js's
+        // bufferedAmount back-pressure gate -- on a genuinely stalled WebRTC link the stream
+        // frames chanSend skips are still counted here, so txB over-reports by exactly
+        // eaRtc.netStats().streamDropped frames' worth. On a healthy link (and on every eahl
+        // transport, which has no such gate) the two agree; read the JS drop counter beside
+        // txBps before quoting an uplink figure from a degraded run.
         public long TxStreamBytes { get; private set; }
         public long TxReliableBytes { get; private set; }
         public long RxStreamBytes { get; private set; }

@@ -97,8 +97,9 @@ window.eaRtc = (() => {
     // front of it, which is strictly worse than the loss the lane's consumers are all built to
     // tolerate (interpolation underrun, snapshot self-heal, cumulative shot counts). So a
     // stream send is SKIPPED while the channel already holds more than STREAM_BUF_LIMIT of
-    // unsent bytes: at the measured whole-N=4 payload rates that is well over a second of
-    // backlog, i.e. a link that is genuinely stalled rather than jittering. The RELIABLE lane
+    // unsent bytes. bufferedAmount is PER CHANNEL, i.e. per peer: at the measured N=4 rates a
+    // single peer's share is ~7-10 KB/s, so 16 KB is ~1.5-2 s of backlog on the channel the
+    // gate actually reads -- a link that is genuinely stalled, not jittering. The RELIABLE lane
     // is never dropped (the INetTransport contract) -- its backlog is tracked and named once
     // past REL_BUF_WARN so a wedged link says so instead of silently freezing the event lane.
     const STREAM_BUF_LIMIT = 16 * 1024;
@@ -430,7 +431,7 @@ window.eaRtc = (() => {
                 const c = { readyState: state, bufferedAmount: buffered, sent: 0, send() { this.sent++; } };
                 return c;
             };
-            const base = { d: netStats.streamDropped, p: netStats.streamPeak, r: netStats.relPeak };
+            const base = { d: netStats.streamDropped, p: netStats.streamPeak, r: netStats.relPeak, w: netStats.relWarned };
             let pass = 0, fail = 0;
             const leg = (what, ok) => { console.log('[rtc] ' + (ok ? 'PASS' : 'FAIL') + ' ' + what); if (ok) pass++; else fail++; };
             let ch = mk('open', 0);
@@ -453,6 +454,10 @@ window.eaRtc = (() => {
             netStats.streamDropped = base.d;
             netStats.streamPeak = base.p;
             netStats.relPeak = base.r;
+            // relWarned too: today the fake backlog (STREAM_BUF_LIMIT + 1) sits under
+            // REL_BUF_WARN, but that is an arithmetic coincidence of two independently tunable
+            // constants, and a self-test must not spend a real run's one-shot warning.
+            netStats.relWarned = base.w;
             console.log('[rtc] backpressure self-test: ' + pass + ' passed, ' + fail + ' failed');
             return fail === 0;
         },

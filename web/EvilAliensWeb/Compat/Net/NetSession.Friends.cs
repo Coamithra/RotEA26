@@ -240,10 +240,14 @@ namespace EvilAliensWeb.Compat.Net
             ch.LastRxAt = NowMs;
             // Card 6fb406bc: a relayed channel (client ship via the host hub) renders on the
             // wider RelayedInterpDelayMs cushion -- see AdvanceShipClock/InterpDelayFor. A LEVEL
-            // off the newest frame, like Alive: a channel is per (peer, slot), so its frames are
-            // all-relayed or all-direct and the latch never flaps.
-            ch.Relayed = sample.Relayed;
-            ch.Buffer.Add(sample);
+            // off the newest IN-ORDER frame, like the primary's alive edge (card df72b051's
+            // rule): a channel is per (peer, slot), so its frames are all-relayed or all-direct
+            // and the latch should never flap -- gating on the buffer's own in-order test makes
+            // that structural rather than conventional.
+            if (ch.Buffer.Add(sample))
+            {
+                ch.Relayed = sample.Relayed;
+            }
             grantsAwaitingStream.Remove(slot); // the peer took the grant -- stop the claim clock
         }
 

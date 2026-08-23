@@ -965,14 +965,17 @@ Four pieces, none changing what replicates -- only how well the star holds up at
   payload run to run (population-dependent), joiners ~1.2 up / ~9.5 down** -- the design doc's
   ~33 KB/s estimate confirmed sane. Real wire cost adds SCTP/DTLS/UDP/IP framing, ~2-3x at
   these packet sizes, so the host budget stands at roughly 60-90 KB/s up: comfortable on any
-  home connection, no pacing work needed. Pinned by `NetWireTest` section 2b (fanout x3 vs
+  home connection, no pacing work needed. CAVEAT: `txB` counts what the session OFFERED, one
+  layer above the JS back-pressure gate below -- on a stalled real-WebRTC link read
+  `eaRtc.netStats().streamDropped` beside `txBps` before quoting an uplink figure. Pinned by `NetWireTest` section 2b (fanout x3 vs
   addressed x1, rx-counts-before-the-loss-roll, `Close()` zeroing).
 - **`bufferedAmount` BACK-PRESSURE (webrtc.js).** SCTP queues even unreliable-channel sends, so
   a stalled link does not DROP the stream lane -- it BACKLOGS it, and every ship/snapshot frame
   then arrives late by whatever is queued ahead, which is strictly worse than the loss the
   lane's consumers are all built to tolerate. `chanSend` (both `send` and `sendTo` route through
-  it) SKIPS a stream send while `ch.bufferedAmount > 16 KB` (well over a second of whole-N=4
-  payload -- a genuinely stalled link, not jitter) and counts it; the RELIABLE lane is never
+  it) SKIPS a stream send while `ch.bufferedAmount > 16 KB` and counts it -- bufferedAmount is
+  PER CHANNEL (per peer), where a single peer's measured N=4 share is ~7-10 KB/s, so 16 KB is
+  ~1.5-2 s of backlog on the channel the gate reads: a genuinely stalled link, not jitter; the RELIABLE lane is never
   dropped (the `INetTransport` contract) but tracks its high-water mark and names a backlog past
   256 KB once. **`eaRtc.netStats()`** reads `{streamDropped, streamPeak, relPeak}`;
   **`eaRtc.testBackpressure()`** is the regression guard (the `eaFps.test` idiom -- the JS layer

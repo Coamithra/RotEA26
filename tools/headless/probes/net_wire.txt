@@ -98,6 +98,6 @@ expect 5\. scaled-i16 motion rates
 # unknown id, self, closed target, right id in the wrong room -- is a SILENT drop with TxSent
 # moving and TxFanout not (the closed-DataChannel semantic INetTransport pins); and the
 # NetImpairment decorator passes both addressed lanes through verbatim (impairment is RX-only).
-expect \[netwire\] 110 passed, 0 failed
+expect \[netwire\] 118 passed, 0 failed
 expect-not FAIL
 quit

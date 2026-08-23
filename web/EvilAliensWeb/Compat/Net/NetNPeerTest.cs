@@ -243,6 +243,8 @@ namespace EvilAliensWeb.Compat.Net
             Check("B received A's ship as slot-" + slotA + " frames (n=" + relayedToB + ")", relayedToB >= 1);
             Check("...NON-primary (an extras channel over there, v23's one ship path)",
                 RelayedFramesAreNonPrimary(atB, slotA));
+            Check("...every one carrying ShipFlagRelayed (card 6fb406bc -- the 150ms cushion's cue)",
+                RelayedFramesCarryRelayedBit(atB, slotA));
             Check("...and A got NONE of its own state back (echo guard)",
                 ShipFrames(atA, slotA) == shipsAtABefore);
             Check("...at A's streamed position (211,137)", RelayedPosMatches(atB, slotA, 211f, 137f));
@@ -384,6 +386,25 @@ namespace EvilAliensWeb.Compat.Net
             Check("one naming another client's seat did (slot " + OtherClientSlot + ")",
                 NetSession.FriendChannelExists(OtherClientSlot));
 
+            // Card 6fb406bc: the interpolation cushion follows the frame's relayed bit. The
+            // slot-2 channel above was built from UNFLAGGED frames (a host couch ship, one hop)
+            // and is the negative control; a channel built from ShipFlagRelayed frames (another
+            // client's ship via the hub) latches the wider budget. The latch changes no pixel
+            // and no counter, so this readback is its only observable.
+            Check("a DIRECT extras channel renders on InterpDelayMs (" + NetSession.InterpDelayMs + "ms)",
+                NetSession.FriendInterpDelayMs(OtherClientSlot) == NetSession.InterpDelayMs);
+            const byte RelayedSlot = 3;
+            scriptedHost.SendStream(NetProtocol.EncodeShipState(RelayedSlot, primary: false, hostSeq++, hostMs += 33,
+                new Vector2(500f, 200f), Vector2.Zero, 4.7f, alive: true, shotCount: 0,
+                shotsPerSec: 8, bulletLife: 450f, scriptGate: false, asplodeBits: 0, bounceBits: 0,
+                relayed: true));
+            wire.Pump();
+            NetSession.Update();
+            Check("a RELAYED extras channel latches RelayedInterpDelayMs ("
+                + NetSession.RelayedInterpDelayMs + "ms)",
+                NetSession.FriendChannelExists(RelayedSlot)
+                && NetSession.FriendInterpDelayMs(RelayedSlot) == NetSession.RelayedInterpDelayMs);
+
             // EvPeerLeft: that client left -- its channel and its (planted) seat must free.
             bool seated = oracle.AddPlayerAt(OtherClientSlot, ControlDevice.RemoteFriend);
             Check("PRECONDITION the departed client's seat is planted", seated);
@@ -451,6 +472,24 @@ namespace EvilAliensWeb.Compat.Net
                 {
                     any = true;
                     if (!NetProtocol.TryDecodeShipState(d, out _, out bool primary, out _, out _, out _, out _) || primary)
+                    {
+                        return false;
+                    }
+                }
+            }
+            return any;
+        }
+
+        private static bool RelayedFramesCarryRelayedBit(Collector c, byte slot)
+        {
+            bool any = false;
+            foreach ((byte[] d, bool r) in c.Frames)
+            {
+                if (!r && d.Length >= NetProtocol.ShipStateBytes && d[0] == NetProtocol.MsgShipState && d[1] == slot)
+                {
+                    any = true;
+                    if (!NetProtocol.TryDecodeShipState(d, out _, out _, out _, out ShipSample s, out _, out _)
+                        || !s.Relayed)
                     {
                         return false;
                     }

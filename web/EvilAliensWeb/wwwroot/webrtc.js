@@ -85,6 +85,35 @@ window.eaRtc = (() => {
 
     const sendSignal = (obj) => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj)); };
 
+    // bufferedAmount back-pressure (card 6fb406bc, Stage 11.11). SCTP queues even
+    // unreliable-channel sends, so when a link stalls the stream lane does not drop -- it
+    // BACKLOGS, and every ship/snapshot frame then arrives late by however much is queued in
+    // front of it, which is strictly worse than the loss the lane's consumers are all built to
+    // tolerate (interpolation underrun, snapshot self-heal, cumulative shot counts). So a
+    // stream send is SKIPPED while the channel already holds more than STREAM_BUF_LIMIT of
+    // unsent bytes: at the measured whole-N=4 payload rates that is well over a second of
+    // backlog, i.e. a link that is genuinely stalled rather than jittering. The RELIABLE lane
+    // is never dropped (the INetTransport contract) -- its backlog is tracked and named once
+    // past REL_BUF_WARN so a wedged link says so instead of silently freezing the event lane.
+    const STREAM_BUF_LIMIT = 16 * 1024;
+    const REL_BUF_WARN = 256 * 1024;
+    const netStats = { streamDropped: 0, streamPeak: 0, relPeak: 0, relWarned: false };
+    const chanSend = (ch, rel, bytes) => {
+        if (!ch || ch.readyState !== 'open') return;
+        const buf = ch.bufferedAmount || 0;
+        if (rel) {
+            if (buf > netStats.relPeak) netStats.relPeak = buf;
+            if (buf > REL_BUF_WARN && !netStats.relWarned) {
+                netStats.relWarned = true;
+                console.warn('[rtc] reliable channel backlog ' + buf + 'B -- the link is not draining');
+            }
+        } else {
+            if (buf > netStats.streamPeak) netStats.streamPeak = buf;
+            if (buf > STREAM_BUF_LIMIT) { netStats.streamDropped++; return; }
+        }
+        try { ch.send(bytes); } catch (e) { }
+    };
+
     // The peer-id string C# sees as OnData's senderId AND takes as sendTo's address.
     const peerIdStr = (key) => isHost ? String(key) : 'h';
     const anyConnected = () => { for (const p of peers.values()) if (p.connected) return true; return false; };
@@ -365,11 +394,9 @@ window.eaRtc = (() => {
             openSignaling(signalUrl, () => sendSignal({ t: 'join', code: String(code || '') }));
         },
         send(b64, rel) {
+            const bytes = bufFromB64(b64);
             for (const p of peers.values()) {
-                const ch = rel ? p.chR : p.chS;
-                if (ch && ch.readyState === 'open') {
-                    try { ch.send(bufFromB64(b64)); } catch (e) { }
-                }
+                chanSend(rel ? p.chR : p.chS, rel, bytes);
             }
         },
         // Addressed send: peerKey is the same string C# saw as the senderId ("1".."3" on the
@@ -379,10 +406,47 @@ window.eaRtc = (() => {
             const key = isHost ? Number(peerKey) : (peerKey === 'h' ? HOST_KEY : NaN);
             const p = peers.get(key);
             if (!p) return;
-            const ch = rel ? p.chR : p.chS;
-            if (ch && ch.readyState === 'open') {
-                try { ch.send(bufFromB64(b64)); } catch (e) { }
-            }
+            chanSend(rel ? p.chR : p.chS, rel, bufFromB64(b64));
+        },
+        // Back-pressure diagnostics (card 6fb406bc): drops + per-lane bufferedAmount high-water
+        // marks since page load. Console-read like the FPS HUD's stats; nothing C# depends on it.
+        netStats() {
+            return { streamDropped: netStats.streamDropped, streamPeak: netStats.streamPeak, relPeak: netStats.relPeak };
+        },
+        // Self-test in the eaFps.test idiom (card 6fb406bc): the JS layer has no headless
+        // runner, so the send gate is a pure function driven over FAKE channel objects here --
+        // callable from any boot's console, no session needed. Prints PASS/FAIL per leg and
+        // returns true iff all held.
+        testBackpressure() {
+            const mk = (state, buffered) => {
+                const c = { readyState: state, bufferedAmount: buffered, sent: 0, send() { this.sent++; } };
+                return c;
+            };
+            const base = { d: netStats.streamDropped, p: netStats.streamPeak, r: netStats.relPeak };
+            let pass = 0, fail = 0;
+            const leg = (what, ok) => { console.log('[rtc] ' + (ok ? 'PASS' : 'FAIL') + ' ' + what); if (ok) pass++; else fail++; };
+            let ch = mk('open', 0);
+            chanSend(ch, false, new Uint8Array(4));
+            leg('stream under the limit sends', ch.sent === 1 && netStats.streamDropped === base.d);
+            ch = mk('open', STREAM_BUF_LIMIT + 1);
+            chanSend(ch, false, new Uint8Array(4));
+            leg('stream over the limit drops and counts', ch.sent === 0 && netStats.streamDropped === base.d + 1);
+            leg('...and the stream peak recorded it', netStats.streamPeak >= STREAM_BUF_LIMIT + 1);
+            ch = mk('open', STREAM_BUF_LIMIT + 1);
+            chanSend(ch, true, new Uint8Array(4));
+            leg('reliable NEVER drops, whatever the backlog', ch.sent === 1 && netStats.streamDropped === base.d + 1);
+            leg('...and the reliable peak recorded it', netStats.relPeak >= STREAM_BUF_LIMIT + 1);
+            ch = mk('closed', 0);
+            chanSend(ch, false, new Uint8Array(4));
+            leg('a closed channel is a silent no-op, not a drop count', ch.sent === 0 && netStats.streamDropped === base.d + 1);
+            // Leave-no-trace on the counters a REAL run reads: the peaks are high-water marks a
+            // fake channel legitimately raised, but the drop count must go back to describing
+            // real traffic only.
+            netStats.streamDropped = base.d;
+            netStats.streamPeak = base.p;
+            netStats.relPeak = base.r;
+            console.log('[rtc] backpressure self-test: ' + pass + ' passed, ' + fail + ' failed');
+            return fail === 0;
         },
         close() {
             finished = true; // deliberate local close -- suppress failed/closed callbacks

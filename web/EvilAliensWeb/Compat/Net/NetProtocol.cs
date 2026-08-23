@@ -165,6 +165,17 @@ namespace EvilAliensWeb.Compat.Net
         // receiver's routing is self-describing across the slot-settle race and any mid-session
         // re-grant: the primary channel is a distinguished thing, whichever seat it is in.
         public const byte ShipFlagPrimary = 1 << 2;
+        // Card 6fb406bc (Stage 11.11): this frame took the star's second hop -- a client's ship
+        // re-encoded by the HOST hub (NetSession.RelayShipSample) rather than sent by its owner
+        // directly. The receiver renders such a channel RelayedInterpDelayMs (150 ms) behind its
+        // newest sample instead of the direct InterpDelayMs (100 ms): the relay adds
+        // ~half(RTT_A+RTT_B) plus up to one 33 ms re-send beat of arrival jitter, and a cushion
+        // sized for one hop leaves the puppet living on the extrapolation cap. A spare bit in an
+        // existing byte with graceful degradation both ways (an old peer ignores it and renders
+        // at 100 ms -- the pre-card behaviour), so NO protocol bump: the ShipFlagScriptGate
+        // precedent. Only the relay sets it; only an EXTRAS channel can latch it (a client's
+        // primary channel is the host's own ship, one hop by construction).
+        public const byte ShipFlagRelayed = 1 << 3;
 
         // ---- wire enum validation (card 88f87ba2) -------------------------------------
         //
@@ -413,13 +424,13 @@ namespace EvilAliensWeb.Compat.Net
         // send slot 0 / primary false.
         public const int ShipStateBytes = 34;
 
-        public static byte[] EncodeShipState(byte slot, bool primary, ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, bool alive, byte shotCount, int shotsPerSec, float bulletLife, bool scriptGate = false, byte asplodeBits = 0, byte bounceBits = 0)
+        public static byte[] EncodeShipState(byte slot, bool primary, ushort seq, uint senderMs, Vector2 pos, Vector2 vel, float aim, bool alive, byte shotCount, int shotsPerSec, float bulletLife, bool scriptGate = false, byte asplodeBits = 0, byte bounceBits = 0, bool relayed = false)
         {
             byte[] b = new byte[ShipStateBytes];
             b[0] = MsgShipState;
             b[1] = slot;
             b[2] = (byte)((alive ? ShipFlagAlive : 0) | (scriptGate ? ShipFlagScriptGate : 0)
-                | (primary ? ShipFlagPrimary : 0));
+                | (primary ? ShipFlagPrimary : 0) | (relayed ? ShipFlagRelayed : 0));
             b[3] = (byte)Math.Clamp(shotsPerSec, 1, 255);
             b[4] = (byte)Math.Clamp((int)(bulletLife / 10f), 0, 255);
             WriteU16(b, 5, seq);
@@ -458,6 +469,7 @@ namespace EvilAliensWeb.Compat.Net
             sample.Aim = ReadF32(b, 27);
             sample.Alive = (b[2] & ShipFlagAlive) != 0;
             sample.ScriptGate = (b[2] & ShipFlagScriptGate) != 0;
+            sample.Relayed = (b[2] & ShipFlagRelayed) != 0;
             sample.ShotCount = b[31];
             sample.AsplodeBits = b[32];
             sample.BounceBits = b[33];
@@ -1555,6 +1567,10 @@ namespace EvilAliensWeb.Compat.Net
         // PRIMARY-flagged frame from the host (NetSession.HandleShipFrame): an extra ship has
         // no level script.
         public bool ScriptGate;
+        // Card 6fb406bc: the frame took the host relay's second hop (ShipFlagRelayed). A LEVEL
+        // like Alive/ScriptGate; the receiving extras channel latches it to pick its
+        // interpolation cushion (150 ms relayed vs 100 ms direct).
+        public bool Relayed;
         // Cumulative wrapping count of the shots the OWNER's ship has actually spawned (card
         // a45b78f6). The receiver fires the wrapped delta; it is not a rate and never resets
         // except with the ship itself.

@@ -143,6 +143,17 @@ namespace EvilAliensWeb.Compat.Net
         public long Pauses;             // EvPause on-edges sent + received
         public long TetherBreaks;       // EvTetherBreak sent + received
 
+        // Bandwidth (card 6fb406bc, Stage 11.11): cumulative PAYLOAD bytes both ways (stream +
+        // reliable lanes summed; broadcasts counted once per connected peer -- see
+        // NetImpairment's accounting header) and the rate over the last report interval. This
+        // is what turned the design doc's ~33 KB/s N=4 host-uplink ESTIMATE into a measurement;
+        // real wire cost adds SCTP/DTLS/UDP/IP framing, ~2-3x at these packet sizes. Neither is
+        // a health bar -- they describe the level and the peer count, not the link.
+        public long TxBytes;
+        public long RxBytes;
+        public float TxBps;
+        public float RxBps;
+
         // Artificial impairment (card 40334a8f). Reported so a captured "[net]" line from an
         // impaired run is self-describing -- without the settings inline, a deliberately
         // degraded log is indistinguishable from a genuinely broken one months later.
@@ -169,7 +180,7 @@ namespace EvilAliensWeb.Compat.Net
             // corrections. Printed because pupPops cannot be judged without it -- a big world
             // stretches the turn and pops follow, on a perfectly healthy link (card 48ab9b2f).
             return string.Format(CultureInfo.InvariantCulture,
-                "[net] role={0} peer={1} localShip={2} remoteShip={3} roster={38} txStream={4} rxStream={5} drop={6} sgap={7} buf={8:0}ms interp={9} extrap={10} pops={11} maxPop={12:0.0}px evTx={13} evRx={14} dup={15} dupLive={41} dupDecl={42} dupBad={43} ordViol={16} seqGap={17} liveIds={18} snapTurn={19}ms snapTx={20} snapRx={21} snapEnt={22} snapUnk={23} snapNew={24} snapDead={25} snapBad={26} snapStale={46} pupPops={27} clTx={28} clRx={29} clKill={30} clPaid={31} beatTx={32} beatRx={33} resets={34} wins={35} pauses={36} tetherBrk={37} hudTx={39} hudRx={40} teleports={44} tpUnmarked={45}",
+                "[net] role={0} peer={1} localShip={2} remoteShip={3} roster={38} txStream={4} rxStream={5} drop={6} sgap={7} buf={8:0}ms interp={9} extrap={10} pops={11} maxPop={12:0.0}px evTx={13} evRx={14} dup={15} dupLive={41} dupDecl={42} dupBad={43} ordViol={16} seqGap={17} liveIds={18} snapTurn={19}ms snapTx={20} snapRx={21} snapEnt={22} snapUnk={23} snapNew={24} snapDead={25} snapBad={26} snapStale={46} pupPops={27} clTx={28} clRx={29} clKill={30} clPaid={31} beatTx={32} beatRx={33} resets={34} wins={35} pauses={36} tetherBrk={37} hudTx={39} hudRx={40} teleports={44} tpUnmarked={45} txB={47} rxB={48} txBps={49:0} rxBps={50:0}",
                 isHost ? "host" : "join", peerUp ? "up" : "down",
                 localShip ? 1 : 0, remoteShip ? 1 : 0,
                 StreamTx, StreamRx, StreamDropped, StreamSeqGaps,
@@ -179,7 +190,7 @@ namespace EvilAliensWeb.Compat.Net
                 ClaimsTx, ClaimsRx, ClaimsHonored, ClaimsPaidDead,
                 BeatsTx, BeatsRx, Resets, Victories, Pauses, TetherBreaks, roster,
                 HudTx, HudRx, DupLive, DupDeclined, DupBad, Teleports, UnmarkedTeleports,
-                SnapStale) + imp;
+                SnapStale, TxBytes, RxBytes, TxBps, RxBps) + imp;
         }
     }
 }

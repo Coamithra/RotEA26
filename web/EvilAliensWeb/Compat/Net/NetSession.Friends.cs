@@ -141,7 +141,10 @@ namespace EvilAliensWeb.Compat.Net
             ShipSample newest = ch.Buffer.Newest;
             byte[] frame = NetProtocol.EncodeShipState(slot, primary: false, relayShipSeq++, (uint)(now - sessionStartAt),
                 newest.Pos, newest.Vel, newest.Aim, alive: true, newest.ShotCount, ch.ShotsPerSec, ch.BulletLife,
-                scriptGate: false, newest.AsplodeBits, newest.BounceBits);
+                scriptGate: false, newest.AsplodeBits, newest.BounceBits,
+                // Card 6fb406bc: mark the second hop so the recipient renders this channel on
+                // the wider relayed cushion. The ONLY setter of ShipFlagRelayed.
+                relayed: true);
             foreach (PeerChannel q in peers.Values)
             {
                 if (q.Up && q != from)
@@ -164,6 +167,21 @@ namespace EvilAliensWeb.Compat.Net
                 }
             }
             return false;
+        }
+
+        // Card 6fb406bc: which interpolation cushion does the extras channel for `slot` render
+        // on? -1 = no channel. Internal for NetNPeerTest -- the relayed latch changes no pixel
+        // and moves no counter, so this readback is its only observable.
+        internal static float FriendInterpDelayMs(byte slot)
+        {
+            foreach (PeerChannel p in peers.Values)
+            {
+                if (p.Extras.TryGetValue(slot, out ShipChannel ch))
+                {
+                    return InterpDelayFor(ch);
+                }
+            }
+            return -1f;
         }
 
         // Is this slot actively streamed to us? (Host-side grant bookkeeping asks; internal for
@@ -220,6 +238,11 @@ namespace EvilAliensWeb.Compat.Net
             ch.ShotsPerSec = shots;
             ch.BulletLife = life;
             ch.LastRxAt = NowMs;
+            // Card 6fb406bc: a relayed channel (client ship via the host hub) renders on the
+            // wider RelayedInterpDelayMs cushion -- see AdvanceShipClock/InterpDelayFor. A LEVEL
+            // off the newest frame, like Alive: a channel is per (peer, slot), so its frames are
+            // all-relayed or all-direct and the latch never flaps.
+            ch.Relayed = sample.Relayed;
             ch.Buffer.Add(sample);
             grantsAwaitingStream.Remove(slot); // the peer took the grant -- stop the claim clock
         }

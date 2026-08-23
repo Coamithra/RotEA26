@@ -103,7 +103,7 @@ eval HostMenuLive
 # Card a66e190a raised it 88 -> 90: EvSlowmo's duration. The risk there is the WIDTH -- the
 # game sends 12000 ms, which a byte would silently truncate to 224, i.e. a fifth of a second of
 # slow motion on the peer, which reads as "it nearly works" rather than as a broken frame.
-expect \[netwire\] 110 passed, 0 failed
+expect \[netwire\] 118 passed, 0 failed
 # the INetHost seam: the production mapping + the injected clock (card 25ad0659 step 2a). This one
 # is NOT pre-refactor state -- it is the refactor's own guard, and it is in this file so the same
 # exit code covers "the seam is wired right" and "no decision behind it moved".
@@ -242,7 +242,7 @@ expect \[nettp\] 25 passed, 0 failed
 # inbound reject + channel-gated delivery), which fails 1b/8b.
 # The mid-level halves (revert-to-single-player, relayed-puppet spawns) need a scene and live in
 # tools/sim/net_npeer_smoke.py, the three-process eahl rig.
-expect \[netnpeer\] ALL PASS -- 52 passed, 0 failed
+expect \[netnpeer\] ALL PASS -- 55 passed, 0 failed
 # The host pause menu's Online Play decision (card 0d6ffe70), in two halves that fail
 # differently. `hostmenu` is the PURE sweep -- all 32 combinations of the five booleans through
 # the real NetHostMenu.Entries, plus the properties no `if` restates (entry 0 is never a kick,

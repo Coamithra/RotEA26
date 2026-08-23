@@ -114,13 +114,16 @@ inputs; the other peer's ship is an interpolated puppet.
   wire-first successor: the host now MARKS a reposition instead of the observed-velocity estimator
   guessing at one (`e79bb994`, v13) -- see the teleport-marker bullet under "Puppet SMOOTHNESS".
 
-**Remaining.** The TURN go/no-go and interpolation/jitter feel are the only Stage 11.5 pieces
-still open, and both are gated on real-network playtests this rig cannot run -- card `4717d3cf`
-sits in the board's "For me" column for exactly that (TURN itself is since DECIDED deferred --
-owner ruling, see `plans/4p-online-coop.md`'s banner). N-peer online (3-4 separate MACHINES) is
-BUILT at the session layer (11.7-11.9 shipped); what remains of the epic is the lobby/browser UX
-+ capacity>2 rooms (`0257f8ba`, 11.10 -- SHIPPED) and the hardening pass (`6fb406bc`, 11.11 -- relayed-channel
-interp delay, N=4 soak, multi-process rig matrix). Open net cards in Backlog: `ac375753`
+**Remaining.** THE EPIC IS COMPLETE -- 11.7-11.11 all shipped (the hardening pass `6fb406bc`,
+11.11, closed it: relayed-channel interp delay, the measured N=4 bandwidth soak, the
+four-process rig, `bufferedAmount` back-pressure -- see "STAGE 11.11 HARDENING" below). What is
+left is REAL-WORLD, not code: the four-machine WebRTC flow has had no four-real-browsers
+playtest, and interpolation/jitter FEEL still needs real-network play (card `4717d3cf`, "For
+me"). TURN is DECIDED deferred (owner rulings 2026-08-21 + 2026-08-23: STUN-only stays, and NO
+self-hosted coturn ever -- the shared VPS has no bandwidth budget for relaying game traffic; if
+real-world lobby-formation failure reports land, the candidates are a free-tier managed TURN
+service wired into the ICE config, or accepting the failure rate with its clean error). Open
+net cards in Backlog: `ac375753`
 (two-window net pass), `25ad0659` (headless net sim + de-static refactor) and `1cd47879` (a
 single-tab live browser pass -- only its IndexOutOfRange block is net). Deferred to "Later" rather than
 stage-sequenced: `816a8286` (replicate mechanical-friend ships), `1ec29347` (mid-boss arrival
@@ -167,9 +170,9 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   RTCPeerConnection + signaling WS + the join-code overlay; two DataChannels map to the
   lanes ("s" unordered `maxRetransmits:0`, "r" reliable). A 1-byte `0x00` reliable frame
   is the JS-level pagehide "bye" (0x00 is reserved -- C# msg types start at 0x01). STUN =
-  free Google servers, NO TURN in v1 (~10-15% of NAT pairs get a clean "could not
-  connect"; the TURN go/no-go is still OPEN and needs a real-world connect-failure rate --
-  carried by card `4717d3cf` (Stage 11.5, "For me") and card `6fb406bc` (Stage 11.11)).
+  free Google servers, NO TURN (~10-15% of NAT pairs get a clean "could not connect"; the
+  go/no-go is DECIDED deferred -- owner rulings 2026-08-21 + 2026-08-23, no self-hosted
+  coturn ever; the "Remaining" paragraph at the top of this file has the standing terms).
   Nothing above the interface may assume loopback
   reliability.
 - **The transport layer is N-PEER since card `583a3ef8` (Stage 11.7) -- the SESSION above it is
@@ -222,7 +225,7 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     peers get monotone ids `peer1..`, the dialling side's one remote keeps `"peer"`.
   - Pinned by `NetWireTest` section 1b (addressed sends at N=4 -- reach EXACTLY the target, the
     others get NOTHING, the silent-drop counter arithmetic, room isolation, the impairment
-    pass-through; floor 110 in `ProbeNetWire` / `net_wire.txt` / `net_selftests.txt`) and by
+    pass-through; floor 118 since card 6fb406bc, in `ProbeNetWire` / `net_wire.txt` / `net_selftests.txt`) and by
     `test_signal.py`'s N-join/leave/fan-out/capacity cases with the old byte-equality cases kept
     verbatim as the shipped-protocol mutation controls.
 - **Impl #3 `InMemoryTransport` (card 25ad0659) is the HEADLESS one: N endpoints in ONE process,
@@ -812,7 +815,9 @@ tabs, LocalSocketNet `--net-peers`) remain how it is exercised headlessly.
   the 500 ms timeout explodes the puppet). A client's `MsgHudState` is relayed verbatim to the
   others; `EvBlast` / `EvRespawn` / `EvSlowmo` / `EvTetherBreak` are re-emitted under each
   recipient's own seq, addressed so the SOURCE never hears its own event back. The relayed
-  channel's extra interpolation hop (~150 ms budget) is card `6fb406bc`'s (11.11).
+  channel's extra interpolation hop SHIPPED with card `6fb406bc` (11.11): the relay marks its
+  frames `ShipFlagRelayed` and the receiving channel renders 150 ms behind newest instead of
+  100 -- see "STAGE 11.11 HARDENING" below.
 - **PAUSE IS A SET.** `p.RemotePaused` per channel; the scene freezes on the AGGREGATE's edges
   (`SyncRemotePauseToScene`; the scene setters self-guard). The host relays each client X the
   per-recipient aggregate `localPaused || anyOtherClientPaused(X)` as `EvPause` edges
@@ -860,14 +865,16 @@ tabs, LocalSocketNet `--net-peers`) remain how it is exercised headlessly.
   echoing to its source: 1; a global event seq: 2; the pre-card match-end policy: 8; the
   pre-review reject handling -- whole-session Stop on any inbound reject, channel-gated
   delivery -- legs 1b/8b). The
-  mid-level halves live in **`python tools/sim/net_npeer_smoke.py`** -- THREE eahl processes
-  over LocalSocketNet (`--net-peers 2`, the `net_jip_sync` rig shape: `--nettime game`,
-  `?net=jiphost` + two real `?net=jipjoin` menu-session joiners): mirror-image THREE-seat
-  rosters on all three consoles, all three worlds holding all three ships (the relay's only
-  end-to-end proof), `dupBad=0` throughout, then joiner2 killed mid-level -- host and the
-  surviving joiner free exactly its seats (`EvPeerLeft` end to end) and the match plays on with
-  no `session stop`. A smoke, not a differ -- entity-level convergence stays
-  `net_jip_sync.py`'s (2-process), and the N=4 soak is 11.11's.
+  mid-level halves live in **`python tools/sim/net_npeer_smoke.py`** -- FOUR eahl processes
+  since card `6fb406bc` (`--net-peers 3`, the full star; the `net_jip_sync` rig shape:
+  `--nettime game`, `?net=jiphost` + three real `?net=jipjoin` menu-session joiners, all
+  `&invuln` -- an input-less joiner ship dies to Level 2 mid-soak otherwise and the structural
+  check becomes a timing lottery): mirror-image FOUR-seat rosters on all four consoles, every
+  world holding all four ships (the relay's only end-to-end proof), `dupBad=0` throughout, the
+  ~30 sim-second bandwidth soak reading the measured `txBps`/`rxBps` off the host's `[net]`
+  line, then joiner2 killed mid-level -- host and BOTH surviving joiners free exactly its seats
+  (`EvPeerLeft` end to end) and the match plays on with no `session stop`. A smoke, not a
+  differ -- entity-level convergence stays `net_jip_sync.py`'s (2-process).
 
 ## LOBBY & CAPACITY -- the 3-4 player UX (card 0257f8ba, Stage 11.10, protocol v25)
 
@@ -924,7 +931,56 @@ per-peer kick. Design: `plans/4p-online-coop.md` section G.
   a local `uvicorn` signaling rig + three tabs is the recipe (JIP traps 1-5 apply), and no
   four-real-networks playtest has run yet.
 
-## Protocol, NetIds & the replicable set
+## STAGE 11.11 HARDENING (card 6fb406bc, no protocol bump -- the epic's last card)
+
+Four pieces, none changing what replicates -- only how well the star holds up at N=4.
+
+- **RELAYED-CHANNEL INTERP DELAY: `ShipFlagRelayed` (flags bit 3) + a 150 ms cushion.** A
+  client's view of ANOTHER client's ship takes the star's second hop (client -> host -> client),
+  adding ~half(RTT_A+RTT_B) plus up to one 33 ms relay re-send beat -- so the one-hop
+  `InterpDelayMs` (100 ms) left those puppets living on the extrapolation cap instead of the
+  buffer. `RelayShipSample` (the ONLY setter) marks its re-encoded frames; `HandleExtraShipFrame`
+  latches the bit onto the channel (`ShipChannel.Relayed` -- a LEVEL off the newest sample, and a
+  channel is per (peer, slot) so it never flaps) and `AdvanceShipClock` renders it
+  `RelayedInterpDelayMs` (150 ms, the 4p design doc's own budget) behind newest via
+  `InterpDelayFor`. FIXED rather than jitter-derived, so the tuned 2-peer feel cannot drift; only
+  an EXTRAS channel can be relayed (a client's primary channel is the host's own ship, one hop by
+  construction; the host receives everything direct). **No protocol bump** -- a spare bit in an
+  existing byte, degrading to the pre-card 100 ms in both directions (the `ShipFlagScriptGate`
+  precedent). Pinned by `NetWireTest`'s codec leg (direct legs pin the bit CLEAR beside set
+  primary/alive, so a mis-wired mask cannot pass) and `NetNPeerTest`'s relay-bit +
+  direct-vs-relayed cushion legs (`NetSession.FriendInterpDelayMs(slot)` is the readback seam --
+  the latch changes no pixel and moves no counter, so it is the only observable).
+- **BANDWIDTH IS MEASURED, NOT ESTIMATED.** `NetImpairment` -- the one choke point every session
+  send/receive already passes -- carries per-lane PAYLOAD byte counters
+  (`TxStreamBytes`/`TxReliableBytes`/`RxStreamBytes`/`RxReliableBytes`) plus `BroadcastFanout`,
+  which `NetSession.Update` refreshes to the up-peer count each send cadence: an unaddressed
+  send really goes out once per connected peer at the JS/socket layer (webrtc.js loops the peer
+  map, LocalSocketNet writes every client socket), so a broadcast counts payload x fanout while
+  an addressed send counts once. RX counts at ARRIVAL, before the impairment's own loss roll.
+  The `[net]` line gains **`txB= rxB=`** (cumulative totals) and **`txBps= rxBps=`** (rate over
+  the report interval; the session's first line reads 0 rather than a boot-stretch mean).
+  Neither is a health bar -- they describe the level, the population and the peer count.
+  **MEASURED at N=4 on the smoke rig (Level 2, all four ships live): host uplink ~20-29 KB/s
+  payload run to run (population-dependent), joiners ~1.2 up / ~9.5 down** -- the design doc's
+  ~33 KB/s estimate confirmed sane. Real wire cost adds SCTP/DTLS/UDP/IP framing, ~2-3x at
+  these packet sizes, so the host budget stands at roughly 60-90 KB/s up: comfortable on any
+  home connection, no pacing work needed. Pinned by `NetWireTest` section 2b (fanout x3 vs
+  addressed x1, rx-counts-before-the-loss-roll, `Close()` zeroing).
+- **`bufferedAmount` BACK-PRESSURE (webrtc.js).** SCTP queues even unreliable-channel sends, so
+  a stalled link does not DROP the stream lane -- it BACKLOGS it, and every ship/snapshot frame
+  then arrives late by whatever is queued ahead, which is strictly worse than the loss the
+  lane's consumers are all built to tolerate. `chanSend` (both `send` and `sendTo` route through
+  it) SKIPS a stream send while `ch.bufferedAmount > 16 KB` (well over a second of whole-N=4
+  payload -- a genuinely stalled link, not jitter) and counts it; the RELIABLE lane is never
+  dropped (the `INetTransport` contract) but tracks its high-water mark and names a backlog past
+  256 KB once. **`eaRtc.netStats()`** reads `{streamDropped, streamPeak, relPeak}`;
+  **`eaRtc.testBackpressure()`** is the regression guard (the `eaFps.test` idiom -- the JS layer
+  has no headless runner, so the gate is a pure function driven over fake channel objects,
+  callable from any boot; it restores the counters it touched). eahl never sees any of this
+  (its `eaRtc` is stubbed), so the Chrome pass is the only place it runs for real.
+- **THE FOUR-PROCESS RIG + the N=4 soak** -- `net_npeer_smoke.py` grew to the full star; see the
+  N-PEER SESSION section's rig bullet for the shape and the joiner-`&invuln` gotcha.
 
 - **PROTOCOL CHANGES ARE CHEAP -- never contort a design to avoid wire bytes (user ruling,
   2026-08-02).** The game is in active development and the build-hash handshake already refuses
@@ -2788,9 +2844,10 @@ per-peer kick. Design: `plans/4p-online-coop.md` section G.
   replicated (profile-local setting).
   - **The SESSION holds up to four machines since card 87242257 (Stage 11.9), and since card
     `0257f8ba` (Stage 11.10) the REAL-NETWORK path reaches it too** -- four-machine rooms in
-    the menu lobby and the public browser, JIP into slots 3/4, the lobby roster panels. What
-    remains of the epic is 11.11's hardening (relayed-channel interp delay, N=4 soak,
-    multi-process rig matrix) -- and note the real-WebRTC four-machine flow has NOT had a
+    the menu lobby and the public browser, JIP into slots 3/4, the lobby roster panels. The
+    epic closed with 11.11's hardening (card `6fb406bc`: relayed-channel interp delay, the
+    measured N=4 bandwidth soak, the four-process rig, `bufferedAmount` back-pressure) -- and
+    note the real-WebRTC four-machine flow has NOT had a
     four-real-browsers playtest yet; the rigs here cover the session and the menus, not NAT
     reality. The player dimension was already 4-wide everywhere
     (`Oracle.MaxPlayers`, `ScoreVisualiser.SlotCount`, the slot-keyed ship stream,

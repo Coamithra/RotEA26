@@ -54,6 +54,9 @@ namespace EvilAliensWeb.Compat.Net
             sb.Append(" 2. NetImpairment composed over an endpoint\n");
             SectionImpairment(Check);
 
+            sb.Append(" 2b. bandwidth accounting (card 6fb406bc)\n");
+            SectionBandwidth(Check);
+
             sb.Append(" 3. codec round trips through the wire\n");
             SectionCodecs(Check);
 
@@ -434,6 +437,59 @@ namespace EvilAliensWeb.Compat.Net
             check("lag=200 preserves per-lane order", lagOrder);
         }
 
+        // ---- 2b. bandwidth accounting (card 6fb406bc, Stage 11.11) ------------------------
+
+        private static void SectionBandwidth(Action<string, bool> check)
+        {
+            // The byte counters live on the impairment decorator because it is the one choke
+            // point every session send/receive passes. The [net] line's txB/rxB/txBps figures
+            // are these totals, so a slip here is a wrong measurement published as a measured
+            // fact -- which is exactly what the counters exist to prevent.
+            NetWire wire = new NetWire(2);
+            NetImpairment imp = new NetImpairment(wire[0], 0f, 0f, 0f);
+            wire[0].Open("room");
+            wire[1].Open("room");
+
+            imp.SendStream(new byte[10]);
+            check("a broadcast at fanout 1 counts its payload once", imp.TxStreamBytes == 10);
+            // The fan-out rule: an unaddressed send really goes out once per connected peer at
+            // the JS/socket layer, so the counter multiplies -- that multiplication IS the
+            // difference between the per-client figure and the host's uplink at N=4.
+            imp.BroadcastFanout = 3;
+            imp.SendStream(new byte[10]);
+            check("a broadcast at fanout 3 counts 3x", imp.TxStreamBytes == 40);
+            imp.SendStreamTo(wire[1].Id, new byte[7]);
+            check("an ADDRESSED send counts once even at fanout 3", imp.TxStreamBytes == 47);
+            imp.SendReliable(new byte[5]);
+            imp.SendReliableTo(wire[1].Id, new byte[4]);
+            check("the reliable lane counts separately (broadcast x3 + addressed x1)",
+                imp.TxReliableBytes == 19 && imp.TxStreamBytes == 47);
+
+            // Drain the TX legs' queued packets BEFORE the RX half subscribes, or they land in
+            // its counters (delivery is on Pump, and a subscription made between send and Pump
+            // still hears the packet).
+            wire.Pump();
+
+            // RX counts at ARRIVAL, before the impairment's own loss roll: the bytes crossed
+            // the wire whether or not the wrapper then eats the packet. A counter placed after
+            // the roll would report an impaired run as cheaper than the identical clean one.
+            NetImpairment rxImp = new NetImpairment(wire[1], 0f, 100f, 0f);
+            Recorder rxRec = new Recorder(rxImp);
+            wire[0].SendStream(new byte[8]);
+            wire[0].SendReliable(new byte[6]);
+            wire.Pump();
+            check("rx stream bytes count even when loss=100 then drops the packet",
+                rxImp.RxStreamBytes == 8 && rxImp.Dropped == 1 && rxRec.Count == 1);
+            check("rx reliable bytes count on their own lane", rxImp.RxReliableBytes == 6);
+
+            // Close() is session teardown: a fresh session must start its measurement at zero,
+            // and the fanout must not leak into the next pairing's 2-peer accounting.
+            imp.Close();
+            check("Close() zeroes the counters and resets the fanout",
+                imp.TxStreamBytes == 0 && imp.TxReliableBytes == 0
+                && imp.RxStreamBytes == 0 && imp.RxReliableBytes == 0 && imp.BroadcastFanout == 1);
+        }
+
         // ---- 3. codec round trips THROUGH the wire ----------------------------------------
 
         private static void SectionCodecs(Action<string, bool> check)
@@ -535,9 +591,22 @@ namespace EvilAliensWeb.Compat.Net
                     && Near(fs.Vel.X, -0.25f) && Near(fs.Vel.Y, 0.75f)
                     && Near(fs.Aim, -2.5f) && fs.Alive && fs.ShotCount == 137
                     && fsps == 5 && Near(fblife, 300f)
-                    && fs.AsplodeBits == 0x81 && fs.BounceBits == 0x42;
+                    && fs.AsplodeBits == 0x81 && fs.BounceBits == 0x42
+                    && !fs.Relayed;
             }
-            check("an extra-ship frame round-trips every field (primary flag clear)", friendOk);
+            check("an extra-ship frame round-trips every field (primary flag clear, DIRECT)", friendOk);
+
+            // Card 6fb406bc's relayed bit -- the host hub's re-encode shape: primary CLEAR,
+            // relayed SET (the two direct legs above pin it CLEAR beside a set primary and a
+            // set alive, so a bit wired to the wrong mask cannot pass all three).
+            byte[] relayed = Round(NetProtocol.EncodeShipState(
+                2, primary: false, 5, 100u, Vector2.One, Vector2.Zero, 0f, alive: true,
+                shotCount: 9, shotsPerSec: 8, bulletLife: 450f,
+                scriptGate: false, asplodeBits: 0, bounceBits: 0, relayed: true), reliable: false);
+            check("a relayed frame carries ShipFlagRelayed independently of primary/alive",
+                relayed != null && NetProtocol.TryDecodeShipState(relayed, out _, out bool rPrimary,
+                    out _, out ShipSample rSample, out _, out _)
+                && rSample.Relayed && !rPrimary && rSample.Alive);
 
             // MsgHudState: variable-length, two slots, and a combo past 255 -- the value whose
             // width is load-bearing because the host SPENDS it (AwardScoreToAll -> comboModify).

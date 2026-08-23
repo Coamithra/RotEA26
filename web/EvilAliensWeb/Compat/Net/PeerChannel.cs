@@ -128,6 +128,13 @@ namespace EvilAliensWeb.Compat.Net
         // ("infinitely stale") and must not be consulted.
         public long LastRxAt;
 
+        // Extras only (card 6fb406bc): the newest sample's ShipFlagRelayed -- this channel's
+        // frames took the host relay's second hop, so its render clock runs
+        // NetSession.RelayedInterpDelayMs behind newest instead of InterpDelayMs. Latched in
+        // HandleExtraShipFrame; the primary channel is one hop by construction and never
+        // consults it.
+        public bool Relayed;
+
         // Primary only: the alive LEVEL off the newest in-order sample (was remoteAlive), and
         // whether the peer has reported alive=true while we held THIS puppet -- only then does
         // losing alive mean a death worth showing (card b4d0ba1d).

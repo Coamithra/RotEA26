@@ -79,6 +79,34 @@ namespace EvilAliensWeb.Compat.Net
 
         public int HeldCount => streamHeld.Count + reliableHeld.Count;
 
+        // ---- bandwidth accounting (card 6fb406bc, Stage 11.11) --------------------------------
+        //
+        // PAYLOAD bytes per lane, counted here because this decorator is the one choke point
+        // every session send and receive already passes through (NetSession.StartWith always
+        // wraps its transport in one). SCTP/DTLS/UDP/IP framing is invisible from C# and stays
+        // the documented ~2-3x multiplier at these packet sizes; what these counters answer is
+        // the design doc's "measure the N=4 host uplink" -- payload, self-reported, on any
+        // transport.
+        //
+        // An UNADDRESSED send is a fan-out: the JS/socket layer really writes it once per
+        // connected peer (webrtc.js `send` loops the peer map; LocalSocketNet writes every
+        // client socket), so it counts payload x BroadcastFanout -- which NetSession refreshes
+        // to its up-peer count each send cadence. Addressed sends count once. RX counts at
+        // ARRIVAL, before this wrapper's own loss roll -- the bytes crossed the wire whether or
+        // not the impairment then eats the packet (Dropped reports that separately).
+        //
+        // CAVEAT: TX counts what the session OFFERED, one layer above webrtc.js's
+        // bufferedAmount back-pressure gate -- on a genuinely stalled WebRTC link the stream
+        // frames chanSend skips are still counted here, so txB over-reports by exactly
+        // eaRtc.netStats().streamDropped frames' worth. On a healthy link (and on every eahl
+        // transport, which has no such gate) the two agree; read the JS drop counter beside
+        // txBps before quoting an uplink figure from a degraded run.
+        public long TxStreamBytes { get; private set; }
+        public long TxReliableBytes { get; private set; }
+        public long RxStreamBytes { get; private set; }
+        public long RxReliableBytes { get; private set; }
+        public int BroadcastFanout = 1;
+
         // Public because the "[net]" line reports these: logging the flags directly would be
         // only accidentally correct, since the wrapper re-clamps and can be constructed with
         // explicit overrides. A self-describing log has to quote what is actually in force.
@@ -115,23 +143,28 @@ namespace EvilAliensWeb.Compat.Net
 
         public void SendStream(byte[] payload)
         {
+            TxStreamBytes += (long)payload.Length * Math.Max(1, BroadcastFanout);
             inner.SendStream(payload);
         }
 
         public void SendReliable(byte[] payload)
         {
+            TxReliableBytes += (long)payload.Length * Math.Max(1, BroadcastFanout);
             inner.SendReliable(payload);
         }
 
         // Addressed sends forward verbatim like the unaddressed pair -- impairment is RX-ONLY
-        // (see the header), so the decorator has nothing to do on any TX path.
+        // (see the header), so beyond the byte accounting the decorator has nothing to do on
+        // any TX path.
         public void SendStreamTo(string peerId, byte[] payload)
         {
+            TxStreamBytes += payload.Length;
             inner.SendStreamTo(peerId, payload);
         }
 
         public void SendReliableTo(string peerId, byte[] payload)
         {
+            TxReliableBytes += payload.Length;
             inner.SendReliableTo(peerId, payload);
         }
 
@@ -146,6 +179,11 @@ namespace EvilAliensWeb.Compat.Net
             lastReliableRelease = 0;
             arrivalCounter = 0;
             Dropped = 0;
+            TxStreamBytes = 0;
+            TxReliableBytes = 0;
+            RxStreamBytes = 0;
+            RxReliableBytes = 0;
+            BroadcastFanout = 1;
             inner.Close();
         }
 
@@ -158,6 +196,14 @@ namespace EvilAliensWeb.Compat.Net
         // that had to spend 500ms of real time per sample could never run enough of them.
         internal void Receive(byte[] payload, bool reliable, string from, long now)
         {
+            if (reliable)
+            {
+                RxReliableBytes += payload.Length;
+            }
+            else
+            {
+                RxStreamBytes += payload.Length;
+            }
             float lag = LagMs;
             float loss = LossPct;
             float jitter = JitterMs;

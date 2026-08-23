@@ -156,6 +156,14 @@ namespace EvilAliensWeb.Compat.Net
         // graceful-degradation path to reason about in either direction.
         public const byte ProtocolVersion = 25;
         public const float InterpDelayMs = 100f;
+        // Card 6fb406bc (Stage 11.11): the cushion for a channel whose frames take the star's
+        // SECOND hop (client -> host -> client, ShipFlagRelayed). The relay adds
+        // ~half(RTT_A+RTT_B) plus up to one 33 ms re-send beat of arrival jitter on top of the
+        // one-hop path the 100 ms above was tuned for, so a relayed channel rendered at 100 ms
+        // lives on the extrapolation cap instead of the buffer. 150 ms is the 4p design doc's
+        // own budget ("~150ms, or derived from observed arrival jitter"); fixed rather than
+        // jitter-derived so the already-tuned 2-peer feel cannot drift.
+        public const float RelayedInterpDelayMs = 150f;
 
         // ~30 Hz ship stream. INTERNAL because NetFireTest scripts its packet cadence against it.
         internal const long StreamIntervalMs = 33;
@@ -515,6 +523,13 @@ namespace EvilAliensWeb.Compat.Net
         private static long lastStreamTx;
         private static long lastSnapshotTx;
         private static long lastScoreSyncTx;
+        // Bandwidth rate baseline (card 6fb406bc): the impairment wrapper's cumulative byte
+        // counters as of the previous [net] report, so the line can print a per-interval Bps
+        // beside the totals. -1 = no report yet this session (the first line prints rate 0
+        // rather than averaging over the whole boot-to-first-report stretch); each rate gates
+        // on ITS OWN sentinel so neither can quietly ride the other's lifecycle.
+        private static long lastReportTxBytes = -1;
+        private static long lastReportRxBytes = -1;
         private static Vector2 lastTxPos = new Vector2(400f, 300f);
         private static float lastTxAim = 4.712389f;
         // THE COUNT ON THE WIRE BELONGS TO THE SLOT, NOT TO THE SHIP, and that distinction is the
@@ -1080,6 +1095,8 @@ namespace EvilAliensWeb.Compat.Net
             lastStreamTx = 0;
             lastSnapshotTx = 0;
             lastScoreSyncTx = 0;
+            lastReportTxBytes = -1;
+            lastReportRxBytes = -1;
             lastHudTx = 0;
             lastHelloTx = 0;
             lastUpdateAt = 0;
@@ -1312,6 +1329,13 @@ namespace EvilAliensWeb.Compat.Net
                     return; // the loss above ended the session
                 }
             }
+            // Bandwidth accounting (card 6fb406bc): an unaddressed send really goes out once
+            // per connected peer at the JS/socket layer, so the byte counters multiply
+            // broadcasts by the live up-peer count. Refreshed every tick, UNCONDITIONALLY --
+            // inside the AnyPeerUp() block it went stale the moment the last peer left, and the
+            // initiate hello (a broadcast sent precisely while no peer is up) was then counted
+            // at the departed roster's fanout forever (review finding).
+            impairment.BroadcastFanout = UpPeerCount();
             if (AnyPeerUp())
             {
                 if (now - lastStreamTx >= StreamIntervalMs)
@@ -1362,7 +1386,19 @@ namespace EvilAliensWeb.Compat.Net
             }
             if (now - lastMetricsAt >= MetricsIntervalMs)
             {
+                long sinceMs = now - lastMetricsAt;
                 lastMetricsAt = now;
+                // Bandwidth (card 6fb406bc): totals off the impairment wrapper (the one choke
+                // point every session byte passes), rate over the interval since the LAST report
+                // -- the first report of a session prints 0 Bps rather than a boot-stretch mean.
+                metrics.TxBytes = impairment.TxStreamBytes + impairment.TxReliableBytes;
+                metrics.RxBytes = impairment.RxStreamBytes + impairment.RxReliableBytes;
+                metrics.TxBps = lastReportTxBytes >= 0 && sinceMs > 0
+                    ? (metrics.TxBytes - lastReportTxBytes) * 1000f / sinceMs : 0f;
+                metrics.RxBps = lastReportRxBytes >= 0 && sinceMs > 0
+                    ? (metrics.RxBytes - lastReportRxBytes) * 1000f / sinceMs : 0f;
+                lastReportTxBytes = metrics.TxBytes;
+                lastReportRxBytes = metrics.RxBytes;
                 metrics.ImpDropped = impairment.Dropped;
                 metrics.ImpHeld = impairment.HeldCount;
                 metrics.ImpLagMs = impairment.LagMs;
@@ -5482,7 +5518,7 @@ namespace EvilAliensWeb.Compat.Net
                 ch.RenderMs = double.NaN;
                 return;
             }
-            double target = ch.Buffer.NewestMs - InterpDelayMs;
+            double target = ch.Buffer.NewestMs - InterpDelayFor(ch);
             if (double.IsNaN(ch.RenderMs))
             {
                 ch.RenderMs = target;
@@ -5498,6 +5534,13 @@ namespace EvilAliensWeb.Compat.Net
             {
                 ch.RenderMs += err * 0.1;
             }
+        }
+
+        // Which cushion does this channel render behind? Internal so NetNPeerTest can assert the
+        // relayed budget without restating the constant beside the code it pins.
+        internal static float InterpDelayFor(ShipChannel ch)
+        {
+            return ch.Relayed ? RelayedInterpDelayMs : InterpDelayMs;
         }
 
         // Called from PlayerShip.Update for ControlDevice.Remote ships: position from the

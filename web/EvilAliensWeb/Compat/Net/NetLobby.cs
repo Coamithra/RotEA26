@@ -39,7 +39,10 @@ namespace EvilAliensWeb.Compat.Net
         public static void HostGame(Game g)
         {
             Begin(g, host: true);
-            WebRtcInterop.Host(DebugFlags.NetSignal);
+            // Card 0257f8ba: the room holds up to four MACHINES (the session layer has been
+            // N-peer since card 87242257), so friends keep arriving on the same code until
+            // every seat is taken -- launch is no longer implicit on the first pairing.
+            WebRtcInterop.Host(DebugFlags.NetSignal, EvilAliens.Oracle.MaxPlayers);
             Phase = LobbyPhase.Contacting;
         }
 
@@ -174,6 +177,85 @@ namespace EvilAliensWeb.Compat.Net
         {
             Phase = LobbyPhase.Idle;
             RoomCode = "";
+        }
+
+        // ---- lobby roster text (card 0257f8ba) ------------------------------------------
+
+        // PURE, deliberately -- the panels these feed are ordinary re-texted ConfirmationMenus,
+        // so the only thing that can rot silently is the TEXT decision itself: which seat reads
+        // "you", whether an open seat is named, when the host is told it can start. logic_probe's
+        // ProbeLobbyText sweeps these with no Game, no session and no browser; MenuScene only
+        // passes live values in (the host derives the mask from its own channels, a client reads
+        // the EvLobbyRoster beat).
+
+        // One line per roster seat. `mask` bit i = oracle slot i is taken (the host is always
+        // slot 0 -- NetSession.HostPrimarySlot); `youSlot` is the reader's own seat.
+        internal static string RosterLines(int mask, int youSlot)
+        {
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            for (int i = 0; i < EvilAliens.Oracle.MaxPlayers; i++)
+            {
+                if (i > 0)
+                {
+                    sb.Append('\n');
+                }
+                sb.Append("Player ").Append(i + 1).Append(":  ");
+                if ((mask & (1 << i)) == 0)
+                {
+                    sb.Append("open");
+                }
+                else if (i == youSlot)
+                {
+                    sb.Append(i == 0 ? "you (host)" : "you");
+                }
+                else
+                {
+                    sb.Append(i == 0 ? "host" : "joined");
+                }
+            }
+            return sb.ToString();
+        }
+
+        internal static int CountSeats(int mask)
+        {
+            int n = 0;
+            for (int i = 0; i < EvilAliens.Oracle.MaxPlayers; i++)
+            {
+                if ((mask & (1 << i)) != 0)
+                {
+                    n++;
+                }
+            }
+            return n;
+        }
+
+        // The HOST's lobby panel: room code + live roster + what to do next. The panel's two
+        // entries (Start Game / Cancel) are MenuScene's; this is only the message above them.
+        internal static string HostLobbyText(string code, int mask)
+        {
+            return "Room code:  " + code + "\n\n"
+                + RosterLines(mask, youSlot: 0) + "\n\n"
+                + (CountSeats(mask) >= 2
+                    ? "Start when your crew is aboard!"
+                    : "Tell your friends!\nWaiting for players to join...");
+        }
+
+        // The JOIN side's waiting panel: who else is already in. `mask` < 0 means the roster
+        // beat has not arrived yet (a lost beat degrades to the pre-card text, never to a lie).
+        // Slot 0 is always the HOST's seat, so a client whose own grant has not settled (its
+        // LocalPrimarySlot still reads the default 0) must not be marked "you" there.
+        internal static string ClientLobbyText(int mask, int youSlot)
+        {
+            if (mask < 0)
+            {
+                return "Connected!\nThe host is choosing a mission...";
+            }
+            if (youSlot <= 0 || youSlot >= EvilAliens.Oracle.MaxPlayers)
+            {
+                youSlot = -1;
+            }
+            return "Connected!\n\n" + RosterLines(mask, youSlot)
+                + "\n\nWaiting for the host to start...";
         }
 
         private static string FailureText(string reason)

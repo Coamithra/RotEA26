@@ -1,0 +1,66 @@
+# PROBE: the host LOBBY PANEL (card 0257f8ba) -- roster text, the Start gate, and the cancel
+#        path, driven offline through the debug seam.
+#
+# PINS:   the menu-side wiring of the four-player lobby. The TEXT decision itself (which seat
+#         reads "you", open seats named, when the host is told to start) is swept as pure data
+#         by logic_probe's ProbeLobbyText; what nothing there can see is whether MenuScene
+#         actually mounts the panel as the ONLY live menu (MenuSub1 has no modality -- a main
+#         menu left live underneath takes every keypress too, the card-72143c11 failure), whether
+#         Start REFUSES with nobody aboard, and whether Esc walks back to the Host/Join menu.
+#
+# WHY THE SEAM (eval NetLobbyShow <mask>): the panel's real trigger is the first WebRTC peer
+# pairing -- eaRtc is stubbed headlessly, so no phase can ever fire. The seam supplies exactly
+# that precondition (netMode + panel up + a debug roster mask); everything the probe then drives
+# -- the census, ShowNetLobby/HideNetLobby, the Start gate, netLobby_CancelSelected -- is the
+# real code. The Start REFUSAL leg leans on the same offline fact: with no session,
+# NetSession.IsHost is false, which is the identical gate a lobby whose last guest just left
+# hits (PeerUp false), so the refusal under test is the production branch.
+#
+# FAILURE MEANS: read which line went red.
+#   * the [netlobby] roster line     -> MenuScene's text builder no longer feeds the mask/code
+#                                       through NetLobby.HostLobbyText (the pure sweep would
+#                                       still be green -- this is the wiring).
+#   * `live=NetLobbyMenu` missing    -> the panel did not mount, or mounted OVER a live menu
+#                                       (count=2), which is the two-menus-take-input bug.
+#   * the post-Enter census red      -> Start launched with nobody aboard -- the gate in
+#                                       netLobby_StartSelected is gone.
+#   * the post-Esc census red        -> the cancel path no longer returns to Host/Join.
+#
+# MUTATION-TESTED (both re-run through this file): removing netLobby_StartSelected's
+# no-session/no-peer gate fails the post-Enter census leg alone (the panel gives way to
+# netPickMenu); dropping the debug-mask pass-through in HostLobbyPanelText fails the
+# [netlobby] roster leg alone (every seat renders as taken off the live -1 mask).
+#
+# eahl: --flags "?menu&noattract"
+
+# Settle: menu warm + the auto-pressed Start landing on the main menu.
+step 400 nodraw
+mark
+
+# The main menu is what the seam must replace.
+eval MenuCensus
+expect \[menucensus\] count=1 live=MenuSubWithSkull
+
+# Panel up, host + slot-1 guest aboard, seats 3/4 open.
+eval NetLobbyShow 3
+expect \[netlobby\] Room code:  DEBUG\|\|Player 1:  you \(host\)\|Player 2:  joined\|Player 3:  open\|Player 4:  open\|\|Start when your crew is aboard!
+step 5 nodraw
+eval MenuCensus
+expect \[menucensus\] count=1 live=NetLobbyMenu
+
+mark
+# Entry 0 is Start Game. With no session it must REFUSE -- the same gate a lobby whose last
+# guest just left relies on -- so the panel stays the one live menu.
+eval Press enter 1
+step 10 nodraw
+eval MenuCensus
+expect \[menucensus\] count=1 live=NetLobbyMenu
+
+mark
+# Esc = the Cancel path: back to the Online Co-op Host/Join menu (a plain MenuSub1), panel gone.
+eval Press esc 1
+step 10 nodraw
+eval MenuCensus
+expect \[menucensus\] count=1 live=MenuSub1
+
+quit

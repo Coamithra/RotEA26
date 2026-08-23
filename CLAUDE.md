@@ -222,14 +222,26 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   `?netfakepeer=<s>` overrides this tab's peer-identity token and is **required** for any
   two-tab kick+block test (both dev tabs share one `localStorage`, so they otherwise present
   the same id and blocking the joiner blocks yourself). Console: `eaKickTest()`.
-- **Host pause menu -- "Online Play"** (card 0d6ffe70): the host's own way to reach the kick
-  above (`?netkickshot`'s menu only ever appears under a REMOTE pause) plus an open/close-room
-  toggle. No new flag: `?netfakelisted=<code>` reaches the room half (it now sets `CouldList`
-  and honours `Settings.AllowOnlineJoins`, so the toggle is live), and the kick half is a
-  scripted-peer session. Console: **`eaHostMenu()`** dumps the LIVE decision (session/host/peer/
-  couldList/allowJoins -> which rows), **`.test()`** sweeps the predicate over all 32 states
-  (also `logic_probe`'s `ProbeHostMenu`), **`.live()`** drives it over a real session and kicks.
+- **Host pause menu -- "Online Play"** (card 0d6ffe70; per-peer rows card 0257f8ba): the host's
+  own way to reach the kick above (`?netkickshot`'s menu only ever appears under a REMOTE
+  pause) plus an open/close-room toggle. Since 0257f8ba the kick rows are PER PEER ("Kick
+  Player 2") and the room toggle also appears MID-SESSION (a host session with a free seat is
+  listable now). No new flag: `?netfakelisted=<code>` reaches the room half (it sets
+  `CouldList` and honours `Settings.AllowOnlineJoins`, so the toggle is live), and the kick
+  half is a scripted-peer session. Console: **`eaHostMenu()`** dumps the LIVE decision
+  (session/host/peer/peerSlots/couldList/allowJoins -> which rows), **`.test()`** sweeps the
+  predicate over the 32 boolean states x the seat masks (also `logic_probe`'s `ProbeHostMenu`),
+  **`.live()`** drives it over a real session and kicks by seat.
   Pinned by `tools/headless/probes/net_host_menu.txt` + `net_host_menu_absent.txt`.
+- **Online co-op LOBBY for 3-4 machines** (card 0257f8ba): the host waits in a lobby panel
+  (room code + live per-seat roster + Start Game) instead of launching on the first pairing,
+  the join side's panel shows who is in, and rooms hold four machines (lobby + listing alike;
+  a mid-level game with a free seat stays joinable from the browser AND by code). Console:
+  **`eaNetLobbyShow(mask)`** parks the host lobby panel offline with a debug roster -- its real
+  trigger is a WebRTC pairing, so this is the screenshot/census rig -- and the text decision is
+  pure (`NetLobby.HostLobbyText`/`ClientLobbyText`, swept by `logic_probe`'s `ProbeLobbyText`).
+  Pinned by `tools/headless/probes/net_lobby_panel.txt`; details: net CLAUDE.md ->
+  "LOBBY & CAPACITY".
 - **Net UI screenshot/probe seams** (card group `fix/net-ui-smalls`): **`?netfakelisted=<code>`**
   reports the game as publicly LISTED under that code with **no socket and no server**, so the
   pause menu's "Listed online -- room XYZAB" line and `ScoreVisualiser`'s corner beacon can be

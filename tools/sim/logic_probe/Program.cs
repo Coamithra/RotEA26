@@ -214,6 +214,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeLobbyText(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         rc = ProbeSpawnDirection(asm);
         if (rc != 0)
         {
@@ -3166,11 +3172,84 @@ internal static class Program
             "1. the exhaustive state sweep",
             "2. entry 0 is never destructive",
             "3. Available agrees with Entries",
-            "4. the two shapes never coexist",
+            "4. the kick rows cover the mask exactly",
             "5. non-degeneracy + the pre-card control",
             "6. labels",
         };
-        return RunBrowserSuite(asm, "EvilAliensWeb.Compat.Net.NetHostMenuTest", sections, minAssertions: 44, card: "0d6ffe70");
+        // The sweep grew with card 0257f8ba: 16 no-session states + 16 session states x the 4
+        // seat masks, plus the structural sections. Floor set just under the current 100.
+        return RunBrowserSuite(asm, "EvilAliensWeb.Compat.Net.NetHostMenuTest", sections, minAssertions: 95, card: "0d6ffe70");
+    }
+
+    // Card 0257f8ba -- the lobby panels' TEXT decision. The panels themselves are re-texted
+    // ConfirmationMenus, so which seat reads "you", whether an open seat is named, and when the
+    // host is told it can start are the whole feature surface a probe can reach -- and every one
+    // of them would need a real multi-peer WebRTC lobby to reach live. Pure functions on
+    // NetLobby, swept here with no Game, no session and no browser.
+    private static int ProbeLobbyText(Assembly asm)
+    {
+        Type lobby = asm.GetType("EvilAliensWeb.Compat.Net.NetLobby", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo roster = lobby.GetMethod("RosterLines", anyStatic);
+        MethodInfo host = lobby.GetMethod("HostLobbyText", anyStatic);
+        MethodInfo client = lobby.GetMethod("ClientLobbyText", anyStatic);
+        MethodInfo count = lobby.GetMethod("CountSeats", anyStatic);
+        if (roster == null || host == null || client == null || count == null)
+        {
+            Console.WriteLine("FAIL: could not reflect the NetLobby text helpers -- renamed or moved?");
+            return 2;
+        }
+
+        Console.WriteLine("[logic_probe] NetLobby lobby-panel text (card 0257f8ba)");
+
+        Func<int, int, string> lines = (mask, you) => (string)roster.Invoke(null, new object[] { mask, you });
+        Func<string, int, string> hostText = (code, mask) => (string)host.Invoke(null, new object[] { code, mask });
+        Func<int, int, string> clientText = (mask, you) => (string)client.Invoke(null, new object[] { mask, you });
+        Func<int, int> seats = mask => (int)count.Invoke(null, new object[] { mask });
+
+        // The host's own view of a fresh lobby: itself + the classic slot-1 guest.
+        string h = hostText("ABCDE", 0b0011);
+        Check("the host panel carries the room code", h.Contains("Room code:  ABCDE"), h);
+        Check("...marks seat 1 as themselves", h.Contains("Player 1:  you (host)"), h);
+        Check("...marks seat 2 as joined", h.Contains("Player 2:  joined"), h);
+        Check("...names the empty seats as open", h.Contains("Player 3:  open") && h.Contains("Player 4:  open"), h);
+        Check("...and with a guest aboard says to start when ready", h.Contains("Start when your crew is aboard!"), h);
+
+        // A host alone is told to recruit, not to start -- Start with nobody aboard would launch
+        // a solo game out of a co-op lobby.
+        string alone = hostText("ABCDE", 0b0001);
+        Check("a host alone is still recruiting", alone.Contains("Waiting for players to join...")
+            && !alone.Contains("Start when"), alone);
+
+        // The join side: slot 2's view of a 3-player room.
+        string c = clientText(0b0111, 2);
+        Check("the client panel marks the host's seat", c.Contains("Player 1:  host"), c);
+        Check("...its own seat as you", c.Contains("Player 3:  you"), c);
+        Check("...its fellow guest as joined", c.Contains("Player 2:  joined"), c);
+        Check("...and waits for the host", c.Contains("Waiting for the host to start..."), c);
+
+        // No roster beat yet (-1) degrades to the pre-card wording -- never an invented roster.
+        string noBeat = clientText(-1, 1);
+        Check("no beat yet degrades to the pre-card text", noBeat == "Connected!\nThe host is choosing a mission...", noBeat);
+        Check("...and names no seats", !noBeat.Contains("Player 1"), noBeat);
+
+        // A client whose own grant has not settled reads the default slot 0, which is ALWAYS the
+        // host's chair -- it must not be marked "you".
+        string unsettled = clientText(0b0011, 0);
+        Check("an unsettled client never claims the host's seat", unsettled.Contains("Player 1:  host")
+            && !unsettled.Contains("you"), unsettled);
+
+        // The seat counter the start hint keys off.
+        Check("CountSeats counts bits over the 4 seats", seats(0) == 0 && seats(0b0001) == 1
+            && seats(0b1111) == 4 && seats(0b0101) == 2, null);
+
+        // NON-DEGENERACY: every seat state renders differently, so a copy-paste of one branch
+        // cannot pass the containment checks above by rendering everything the same.
+        string a = lines(0b0011, 0);
+        string b = lines(0b0011, -1);
+        Check("the 'you' marking really varies with youSlot", a != b, a + " vs " + b);
+
+        return 0;
     }
 
     // Card b4a9fe60 -- the angle a ship flies IN on and, at level end, flies OUT on.

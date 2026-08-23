@@ -142,6 +142,18 @@ namespace EvilAliensWeb.Compat.Net
         // that is also what a wifi hiccup looks like.
         public const byte EvPeerLeft = 27;
 
+        // Card 0257f8ba (Stage 11.10, protocol v25), HOST -> clients, reliable: which roster
+        // seats are taken RIGHT NOW, as one slot-mask byte (EncodeByteEvent; bit i = oracle
+        // slot i). The menu lobby's waiting panel is the consumer: a client sitting on
+        // "waiting for the host to start" cannot see its fellow joiners any other way -- their
+        // grants are host-side, nothing relays ship frames while no ship exists, and the
+        // oracle at the menu is local bookkeeping. Sent on every change of the mask and
+        // addressed to each newcomer at PeerConnected, so a join, a departure and a couch seat
+        // all reach every waiting screen. Purely presentational: the receiver stores the byte
+        // and draws it (NetLobby.RosterLines); nothing gameplay-visible reads it, so a lost or
+        // ignored beat costs a stale line, never a desync.
+        public const byte EvLobbyRoster = 28;
+
         // "No slot" -- a refused join grant. 0xFF can never be a real slot (Oracle.MaxPlayers is 4)
         // and matches KillerNone's convention.
         public const byte SlotNone = 0xFF;

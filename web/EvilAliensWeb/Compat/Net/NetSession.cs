@@ -142,13 +142,19 @@ namespace EvilAliensWeb.Compat.Net
         // -- but the handshake refuses a mismatched pairing anyway (the NOTE below). The same
         // card makes the host->client EvPause carry a per-recipient AGGREGATE ("someone besides
         // you is paused") rather than the host's own pause alone; payload unchanged.
+        // v25 (card 0257f8ba, Stage 11.10): EvLobbyRoster (event 28) -- the host tells its lobby
+        // clients which roster seats are taken, so the waiting panel can show who is in. New
+        // event type only (an older peer would merely show no roster line), so like v14/v15/v17
+        // the bump is the convention rather than a forced incompatibility. The same card raises
+        // the REAL rooms to 4 machines (menu lobby + listed/JIP -- webrtc.js/server side, no wire
+        // layout involved), which is what makes the 11.9 N-peer session reachable by a player.
         // NOTE, because the v18/v21 notes above can read otherwise: no peer ever sees a version it
         // does not itself speak. OnHandshake refuses `ver != ProtocolVersion` outright with
         // RejectVersion before a single snapshot is exchanged, and the build-hash equality check
         // right behind it would refuse anyway. So a bump here is BOOKKEEPING -- it names the wire
         // layout for the next reader; it is not a compatibility measure, and there is no
         // graceful-degradation path to reason about in either direction.
-        public const byte ProtocolVersion = 24;
+        public const byte ProtocolVersion = 25;
         public const float InterpDelayMs = 100f;
         // Card 6fb406bc (Stage 11.11): the cushion for a channel whose frames take the star's
         // SECOND hop (client -> host -> client, ShipFlagRelayed). The relay adds
@@ -656,6 +662,19 @@ namespace EvilAliensWeb.Compat.Net
         private static string pendingStopNotice;
         private static string pendingStopReason = "pairing rejected";
         // (The remote-pause kick-offer clock, card 0b8a300b, lives on the PeerChannel.)
+        // The room string the session opened on -- for the menu lobby that is the 5-char room
+        // code, which NetListing needs when it ADOPTS the session's already-open signaling room
+        // as a public listing (card 0257f8ba). Cleared with the session.
+        private static string sessionRoom = "";
+        // Whether the session's transport is the real WebRTC one. A stranger from the public
+        // browser can only ever arrive THROUGH eaRtc, so a session on any other transport must
+        // never let NetListing advertise while it is up -- the stranger's frames would land on a
+        // transport the session is not reading (card 0257f8ba).
+        private static bool sessionRtc;
+        // Card 0257f8ba, the lobby roster beat (EvLobbyRoster). Client: the last mask received
+        // (-1 = none yet). Host: the last mask broadcast, so the beat is edge-triggered.
+        private static int lobbyRosterMaskRx = -1;
+        private static int lobbyRosterMaskTx = -1;
         private static bool sceneWasUp;       // GameScene edge detection (EvReady / match end)
         private static bool pendingLaunchHas;
         // Validated at the decode boundary, so these hold real enum members and never a raw
@@ -938,6 +957,8 @@ namespace EvilAliensWeb.Compat.Net
             isHost = host;
             menuSession = asMenuSession;
             listedSession = asListedSession;
+            sessionRoom = room ?? "";
+            sessionRtc = t is WebRtcTransport;
             // Both fingerprints arrive ALREADY resolved against ?netfakehash / ?netfakepeer --
             // the resolution expressions moved verbatim into ServiceHelperNetHost (step 2a), so
             // a scenario supplies two strings instead of reaching into JS interop.
@@ -1084,6 +1105,10 @@ namespace EvilAliensWeb.Compat.Net
             recentDeathOrder.Clear();
             pendingLaunchHas = false;
             listedSession = false;
+            sessionRoom = "";
+            sessionRtc = false;
+            lobbyRosterMaskRx = -1;
+            lobbyRosterMaskTx = -1;
             // Card 3b6c12e7. Both are per-MATCH latches; a session that ends outright must not
             // leave the menus about to enter a lobby for a pairing that no longer exists.
             levelFinishedCleanly = false;
@@ -1140,6 +1165,60 @@ namespace EvilAliensWeb.Compat.Net
             }
             SendEventToSessionPeers(seq => NetProtocol.EncodeLaunchEvent(seq, (byte)level, (byte)difficulty));
             Console.WriteLine("[net] tx launch level=" + level + " difficulty=" + difficulty);
+        }
+
+        // ---- lobby roster + capacity seams (card 0257f8ba) ------------------------------
+
+        // The room string this session opened on. For a menu-lobby session it is the 5-char
+        // room code; NetListing reads it when it adopts the session's signaling room as a
+        // public listing (there is no 'code' phase to learn it from on that path).
+        internal static string SessionRoomCode => Active ? sessionRoom : "";
+
+        // Can a stranger from the public game browser still be taken INTO this session?
+        // The 11.10 relaxation of NetListing's old `!NetSession.Active` term: a HOST session on
+        // the real WebRTC transport (menu lobby or listed/JIP -- never a `?net=` dev shape,
+        // whose eaRtc room does not feed its transport) accepts late arrivals through the same
+        // room; the free-seat half of the question stays NetListing's own Players() term.
+        public static bool HostOpenToJoinInProgress => Active && isHost && sessionRtc
+            && (menuSession || listedSession);
+
+        // Which roster seats are taken, for the lobby panels (bit i = oracle slot i). The host
+        // derives it live -- its own seat always counts, plus everything seated in the oracle
+        // (granted Remote primaries at the menu; every seat once a level is up). A client reads
+        // the host's EvLobbyRoster beat; -1 = no beat yet (the panel then keeps the pre-card
+        // wording rather than inventing a roster).
+        public static int LobbyRosterMask => !Active ? -1
+            : isHost ? ComputeLobbyRosterMask() : lobbyRosterMaskRx;
+
+        private static int ComputeLobbyRosterMask()
+        {
+            // Channels AND oracle, unioned: the oracle covers everything seated in a live level
+            // (couch players included) but GameScene.Terminate wipes it (card ee96ea61), so at
+            // the post-level lobby the up channels' granted seats are the only record of who is
+            // still connected -- oracle alone would show a full room as empty there.
+            return NetProtocol.SlotBit(HostPrimarySlot)
+                | UpPeerPrimarySlotsMask()
+                | OccupiedMask(oracle, exclude: -1);
+        }
+
+        // Edge-triggered broadcast of the mask above (host, menu-lobby sessions only -- a JIP
+        // joiner lands mid-level, where the panels this feeds are never on screen; couch seats
+        // taken mid-level still move the mask, which is what keeps the post-level lobby's
+        // roster honest). Newcomers additionally get an ADDRESSED copy at PeerConnected, so a
+        // reconnect that changes nothing still learns the current roster.
+        private static void TickLobbyRoster()
+        {
+            if (!isHost || !menuSession)
+            {
+                return;
+            }
+            int mask = ComputeLobbyRosterMask();
+            if (mask == lobbyRosterMaskTx)
+            {
+                return;
+            }
+            lobbyRosterMaskTx = mask;
+            SendEventToSessionPeers(seq => NetProtocol.EncodeByteEvent(seq, NetProtocol.EvLobbyRoster, (byte)mask));
         }
 
         // Ticked once per game tick from Game1.UpdateInner. Cadence runs on REAL time
@@ -1280,6 +1359,7 @@ namespace EvilAliensWeb.Compat.Net
                     SendScoreSync(now);
                 }
                 TickLocalJoinSim(now);
+                TickLobbyRoster();
                 if (isHost)
                 {
                     ExpireUnclaimedGrants(now);
@@ -3820,14 +3900,18 @@ namespace EvilAliensWeb.Compat.Net
                 + (isHost && UpPeerCount() > 1 ? " -- " + UpPeerCount() + " peers" : ""));
             if (isHost)
             {
-                if (listedSession)
+                if (listedSession || menuSession)
                 {
-                    // Join-in-progress: the joiner paired with our LISTED game while we are
-                    // already mid-level. Launch it into our current level+difficulty (it is a
-                    // menu-session client that mirrors EvLaunch); its EvReady then triggers the
-                    // live-world replay below plus the deep scenery catch-up (background ops /
-                    // music cue), and the 1 Hz EvScoreSync trues up score/lives. ADDRESSED: a
-                    // second joiner's arrival must not re-launch the peers already playing.
+                    // Join-in-progress: the joiner paired with our game while we are already
+                    // mid-level -- a stranger off a LISTED room, or (card 0257f8ba, capacity-4
+                    // rooms) a friend arriving by code / a 3rd-4th stranger after the session
+                    // started. Launch it into our current level+difficulty (it is a menu-session
+                    // client that mirrors EvLaunch); its EvReady then triggers the live-world
+                    // replay below plus the deep scenery catch-up (background ops / music cue),
+                    // and the 1 Hz EvScoreSync trues up score/lives. ADDRESSED: a second
+                    // joiner's arrival must not re-launch the peers already playing. At the
+                    // MENUS (scene null -- the lobby) nothing is sent: the launch comes from
+                    // the host's own pick (SendLaunch), exactly as before.
                     INetScene scene = NetScene.Current;
                     if (scene != null)
                     {
@@ -3835,6 +3919,14 @@ namespace EvilAliensWeb.Compat.Net
                             (byte)scene.Level, (byte)Settings.GetInstance().CurrentDifficulty));
                         Console.WriteLine("[net] jip launch level=" + scene.Level
                             + " difficulty=" + Settings.GetInstance().CurrentDifficulty);
+                    }
+                    else if (menuSession)
+                    {
+                        // Card 0257f8ba: the newcomer's waiting panel wants the roster NOW,
+                        // and the edge-triggered broadcast only fires when the mask CHANGES --
+                        // a re-keyed reconnect changes nothing and would never learn it.
+                        SendEventToPeer(p, seq => NetProtocol.EncodeByteEvent(seq,
+                            NetProtocol.EvLobbyRoster, (byte)ComputeLobbyRosterMask()));
                     }
                 }
                 // Late joiner: replay the live NetId set so it can construct the already-
@@ -3901,8 +3993,9 @@ namespace EvilAliensWeb.Compat.Net
         // The departed peer's seats are freed here AND on every remaining client (EvPeerLeft --
         // they cannot infer "gone for good" from the relay going quiet, which is also what a
         // hiccup looks like). When the LAST client goes: mid-level the host reverts to plain
-        // single-player (a listed game re-lists -- NetListing needs !Active); at the menus a
-        // pre-11.10 lobby with zero peers is a dead end, so the session stops with the notice.
+        // single-player (a listed game re-lists once Active falls -- its old room died with the
+        // transport); at the MENUS a lobby host keeps its room and waits for new players
+        // (card 0257f8ba -- before 11.10 a peerless lobby was a dead end and Stopped).
         private static void ReleaseDepartedPeer(PeerChannel p, string reason)
         {
             byte mask = PeerSlotMask(p);
@@ -3932,6 +4025,18 @@ namespace EvilAliensWeb.Compat.Net
             if (NetScene.Current != null)
             {
                 RevertToSinglePlayer(reason);
+                return;
+            }
+            if (menuSession && isHost)
+            {
+                // Card 0257f8ba: a menu-lobby HOST whose last guest left keeps its room. The
+                // session idles peerless (the broadcast hello resumes, which is how the next
+                // pairing initiates), the signaling room is still registered (a >2-capacity ws
+                // stays open for the room's whole life -- webrtc.js), and the lobby panel just
+                // reads "waiting for players" again. Pre-11.10 this was the documented dead
+                // end: zero peers at the menus meant Stop + notice, because the room could not
+                // take a replacement anyway.
+                Console.WriteLine("[net] " + reason + " -- lobby is empty, room stays open for new players");
                 return;
             }
             Stop(reason, "The other player left\nMatch ended");
@@ -4027,13 +4132,55 @@ namespace EvilAliensWeb.Compat.Net
         // instead of being told what happened. Same reason the reject path has that grace.
         public static void KickPeer(bool block)
         {
+            KickPeerCore(block, explicitTarget: null);
+        }
+
+        // Card 0257f8ba: the host pause menu's per-peer kick rows name their target by SEAT --
+        // with up to three remote machines "kick the peer" stopped being a well-formed request.
+        // A slot that matches no up peer is a no-op (the peer left between the menu opening and
+        // the row being chosen; NetHostMenu retracts itself on that edge anyway).
+        public static void KickPeerAt(int slot, bool block)
+        {
+            if (!Active || !isHost)
+            {
+                return;
+            }
+            foreach (PeerChannel p in peers.Values)
+            {
+                if (p.Up && p.PrimarySlot == slot)
+                {
+                    KickPeerCore(block, p);
+                    return;
+                }
+            }
+        }
+
+        // The up peers' granted primary seats as a slot mask -- what the host pause menu builds
+        // its per-peer kick rows from (card 0257f8ba). A peer whose slot exchange has not
+        // settled contributes nothing; NetHostMenu falls back to the slotless kick pair then.
+        internal static byte UpPeerPrimarySlotsMask()
+        {
+            byte mask = 0;
+            foreach (PeerChannel p in peers.Values)
+            {
+                if (p.Up && p.PrimarySlot != NetProtocol.SlotNone && p.PrimarySlot < Oracle.MaxPlayers)
+                {
+                    mask |= NetProtocol.SlotBit(p.PrimarySlot);
+                }
+            }
+            return mask;
+        }
+
+        private static void KickPeerCore(bool block, PeerChannel explicitTarget)
+        {
             if (!Active || !isHost || pendingStopAt != 0)
             {
                 return;
             }
-            // The peer the offer was about; fall back through "a paused peer" to "the only up
-            // peer" so the ?netkickshot/eaKickTest shapes (no offer latched) keep working.
-            PeerChannel target = kickOfferPeer;
+            // The named target (a per-peer menu row), else the peer the offer was about, then
+            // falling back through "a paused peer" to "the only up peer" so the
+            // ?netkickshot/eaKickTest shapes (no offer latched) keep working.
+            PeerChannel target = explicitTarget ?? kickOfferPeer;
             if (target == null || !target.Up)
             {
                 target = null;
@@ -4056,7 +4203,9 @@ namespace EvilAliensWeb.Compat.Net
             kickOfferPeer = null;
             ApplyKickBlock(block, target.PeerId);
             SendEventToPeer(target, seq => NetProtocol.EncodeByteEvent(seq, NetProtocol.EvKick, (byte)(block ? 1 : 0)));
-            Console.WriteLine("[net] kicked the peer" + (block ? " (blocked for this level)" : ""));
+            Console.WriteLine("[net] kicked the peer"
+                + (target.PrimarySlot != NetProtocol.SlotNone ? " (slot " + target.PrimarySlot + ")" : "")
+                + (block ? " (blocked for this level)" : ""));
             // Release the freeze BEFORE the seat release: the world may still be pushed under
             // the kicked player's pause, and the aggregate sync is what pops it (another peer's
             // held pause keeps it frozen, correctly).
@@ -4934,6 +5083,18 @@ namespace EvilAliensWeb.Compat.Net
                     return;
                 }
                 ApplyPeerLeft(p, data[4]);
+                break;
+            }
+            case NetProtocol.EvLobbyRoster:
+            {
+                // Card 0257f8ba: the host's lobby roster, for the waiting panel. Presentation
+                // only -- stored and drawn (NetLobby.RosterLines), never fed to the oracle, so
+                // nothing off this byte can seat or unseat anyone.
+                if (isHost || data.Length < 5)
+                {
+                    return;
+                }
+                lobbyRosterMaskRx = data[4];
                 break;
             }
             }

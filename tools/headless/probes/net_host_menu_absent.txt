@@ -43,7 +43,7 @@ step 400 nodraw
 mark
 
 eval HostMenu
-expect \[hostmenu\] session=False host=False peer=False couldList=False allowJoins=True listed=no available=False rows=\(none\)
+expect \[hostmenu\] session=False host=False peer=False peerSlots=0 couldList=False allowJoins=True listed=no available=False rows=\(none\)
 
 eval Press enter 1
 step 10 nodraw

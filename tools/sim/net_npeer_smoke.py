@@ -43,6 +43,8 @@ import time
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 EAHL = os.path.join(REPO, "tools", "headless", "bin", "Debug", "net8.0", "eahl.exe")
+if not os.path.exists(EAHL):
+    EAHL = EAHL[:-4]  # a non-Windows build names the exe `eahl`
 
 ROSTER_RE = re.compile(r"\[net\] roster=(\S+) pri=(\S+) ships=(\S+) .*role=(\S+) peer=(\S+)")
 DUPBAD_RE = re.compile(r"dupBad=(\d+)")

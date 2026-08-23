@@ -5,38 +5,39 @@ using System.Text;
 
 namespace EvilAliensWeb.Compat.Net
 {
-    // Console self-test for the host pause menu's entry decision (card 0d6ffe70). Invoke with
-    // eaHostMenu.test() from the browser console (bare eaHostMenu() is the LIVE dump, and
-    // eaHostMenu.live() the real-session suite), `eval HostMenuTest` under eahl, or the
-    // ProbeHostMenu case set in tools/sim/logic_probe.
+    // Console self-test for the host pause menu's entry decision (card 0d6ffe70; per-peer rows
+    // and the mid-session room toggle are card 0257f8ba). Invoke with eaHostMenu.test() from the
+    // browser console (bare eaHostMenu() is the LIVE dump, and eaHostMenu.live() the
+    // real-session suite), `eval HostMenuTest` under eahl, or the ProbeHostMenu case set in
+    // tools/sim/logic_probe.
     //
-    // WHY A DECISION SUITE AND NOT A SCREENSHOT. What this card adds is almost entirely a
-    // predicate: WHICH rows exist, given whether a session is up, whether we are its host,
-    // whether a peer is actually in it, and whether the running game is one toggle away from
-    // being listed. Every one of those is expensive to reach in a live game (a real peer, a real
+    // WHY A DECISION SUITE AND NOT A SCREENSHOT. What these cards add is almost entirely a
+    // predicate: WHICH rows exist, given whether a session is up, whether we are its host, which
+    // peers are actually in it, and whether the running game is one toggle away from being
+    // listed. Every one of those is expensive to reach in a live game (real peers, a real
     // signaling listing, a level, a pause) and trivial to state as data -- so the decision is
-    // lifted into NetHostMenu.Entries(State), a pure function of five booleans, and swept
-    // EXHAUSTIVELY here over all 32 combinations. A screenshot would show one of them.
+    // lifted into NetHostMenu.Entries(State), a pure function, and swept EXHAUSTIVELY here over
+    // all 32 boolean combinations x the peer-seat masks. A screenshot would show one of them.
     //
-    // THE THREE PROPERTIES THAT ARE NOT RESTATEMENTS OF THE `if`s, and each has a cost behind it:
+    // THE PROPERTIES THAT ARE NOT RESTATEMENTS OF THE `if`s, each with a cost behind it:
     //   * entry 0 is never destructive. MenuSub1.Reset() forces selectedEntry = 0 and this menu
     //     opens over a frozen world, so whatever lands at index 0 is what a reflexive Enter
-    //     hits. If Kick were ever first, a mis-keyed pause would end a stranger's run. This is
+    //     hits. If a kick were ever first, a mis-keyed pause would end a stranger's run. This is
     //     the same reasoning NetKickMenu's Initialize documents one level up.
-    //   * the room shape and the kick shape NEVER coexist. In production that holds because
-    //     NetListing refuses to list while NetSession.Active -- a property of a DIFFERENT file.
-    //     Section 4 asserts the menu does not RELY on it: fed the contradictory state anyway, it
-    //     still yields one shape, so the day listing during a session becomes possible the
-    //     failure is not a stray row over a live match.
+    //   * the kick rows COVER the mask, exactly -- one Kick + one KickAndBlock per up peer, in
+    //     seat order, and none for a seat no peer holds. A row for a phantom seat is a no-op
+    //     sold as a control; a missing row is an unkickable griefer.
+    //   * the room toggle rides along MID-SESSION (card 0257f8ba: a host session with a free
+    //     seat is listable, so NetListing's old session/room exclusivity is GONE) -- but never
+    //     at index 0 while kick rows exist, and never for a client.
     //   * Available() agrees with Entries() everywhere. GameScene gates the pause row on the
     //     former and builds from the latter; if they ever disagree the player gets a row that
     //     opens an empty menu (or, worse, no row over a game with a griefer in it).
     //
-    // THE NEGATIVE CONTROL is the pre-card behaviour -- there was no such menu, i.e. the entry
-    // set was empty for every state. Section 5 asserts a NON-degeneracy: at least one state
-    // yields the room shape and at least one yields the kick shape, so a predicate stuck at
-    // "empty" (or at "everything") cannot pass the sweep by agreeing with a table that is itself
-    // wrong. Without it, deleting the whole feature would still fail only the states it changes.
+    // THE NEGATIVE CONTROL is the pre-card behaviour -- no such menu, i.e. an empty entry set
+    // for every state. The non-degeneracy section asserts each live shape is reachable, so a
+    // predicate stuck at "empty" (or at "everything") cannot pass by agreeing with a table that
+    // is itself wrong.
     //
     // DELIBERATELY GAME-FREE: it touches Entries/Available/Label only, never CurrentState() or
     // Caption() (which read Settings, NetSession and NetListing statics and, in Caption's case,
@@ -45,6 +46,11 @@ namespace EvilAliensWeb.Compat.Net
     {
         private const string RoomOn = "Allow Online Joins: Enabled";
         private const string RoomOff = "Allow Online Joins: Disabled";
+
+        // The seat masks the sweep multiplies the booleans by: none settled, one peer (the
+        // classic slot 1), two, and the full three-guest room. Slot 0 can never appear in a
+        // real mask (it is the host's own seat) and is covered by the labels section instead.
+        private static readonly byte[] SweepMasks = { 0, 0b0010, 0b0110, 0b1110 };
 
         public static string Run()
         {
@@ -57,7 +63,7 @@ namespace EvilAliensWeb.Compat.Net
                 if (ok) { pass++; } else { fail++; }
             }
 
-            sb.Append("[hostmenu] the pause menu's Online Play decision (card 0d6ffe70)\n");
+            sb.Append("[hostmenu] the pause menu's Online Play decision (cards 0d6ffe70 / 0257f8ba)\n");
 
             sb.Append(" 1. the exhaustive state sweep\n");
             SectionSweep(Check);
@@ -68,8 +74,8 @@ namespace EvilAliensWeb.Compat.Net
             sb.Append(" 3. Available agrees with Entries\n");
             SectionAvailable(Check);
 
-            sb.Append(" 4. the two shapes never coexist\n");
-            SectionShapesDisjoint(Check);
+            sb.Append(" 4. the kick rows cover the mask exactly\n");
+            SectionMaskCoverage(Check);
 
             sb.Append(" 5. non-degeneracy + the pre-card control\n");
             SectionNonDegenerate(Check);
@@ -82,73 +88,113 @@ namespace EvilAliensWeb.Compat.Net
             return sb.ToString();
         }
 
-        // Every combination of the five booleans, each with the entry list it must produce.
-        // Written as a table rather than as a second copy of the branch, so a change to the
-        // branch has to be argued for HERE, one row at a time.
-        private static void SectionSweep(Action<string, bool> check)
+        private static void ForEachState(Action<NetHostMenu.State> visit)
         {
             for (int mask = 0; mask < 32; mask++)
             {
                 bool session = (mask & 1) != 0;
-                bool host = (mask & 2) != 0;
-                bool peer = (mask & 4) != 0;
-                bool could = (mask & 8) != 0;
-                bool allow = (mask & 16) != 0;
-                NetHostMenu.State s = new NetHostMenu.State(session, host, peer, could, allow);
-
-                List<NetHostMenu.Entry> want = new List<NetHostMenu.Entry>();
-                if (session)
+                foreach (byte slots in SweepMasks)
                 {
-                    // Host + a peer actually in the game: the kick shape. A client gets nothing
-                    // (leaving IS its "kick the host", and the pause menu already offers it), and
-                    // a host with no peer yet gets nothing either -- KickPeer would no-op.
-                    if (host && peer)
+                    visit(new NetHostMenu.State(session, (mask & 2) != 0, (mask & 4) != 0,
+                        (mask & 8) != 0, (mask & 16) != 0, session ? slots : (byte)0));
+                    if (!session)
                     {
-                        want.Add(NetHostMenu.Entry.Back);
-                        want.Add(NetHostMenu.Entry.Kick);
-                        want.Add(NetHostMenu.Entry.KickAndBlock);
+                        break; // no session, no seats -- the masks would be 4 copies of one state
                     }
                 }
-                else if (could)
+            }
+        }
+
+        // Every boolean combination (x the seat masks while a session is up), each with the row
+        // list it must produce. Written as a table rather than as a second copy of the branch,
+        // so a change to the branch has to be argued for HERE, one row at a time.
+        private static void SectionSweep(Action<string, bool> check)
+        {
+            ForEachState(s =>
+            {
+                List<NetHostMenu.Row> want = new List<NetHostMenu.Row>();
+                if (s.SessionActive)
                 {
-                    // No session, but this game is one toggle away from being joinable: the room
-                    // shape. Note it does NOT depend on `allow` -- offering the toggle only while
-                    // the room is OPEN would make closing it a one-way door for the rest of the
-                    // run, which is the exact opposite of what the card asks for.
-                    want.Add(NetHostMenu.Entry.RoomToggle);
-                    want.Add(NetHostMenu.Entry.Back);
+                    if (s.IsHost)
+                    {
+                        // Host + peers actually in the game: the kick rows, per settled seat --
+                        // or the slotless fallback pair while no seat has settled. A client
+                        // gets nothing (leaving IS its "kick the host", and the pause menu
+                        // already offers it); a host with no peer yet gets no kick rows either
+                        // -- a kick would no-op.
+                        if (s.PeerUp)
+                        {
+                            want.Add(new NetHostMenu.Row(NetHostMenu.Entry.Back));
+                            if (s.PeerSlotsMask == 0)
+                            {
+                                want.Add(new NetHostMenu.Row(NetHostMenu.Entry.Kick));
+                                want.Add(new NetHostMenu.Row(NetHostMenu.Entry.KickAndBlock));
+                            }
+                            else
+                            {
+                                for (byte slot = 0; slot < 4; slot++)
+                                {
+                                    if ((s.PeerSlotsMask & (1 << slot)) != 0)
+                                    {
+                                        want.Add(new NetHostMenu.Row(NetHostMenu.Entry.Kick, slot));
+                                        want.Add(new NetHostMenu.Row(NetHostMenu.Entry.KickAndBlock, slot));
+                                    }
+                                }
+                            }
+                        }
+                        // Card 0257f8ba: the room toggle rides along whenever the running game
+                        // is one toggle from joinable -- which since that card includes a host
+                        // session with a free seat. After Back when kick rows exist, leading
+                        // otherwise. Note it does NOT depend on `allow` -- offering the toggle
+                        // only while the room is OPEN would make closing it a one-way door.
+                        if (s.CouldList)
+                        {
+                            if (want.Count == 0)
+                            {
+                                want.Add(new NetHostMenu.Row(NetHostMenu.Entry.RoomToggle));
+                                want.Add(new NetHostMenu.Row(NetHostMenu.Entry.Back));
+                            }
+                            else
+                            {
+                                want.Insert(1, new NetHostMenu.Row(NetHostMenu.Entry.RoomToggle));
+                            }
+                        }
+                    }
+                }
+                else if (s.CouldList)
+                {
+                    want.Add(new NetHostMenu.Row(NetHostMenu.Entry.RoomToggle));
+                    want.Add(new NetHostMenu.Row(NetHostMenu.Entry.Back));
                 }
 
-                List<NetHostMenu.Entry> got = NetHostMenu.Entries(s);
+                List<NetHostMenu.Row> got = NetHostMenu.Entries(s);
                 bool ok = Same(want, got);
                 // One assertion per state (so the tally IS the sweep), with the ACTUAL list
                 // appended only on a miss -- a failure that reports what was wanted and not what
                 // happened costs a debugging round trip.
                 check("sweep " + Describe(s) + " -> " + Render(want)
                     + (ok ? "" : "   [GOT " + Render(got) + "]"), ok);
-            }
+            });
         }
 
         private static void SectionSafeDefault(Action<string, bool> check)
         {
             int nonEmpty = 0;
             bool allSafe = true;
-            for (int mask = 0; mask < 32; mask++)
+            ForEachState(s =>
             {
-                NetHostMenu.State s = new NetHostMenu.State(
-                    (mask & 1) != 0, (mask & 2) != 0, (mask & 4) != 0, (mask & 8) != 0, (mask & 16) != 0);
-                List<NetHostMenu.Entry> got = NetHostMenu.Entries(s);
+                List<NetHostMenu.Row> got = NetHostMenu.Entries(s);
                 if (got.Count == 0)
                 {
-                    continue;
+                    return;
                 }
                 nonEmpty++;
-                if (got[0] == NetHostMenu.Entry.Kick || got[0] == NetHostMenu.Entry.KickAndBlock)
+                if (got[0].Kind == NetHostMenu.Entry.Kick || got[0].Kind == NetHostMenu.Entry.KickAndBlock)
                 {
                     allSafe = false;
                     check("   ... " + Describe(s) + " leads with a KICK row", false);
                 }
-            }
+            });
             check("no state puts a kick row at index 0 (a reflexive Enter must be harmless)", allSafe);
             // Without this the leg passes vacuously on a build where Entries() returns nothing.
             check("... over a non-empty population (" + nonEmpty + " states offer rows)", nonEmpty > 0);
@@ -157,74 +203,93 @@ namespace EvilAliensWeb.Compat.Net
         private static void SectionAvailable(Action<string, bool> check)
         {
             bool agree = true;
-            for (int mask = 0; mask < 32; mask++)
+            ForEachState(s =>
             {
-                NetHostMenu.State s = new NetHostMenu.State(
-                    (mask & 1) != 0, (mask & 2) != 0, (mask & 4) != 0, (mask & 8) != 0, (mask & 16) != 0);
                 if (NetHostMenu.Available(s) != (NetHostMenu.Entries(s).Count > 0))
                 {
                     agree = false;
                     check("   ... " + Describe(s) + " disagrees", false);
                 }
-            }
-            check("Available(s) == (Entries(s).Count > 0) for all 32 states", agree);
+            });
+            check("Available(s) == (Entries(s).Count > 0) for every swept state", agree);
         }
 
-        private static void SectionShapesDisjoint(Action<string, bool> check)
+        // Card 0257f8ba's own property: one Kick + one KickAndBlock per masked seat, in seat
+        // order, and NONE for an unmasked one. Checked structurally rather than re-listed, so
+        // it holds for every mask the sweep visits.
+        private static void SectionMaskCoverage(Action<string, bool> check)
         {
-            bool disjoint = true;
-            for (int mask = 0; mask < 32; mask++)
+            bool cover = true;
+            ForEachState(s =>
             {
-                NetHostMenu.State s = new NetHostMenu.State(
-                    (mask & 1) != 0, (mask & 2) != 0, (mask & 4) != 0, (mask & 8) != 0, (mask & 16) != 0);
-                List<NetHostMenu.Entry> got = NetHostMenu.Entries(s);
-                bool room = got.Contains(NetHostMenu.Entry.RoomToggle);
-                bool kick = got.Contains(NetHostMenu.Entry.Kick) || got.Contains(NetHostMenu.Entry.KickAndBlock);
-                if (room && kick)
+                List<NetHostMenu.Row> got = NetHostMenu.Entries(s);
+                for (byte slot = 0; slot < 4; slot++)
                 {
-                    disjoint = false;
-                    check("   ... " + Describe(s) + " offers both", false);
+                    bool wantPair = s.SessionActive && s.IsHost && s.PeerUp
+                        && (s.PeerSlotsMask & (1 << slot)) != 0;
+                    int kicks = 0;
+                    int blocks = 0;
+                    foreach (NetHostMenu.Row r in got)
+                    {
+                        if (r.Slot != slot)
+                        {
+                            continue;
+                        }
+                        if (r.Kind == NetHostMenu.Entry.Kick) { kicks++; }
+                        if (r.Kind == NetHostMenu.Entry.KickAndBlock) { blocks++; }
+                    }
+                    if (kicks != (wantPair ? 1 : 0) || blocks != (wantPair ? 1 : 0))
+                    {
+                        cover = false;
+                        check("   ... " + Describe(s) + " slot " + slot + " has " + kicks
+                            + " kick / " + blocks + " block rows", false);
+                    }
                 }
-            }
-            check("no state offers the room toggle AND a kick row", disjoint);
-            // Production reaches that by a property of a DIFFERENT file -- NetListing refuses to
-            // list while NetSession.Active, so CouldList and SessionActive are never both true.
-            // This leg deliberately feeds the contradictory state anyway: the menu must not
-            // DEPEND on that guarantee, because the day listing during a session becomes
-            // possible, the failure would be a silent extra row over a live match rather than a
-            // compile error. (The NetListing half is Game-bound and cannot be asserted here; it
-            // is covered by that file's own early return.)
-            List<NetHostMenu.Entry> contradictory = NetHostMenu.Entries(
-                new NetHostMenu.State(true, true, true, true, true));
-            check("... even for the impossible session+couldList state, which yields the kick shape only",
-                contradictory.Contains(NetHostMenu.Entry.Kick)
-                && !contradictory.Contains(NetHostMenu.Entry.RoomToggle));
+            });
+            check("every masked seat gets exactly one Kick and one KickAndBlock row; no other seat gets any", cover);
         }
 
         private static void SectionNonDegenerate(Action<string, bool> check)
         {
             // Room shape reachable: a plain listable single-player game.
-            List<NetHostMenu.Entry> room = NetHostMenu.Entries(
+            List<NetHostMenu.Row> room = NetHostMenu.Entries(
                 new NetHostMenu.State(false, false, false, true, true));
             check("a listable single-player game DOES offer the room toggle",
-                room.Contains(NetHostMenu.Entry.RoomToggle));
+                Has(room, NetHostMenu.Entry.RoomToggle));
 
-            // Kick shape reachable: host with a peer.
-            List<NetHostMenu.Entry> kick = NetHostMenu.Entries(
-                new NetHostMenu.State(true, true, true, false, true));
-            check("a host with a peer DOES offer both kick rows",
-                kick.Contains(NetHostMenu.Entry.Kick) && kick.Contains(NetHostMenu.Entry.KickAndBlock));
+            // Kick shape reachable: host with two settled peers.
+            List<NetHostMenu.Row> kick = NetHostMenu.Entries(
+                new NetHostMenu.State(true, true, true, false, true, 0b0110));
+            check("a host with two peers DOES offer both kick rows for each",
+                kick.Count == 5 && Has(kick, NetHostMenu.Entry.Kick) && Has(kick, NetHostMenu.Entry.KickAndBlock));
+
+            // Card 0257f8ba: the composed shape -- a listable HOST SESSION gets the kick rows
+            // AND the room toggle, with the toggle at index 1 (after Back, before any kick).
+            List<NetHostMenu.Row> both = NetHostMenu.Entries(
+                new NetHostMenu.State(true, true, true, true, true, 0b0010));
+            check("a listable host session offers the kick rows AND the room toggle",
+                Has(both, NetHostMenu.Entry.Kick) && Has(both, NetHostMenu.Entry.RoomToggle));
+            check("... with the toggle at index 1 (Back leads; kicks follow)",
+                both.Count == 4 && both[0].Kind == NetHostMenu.Entry.Back
+                && both[1].Kind == NetHostMenu.Entry.RoomToggle
+                && both[2].Kind == NetHostMenu.Entry.Kick);
+            // ...and a session between levels (peerless-but-listable is unreachable today, a
+            // lobby has no scene -- but the menu must not DEPEND on that): the room shape alone.
+            List<NetHostMenu.Row> sessionRoom = NetHostMenu.Entries(
+                new NetHostMenu.State(true, true, false, true, true));
+            check("a listable host session with NO peer up degrades to the room shape",
+                sessionRoom.Count == 2 && sessionRoom[0].Kind == NetHostMenu.Entry.RoomToggle);
 
             // The pre-card behaviour, as the control: there was no Online Play row at all, so a
             // predicate that quietly reverted to it would satisfy every "must NOT offer" leg in
-            // the sweep and fail only these two.
+            // the sweep and fail only these.
             check("... i.e. the pre-card behaviour (never any row) is genuinely excluded",
-                room.Count > 0 && kick.Count > 0);
+                room.Count > 0 && kick.Count > 0 && both.Count > 0);
 
             // And the other degenerate shape: a predicate stuck at "always".
             check("a CLIENT in a session is offered nothing",
-                NetHostMenu.Entries(new NetHostMenu.State(true, false, true, false, true)).Count == 0);
-            check("a host whose peer has not arrived is offered nothing",
+                NetHostMenu.Entries(new NetHostMenu.State(true, false, true, false, true, 0b0010)).Count == 0);
+            check("a host whose peer has not arrived (and with nothing to list) is offered nothing",
                 NetHostMenu.Entries(new NetHostMenu.State(true, true, false, false, true)).Count == 0);
             check("an unlistable single-player game is offered nothing",
                 NetHostMenu.Entries(new NetHostMenu.State(false, false, false, false, true)).Count == 0);
@@ -238,19 +303,36 @@ namespace EvilAliensWeb.Compat.Net
             // states or the player cannot tell an open room from a closed one. (It deliberately
             // matches the Options entry word for word: it is the same switch.)
             check("the room row reads " + RoomOn + " while joins are allowed",
-                NetHostMenu.Label(NetHostMenu.Entry.RoomToggle, open) == RoomOn);
+                NetHostMenu.Label(new NetHostMenu.Row(NetHostMenu.Entry.RoomToggle), open) == RoomOn);
             check("the room row reads " + RoomOff + " while they are not",
-                NetHostMenu.Label(NetHostMenu.Entry.RoomToggle, closed) == RoomOff);
-            // Singular on purpose: the protocol is 2-peer, so there is exactly one other machine
-            // to kick, and any couch players it brought leave with it. Wording that implied a
-            // per-seat kick would promise something the wire cannot do.
-            check("the kick rows name ONE other player (2-peer protocol)",
-                NetHostMenu.Label(NetHostMenu.Entry.Kick, open) == "Kick Other Player"
-                && NetHostMenu.Label(NetHostMenu.Entry.KickAndBlock, open) == "Kick and Block Player");
-            check("Back reads Back", NetHostMenu.Label(NetHostMenu.Entry.Back, open) == "Back");
+                NetHostMenu.Label(new NetHostMenu.Row(NetHostMenu.Entry.RoomToggle), closed) == RoomOff);
+            // Card 0257f8ba: a seat-named kick row names the PLAYER NUMBER the score panels use
+            // (slot + 1), so "Kick Player 2" is the seat the second panel calls Player 2.
+            check("a seat-named kick row reads the score panel's player number",
+                NetHostMenu.Label(new NetHostMenu.Row(NetHostMenu.Entry.Kick, 1), open) == "Kick Player 2"
+                && NetHostMenu.Label(new NetHostMenu.Row(NetHostMenu.Entry.KickAndBlock, 3), open) == "Kick and Block Player 4");
+            // The slotless fallback keeps the pre-card singular wording -- there is exactly one
+            // peer it can mean (KickPeer's own resolution), and naming a number for a seat that
+            // has not settled would be a guess.
+            check("the slotless fallback keeps the singular wording",
+                NetHostMenu.Label(new NetHostMenu.Row(NetHostMenu.Entry.Kick), open) == "Kick Other Player"
+                && NetHostMenu.Label(new NetHostMenu.Row(NetHostMenu.Entry.KickAndBlock), open) == "Kick and Block Player");
+            check("Back reads Back", NetHostMenu.Label(new NetHostMenu.Row(NetHostMenu.Entry.Back), open) == "Back");
         }
 
-        private static bool Same(List<NetHostMenu.Entry> a, List<NetHostMenu.Entry> b)
+        private static bool Has(List<NetHostMenu.Row> rows, NetHostMenu.Entry kind)
+        {
+            foreach (NetHostMenu.Row r in rows)
+            {
+                if (r.Kind == kind)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static bool Same(List<NetHostMenu.Row> a, List<NetHostMenu.Row> b)
         {
             if (a.Count != b.Count)
             {
@@ -258,7 +340,7 @@ namespace EvilAliensWeb.Compat.Net
             }
             for (int i = 0; i < a.Count; i++)
             {
-                if (a[i] != b[i])
+                if (a[i].Kind != b[i].Kind || a[i].Slot != b[i].Slot)
                 {
                     return false;
                 }
@@ -266,7 +348,7 @@ namespace EvilAliensWeb.Compat.Net
             return true;
         }
 
-        private static string Render(List<NetHostMenu.Entry> e)
+        private static string Render(List<NetHostMenu.Row> e)
         {
             if (e.Count == 0)
             {
@@ -280,6 +362,7 @@ namespace EvilAliensWeb.Compat.Net
             return (s.SessionActive ? "session" : "nosession")
                 + "/" + (s.IsHost ? "host" : "client")
                 + "/" + (s.PeerUp ? "peer" : "nopeer")
+                + "/slots" + s.PeerSlotsMask
                 + "/" + (s.CouldList ? "couldlist" : "nolist")
                 + "/" + (s.AllowJoins ? "allow" : "closed");
         }

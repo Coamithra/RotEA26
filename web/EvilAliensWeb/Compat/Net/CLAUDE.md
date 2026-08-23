@@ -34,9 +34,19 @@ inputs; the other peer's ship is an interpolated puppet.
   hello/welcome + roster grants, per-peer liveness, pause as a set, the host relay of client
   ship/HUD state and symmetric events, ADDRESSED catch-up, and the NEW MATCH-END POLICY (host
   leaves -> match ends; a client leaving frees its seats everywhere -- `EvPeerLeft` -- and play
-  continues). See the "N-PEER SESSION" section below for all of it. The menu-lobby/browser UX
-  and >2-capacity signaling rooms stay card `0257f8ba` (11.10), so the REAL WebRTC path still
-  pairs 2 machines until then; the N-peer session is exercised on the dev transports.
+  continues). See the "N-PEER SESSION" section below for all of it.
+- **Stage 11.10 -- the LOBBY + BROWSER UX for 3-4 machines (card `0257f8ba`, protocol v25):**
+  the REAL rooms hold four machines now (the menu lobby hosts at `Oracle.MaxPlayers`;
+  listed/JIP rooms open at webrtc.js `LIST_ROOM_MAX` 4; a >2 host KEEPS its signaling ws for
+  the room's whole life, so a freed seat is replaceable). The host waits in a LOBBY PANEL
+  (room code + live roster + Start Game) instead of launching on the first pairing; the join
+  side's waiting panel shows who is in (`EvLobbyRoster`, event 28); a peerless menu lobby
+  SURVIVES instead of Stopping. LISTING lost its `!NetSession.Active` term -- a HOST session
+  with a free seat stays advertised (a menu-lobby game mid-level ADOPTS its own signaling room
+  as the listing), so a 3rd/4th stranger joins the running match: `PeerConnected` JIP-launches
+  a late arrival on any menu/listed session with a live scene. The host pause menu's kick rows
+  are PER PEER ("Kick Player 2", `KickPeerAt`) and its room toggle rides along mid-session.
+  See the LOBBY & CAPACITY section below.
 - **Stage 11.5 round 1** (card `4717d3cf`): the hardening pass -- powerup pickups replicate to
   the collector's HUD slot, ONE match-end path, a drop-verdict grace window with a
   waiting-for-peer banner, and the WebcamAliens net-lobby refusal explains itself. The graceful
@@ -109,7 +119,7 @@ still open, and both are gated on real-network playtests this rig cannot run -- 
 sits in the board's "For me" column for exactly that (TURN itself is since DECIDED deferred --
 owner ruling, see `plans/4p-online-coop.md`'s banner). N-peer online (3-4 separate MACHINES) is
 BUILT at the session layer (11.7-11.9 shipped); what remains of the epic is the lobby/browser UX
-+ capacity>2 rooms (`0257f8ba`, 11.10) and the hardening pass (`6fb406bc`, 11.11 -- relayed-channel
++ capacity>2 rooms (`0257f8ba`, 11.10 -- SHIPPED) and the hardening pass (`6fb406bc`, 11.11 -- relayed-channel
 interp delay, N=4 soak, multi-process rig matrix). Open net cards in Backlog: `ac375753`
 (two-window net pass), `25ad0659` (headless net sim + de-static refactor) and `1cd47879` (a
 single-tab live browser pass -- only its IndexOutOfRange block is net). Deferred to "Later" rather than
@@ -179,15 +189,17 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   - **`webrtc.js` holds a MAP of peer entries, not singletons** -- host: one `{pc, chS, chR}`
     triple per joiner, keyed by the server's joiner id (1..3, monotone, never reused); joiner:
     exactly one entry (the host). SenderIds: `"1".."3"` host-side, `"h"` joiner-side.
-    `eaRtc.host(url, max)` requests room capacity (clamped 2..4, default 2); the signaling WS
-    now closes when the room is FULL (`connectedCount == max-1`), which at max 2 is exactly the
-    old first-peer close; a bigger host keeps it open (and beating) to admit later joiners. A
-    single peer's loss on a bigger host is the new `peergone` phase (detail = its id) and the
-    JS layer plays on -- note one bound on that claim: once the room FILLED the ws is closed
-    and the server room is gone, so a lost peer is NOT replaceable until the lobby card
-    (`0257f8ba`). (Per-peer session survival itself shipped with card `87242257`.) Every shipped flow
-    (joiner, max-2 host, last-peer-gone) keeps the old terminal `closed`/`failed` behaviour
-    exactly. Listed/JIP rooms stay capacity 2 until card `0257f8ba`.
+    `eaRtc.host(url, max)` requests room capacity (clamped 2..4, default 2). For a MAX-2 room
+    the signaling WS closes when the room is full (`connectedCount == max-1`) -- exactly the
+    old first-peer close; since card `0257f8ba` a >2 host NEVER closes it (not even while
+    momentarily full: seats free when a peer leaves mid-match, and a closed ws would mean the
+    server room and its code died with the third arrival), so a lost peer IS replaceable. A
+    single peer's loss on a bigger host is the `peergone` phase (detail = its id) and the JS
+    layer plays on. Every max-2 flow (joiner, max-2 host, last-peer-gone) keeps the old
+    terminal `closed`/`failed` behaviour exactly. Listed/JIP rooms open at `LIST_ROOM_MAX` 4
+    and the menu lobby hosts at `Oracle.MaxPlayers` since card `0257f8ba`; `eaRtc.list` on a
+    socket a live room already owns ADOPTS it as the listing (advertise + beat on the same
+    room) -- the menu-lobby game mid-level listing itself under the code its friends joined by.
     **GOTCHA (found live on the 3-tab rig, fixed): a `{t:gone,id}` from the server means "that
     SIGNALING seat emptied", not "that peer left"** -- a joiner deliberately closes its ws the
     moment P2P is up (the shipped flow), so post-connect the frame is EXPECTED and must be
@@ -576,15 +588,20 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   Deploy = scp `server/signal/*.py` + `requirements.txt` to `/opt/rotea/server`,
   `systemctl restart rotea` (full first-install steps: `server/signal/README.md`). The
   signaling WS closes once the DataChannels connect -- gameplay is pure P2P.
-- **Menu lobby (card 11.4):** main menu "Online Co-op" -> Host Game (shows the room code
-  + "waiting") / Join Game (HTML code-entry overlay outside `#app` -- `eaRtc.promptCode`).
+- **Menu lobby (card 11.4; the 4-player lobby panel is card 0257f8ba):** main menu
+  "Online Co-op" -> Host Game (shows the room code + "waiting for players") / Join by Code
+  (HTML code-entry overlay outside `#app` -- `eaRtc.promptCode`).
   `Compat/Net/NetLobby` owns the pre-session flow (JS phase queue drained by
   `MenuScene.NetUpdate` on the game tick; `NetStatusMenu` = the re-textable
-  ConfirmationMenu panel). On connect the HOST picks level+difficulty through the NORMAL
-  select screens (netPickMenu -> the shared selectors; their OnExit reroutes in net mode;
-  WebcamAliens selection is refused, and the carousel swaps its briefing for the reason) and `EvLaunch` mirrors the launch on the client
-  (`MenuScene.NetLaunchMirror` -- same fade/warm path, difficulty locked, starter
-  Keyboard). Turbo is forced to 100 while a session is Active (`Game1.Update`).
+  ConfirmationMenu panel). On the FIRST connect the HOST lands on the LOBBY PANEL
+  (`NetLobbyMenu`: room code + live roster + Start Game/Cancel -- launch is no longer
+  implicit on pairing; more friends keep joining the same code meanwhile, and the join side's
+  panel shows the roster via `EvLobbyRoster`). Start Game leads to the NORMAL select screens
+  (netPickMenu -> the shared selectors; their OnExit reroutes in net mode; netPickMenu's
+  Cancel backs out to the lobby panel rather than ending the session; WebcamAliens selection
+  is refused, and the carousel swaps its briefing for the reason) and `EvLaunch` mirrors the
+  launch on every client (`MenuScene.NetLaunchMirror` -- same fade/warm path, difficulty
+  locked, starter Keyboard). Turbo is forced to 100 while a session is Active (`Game1.Update`).
 - **v4 handshake + match-end (card 11.4):** hello/welcome carry an 8-byte build hash
   (FNV-1a of `window.eaBuildHash`; deploy.yml stamps a sha256 of `blazor.boot.json` at
   publish, dev builds read 'dev') + a flags byte. Hash mismatch -> `MsgReject` -> "Update
@@ -748,9 +765,10 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
 The session layer holds a peer SET on the star `plans/4p-online-coop.md` fixed: the host is the
 hub (up to `MaxRemotePeers` 3 channels -- `Oracle.MaxPlayers` minus its own seat), a client holds
 exactly one channel (its host). World authority is untouched -- snapshots/events fan out, claims
-arrive from any client, the ledgers were already per-(netId, slot). The menu lobby and the real
-WebRTC rooms stay capacity 2 until card `0257f8ba` (11.10), so this is exercised on the dev
-transports: `NetWire`, BroadcastChannel tabs, and LocalSocketNet `--net-peers`.
+arrive from any client, the ledgers were already per-(netId, slot). Since card `0257f8ba`
+(11.10) the REAL rooms hold four machines too -- the menu lobby, the listed/JIP rooms and the
+in-level joins all reach this session layer; the dev transports (`NetWire`, BroadcastChannel
+tabs, LocalSocketNet `--net-peers`) remain how it is exercised headlessly.
 
 - **THE MATCH-END POLICY (the card's design decision, adopted as proposed and UNIFORM, N=2
   included).** Host leaves -> the match ends for every client, no host migration (host
@@ -761,7 +779,9 @@ transports: `NetWire`, BroadcastChannel tabs, and LocalSocketNet `--net-peers`.
   `EvPeerLeft` (slot mask; their `ExplodeFriend`-kept seats would otherwise leak) and
   recomputes the pause/stall aggregates. When the LAST client goes: mid-level the host reverts
   to plain single-player (`RevertToSinglePlayer` -- a listed game re-lists); at the menus a
-  pre-11.10 lobby with zero peers is a dead end, so the session Stops with the notice.
+  MENU-LOBBY host keeps its session and its room and just waits for new players (card
+  `0257f8ba` -- before 11.10 a peerless lobby was a dead end and Stopped with the notice; the
+  Stop survives only for the non-lobby shapes, e.g. a scenario session).
   **Consequence at N=2, deliberate:** a menu-session host whose partner drops now keeps playing
   solo instead of being thrown to the menu. A clean level FINISH still keeps every pairing
   alive (card 3b6c12e7; `ResetPerMatchState` loops the channels).
@@ -802,8 +822,9 @@ transports: `NetWire`, BroadcastChannel tabs, and LocalSocketNet `--net-peers`.
   pause (a frozen world backgrounds everyone's tab). Kick offers tick per paused channel and
   latch their TARGET (`kickOfferPeer`); `KickPeer` kicks that peer only -- addressed `EvKick`,
   seats freed, `EvPeerLeft` to the rest, the whole session wound down (after the egress grace)
-  only when nobody remains. 11.10 owns a per-peer kick UI; today's menu acts on the offer's
-  subject.
+  only when nobody remains. The pause-driven `NetKickMenu` still acts on the offer's subject;
+  the host pause menu's deliberate kick is PER PEER since card `0257f8ba` ("Kick Player 2" ->
+  `KickPeerAt(slot, block)`, the seat read off `UpPeerPrimarySlotsMask`).
 - **PER-PEER LIVENESS.** The stall/timeout ladder runs per channel; the `NetWaitOverlay` banner
   rides the aggregate (any up peer stalled). A timeout verdict is `PeerLost(p)` -- on a host in
   a menu/listed session that is the client-departure path above, not a match end. The `?net=`
@@ -829,7 +850,7 @@ transports: `NetWire`, BroadcastChannel tabs, and LocalSocketNet `--net-peers`.
   prints on the 5 s cadence whenever the session holds >1 channel: per peer -- id, state
   (up/stalled/paused/down/refused), granted seat, stream quiet, primary buffer depth, extras
   count, both event seqs.
-- **VERIFY with `eaNetNPeer()` / `eval NetNPeer`** (`Compat/Net/NetNPeerTest.cs`, 52 assertions;
+- **VERIFY with `eaNetNPeer()` / `eval NetNPeer`** (`Compat/Net/NetNPeerTest.cs`, 57 assertions;
   a leg of `net_selftests.txt`): one real HOST session with TWO scripted joiners (plus a
   straggler for the per-peer reject legs) on a
   `NetWire(4)`, then a real CLIENT with a scripted host -- menu-runnable and leave-no-trace, the
@@ -847,6 +868,61 @@ transports: `NetWire`, BroadcastChannel tabs, and LocalSocketNet `--net-peers`.
   surviving joiner free exactly its seats (`EvPeerLeft` end to end) and the match plays on with
   no `session stop`. A smoke, not a differ -- entity-level convergence stays
   `net_jip_sync.py`'s (2-process), and the N=4 soak is 11.11's.
+
+## LOBBY & CAPACITY -- the 3-4 player UX (card 0257f8ba, Stage 11.10, protocol v25)
+
+The step that makes 11.9's N-peer session REACHABLE by a player: four-machine rooms, a host
+lobby that waits, a join panel that shows the room, listing that survives a session, and a
+per-peer kick. Design: `plans/4p-online-coop.md` section G.
+
+- **ROOMS HOLD FOUR MACHINES.** `NetLobby.HostGame` hosts at `Oracle.MaxPlayers`; `eaRtc.list`
+  opens at `LIST_ROOM_MAX` 4. A >2 host KEEPS its signaling ws for the room's whole life (even
+  momentarily full -- webrtc.js has the reasoning), so late joiners keep arriving and a freed
+  seat is replaceable; the max-2 flows are byte-identical to what shipped. The server side has
+  been capacity-aware since 11.7 (`{t:host,max}`, seat ids, `listable()`).
+- **START-WHEN-READY.** The host's first pairing no longer falls through to the level pick:
+  `MenuScene` mounts the LOBBY PANEL (`NetLobbyMenu` -- its own type so `eaMenuCensus` can see
+  it; entries Start Game / Cancel; text `NetLobby.HostLobbyText` = room code + per-seat roster
+  + the start hint, re-texted every tick). Start is GATED on a peer being up, and backs the
+  level pick out to the panel rather than tearing the session down (`netPick_CancelSelected`).
+  The post-level lobby return (card 3b6c12e7) still lands the host on `netPickMenu` -- the
+  crew is already aboard -- and Cancel from there now reaches the roster panel.
+- **THE JOIN SIDE SEES THE ROOM: `EvLobbyRoster` (event 28, host -> clients, reliable,
+  `[slotMask:1]`).** A waiting client cannot see its fellow joiners any other way (grants are
+  host-side, no ships exist to relay, the menu oracle is local bookkeeping). Edge-triggered on
+  the mask changing plus an ADDRESSED copy to each newcomer at `PeerConnected`; the receiver
+  stores the byte and draws it (`NetLobby.ClientLobbyText`), so it is presentation-only by
+  construction -- a lost beat is a stale line, never a desync, and -1 (no beat yet) degrades to
+  the pre-card wording. The host derives its own mask live (`NetSession.LobbyRosterMask`).
+- **A PEERLESS LOBBY SURVIVES.** The last guest leaving a menu-lobby host no longer Stops the
+  session with "match ended": the session idles (the broadcast hello resumes, which is how the
+  next pairing initiates), the room stays registered, and the panel reads "waiting for players"
+  again (`ReleaseDepartedPeer`'s menu branch). Cancel is still the way OUT.
+- **LISTING COMPOSES WITH A SESSION** -- the `!NetSession.Active` term is gone; see the game
+  browser section for the predicate and `NetListing` itself for the adoption mechanics (a
+  menu-lobby game mid-level lists on the very room its friends joined by; the session's
+  teardown closes that room, caught by NetListing's Active-edge detector). Consequences worth
+  knowing: the pause "Listed online" line and the corner beacon can now show DURING a session,
+  and `NetListing.CouldList` is true mid-session, which is what puts the room toggle in the
+  host pause menu's session shape.
+- **JIP INTO SLOTS 3/4.** `PeerConnected` sends the addressed `EvLaunch` for ANY menu/listed
+  host session with a live scene (it used to be listed-only), so a stranger off the browser --
+  or a friend arriving by code mid-level -- lands in the running match through the ordinary
+  catch-up (`EvReady` replay, scenery, scores). At the menus (scene null) nothing is sent: the
+  lobby launch stays `SendLaunch`.
+- **PER-PEER KICK.** `NetSession.KickPeerAt(slot, block)` + `UpPeerPrimarySlotsMask`; the host
+  pause menu's rows read "Kick Player N" per settled seat (slotless fallback pair while a seat
+  has not settled). The remote-pause `NetKickMenu` still acts on the offer's subject.
+- **VERIFY:** `eaHostMenu.test()` (98 assertions -- the swept table now covers the seat masks
+  and the composed session+room shape; `ProbeHostMenu` floor 95) and `eaHostMenu.live()` (the
+  live seat mask + `KickPeerAt` end to end); `logic_probe`'s **`ProbeLobbyText`** sweeps the
+  panel text pure (who reads "you", open seats, the start hint, the -1 degradation);
+  **`tools/headless/probes/net_lobby_panel.txt`** drives the real panel offline through the
+  **`eaNetLobbyShow(mask)`** / `eval NetLobbyShow <mask>` seam (census, the Start refusal with
+  nobody aboard, Esc's cancel path -- mutation-tested both ways, see its header). The panel's
+  REAL trigger needs a WebRTC pairing, so the multi-machine flow itself remains a browser pass:
+  a local `uvicorn` signaling rig + three tabs is the recipe (JIP traps 1-5 apply), and no
+  four-real-networks playtest has run yet.
 
 ## Protocol, NetIds & the replicable set
 
@@ -2592,11 +2668,12 @@ transports: `NetWire`, BroadcastChannel tabs, and LocalSocketNet `--net-peers`.
     into later games, exactly as if the player had gone to Options; the row is labelled with that
     menu's own wording (`Allow Online Joins: Enabled/Disabled`) rather than a verb, for that
     reason. `SaveThreaded()` fires on the toggle.
-  - **The two shapes are MUTUALLY EXCLUSIVE, and it is a property of `NetListing`, not of this
-    file:** `ComputeEligibleIgnoringSetting` refuses while `NetSession.Active`, so a game with a
-    peer in it is never listable. The menu does not RELY on that (fed the contradictory state it
-    still yields one shape), because the day listing during a session becomes possible the
-    failure would be a stray row over a live match.
+  - **The two shapes COMPOSE since card 0257f8ba (they used to be mutually exclusive):** a HOST
+    session with a free seat is itself listable now, so a paused host can close its room against
+    further strangers AND kick a peer from the same menu -- rows `Back, RoomToggle, Kick@...`,
+    with the toggle always after Back so entry 0 stays non-destructive. The old exclusivity note
+    ("the day listing during a session becomes possible...") came due exactly as written; the
+    NetHostMenuTest sweep now pins the composed shape instead.
   - **`NetListing.CouldList` is the new predicate half** -- eligible EXCEPT for the setting.
     `Eligible` cannot answer "is this game one toggle away from joinable", since it is already
     false whenever the setting is off.
@@ -2709,10 +2786,13 @@ transports: `NetWire`, BroadcastChannel tabs, and LocalSocketNet `--net-peers`.
 - **Known limits (by design -- next cards):** a dead local player will NOT respawn while the
   remote puppet lives (LoseLife triggers on AllShipsDead); DevCommentEvent commentary is not
   replicated (profile-local setting).
-  - **The SESSION holds up to four machines since card 87242257 (Stage 11.9)** -- see the
-    N-PEER SESSION section -- but the REAL-NETWORK path still pairs two until card `0257f8ba`
-    (11.10) raises the lobby/browser room capacity, so "3-4 strangers over WebRTC" is not yet
-    reachable by a player. The player dimension was already 4-wide everywhere
+  - **The SESSION holds up to four machines since card 87242257 (Stage 11.9), and since card
+    `0257f8ba` (Stage 11.10) the REAL-NETWORK path reaches it too** -- four-machine rooms in
+    the menu lobby and the public browser, JIP into slots 3/4, the lobby roster panels. What
+    remains of the epic is 11.11's hardening (relayed-channel interp delay, N=4 soak,
+    multi-process rig matrix) -- and note the real-WebRTC four-machine flow has NOT had a
+    four-real-browsers playtest yet; the rigs here cover the session and the menus, not NAT
+    reality. The player dimension was already 4-wide everywhere
     (`Oracle.MaxPlayers`, `ScoreVisualiser.SlotCount`, the slot-keyed ship stream,
     `EvScoreSync`, the claim ledgers -- and 4-player online as two consoles with a couch
     partner each has worked since card 2e0f908b). The design is `plans/4p-online-coop.md`
@@ -3531,8 +3611,12 @@ and the measurement stays in the suite forever as the control.
     any empty player slot (`oracle.Players < Oracle.MaxPlayers` -- card 4d904410 relaxed this
     from `== 1`, so a COUCH game with a spare seat lists too and the browser's players column
     genuinely varies 1..3) + `Settings.AllowOnlineJoins` (new Option,
-    **default ON**) + no cheats/`DebugFlags.Active` + a net-eligible LEVEL
-    + no session already up. **The level test is split out as the pure
+    **default ON**) + no cheats/`DebugFlags.Active` + a net-eligible LEVEL. The old "+ no
+    session already up" term is GONE (card 0257f8ba): a HOST session on the real WebRTC
+    transport with a free seat keeps advertising (`NetSession.HostOpenToJoinInProgress` bounds
+    which sessions qualify -- a client, or a session on any dev transport, never lists), so a
+    3rd/4th stranger joins the RUNNING match through the same room and `PeerConnected`
+    JIP-launches it. **The level test is split out as the pure
     `NetListing.IsNetEligibleLevel(Levels)`** so it can be verified as data (`logic_probe`'s
     `ProbeListingLevels` sweeps the whole enum, with the pre-card predicate as the negative
     control -- the failure here is silent and REMOTE, a level appearing in a stranger's browser

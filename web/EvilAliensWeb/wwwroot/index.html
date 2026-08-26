@@ -1266,7 +1266,32 @@
             state: () => {
                 try { DotNet.invokeMethod('EvilAliensWeb', 'debugRespawnState'); }
                 catch (e) { console.warn('[debug] eaRespawn.state failed (game not booted yet?): ' + e.message); }
+            },
+            // Raise a real OWNED summon on `slot` (card ed32efe1). Its production trigger is a
+            // CO-OP death -- single player wipes the world and raises none -- so this is the only
+            // on-demand way to watch one run, pop and drop its reward bomb. DESTRUCTIVE: the pop
+            // spawns a real PlayerShip into the live world, so use a throwaway boot.
+            raise: (slot, bonus) => {
+                try {
+                    console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugRespawnRaise',
+                        Number(slot) || 0, Number(bonus) || 0));
+                }
+                catch (e) { console.warn('[debug] eaRespawn.raise failed (game not booted yet?): ' + e.message); }
             }
+        };
+
+        // Debug: set one slot's powerup LEVEL (card ed32efe1).
+        //   eaPowerupLevel(slot, type, level) — type is Blast|Option|FirePower|Range|Linker.
+        // The respawn reward bomb is sized by the "2" (Linker) level, and nothing else can put a
+        // level on a slot without a live ship, a live level and a spawner roll. Drives the wire's
+        // own NetSetPowerupLevel, so it climbs through the real PowerupData path.
+        window.eaPowerupLevel = (slot, type, level) => {
+            try {
+                console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugPowerupLevel',
+                    Number(slot) || 0, type === undefined ? 'Linker' : String(type),
+                    level === undefined ? 4 : Number(level)));
+            }
+            catch (e) { console.warn('[debug] eaPowerupLevel failed (game not booted yet?): ' + e.message); }
         };
 
         // Debug: the evil grinning face of death's volley state (card d8344c17).

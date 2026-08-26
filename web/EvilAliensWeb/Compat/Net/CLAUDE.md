@@ -1080,6 +1080,12 @@ Four pieces, none changing what replicates -- only how well the star holds up at
   its respawn clock, so the other peer draws the indicator too, card 37f3a663. A v16 peer ignores
   the unknown event and simply does not draw it, i.e. the pre-card behaviour, so like v14 and v15
   the bump is the batch convention rather than a forced incompatibility.
+  **v26** appends `[rewardLevel:1]` to `EvRespawn` -- card ed32efe1, the respawn pop's reward
+  bomb is the dying player's own "2" powerup level now, and the blast is not itself replicated (see
+  the `EvRespawn` bullet under "THE RESPAWN INDICATOR"). Unlike v14/v15/v17/v25 this WIDENS AN
+  EXISTING EVENT, so a v25 peer's length check would refuse the frame outright and lose the whole
+  announcement -- a forced bump, not a convention one, though as the note at the version constant
+  says no such peer can reach us.
   **v19** puts a monotone `[seq:2]` on the MsgWorldSnapshot HEADER and raises
   `NetBaseState.Scale`'s quantum from 1/256 to 1/4096 with a ROUNDING cast -- card f5cf7a5c, see
   the SNAPSHOT STALENESS section. Like v13 and v16 both changes MOVE AN EXISTING LAYOUT rather
@@ -2100,8 +2106,8 @@ Four pieces, none changing what replicates -- only how well the star holds up at
   - **NOT VERIFIED ON TWO REAL SCREENS.** Whether 12 s of shared bullet-time from one player's
     1up FEELS right is a playtest question this rig cannot answer.
 - **THE RESPAWN INDICATOR IS THE WORLD'S TOO: `EvRespawn` (event 26, reliable,
-  `[slot:1][posX:f32][posY:f32][durationMs:u16]`, 15 B, protocol v17, EITHER PEER) -- card
-  37f3a663.** A dead player's respawn clock existed only on their own screen: the other peer
+  `[slot:1][posX:f32][posY:f32][durationMs:u16][rewardLevel:1]`, 16 B, protocol v17 / v26,
+  EITHER PEER) -- card 37f3a663, `rewardLevel` card ed32efe1.** A dead player's respawn clock existed only on their own screen: the other peer
   watched the ship explode and then had ten seconds of nothing, with no idea their buddy was coming
   back or where. That is structural rather than an oversight -- `NetSession.ExplodePuppet` takes a
   puppet out WITHOUT `Die()`, precisely so it does not raise a local summon for a ship it does not
@@ -2121,6 +2127,22 @@ Four pieces, none changing what replicates -- only how well the star holds up at
     `EvIntroVolley` idiom. Damage stays fair because that is already how an ordinary co-op bomb
     works: both peers spawn a real `Blast`, the host's is authoritative and the client's kills go
     through the generous claims.
+  - **...WHICH IS EXACTLY WHY THE REWARD LEVEL HAD TO GO ON THE WIRE (card ed32efe1, v26).** The
+    blast is not replicated, so while its level was a CONSTANT the two peers' copies matched by
+    construction and there was nothing to send. Once it became the owner's "2" (`Linker`) powerup
+    level, an observer re-deriving it from its own `Score` could disagree: that slot's levels reach
+    this peer over the ~10 Hz `MsgHudState`, so a peer who takes their fourth "2" and dies inside
+    the next packet's window latches the stale 3, and a JOIN-IN-PROGRESS peer that receives this
+    event before its first HUD packet latches 0. Not cosmetic -- `Blast.Setup` makes the lifetime
+    `1000ms * (level+1)` and the blast KILLS, so wherever the observer is the host its copy is
+    authoritative for what dies. One byte restores the by-construction identity, and the sender
+    reads it off the SUMMON (`PlayerShipSummon.RewardBlastLevel`) rather than re-reading `Score`,
+    so the announcement cannot describe a different bomb from the one that peer will drop.
+    Clamped 0..4 at the decode boundary rather than refused, the `ClampKillerSlot` ruling: the
+    frame also carries the announcement itself, and dropping the indicator and its position over
+    one bad byte is the worse trade. Pinned by `NetRespawnTest` sections 1 and 2 (whose section-2
+    leg asserts this peer's own view of that slot's "2" is 0, so a re-derived build reads 0 and
+    fails) and by `NetWireTest`'s round-trip + clamp legs.
   - **NOT an `EvFx`.** That lane is HOST-ONLY and keyed on a `netId`; this is neither -- either
     peer's ship can die, and a summon is not a replicated entity at all, so it needs its own
     position. `EvSlowmo` is the shape it follows.

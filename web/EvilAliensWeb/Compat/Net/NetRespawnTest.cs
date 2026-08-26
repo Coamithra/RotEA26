@@ -58,6 +58,11 @@ namespace EvilAliensWeb.Compat.Net
         // a round second, so a receiver that rounded to whole seconds would show.
         private const int PeerRespawnMs = 750;
 
+        // The "2" (Linker) level section 1 gives our slot before the death, and the one section 3
+        // puts on the wire. Deliberately NEITHER 0 (what a build that lost the read produces) nor
+        // 3 (the pre-card constant), so the reward legs cannot pass on either -- card ed32efe1.
+        private const int RewardLinkerLevel = 2;
+
         public static string Run()
         {
             StringBuilder sb = new StringBuilder();
@@ -171,6 +176,18 @@ namespace EvilAliensWeb.Compat.Net
             Check("PRECONDITION both ships are in the oracle (ships=" + oracle.LiveShips + ")",
                 oracle.LiveShips == 2);
 
+            // Give OUR slot a "2" powerup level AFTER the plant -- PlantShip's Initialize runs
+            // Score.ResetPowerup on it, so setting it earlier would be wiped. This is what makes
+            // the reward legs below non-vacuous: RewardLinkerLevel is neither 0 (what a broken
+            // read gives) nor 3 (the pre-card constant).
+            ServiceHelper.Get<IScoreService>().Score
+                .DebugSetPowerupLevel(OurSlot, Powerup.PowerupType.Linker, RewardLinkerLevel);
+            Check("PRECONDITION our slot holds a level-" + RewardLinkerLevel + " \"2\" ("
+                + ServiceHelper.Get<IScoreService>().Score
+                    .GetPowerupLevel(Powerup.PowerupType.Linker, OurSlot) + ")",
+                ServiceHelper.Get<IScoreService>().Score
+                    .GetPowerupLevel(Powerup.PowerupType.Linker, OurSlot) == RewardLinkerLevel);
+
             respawnFrames.Clear();
             int summonsBefore = CountSummons(game);
             ourShip.Asplode();
@@ -184,8 +201,10 @@ namespace EvilAliensWeb.Compat.Net
             byte txSlot = 0;
             Vector2 txPos = Vector2.Zero;
             int txMs = 0;
+            int txReward = 0;
             bool txOk = respawnFrames.Count == 1
-                && NetProtocol.TryDecodeRespawnEvent(respawnFrames[0], out txSlot, out txPos, out txMs);
+                && NetProtocol.TryDecodeRespawnEvent(respawnFrames[0], out txSlot, out txPos, out txMs,
+                    out txReward);
             Check("...and put exactly one EvRespawn on the peer's wire (" + respawnFrames.Count
                 + " frames, slot=" + txSlot + ")", txOk && txSlot == OurSlot);
             // The DURATION needs its own leg: it is what the far peer's clock runs for, and it is
@@ -198,6 +217,16 @@ namespace EvilAliensWeb.Compat.Net
             Check("...and the position the ship died at (" + Fmt(txPos) + " vs "
                 + Fmt(Nowhere) + ")",
                 txOk && txPos.X == Nowhere.X && txPos.Y == Nowhere.Y);
+            // The REWARD LEVEL, its own leg for the same reason the duration has one (card
+            // ed32efe1, v26): it is the dying player's "2" powerup level, not a constant, and it
+            // must be the value the SUMMON latched -- a sender that re-read Score here would ship
+            // whatever the slot holds at send time instead. Driven to a non-default value above
+            // via Score.DebugSetPowerupLevel so a hard-coded 0 or 3 cannot pass.
+            Check("...and the reward level the summon latched (" + txReward + " vs "
+                + (raised != null ? raised.RewardBlastLevel : -1) + ")",
+                txOk && raised != null && txReward == raised.RewardBlastLevel);
+            Check("...which is the LINKER level we gave that slot, not a constant ("
+                + txReward + " vs " + RewardLinkerLevel + ")", txOk && txReward == RewardLinkerLevel);
 
             // 1a. THE CLOCK ONLY EVER RUNS DOWN. `base.Update` ticks the timers AFTER this class
             // tests `Finished`, so between the tick that rings the 1 Hz timer and the tick that
@@ -250,7 +279,8 @@ namespace EvilAliensWeb.Compat.Net
             RetireSummons(bin, game, planted);
             bin.TopOfTickFlush();
             summonsBefore = CountSummons(game);
-            peer.SendReliable(NetProtocol.EncodeRespawnEvent(eventSeq++, TheirSlot, PeerRespawnAt, PeerRespawnMs));
+            peer.SendReliable(NetProtocol.EncodeRespawnEvent(eventSeq++, TheirSlot, PeerRespawnAt,
+                PeerRespawnMs, RewardLinkerLevel));
             wire.Pump();
             NetSession.Update();
             PlayerShipSummon mirrored = FindSummon(game);
@@ -266,6 +296,20 @@ namespace EvilAliensWeb.Compat.Net
             Check("...for the announced duration (" + (mirrored != null ? mirrored.DurationMs : -1)
                 + "ms vs " + PeerRespawnMs + "ms)",
                 mirrored != null && mirrored.DurationMs == PeerRespawnMs);
+            // ...and with the announced REWARD LEVEL (card ed32efe1, v26). It has to come off the
+            // wire: this peer's own view of THEIR powerups arrives over the ~10 Hz MsgHudState and
+            // would be stale (or, for a join-in-progress peer, absent). Non-vacuous because
+            // nothing here ever gave slot TheirSlot a Linker level -- PlantShip's Initialize
+            // zeroed it -- so a build that re-derived it locally reads 0 and fails.
+            Check("...and with the announced reward level ("
+                + (mirrored != null ? mirrored.RewardBlastLevel : -1) + " vs " + RewardLinkerLevel
+                + ")", mirrored != null && mirrored.RewardBlastLevel == RewardLinkerLevel);
+            Check("PRECONDITION our local view of THEIR \"2\" is 0, so that level can only have"
+                + " come off the wire ("
+                + ServiceHelper.Get<IScoreService>().Score
+                    .GetPowerupLevel(Powerup.PowerupType.Linker, TheirSlot) + ")",
+                ServiceHelper.Get<IScoreService>().Score
+                    .GetPowerupLevel(Powerup.PowerupType.Linker, TheirSlot) == 0);
             // Card 045c5a92's numeral, on the COSMETIC path. PeerRespawnMs is deliberately not a
             // round second, which is exactly what makes this worth asserting: the countdown must
             // still read a whole 1 here (ceil of 0.75), never a 0 and never a fraction. The owned
@@ -285,7 +329,8 @@ namespace EvilAliensWeb.Compat.Net
             // disagreement parks a phantom clock over a player who is alive and flying, and drops
             // a free bomb into our world when it pops.
             int summonsNow = CountSummons(game);
-            peer.SendReliable(NetProtocol.EncodeRespawnEvent(eventSeq++, OurSlot, PeerRespawnAt, PeerRespawnMs));
+            peer.SendReliable(NetProtocol.EncodeRespawnEvent(eventSeq++, OurSlot, PeerRespawnAt,
+                PeerRespawnMs, RewardLinkerLevel));
             wire.Pump();
             NetSession.Update();
             Check("an EvRespawn naming a slot WE own is refused (summons " + summonsNow + " -> "

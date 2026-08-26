@@ -15,9 +15,30 @@ prompt is pixel-identical. Pinned by `tools/headless/probes/confirm_prompt_layou
 _Further testing would be nice:_ the final foreground-Chrome smoke check was not possible here (no
 browser/dev server in this environment); verified headlessly via `eahl` instead.
 
-## 2. `ed32efe1` — let's make the explosion that is created when you respawn have its size level be equal to the level you had the "2" powerup at
+## 2. `ed32efe1` — let's make the explosion that is created when you respawn have its size level be equal to the level you had the "2" powerup at — **DONE**
 
 _No description or comments — the card title is the whole ticket._
+
+**Done** (PR pending link). The respawn pop's reward bomb was a fixed level 3; it is now
+`Score.GetPowerupLevel(Powerup.PowerupType.Linker, slot)` — `Linker` is the powerup the game draws
+as **"2"**, and it is already the respawn powerup (its level buys `respawntimebonus`, i.e. a shorter
+version of this very countdown). Level 0 is a legal small blast for a player who never picked one up.
+
+The level is **latched when the summon is raised**, not read at the pop: the pop spawns the new ship
+two lines earlier and `PlayerShip.Initialize` calls `Score.ResetPowerup`, so a read at the pop
+measured 0 for a maxed "2" every time.
+
+**Protocol v26**: the level rides `EvRespawn`. The reward blast is not itself replicated, so while
+its level was a constant the two peers' copies matched by construction; re-deriving the new one from
+a peer's own ~10 Hz `MsgHudState` view could disagree, and the blast kills. One byte restores the
+identity.
+
+New rig seams `eaRespawn.raise(slot)` / `eaPowerupLevel(slot,type,level)`; pinned by the probe pair
+`respawn_reward_level.txt` + `respawn_reward_level_zero.txt` (mutation-tested three ways) and by five
+new `NetRespawnTest` legs.
+
+_Further testing would be nice:_ the co-op path is covered by the in-process wire self-tests, not by
+a live two-machine session — multiplayer is not testable in this environment.
 
 ## 3. `f6fc1d97` — in multiplayer games, on the client, I can see 1 hp ufo's blink white before they blow up (the hit effect for enemies with multiple hit points). Is this a result of how the networking works? That a joining peer just shows the "enemy hit" animation until the host acknowledges that the enemy died? For 1 hp enemies I'd like the joining clients to just immediately blow the monster up and send a message to the host. The host trusts clients and then also blows up that enemy (of if it already had it just ignores the message since it's already dealt with).
 

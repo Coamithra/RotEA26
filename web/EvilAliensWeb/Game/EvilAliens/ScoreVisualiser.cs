@@ -489,6 +489,23 @@ public class ScoreVisualiser : DrawableGameComponent, IScoreService, IComponentW
 		}
 	}
 
+	// DEBUG SEAM (card ed32efe1): drive one slot's powerup LEVEL from the console. It exists
+	// because the respawn reward blast is now sized by the "2" (Linker) level, and no offline rig
+	// can otherwise put a level on a slot: the sprite harness has no PlayerShip to pick a powerup
+	// up, and a real pickup needs a live level, a live ship and a spawner roll. Goes through the
+	// same NetSetPowerupLevel the wire uses, so it climbs (or drops) through the real PowerupData
+	// path rather than poking a field -- a seam that set the number a different way would not be
+	// evidence about the number the game reads. Reached through DebugInput.PowerupLevel.
+	internal bool DebugSetPowerupLevel(int player, Powerup.PowerupType type, int level)
+	{
+		if (player < 0 || player >= scores.Count)
+		{
+			return false;
+		}
+		NetSetPowerupLevel(player, type, level);
+		return true;
+	}
+
 	// `oracle` is bound in Initialize, which only runs once this component is added to the bin --
 	// i.e. inside a GameScene. The HUD-state path (card 1a3ad45a) can be reached before that
 	// (eaNetCombo.test from the main menu, and a wire packet that outruns the scene), so the null

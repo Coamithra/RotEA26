@@ -1,68 +1,99 @@
-# PROBE: the respawn reward bomb is a level 3, and it really reaches Blast (card 258afd66)
+# PROBE: the respawn reward bomb is sized by the player's OWN "2" powerup level, latched at the
+#        moment the summon is raised (card ed32efe1).
 #
-# PINS:   the card lowered the free bomb a dead player gets on their way back in, 4 -> 3, because
-#         at 4 a co-op partner's death cleared most of the screen. A constant is trivial to read in
-#         a diff and worth nothing on its own -- what can silently rot is whether that constant is
-#         still the one that reaches Blast.Setup. So this asserts the value at BOTH ends:
+# PINS:  three separate claims, and the file is built so each fails on its own.
 #
-#           * `[respawn] reward blast ... level=3` is printed from the call site, with the value
-#             actually passed to Setup.
-#           * the ring the Blast fires resolves to a 4.00 s duration. Blast.Setup makes the
-#             lifetime 1000ms * (level+1) and BombRipple seeds the ring from that real lifetime
-#             (card 03c379f2), so a level 4 reads 5.00 here. That second witness is independent of
-#             the print: it comes off the Blast, through the ripple, not off this class at all.
+#   1. THE LEVEL IS THE SLOT'S LINKER LEVEL, not a constant. The "2" is
+#      `Powerup.PowerupType.Linker` (`Powerup.PowerUpString` renders it as "2"), which is already
+#      the respawn powerup -- `PlayerShip.PowerUp` spends its level on `respawntimebonus`, i.e. on
+#      this very clock. The pre-card build shipped a fixed 3 (card 258afd66, itself down from 4),
+#      so `level=3` and `level=4` are the two values that separate the eras. This probe asks for
+#      4 for that reason: it is neither the old constant nor the zero a broken read gives.
 #
-#         THE RIG IS ?harness=respawn&harnessrun, and it has to be. The reward only fires in
-#         CO-OP, and the one level that seats a second local ship offline is TeamChallenge -- which
-#         is SHARED-FATE (UpdateNormal asplodes the partner and calls LoseLife the instant either
-#         ship dies), so GameScene.LoseLife purges the summon within about ten frames of it being
-#         raised and it never reaches its pop. Measured, both seats, before this rig existed.
-#         ?harnessrun is the same summon with the harness freeze lifted, so the real owned
-#         countdown runs to the pop. (It was its own registry key, ["respawnrun"], until card
-#         d1ee8761 generalised it into a flag that works on every key; nothing about this rig
-#         changed but the spelling, which is why this probe stayed green through that card.)
+#   2. IT IS LATCHED AT SETUP, NOT READ AT THE POP -- which is not a stylistic choice, it is the
+#      whole fix. The pop SPAWNS THE SHIP two lines before it builds the blast, `ComponentBin.Add`
+#      runs `Initialize` synchronously, and `PlayerShip.Initialize` calls
+#      `Score.ResetPowerup(player)`, which zeroes every level on that slot. A build that read the
+#      score at the pop measured 0 for a maxed "2" on every single run (measured, before the
+#      latch). The probe reproduces that wipe EXPLICITLY as well -- it drops the slot to 0 thirty
+#      frames after the raise and asserts the drop took -- so the surviving 4 cannot be a slot that
+#      simply never got reset.
+#
+#   3. THE VALUE REACHES Blast.Setup, witnessed INDEPENDENTLY of the print. `Blast.Setup` makes the
+#      lifetime `1000ms * (level+1)` and `BombRipple` seeds its ring from that real lifetime (card
+#      03c379f2), so `eval RippleState` reads `/5.00` at level 4 and `/1.00` at level 0. That
+#      number comes off the Blast through the ripple, not off PlayerShipSummon at all.
+#
+# WHY THE SEAM (eval RespawnRaise): the summon's production trigger is a CO-OP death. A
+# single-player death is a world WIPE and raises no summon at all (PlayerShipSummon.ShouldSummon),
+# and the one level that seats a second local ship offline -- TeamChallenge -- is shared-fate, so
+# GameScene.LoseLife purges the summon within ~10 frames of it being raised. `?harness=respawn&
+# harnessrun` does run one, but raises it at BOOT, which is too early to be given a powerup level
+# first -- and the ordering IS claim 2. `eval PowerupLevel` is the other half: no offline rig can
+# otherwise put a level on a slot (no ship to pick a powerup up, no spawner roll to win).
+# Both drive production code: the real `Setup` + `ComponentBin.Add`, and the wire's own
+# `NetSetPowerupLevel`.
 #
 # FAILURE MEANS:
-#   `level=4` -> the constant went back up.
-#   the level line present but the ripple reading /5.00 -> the printed constant and the one handed
-#   to Blast.Setup have drifted apart, which is the whole reason both are asserted.
-#   NO reward line at all -> the pop stopped spawning a blast; check SpawnRewardBlast's callers in
-#   Update (both the cosmetic and the owned branch call it).
+#   `reward=3` or `reward=0` at the raise -> the level is not being read off the "2" at all.
+#   `reward=4` but `reward blast ... level=0`   -> the latch is gone; the read moved back to the
+#                                                  pop and the ship spawn wiped it underneath.
+#   the RippleState leg red with the others green -> the printed level and the one handed to
+#                                                  Blast.Setup have drifted apart.
+#   `[poweruplevel] slot=0 type=Linker level=0` missing after the raise -> the wipe leg is vacuous.
 #
-# Mutation-tested twice, both run. The runner aborts at the first failed expect, so each trips
-# leg 2 and leg 3 is not reached in the same run:
-#   RewardBlastLevel 3 -> 4      : leg 2 goes red, printing `level=4`.
-#   both SpawnRewardBlast calls  : leg 2 goes red with no reward line at all, leg 1 still green
-#     deleted                      (so the rig did raise a clock -- the pop just dropped nothing).
-# LEG 3 WAS CONFIRMED SEPARATELY, against the pre-card build: with RewardBlastLevel still 4, this
-# same rig reported the ring as `r0=(400,300 e=3.82/5.00)`, i.e. exactly the /5.00 leg 3 refuses.
-# So the second witness is known to move with the constant rather than merely to agree with it.
+# COMPANION: respawn_reward_level_zero.txt runs the same rig at level 0 and requires `/1.00`, so
+# neither file can pass on a build that returns a fixed maximum. Read the two as one probe.
 #
-# eahl: --flags "?harness=respawn&harnessrun"
+# MUTATION-TESTED, three ways, each isolated. The runner stops at the first failed expect, so each
+# mutation reddens one leg and the ones after it are not reached:
+#   * the level back to a fixed 3 (the pre-card build): the RAISE leg goes red, `reward=3`. Both
+#     files fail -- the constant is wrong for either asked-for level.
+#   * the latch dropped (Score read at the pop again): the raise leg still reads `reward=4`, and
+#     the POP leg goes red with `level=0` -- the ship spawn wiped the slot underneath it. This
+#     file alone; the zero companion passes, because 0 is what a broken read gives anyway.
+#   * the level floored at 1: this file passes and the ZERO COMPANION goes red (`level=1`), which
+#     is the asymmetry the companion exists for. Do not read either file's green alone.
+#
+# eahl: --flags "?level=Level2&invuln&noattract&seed=1&difficulty=Medium"
 
-step 160
-
-# 1. THE PRECONDITION, pinned rather than waited out (card af4c3694): a summon really is running
-#    before the steps below, so leg 2's absence-or-presence is about the POP and not about a rig
-#    that never raised a clock at all.
+# Settle into the level with a live ship in slot 0. Level 2 rather than Level 1 on purpose: Level
+# 1's intro cinematic holds the player spawn for ~10 s, so the summon would report
+# "draw suppressed (world wiped)" and the rig would be testing a shipless world.
+# `?difficulty=Medium` is PINNED rather than inherited: the raise leg asserts `ms=10000`, and the
+# countdown scales with difficulty (round((15 - bonus) * 0.66..0.9)). Without it a saved profile at
+# Hard would fail this file as "wrong reward" when the difficulty is what moved -- probes README
+# rule 5, a precondition folded into a subject assertion.
+step 400 nodraw
 mark
-eval RespawnState
-expect \[respawn\] summons=1
-expect \[respawn\] fill=0\.[0-9]+ .* secs=[0-9]+ .* local
 
-# 2. Run past the 10 s clock into the pop. `mark` first, because the reward line is printed DURING
-#    the steps and an assertion window opened afterwards would have thrown it away.
-mark
-step 500
-expect \[respawn\] reward blast slot=0 level=3
-expect-not \[respawn\] reward blast slot=0 level=4
+# Give slot 0 a maxed "2" and raise a real summon. `reward=` is the latch read straight back.
+eval PowerupLevel 0 Linker 4
+expect \[poweruplevel\] slot=0 type=Linker level=4
+eval RespawnRaise 0 0
+expect \[respawn\] raise slot=0 bonus=0 ms=10000 reward=4
+expect-not \[respawn\] raise .* reward=(0|3)$
 
-# 3. THE INDEPENDENT WITNESS. The ring is still in flight (it lives 4.00 s and the pop was ~1 s
-#    ago), and its resolved duration is the Blast's own lifetime, so it reads the bomb's level
-#    back out through a completely different object.
 mark
+# Now WIPE the slot, exactly as the respawn itself will in a moment. Asserted, not assumed: a
+# surviving 4 means nothing if the reset never happened.
+step 30
+eval PowerupLevel 0 Linker 0
+expect \[poweruplevel\] slot=0 type=Linker level=0
+
+mark
+# Run through the pop. The ship spawn inside it runs Score.ResetPowerup for real, so by the time
+# the blast is built the slot has been zeroed twice over -- and the latched 4 must still be what
+# is spent.
+step 620 nodraw
+expect \[respawn\] reward blast slot=0 level=4
+expect-not \[respawn\] reward blast slot=0 level=(0|3)
+
+mark
+# The independent witness: the ring's resolved duration IS the Blast's own lifetime.
+step 20
 eval RippleState
-expect e=[0-9.]+/4\.00
-expect-not e=[0-9.]+/5\.00
+expect e=[0-9.]+/5\.00
+expect-not e=[0-9.]+/(1|4)\.00
 
 quit

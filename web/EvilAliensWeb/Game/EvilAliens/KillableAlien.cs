@@ -216,7 +216,8 @@ public abstract class KillableAlien : AlienDrawableGameComponent, EvilAliensWeb.
 
 	// Online co-op (card f62116b5): a KilledBy that returned with the component STILL IN THE
 	// WORLD deferred its own removal into a multi-second dying animation -- BattleSkull's 2.5s
-	// shrink-and-flicker, the surviving MarsBoss's 5s crash, the BrainBoss/FakeBoss asplode.
+	// shrink-and-flicker, the surviving MarsBoss's 5s crash, the FakeBoss's 4s and the BrainBoss's
+	// TWENTY-second asplode (durations matter to the puppet layer: NetPuppets.releasedDying).
 	// A puppet is frozen for life, so the other peer has to be told NOW to let its copy go and
 	// finish dying locally; the host's own EvDeath does not arrive until that animation ENDS.
 	//

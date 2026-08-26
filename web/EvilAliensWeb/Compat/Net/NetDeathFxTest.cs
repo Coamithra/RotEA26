@@ -108,6 +108,10 @@ namespace EvilAliensWeb.Compat.Net
         private const ushort IdHelper2 = 61017;
         private const ushort IdMine3 = 61018;
         private const ushort IdSkull6 = 61019;
+        // Section 9's dying-release ghost legs (card 444eb614).
+        private const ushort IdSpiderBoss3 = 61020;
+        private const ushort IdBullet3 = 61021;
+        private const ushort IdSpiderBoss4 = 61022;
 
         public static string Run()
         {
@@ -151,7 +155,10 @@ namespace EvilAliensWeb.Compat.Net
             int songBefore = sound.NetCurrentSong;
 
             INetHost hostBefore = NetHost.Current;
-            NetHost.Current = new PinnedNetHost();
+            // Held rather than assigned inline: section 9's ghost leg has to ADVANCE it past
+            // NetPuppets.RecentRemovalWindowMs without waiting three real seconds.
+            PinnedNetHost clock = new PinnedNetHost();
+            NetHost.Current = clock;
             try
             {
                 Section1Codec(sb, Check);
@@ -163,7 +170,7 @@ namespace EvilAliensWeb.Compat.Net
                 Section6DeferredFromEvDying(sb, Check, bin, game, score, planted);
                 Section7HelperMothership(sb, Check, bin, game, score, planted);
                 Section8BossChoreography(sb, Check, bin, game, score, planted);
-                Section9SpiderBoss(sb, Check, bin, game, score, planted);
+                Section9SpiderBoss(sb, Check, bin, game, score, planted, clock);
             }
             catch (Exception ex)
             {
@@ -1212,6 +1219,7 @@ namespace EvilAliensWeb.Compat.Net
             Check(name + ": the animation ENDED on its own and the boss left the world (after "
                 + took + " of at most " + maxTicks + " ticks)",
                 !InWorld(game, (GameComponent)(object)boss));
+            CheckFitsReleaseWindow(Check, name, midTicks + took);
             Check(name + ": ...having spawned strictly more FX on the way out (+"
                 + (DeathFxCount(game) - midway) + ")", DeathFxCount(game) > midway);
             // The finale calls AwardScoreToAll, which under one writer per slot credits only
@@ -1219,6 +1227,30 @@ namespace EvilAliensWeb.Compat.Net
             // move nothing (card af96bcc2). Section 5 is the leg proving payment still works.
             Check(name + ": no score panel ever moved across the whole choreography",
                 SameScores(score, before));
+        }
+
+        // THE CONSTANT, CHECKED AGAINST THE REAL ANIMATION (card 444eb614).
+        //
+        // `NetPuppets.DyingReleaseWindowMs` is how long a RELEASED dying puppet's id stays
+        // suppressed from the snapshot self-heal, and it exists because the host keeps streaming
+        // that id for the whole animation. A death LONGER than the window ghosts -- which is the
+        // card's own defect, and it is what 15 s did to the BrainBoss's twenty-second asplode.
+        //
+        // So the number is not asserted against a census in a comment (a census drifts and cannot
+        // fail); it is asserted against the duration the choreography ACTUALLY ran for, measured
+        // by the leg that just ticked it. A future death that grows past the window fails HERE.
+        //
+        // Ticks -> ms at the suite's own fixed 60 Hz dt (`Tick`), and it is a FLOOR rather than
+        // the exact figure: `TickUntilGone` stops at the first tick past the end. Difficulty
+        // scales some of these (`SpiderBoss`), so what this pins is the run's own tier -- the
+        // tier RANGE lives in `releasedDying`'s census.
+        private static void CheckFitsReleaseWindow(Action<string, bool> Check, string name, int ticks)
+        {
+            float ms = ticks * (166667f / 10000f);
+            Check(name + ": the whole dying animation (" + (int)ms + " ms measured) fits inside"
+                + " NetPuppets.DyingReleaseWindowMs (" + (int)NetPuppets.DyingReleaseWindowMs
+                + " ms) -- longer than that and its id ghosts",
+                ms < NetPuppets.DyingReleaseWindowMs);
         }
 
         // ---- 9. SpiderBoss -- the one that is NOT a KillableAlien ----------------------------
@@ -1237,7 +1269,8 @@ namespace EvilAliensWeb.Compat.Net
         //
         // Its FX are BloodExplosion, not Explosion, which is why this suite counts both.
         private static void Section9SpiderBoss(StringBuilder sb, Action<string, bool> Check,
-            ComponentBin bin, Game game, ScoreVisualiser score, List<GameComponent> planted)
+            ComponentBin bin, Game game, ScoreVisualiser score, List<GameComponent> planted,
+            PinnedNetHost clock)
         {
             sb.Append(" 9. CLIENT -- SpiderBoss, whose death does NOT run through KillableAlien"
                 + " (card ad9c8f8b)\n");
@@ -1278,13 +1311,17 @@ namespace EvilAliensWeb.Compat.Net
             Check("SpiderBoss: NEGATIVE a repeated death-began is a no-op, not a second burst (+"
                 + (DeathFxCount(game) - afterOpen) + ")", DeathFxCount(game) == afterOpen);
 
-            // The 5 s debris fall, then Die(). 340 ticks is 5.67 s at 60 Hz.
-            Tick((GameComponent)(object)boss, 180);
-            Check("SpiderBoss: still in the world 3s in -- the debris have 5s to fall",
+            // The debris fall, then Die(). 120 ticks is 2.0 s at 60 Hz -- deliberately under the
+            // fall's own FLOOR, which is 2941 ms (5000 / DifficultyFactorized(0.5) at the ramped
+            // modifier ceiling of 2.4), so this checkpoint cannot land past the end on a save
+            // whose difficulty has ramped. It used to be 180, i.e. exactly 3000 ms.
+            Tick((GameComponent)(object)boss, 120);
+            Check("SpiderBoss: still in the world 2s in -- the debris have at least 2.9s to fall",
                 InWorld(game, (GameComponent)(object)boss));
             int fell = TickUntilGone((GameComponent)(object)boss, bin, game, 1200);
             Check("SpiderBoss: the fall ENDED on its own and the boss left the world (after "
-                + (180 + fell) + " ticks)", !InWorld(game, (GameComponent)(object)boss));
+                + (120 + fell) + " ticks)", !InWorld(game, (GameComponent)(object)boss));
+            CheckFitsReleaseWindow(Check, "SpiderBoss", 120 + fell);
             Check("SpiderBoss: nothing was credited -- the host's EvDeath is the authority",
                 SameScores(score, before));
 
@@ -1321,6 +1358,174 @@ namespace EvilAliensWeb.Compat.Net
                 Check("SpiderBoss: ...so the host's beat after it fires NO second burst (+"
                     + (DeathFxCount(game) - afterLocal) + ")",
                     DeathFxCount(game) == afterLocal);
+            }
+
+            // ---- THE GHOST: A RELEASED DYING PUPPET MUST NOT BE SELF-HEALED BACK (card 444eb614)
+            //
+            // Reported as *"spider boss (lvl 2) -- on a joining client, after the boss was defeated
+            // and its death animation played, the original sprite still appeared for a few
+            // frames"*. `ReleaseDyingPuppet` drops the id from every map so the boss can finish
+            // dying as ordinary live code, and marks it removed precisely so the snapshot
+            // self-heal will not rebuild it. But that suppression ran on the flat 3 s
+            // `RecentRemovalWindowMs`, and its comment justified the length with "the host stops
+            // streaming the id within a turn or two" -- which is FALSE for exactly the deaths that
+            // reach that line. A dying entity stays in the host's world, so it stays in
+            // `NetIdRegistry.Live`, so the host keeps streaming it for the WHOLE animation: 5 s for
+            // this boss's debris fall at Very_Hard (`5000 / DifficultyFactorized(0.5)`, up to 7.4 s
+            // on Easy), and 5 s for the surviving MarsBoss's crash. At t=3 s the suppression
+            // lapsed, the next turn read as an unknown id, and the self-heal built a fresh, intact,
+            // COLLIDABLE boss standing where one was visibly dying -- which is the reported sprite.
+            // (This boss is why the report names it: `SpiderBoss.Draw` draws only debris once
+            // `dead`, so the rebuilt puppet is the only thing on screen still wearing the sprite.)
+            //
+            // Three legs, in an order that matters. The first two are the SAME call at two clock
+            // readings, so the fix cannot be confused with "the id is suppressed forever"; the
+            // third takes the suppression away again on the host's authoritative word.
+            SpiderBoss ghost = (SpiderBoss)BuildPuppet<SpiderBoss>(game, IdSpiderBoss3, spiderType, planted);
+            Check("GHOST: PRECONDITION a third SpiderBoss puppet was built", ghost != null);
+            if (ghost != null)
+            {
+                NetPuppets.OnDeathBegan(IdSpiderBoss3);
+                Check("GHOST: PRECONDITION it was RELEASED and is dying in the world",
+                    ((INetEntity)ghost).NetIsDying && InWorld(game, (GameComponent)(object)ghost)
+                    && !NetPuppets.IsPuppet((GameComponent)(object)ghost));
+                // Two game-seconds of the fall, so the boss is still visibly dying under the legs
+                // below. Deliberately under the fall's FLOOR of 2941 ms (see the leg above), not
+                // the 3 s the era boundary is at: the pinned clock does not move with these ticks
+                // -- it is what the removal ledger reads -- so the `clock.Advance` below is what
+                // puts the two eras apart, and the ticks carry no assertion value of their own.
+                Tick((GameComponent)(object)ghost, 120);
+
+                // LEG A -- the pre-existing suppression, INSIDE the flat window. The control: if
+                // this were already Rebuilt there would be no era to tell apart and the leg below
+                // would be measuring nothing.
+                int bossesBefore = CountType<SpiderBoss>(game);
+                SnapshotKind(IdSpiderBoss3, spiderType, hp: 0, out SnapUnknownKind kindEarly);
+                Check("GHOST: inside the 3 s window a released dying id reports LeftDead (was "
+                    + kindEarly + ")", kindEarly == SnapUnknownKind.LeftDead);
+                Check("GHOST: ...and nothing was rebuilt",
+                    CountType<SpiderBoss>(game) == bossesBefore);
+
+                // LEG B -- THE FIX. Past the flat window, with the host still streaming the id
+                // because its own copy is still falling. Advance only the ledger's clock.
+                clock.Advance(4000);
+                SnapshotKind(IdSpiderBoss3, spiderType, hp: 0, out SnapUnknownKind kindLate);
+                Check("GHOST: PAST the 3 s window it STILL reports LeftDead -- the release holds"
+                    + " for the whole animation (was " + kindLate + ")",
+                    kindLate == SnapUnknownKind.LeftDead);
+                Check("GHOST: ...so no second, intact boss was built beside the dying one ("
+                    + CountType<SpiderBoss>(game) + " vs " + bossesBefore + ")",
+                    CountType<SpiderBoss>(game) == bossesBefore);
+                Check("GHOST: ...and the one that IS there is still the dying original",
+                    InWorld(game, (GameComponent)(object)ghost)
+                    && ((INetEntity)ghost).NetIsDying && !ghost.Collides);
+
+                // LEG C -- NOT PERMANENT. The host's EvDeath says its own copy has left ITS world,
+                // so it has stopped streaming the id and the suppression is spent. Asserted AFTER
+                // leg B, per the ordering rule: a "the flag is cleared" check is worth nothing
+                // unless something above it showed the flag was set.
+                NetPuppets.OnRemoteDeath(IdSpiderBoss3, NetProtocol.KillerNone, Nowhere);
+                HashSet<GameComponent> beforeHeal = new HashSet<GameComponent>(CollectType<SpiderBoss>(game));
+                SnapshotKind(IdSpiderBoss3, spiderType, hp: 0, out SnapUnknownKind kindAfterDeath);
+                Check("GHOST: the host's EvDeath ENDS the suppression -- the id self-heals again"
+                    + " (was " + kindAfterDeath + ")", kindAfterDeath == SnapUnknownKind.Rebuilt);
+                foreach (GameComponent item in CollectType<SpiderBoss>(game))
+                {
+                    if (!beforeHeal.Contains(item))
+                    {
+                        planted.Add(item);
+                    }
+                }
+            }
+
+            // GHOST: THE SECOND CLEAR SITE -- a reliable EvSpawn under a suppressed id.
+            //
+            // `OnRemoteDeath` is the ordinary end of the suppression (leg C above). This is the
+            // other one, and it is the one that matters if the host ever RE-USES a freed id
+            // quickly: the reliable `EvSpawn` for the new entity must take the suppression with
+            // it, or the id keeps the long window and a later self-heal for a genuinely new
+            // enemy is refused. Written as its own leg because without it that clear is
+            // defence-in-depth NOBODY TESTS -- deleting it left the suite green.
+            SpiderBoss reused = (SpiderBoss)BuildPuppet<SpiderBoss>(game, IdSpiderBoss4, spiderType, planted);
+            Check("GHOST REUSE: PRECONDITION a fourth SpiderBoss puppet was built", reused != null);
+            if (reused != null)
+            {
+                NetPuppets.OnDeathBegan(IdSpiderBoss4);
+                clock.Advance(4000);
+                SnapshotKind(IdSpiderBoss4, spiderType, hp: 0, out SnapUnknownKind reusedHeld);
+                Check("GHOST REUSE: PRECONDITION the id is suppressed past the flat window (was "
+                    + reusedHeld + ")", reusedHeld == SnapUnknownKind.LeftDead);
+                // The host re-uses the id. This is the reliable lane, so it never consults the
+                // removal ledger -- what is under test is that it CLEARS it.
+                NetBaseState fresh = default(NetBaseState);
+                fresh.Pos = Nowhere;
+                fresh.Scale = 1f;
+                HashSet<GameComponent> beforeReuse = new HashSet<GameComponent>(CollectType<SpiderBoss>(game));
+                SpawnRejectKind spawned = NetPuppets.OnSpawn(IdSpiderBoss4, spiderType, fresh,
+                    new byte[1], 0, 0);
+                Check("GHOST REUSE: the reliable EvSpawn builds the re-used id anyway (was "
+                    + spawned + ")", spawned == SpawnRejectKind.None);
+                SpiderBoss rebuilt = null;
+                foreach (GameComponent item in CollectType<SpiderBoss>(game))
+                {
+                    if (!beforeReuse.Contains(item))
+                    {
+                        rebuilt = (SpiderBoss)item;
+                        planted.Add(item);
+                    }
+                }
+                Check("GHOST REUSE: PRECONDITION it really put a new puppet in the world",
+                    rebuilt != null);
+                // Now retire that new entity the ORDINARY way and step past the flat window. If
+                // the spawn had not cleared the suppression, the id would still be holding the
+                // long one and this would read LeftDead.
+                if (rebuilt != null)
+                {
+                    bin.Remove((GameComponent)(object)rebuilt);
+                    bin.Update();
+                    clock.Advance(4000);
+                    HashSet<GameComponent> beforeReheal = new HashSet<GameComponent>(CollectType<SpiderBoss>(game));
+                    SnapshotKind(IdSpiderBoss4, spiderType, hp: 0, out SnapUnknownKind reusedLate);
+                    Check("GHOST REUSE: ...and the spawn TOOK the suppression with it -- the id"
+                        + " self-heals on the flat window again (was " + reusedLate + ")",
+                        reusedLate == SnapUnknownKind.Rebuilt);
+                    foreach (GameComponent item in CollectType<SpiderBoss>(game))
+                    {
+                        if (!beforeReheal.Contains(item))
+                        {
+                            planted.Add(item);
+                        }
+                    }
+                }
+            }
+
+            // GHOST NEGATIVE CONTROL -- the ORDINARY window is untouched. An id removed the
+            // ordinary way (the ComponentRemoved seam, no release) must still lapse at 3 s and
+            // self-heal, or this card would have been "lengthen the window for everything", which
+            // would leave a genuinely-missed spawn missing for fifteen seconds.
+            byte plainType = TypeIdxOf(new EvilBullet(game));
+            EvilBullet plain = (EvilBullet)BuildPuppet<EvilBullet>(game, IdBullet3, plainType, planted);
+            Check("GHOST NEGATIVE: PRECONDITION an ordinary bullet puppet was built", plain != null);
+            if (plain != null)
+            {
+                bin.Remove((GameComponent)(object)plain);
+                bin.Update();
+                SnapshotKind(IdBullet3, plainType, hp: 1, out SnapUnknownKind plainEarly);
+                Check("GHOST NEGATIVE: an ordinarily-removed id reports LeftDead at once (was "
+                    + plainEarly + ")", plainEarly == SnapUnknownKind.LeftDead);
+                clock.Advance(4000);
+                HashSet<GameComponent> beforePlain = new HashSet<GameComponent>(CollectType<EvilBullet>(game));
+                SnapshotKind(IdBullet3, plainType, hp: 1, out SnapUnknownKind plainLate);
+                Check("GHOST NEGATIVE: ...and past 3 s it self-heals as before -- the long window"
+                    + " is for RELEASED deaths only (was " + plainLate + ")",
+                    plainLate == SnapUnknownKind.Rebuilt);
+                foreach (GameComponent item in CollectType<EvilBullet>(game))
+                {
+                    if (!beforePlain.Contains(item))
+                    {
+                        planted.Add(item);
+                    }
+                }
             }
 
             // NEGATIVE: the release is not unconditional. A non-killable type with no deferred

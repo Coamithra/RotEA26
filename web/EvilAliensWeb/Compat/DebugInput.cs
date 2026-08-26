@@ -928,6 +928,30 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetLevelEndTest.MenuCheck();
 		}
 
+		// The LOSING half of the same lobby-return claim (card c600c55a): a Mission Failed has to
+		// end a co-op level the way a victory does. Same two-call shape, but the wait is the
+		// ~14.5 s defeat choreography (UpdateGameOver's 4 s, then AnimatedMessage's 1.5/6/3 s):
+		// `eval NetLevelLostArm`, `step 900`, `eval NetLevelLostCheck`. The HOST half reuses
+		// NetLevelEndMenu for its phase 2 -- the menu facts are the same either way -- so it has
+		// an arm and no check of its own. Both DESTRUCTIVE.
+		[JSInvokable("debugNetLevelLostArm")]
+		public static string NetLevelLostArm()
+		{
+			return EvilAliensWeb.Compat.Net.NetLevelEndTest.ArmDefeat();
+		}
+
+		[JSInvokable("debugNetLevelLostCheck")]
+		public static string NetLevelLostCheck()
+		{
+			return EvilAliensWeb.Compat.Net.NetLevelEndTest.CheckDefeat();
+		}
+
+		[JSInvokable("debugNetLevelLostArmHost")]
+		public static string NetLevelLostArmHost()
+		{
+			return EvilAliensWeb.Compat.Net.NetLevelEndTest.ArmDefeatHost();
+		}
+
 		// JS bridge for the INetEntity seam (eaNetEntity in wwwroot/index.html, card 25ad0659
 		// step 2c-ii). The compiler already covers the migration -- the core fields changed
 		// TYPE, so no call site can still read the concrete one. What it cannot cover is a

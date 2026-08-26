@@ -137,6 +137,14 @@ public class StarMine : KillableAlien
 		soundtimer.Stop();
 		connectedwithbg = true;
 		state = MineState.free;
+		// PER LIFE, and it was NOT reset before (card 745728f9). `ComponentBin` recycles mines, so
+		// a mine out of the pool inherited the PREVIOUS mine's target -- a stale `PlayerShip`
+		// reference, possibly a corpse, possibly an instance the pool has since handed to another
+		// slot. Latent today (the `free` state overwrites it before anything reads it) and exactly
+		// the shape that is not latent for long: it is `EvilSkull.bulletsfired` (card d8344c17)
+		// again, a pooled field nothing cleared. Found by MineTargetTest's second run in one
+		// process, which is what that leave-no-trace convention is for.
+		target = null;
 		hitpointsattached = 3;
 		prevposition = base.Position;
 	}
@@ -157,6 +165,14 @@ public class StarMine : KillableAlien
 			bool acquired = false;
 			foreach (PlayerShip ship in oracle.GetShips())
 			{
+				// A DEAD ship is not a target (card 745728f9). `GetShips()` is updated at the
+				// ComponentBin's removal FLUSH, not at Die(), so a ship that died this tick is
+				// still in it with IsDead already true -- and locking onto one is how a mine ended
+				// up flying to a corpse's last position and detonating there.
+				if (ship.IsDead)
+				{
+					continue;
+				}
 				Vector2 toShip = ship.Position - base.Position;
 				if ((toShip).LengthSquared() <= acquireRange * acquireRange)
 				{
@@ -171,6 +187,15 @@ public class StarMine : KillableAlien
 					sound.Stop(sfx);
 					sfx = sound.Play("targetacquired");
 					soundtimer.Start();
+					// Online co-op (card 745728f9, "the homing sound doesnt play for joining
+					// clients"): a puppet mine is FROZEN, so this Update -- and this cue -- never
+					// runs over there. The lock-on is a warning the other player is entitled to
+					// hear, exactly like an enemy Lazer's telegraph (card c146422f), so it rides
+					// its own beat. Emitted HERE, at the host's real acquire, and gated on the
+					// same soundtimer that gates the local cue, so the wire carries one beat per
+					// sound rather than one per tick of an ongoing lock.
+					EvilAliensWeb.Compat.Net.NetSession.OnGameFx(
+						EvilAliensWeb.Compat.Net.NetFxKind.MineTargetAcquired, this);
 				}
 				state = MineState.attracted_to_player;
 				disconnectFromBackground();
@@ -182,8 +207,25 @@ public class StarMine : KillableAlien
 		}
 		case MineState.attracted_to_player:
 		{
-			if (target == null)
+			// THE LOCK IS ON A LIVE SHIP, and losing it is the whole of card 745728f9's first
+			// half: *"space mines (lvl 3, aka death stars) seem to also explode when they reach a
+			// dead player's location"*. `target` was only ever cleared by the release-RANGE test,
+			// and nothing set it to null when the ship died -- so the mine kept pulling toward a
+			// corpse's frozen Position and, 1800 ms after the acquire, Asplode()d there.
+			//
+			// Worse, `PlayerShip` is POOLED: a dead target's instance can be handed back out by
+			// `Recycle<PlayerShip>` for a respawn, at which point the mine is silently homing on a
+			// live ship it never acquired, on somebody else's timer. Testing `IsDead` closes that
+			// too, because the death is visible for at least one tick before the recycle.
+			//
+			// Going back to `free` rather than just dropping the pull is deliberate: `free` does
+			// not consult `timer`, so a mine whose target dies cannot detonate on the old clock,
+			// and a re-acquire Resets it. It also has to be within `acquireRange` of someone to
+			// re-acquire at all, which is the behaviour the report asks for -- the mine loses
+			// its lock.
+			if (target == null || target.IsDead || !oracle.GetShips().Contains(target))
 			{
+				target = null;
 				state = MineState.free;
 				connectToBackground();
 				break;
@@ -259,6 +301,69 @@ public class StarMine : KillableAlien
 			sound.PlayCue("expl2");
 			Die();
 		}
+	}
+
+	// The client half of the lock-on beat above (card 745728f9). A puppet mine is frozen, so its
+	// own Update never reaches the cue -- this is the only way the joiner hears it. Draw-free and
+	// state-free: it plays the sound and nothing else, because the mine's MOTION is replicated by
+	// the snapshot stream and its detonation by the host's own death event.
+	//
+	// It does NOT touch `soundtimer`: that timer gates the HOST's emission, so the wire already
+	// carries one beat per sound. Consuming it here would only make a puppet that was itself
+	// briefly a local mine (it never is) behave differently.
+	//
+	// **IT MUST FALL THROUGH TO `base`**, and that is not a formality: `StarMine` is a
+	// `KillableAlien`, whose own override is what plays the 35 ms HIT BLINK. An override that
+	// simply returned would delete the blink for every mine on the joiner's screen -- a silent
+	// regression in the very feature (card 43e85936) this beat is modelled on.
+	internal override void NetPlayFx(EvilAliensWeb.Compat.Net.NetFxKind kind)
+	{
+		if (kind != EvilAliensWeb.Compat.Net.NetFxKind.MineTargetAcquired)
+		{
+			base.NetPlayFx(kind);
+			return;
+		}
+		if (!base.IsDead)
+		{
+			sound.Stop(sfx);
+			sfx = sound.Play("targetacquired");
+		}
+	}
+
+	// ---- readbacks for Compat/Net/MineTargetTest (card 745728f9) --------------------------------
+	//
+	// The lock is INVISIBLE: a locked mine and a free one draw the same sprite, and the difference
+	// -- which ship it is pulling toward, and whether the 1800 ms detonation clock is running --
+	// is private state that no frame and no metric can show. That is why the card's first half is
+	// verified as data.
+	internal bool NetLockedOn => state == MineState.attracted_to_player;
+
+	internal PlayerShip NetTarget => target;
+
+	internal bool NetDetonationClockRunning => state == MineState.attracted_to_player && timer.Active;
+
+	// Drive one acquire/steer tick with no scene attached -- the isolation-sim pattern. The suite
+	// ticks the MINE and nothing else, so the level's own state machine cannot advance underneath
+	// it (a real player death would otherwise wipe the world a tick later and take the mine with
+	// it, destroying the very observation).
+	internal void NetTickForTest(GameTime gameTime)
+	{
+		Update(gameTime);
+	}
+
+	// Park a mine at an exact point, at rest and off the background scroll. The production entries
+	// cannot: `Setup()` drops it at a RANDOM x above the screen (the spawner's own entry) and
+	// `SetupLaunch` gives it `MaxSpeed`, which over the 1800 ms detonation clock carries it ~324 px
+	// -- past the mine's own release range, so the suite's positive control could never reach a
+	// detonation at all. `Speed` and `backgroundfactor` are protected, hence a seam rather than a
+	// caller-side poke.
+	internal void NetParkForTest(Vector2 at)
+	{
+		base.Position = at;
+		base.Speed = 0f;
+		base.SpeedVector = Vector2.Zero;
+		backgroundfactor = 0f;
+		prevposition = at;
 	}
 
 	private void Fire()

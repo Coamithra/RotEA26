@@ -2495,6 +2495,7 @@ namespace EvilAliensWeb.Compat.Net
             {
             case NetFxKind.EnemyHitFlash:
             case NetFxKind.BallDetach:
+            case NetFxKind.MineTargetAcquired:
             {
                 INetEntity target = NetPuppets.FindPuppet(netId);
                 target?.NetPlayFx(kind);

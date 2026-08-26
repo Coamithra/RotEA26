@@ -1829,6 +1829,38 @@ uses `Enabled=false`, not a pause layer -- so they still play here while a `shot
     like the seamless continuation of the previous skull's, and an analysis segmenting volleys by
     shot index alone reported the BROKEN build as clean during this card. That is why the rearm
     line exists. Pinned by `tools/headless/probes/evilskull_volley.txt` (both legs mutation-tested).
+- **The space mine (`StarMine.cs`) locks onto a LIVE ship, and only a live one (card 745728f9).**
+  Reported as *"space mines (lvl 3, aka death stars) seem to also explode when they reach a dead
+  player's location"*. `StarMine` is Level 3's mine; `DeathStar` is `ClassicSpawner`'s, and the two
+  share the `deathstarsheet2` sprite, which is where "aka death stars" comes from.
+  - **`target` was only ever cleared by a release-RANGE test**, so nothing cleared it when the ship
+    it pointed at DIED: the mine kept pulling toward a corpse's frozen `Position` and detonated
+    there 1800 ms after the acquire. Two halves, because one alone leaves the other reachable --
+    the `attracted_to_player` branch drops a target that is `IsDead` or has left `GetShips()`, and
+    the ACQUIRE loop skips a dead ship in the first place, which is what stops the mine
+    re-acquiring the body it just let go.
+  - **`GetShips()` UPDATES AT THE REMOVAL FLUSH, NOT AT `Die()`, and that window is the whole
+    reason the acquire loop needs its own guard.** A ship that died this tick is still in the list
+    with `IsDead` already true, so "in the list" is not "alive". A suite covering this must NOT
+    flush between the death and the acquire, or it tests the wrong window.
+  - **The two guards MASK EACH OTHER over several ticks** -- a mine locks onto the corpse on tick 1
+    and the `attracted_to_player` death test drops it again on tick 2 -- so an acquire-loop
+    assertion has to tick EXACTLY ONCE, or it passes on a build with the loop's guard removed
+    (measured). The homing-cue REQUEST count is the leg that does not depend on the tick count at
+    all: a lock that came and went still leaves the cue behind.
+  - **SIDE-FIX, found by running the suite twice in one process: `Initialize` did not reset
+    `target`.** `StarMine` is pooled, so a recycled mine inherited the previous one's `PlayerShip`
+    reference -- possibly a corpse. `EvilSkull.bulletsfired` (card d8344c17) exactly again, and the
+    reason a leave-no-trace suite is run twice rather than once.
+  - **Nothing about a lock is DRAWN.** A locked mine and a free one are the same sprite, and
+    whether the 1800 ms detonation clock is running is private state no frame and no counter shows
+    -- so it is verified as DATA (`eaMineTarget()` / `eval MineTarget`, seams `NetLockedOn` /
+    `NetTarget` / `NetDetonationClockRunning`), and one leg is deliberately asserted on the
+    EXPLOSION COUNT rather than on `IsDead`: a freed mine re-attaches to the background scroll and
+    can legitimately fly off screen and `Die()` on `OffScreen(100f)`, which is a mine leaving, not
+    a mine exploding. `Asplode` spawns exactly two blue `Explosion`s and the fly-off spawns none.
+  - The netplay half -- the lock-on cue reaching a joining client as `NetFxKind.MineTargetAcquired`
+    -- is in [`Compat/Net/CLAUDE.md`](Compat/Net/CLAUDE.md).
 - **Flying spider (Level 2):** reuses the HD reared-up sheet, so `FlyingSpider.SizeFactor`
   (baked `DefaultSizeFactor` 0.75) scales sprite AND box hitbox together; `?flyspiderscale=`.
   Fast-boot a dense endless swarm with **`?level=Level2&flyspiders`** (background variant, the only

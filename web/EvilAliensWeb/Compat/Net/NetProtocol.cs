@@ -298,7 +298,7 @@ namespace EvilAliensWeb.Compat.Net
         internal static bool TryFxKind(int raw, out NetFxKind kind)
         {
             kind = default;
-            if (raw < 0 || raw > (int)NetFxKind.EnemyLazerFire)
+            if (raw < 0 || raw > (int)NetFxKind.MineTargetAcquired)
             {
                 return false;
             }
@@ -1585,6 +1585,12 @@ namespace EvilAliensWeb.Compat.Net
         // layer cannot tell that from a fresh spawn -- which would salvo every live beam's cue at
         // the joiner the instant it arrives.
         EnemyLazerFire = 2,
+        // A StarMine locked onto a player: the "targetacquired" homing cue (card 745728f9).
+        // ADDRESSED TO THE MINE (netId), unlike EnemyLazerFire, because the cue is a per-entity
+        // one -- the receiver stops that mine's own previous instance before starting the new one,
+        // exactly as the host does. Emitted at the host's real acquire and gated on the same
+        // soundtimer, so the wire carries one beat per SOUND rather than one per tick of a lock.
+        MineTargetAcquired = 3,
     }
 
     public struct ShipSample

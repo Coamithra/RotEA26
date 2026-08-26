@@ -317,11 +317,45 @@ ink-vs-box asymmetry exactly. If the owner meant the "RESPAWNING!" label instead
 one-constant change (`LabelOffsetY`). And the per-slot colours are only *seen* here for slot 0: the
 other three are verified as maths plus the roster table, not by a four-player screenshot.
 
-## 9. `745728f9` — space mines (lvl 3, aka death stars) seem to also explore when they reach a dead player's location
+## 9. `745728f9` — space mines (lvl 3, aka death stars) seem to also explore when they reach a dead player's location — **DONE**
 
 **Description / notes:**
 
 also the homing sound doesnt play for joining clients
+
+**Done** (PR pending). Both halves land on `StarMine` (Level 3's mine; `DeathStar` is
+`ClassicSpawner`'s — the two share the `deathstarsheet2` sprite, which is where "aka death stars"
+comes from, and `targetacquired` is `StarMine`'s cue).
+
+**The dead-target half.** `target` was only ever cleared by a release-RANGE test, so nothing
+cleared it when the ship it pointed at died: the mine kept pulling toward a corpse's frozen
+`Position` and detonated there 1800 ms after the acquire. Fixed in two places, because either
+alone leaves the other reachable — the `attracted_to_player` branch drops a target that is
+`IsDead` or has left `GetShips()`, and the acquire loop skips a dead ship in the first place.
+Note `GetShips()` updates at the ComponentBin's removal FLUSH, not at `Die()`, so a ship that died
+this tick is still in the list with `IsDead` true — "in the list" is not "alive".
+
+**The homing-sound half.** A puppet mine is FROZEN, so its `Update` — and its cue — never runs on
+the joiner. The lock-on now rides its own transient-feedback beat, `NetFxKind.MineTargetAcquired`
+(kind 3), gated on the same 300 ms `soundtimer` as the local cue so the wire carries one beat per
+SOUND rather than one per tick. `StarMine.NetPlayFx` plays it and falls through to base for every
+other kind — `StarMine` IS a `KillableAlien`, so an override that returned would silently delete
+the hit blink for every mine on the joiner's screen. **No protocol bump**: `NetFxKind` is
+append-only and the `EvFx` frame is unchanged; only `TryFxKind`'s bound moves.
+
+**Side-fix, found by running the suite twice in one process:** `StarMine.Initialize` never reset
+`target`, so a pooled mine inherited the previous one's `PlayerShip` reference — possibly a corpse.
+`EvilSkull.bulletsfired` (card d8344c17) again.
+
+Nothing about a lock is drawn, so it is verified as data: `eaMineTarget()` / `eval MineTarget`
+(`Compat/Net/MineTargetTest.cs`, 37 assertions), pinned by
+`tools/headless/probes/starmine_dead_target.txt` and mutation-tested five ways.
+
+_Further testing would be nice:_ the joining-client leg is covered by a real host session over the
+in-process `NetWire`, not by two real browsers — no Chrome or dev server in this environment, so
+the final foreground smoke check and any real-WebRTC pass are outstanding. Headlessly there is also
+no mixer, so "the cue was played" means "the cue was requested"; that the joiner actually HEARS it
+is unverified here.
 
 ## 10. `c600c55a` — mission failed in multiplayer dumps everyone back to the menu :)
 

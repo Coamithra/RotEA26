@@ -1,0 +1,141 @@
+# PROBE: a space mine's lock is on a LIVE ship, and its lock-on cue reaches a joining client
+# (card 745728f9).
+#
+# THE REPORT, both halves: *"space mines (lvl 3, aka death stars) seem to also explode when they
+# reach a dead player's location"* and *"also the homing sound doesnt play for joining clients"*.
+# Level 3 spawns `StarMine` nine times over and nothing else; `DeathStar` is ClassicSpawner's.
+# The two share the `deathstarsheet2` sprite -- which is where "aka death stars" comes from -- and
+# `targetacquired`, the homing sound, is `StarMine`'s. Both halves land on the same class.
+#
+# WHY A SUITE AND NOT A SCREENSHOT. **The lock is invisible.** A locked mine and a free one draw
+# the same sprite; which ship it is pulling toward, and whether its 1800 ms detonation clock is
+# running, is private state that no frame and no counter shows. The CUE is worse: headlessly there
+# is no mixer at all, so the only thing observable about a sound is that it was REQUESTED -- which
+# is exactly what card 8732568e's per-cue counters made readable, and is why section 4 can exist.
+#
+# WHAT IT ASSERTS (Compat/Net/MineTargetTest.cs has the reasoning):
+#   1. THE POSITIVE CONTROL, FIRST -- a mine parked on a LIVE ship locks on, starts its clock and
+#      detonates on schedule. Everything below asserts that a mine STOPS doing something, and
+#      without this leg all of it passes on a mine that never locks on or never goes off at all.
+#   2. THE DEFECT -- the target dies (through the REAL `PlayerShip.Asplode`) and the mine must drop
+#      the lock, stop the clock, and never detonate on the corpse. `target` was only ever cleared
+#      by a release-RANGE test, so nothing cleared it on death: the mine kept pulling toward a
+#      corpse's frozen Position and went off there 1800 ms after the acquire.
+#   3. THE ACQUIRE LOOP -- a DEAD ship in range is not a target in the first place, which is what
+#      stops the mine re-acquiring the body it just let go. Section 2's corpse is still in
+#      `GetShips()` when this runs, because the oracle drops a ship at the ComponentBin's removal
+#      FLUSH and the suite deliberately has not flushed: in-the-list AND dead is the exact window
+#      the loop had to be taught about.
+#   4. THE JOIN PEER (RECEIVE) -- an `EvFx(MineTargetAcquired)` beat on a FROZEN mine puppet must
+#      ask for `targetacquired`, with the NEGATIVE that the new override still falls through to
+#      `KillableAlien.NetPlayFx` for the hit BLINK. That negative is not decoration: `StarMine` IS
+#      a KillableAlien, and an override that simply returned would silently delete the blink for
+#      every mine on the joiner's screen -- a regression in the very feature (card 43e85936) this
+#      beat is modelled on.
+#   5. THE SEND -- a real HOST session over a `NetWire`, reading the frames the peer really
+#      RECEIVED. Section 4 drives `NetPlayFx` directly, so on its own it would leave a build that
+#      stopped EMITTING the beat perfectly green while the joiner heard nothing, which is the
+#      reported symptom exactly. It also pins the CADENCE, which is the part that would go wrong
+#      quietly: the emission is gated on the same `soundtimer` as the local cue, so an ongoing lock
+#      is ONE beat -- ungated, a mine sitting on a player would stream ~60 reliable events a second
+#      at the joiner.
+#
+# IT TICKS THE MINE AND NOTHING ELSE, and that isolation is what makes section 2 possible: a real
+# player death advances `GameScene` into a world WIPE a tick later, and that purge would take the
+# mine with it before anything could be read off it.
+#
+# ONE LEG IS DELIBERATELY ASSERTED ON THE FX COUNT rather than on `IsDead`: a freed mine
+# re-attaches to the background scroll and can legitimately leave the screen and `Die()` on
+# `OffScreen(100f)` over the 2.2 s that leg runs. That is a mine flying away, not a mine exploding.
+# `Asplode` spawns exactly two blue Explosions and the fly-off spawns none. An earlier cut asserted
+# `!IsDead` and failed for exactly that reason.
+#
+# NO PROTOCOL BUMP. `NetFxKind` is APPEND-ONLY with a REJECT policy (net CLAUDE.md), the EvFx frame
+# is unchanged, and peers are pinned to an identical binary by the `eaBuildHash` compat key -- so
+# a peer that could receive kind 3 is by construction one that knows it. `NetProtocol.TryFxKind`'s
+# bound moves with the enum, and `logic_probe`'s `ProbeWireEnums` cross-checks every validator
+# against `Enum.IsDefined` over the whole byte domain, so a missed bound fails there.
+#
+# MUTATION-TESTED, each isolated and rebuilt:
+#   * the death test dropped from the `attracted_to_player` state (the pre-card build) -> section
+#     2's three lock assertions AND its FX assertion, i.e. the report reproduced: the mine holds a
+#     corpse and detonates on it.
+#   * the `IsDead` skip dropped from the ACQUIRE loop -> section 3's three legs. **Section 3 ticks
+#     EXACTLY ONCE for this reason**: the two guards mask each other over several ticks -- the mine
+#     locks onto the corpse on tick 1 and the `attracted_to_player` death test drops it again on
+#     tick 2 -- so an earlier cut that ticked four times and read the END state passed on the broken
+#     build (measured). The homing-cue count is the leg that does not depend on the tick count at
+#     all: a lock that came and went still leaves the cue behind.
+#   * the `OnGameFx` call dropped from the acquire -> section 5's two wire legs. Section 4 stays
+#     green, which is precisely why section 5 exists.
+#   * the emission moved OUTSIDE the `soundtimer` gate -> section 5's cadence leg alone (+1 beat
+#     where 0 is required), with its CONTROL leg still green. **That leg had to be rewritten to
+#     discriminate at all, and the reason generalises**: the first cut merely HELD the lock and
+#     required no further beats, which is true whatever the emission is gated on -- the acquire
+#     loop lives in the `free` branch and a locked mine never re-enters it, so the mutation
+#     measured nothing and passed (measured). It drives a real re-acquire now: park the mine away,
+#     tick, park it back. Inside the 300 ms window that must send NOTHING; past it (25 ticks =
+#     417 ms) it must send again, or the leg would pass on a build that emits once per mine and
+#     then never again.
+#   * the new `NetPlayFx` override made to `return` instead of falling through to base -> section
+#     4's blink negative alone. That is the regression the negative exists for.
+#
+# **DESTRUCTIVE** -- it kills the local player's ship for real and respawns it through the scene's
+# own seam, and it sweeps the explosions and puts the screen shake back (both asserted). Own
+# process, throwaway boot.
+#
+# THE SECOND RUN BELOW IS NOT CEREMONY -- it found two real defects the first run could not.
+#   * `StarMine.Initialize` did not reset `target`, so a mine out of the ComponentBin's POOL
+#     inherited the previous mine's -- a stale `PlayerShip` reference, possibly a corpse. Latent
+#     today and exactly the shape that does not stay latent: `EvilSkull.bulletsfired` (card
+#     d8344c17) again. Fixed with the card.
+#   * section 5's own teardown released the scripted peer's seat with `ResetPlayers()`, copied from
+#     the MENU-only suites -- which inside a LIVE LEVEL un-seats the actual player, after which the
+#     respawn has no seat to spawn into and the level is left with no ship at all. It now restores
+#     the roster it found, and asserts it.
+#
+# eahl: --flags "?level=Level2&invuln&noattract"
+#
+# Level 2 rather than Level 3: the suite needs a level that is simply RUNNING with one live ship,
+# and Level 3's own StarMineSpawners would put mines of their own in the world for the census legs
+# to trip over. ?invuln so the 300-frame settle cannot lose the ship before the suite kills it
+# deliberately; ?noattract because the idle menu is not involved but the flag costs nothing and
+# makes the boot independent of machine speed.
+
+step 300 nodraw
+mark
+eval MineTarget
+
+expect \[minetarget\] the StarMine's lock, and its cue on a join peer
+expect 1\. CONTROL -- a mine on a LIVE ship locks on and detonates on schedule
+expect it LOCKED ON to the live ship
+expect \.\.\.and it detonated on schedule
+expect 2\. THE DEFECT -- the target dies, and the lock must go with it
+expect the mine DROPPED the dead target
+expect \.\.\.and it did NOT detonate on the corpse
+expect \.\.\.and no detonation FX ever appeared
+expect 3\. \.\.\.and a DEAD ship in range is not acquired in the first place
+expect it did NOT acquire the corpse it is sitting on
+expect \.\.\.and no homing cue was played
+expect 4\. THE JOIN PEER -- an EvFx beat plays the homing cue on a frozen puppet
+expect the beat asked for the homing cue \(targetacquired \+1\)
+expect NEGATIVE the hit-flash beat still reaches KillableAlien's blink
+expect 5\. HOST -- the acquire really goes out on the wire, ONCE per lock
+expect the acquire broadcast exactly one EvFx \(1\)
+expect \.\.\.carrying MineTargetAcquired, addressed to the mine's own netId
+expect PRECONDITION parking the mine far away drops the lock
+expect PRECONDITION it re-acquired inside the 300 ms sound window
+expect \.\.\.and that re-acquire sent NOTHING -- one beat per SOUND, not per lock \(\+0\)
+expect CONTROL a re-acquire PAST the window sends again \(\+1\)
+expect 6\. teardown
+expect \[minetarget\] 37 passed, 0 failed
+expect-not FAIL
+expect-not SKIP
+
+# LEAVE-NO-TRACE, the eaBinTest rule: a second run in the SAME process -- see the header. A leaked
+# mine, an unrespawned ship, a wiped roster, a stale pooled field or leftover trauma surfaces HERE
+# and not above; two of those really did.
+eval MineTarget
+expect-not FAIL
+expect-not SKIP
+quit

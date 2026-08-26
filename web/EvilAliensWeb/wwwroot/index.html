@@ -236,6 +236,15 @@
             catch (e) { console.warn('[debug] eaSfxBurst failed (game not booted yet?): ' + e.message); }
         };
 
+        // eaMineTarget() -- the StarMine's target lock and its join-peer homing cue (card
+        // 745728f9). The lock is INVISIBLE (a locked mine and a free one draw the same sprite) and
+        // the cue is a sound, so both are verified as data. **DESTRUCTIVE**: it kills your ship
+        // for real and respawns it. Run it in a throwaway ?level=Level2&invuln boot.
+        window.eaMineTarget = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugMineTarget')); }
+            catch (e) { console.warn('[debug] eaMineTarget failed (game not booted yet?): ' + e.message); }
+        };
+
         // QA/demo: freeze game time for N milliseconds of real time (the hit-stop juice
         // effect). Most visible in a level: eaHitstop() for 120ms, eaHitstop(500) for a
         // long dramatic freeze. Disable the shipped effect with ?hitstop=0.

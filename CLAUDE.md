@@ -303,6 +303,18 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   peers simply disagree about where an enemy is aiming, which is what the card was reported for.
   Console `eaNetChargeAim()` / `eval NetChargeAim` is the suite (it drives the flag through the
   injected host, so no reboot); no protocol change, still v19. Details: net CLAUDE.md.
+- **`?maxdt=<ms>`** (card 430494a7): move the world-dt hitch clamp, or `0` to turn it OFF so a
+  browser main-thread stall hands the world ONE dt of up to KNI's 500 ms `MaxElapsedTime` again --
+  which at the pre-boss wall scroll (0.72 px/ms) teleports every block 360 px in a single frame,
+  the reported *"brief visual stutter where a different set of walls is shown"*. The clamp
+  (`Game1.DefaultMaxWorldDtMs`, 100 ms) turns that into lost game time instead, is SKIPPED inside
+  a net session (the dead reckoning wants real-time catch-up -- a host quietly losing time after
+  its own hitch is card 68f62e92's backward-correction shape), and the leading tick of an
+  over-threshold run reports itself on a `[maxdt]` line whether clamped or passed. **Another deliberate bug
+  reproduction** (the `?netstaleguard=0` idiom) and IN `DebugFlags.Active` whenever overridden.
+  Rig: eahl's **`stepdt <ms>`** REPL command (the fixed-step loop can never produce a hitch tick);
+  pinned by `tools/headless/probes/maxdt_clamp.txt` + `maxdt_clamp_off.txt` and `logic_probe`'s
+  `ProbeMaxWorldDt`. Details: web CLAUDE.md -> "The world-dt hitch clamp".
 - **`?sfxcoalesce=0`** (card 8732568e): let every request for a cue start its own copy again, so
   N deaths landing on one tick each play the same sample at the same instant. That is the reported
   bug -- *"a lot of loud explosion effect sounds"* on a joining peer -- and the physics is why it

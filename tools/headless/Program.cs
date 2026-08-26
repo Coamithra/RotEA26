@@ -261,6 +261,18 @@ namespace EvilAliensWeb.Headless
                         Console.WriteLine("ok step " + host.Info());
                         return true;
                     }
+                    case "stepdt":
+                    {
+                        // stepdt <ms> [nodraw] -- ONE frame at a caller-chosen dt: the
+                        // browser-hitch rig (card 430494a7; see HeadlessHost.StepDt).
+                        if (parts.Length < 2) throw new ArgumentException("usage: stepdt <ms> [nodraw]");
+                        double ms = double.Parse(parts[1], CultureInfo.InvariantCulture);
+                        if (ms <= 0.0 || ms > 10000.0)
+                            throw new ArgumentException("stepdt wants 0 < ms <= 10000, got " + parts[1]);
+                        host.StepDt(ms, Array.IndexOf(parts, "nodraw") < 0);
+                        Console.WriteLine("ok stepdt " + host.Info());
+                        return true;
+                    }
                     case "shot":
                     {
                         if (parts.Length < 2) throw new ArgumentException("usage: shot <path.png>");
@@ -326,7 +338,7 @@ namespace EvilAliensWeb.Headless
                         return true;
                     default:
                         throw new ArgumentException("unknown command '" + cmd
-                            + "' (try: step, shot, eval, info, audio, mark, expect, expect-not, help, quit)");
+                            + "' (try: step, stepdt, shot, eval, info, audio, mark, expect, expect-not, help, quit)");
                 }
             }
             catch (Exception ex)

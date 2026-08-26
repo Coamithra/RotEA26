@@ -1,0 +1,45 @@
+# PROBE: ?maxdt=0 turns the hitch clamp OFF, announces itself, and the tick reaches the world whole
+#
+# PINS:   card 430494a7, the off half -- read together with maxdt_clamp.txt, the
+#         netstaleguard/sfx_coalesce pair convention: the on-file alone passes on a build whose
+#         clamp is hard-wired (flag ignored), this file alone passes on one whose clamp is
+#         simply gone. A boot pair because the flag parses once at boot.
+#
+# THE MEASUREMENT IS FLAG-INDEPENDENT (the ?netstaleguard rule: the flag changes the drag,
+# never the measurement): the LEADING tick of an over-threshold run prints a [maxdt] line
+# either way -- `clamped a Xms tick to Yms` when the clamp applied, `passed a Xms tick whole
+# (clamp overridden|net session)` when it did not. So this file asserts the PASSED spelling
+# and the absence of the CLAMPED one, which together say the 500 ms really reached the world.
+#
+# WHY THE ACTIVE LINE IS ASSERTED: ?maxdt= is the `?netstaleguard=0` idiom -- a deliberate bug
+# reproduction that changes the shared run's physics under hitches, so an overridden boot must
+# be tellable from a stock one (and must refuse online play via `Active`). The dump entry IS
+# that promise.
+#
+# FAILURE MEANS:
+#   * the flags-active expect fails -> the override no longer reaches `Active`, so a bug-repro
+#                                      boot could pair into a public lobby
+#   * `passed ... whole` no match   -> 0 no longer disables the clamp (or the line was
+#                                      reworded -- it is an interface)
+#   * a `clamped` line matches      -> same, from the clamp's side
+#
+# MUTATION-TESTED: the two legs are the exact spellings maxdt_clamp.txt's leg 1 inverts, and
+# the pair was run against both the clamped and the ?maxdt=0 boot during the card; dropping
+# `maxdt` from the Active dump turns the first expect red.
+#
+# eahl: --flags "?menu&noattract&maxdt=0"
+
+step 200 nodraw
+
+# The override announces itself in the boot dump (asserted BEFORE any mark -- the line printed
+# at boot, and the capture window still holds it).
+expect \[debug\] flags active:.*maxdt=0
+
+# A 500 ms tick reaches the world whole again, and says so.
+mark
+stepdt 500 nodraw
+step 1
+expect \[maxdt\] passed a 500ms tick whole \(clamp overridden\)
+expect-not \[maxdt\] clamped
+
+quit

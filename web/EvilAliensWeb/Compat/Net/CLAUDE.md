@@ -2847,12 +2847,15 @@ Four pieces, none changing what replicates -- only how well the star holds up at
     to `clTx`, which was WRONG and cost card 48ab9b2f's JIP pass its verdict: `MarkRemoved`
     fires on every local removal, host-authoritative `EvDeath`s included, so an IDLE joiner
     watching the host's AI clear a field logs plenty of `snapDead` with `clTx` pinned at 0.
-  - `snapBad` = the rebuild was REFUSED (no descriptor for the typeIdx, the descriptor declined,
-    or the bin swallowed the add). **This is the one that means trouble** -- it re-counts on
-    every turn the host streams that id. An unknown typeIdx re-counts on literally every turn;
-    the other two mark the id removed first, so they show as one `snapBad` then `snapDead` for
-    3s, then another retry -- i.e. a slow, steady tick rather than a burst. Any sustained
-    `snapBad` deserves a look.
+  - `snapBad` = the rebuild FAILED (no descriptor for the typeIdx, or the bin swallowed the
+    add). **This is the one that means trouble** -- an unknown typeIdx re-counts on literally
+    every turn the host streams that id; the bin swallow marks the id removed first, so it shows
+    as one `snapBad` then `snapDead` for 3s, then another retry -- a slow, steady tick rather
+    than a burst. Any sustained `snapBad` deserves a look.
+  - `snapDecl` = the DESCRIPTOR declined the zero-extras rebuild on purpose (card 430494a7:
+    `WallDescriptor` -- see LEVEL-3 WALLS). Ordinary traffic, split out of `snapBad` so the
+    fault counter stays fault-only; reads 0 in steady state and ticks around joins and wall
+    section seams (same removed-then-`snapDead` rhythm as the swallow, benign polarity).
   Attribution is pinned by **`eaNetSnap()`** (`Compat/Net/NetSnapshotTest.cs`), which drives the
   real `OnSnapshotEntry` through all four outcomes from the main menu -- a classification is
   invisible in any frame, and a second peer tab throttles too hard to show it anyway.
@@ -3835,11 +3838,20 @@ sent per block or per frame.
   from previously in the game" for the lane-skew beat, plus local collisions against geometry the
   host does not have. The "generically-dressed puppet beats no puppet" trade (see the self-heal
   bullet under "World authority, puppets & snapshots") INVERTS for a screen-filling grid, so
-  `CreatePuppet` returns null on `len < 1` -- the Powerup unrecognised-type-byte precedent. The
-  decline's `MarkRemoved` gates only the self-heal lane's retries; `OnSpawn` never consults the
-  removal window, so the reliable `EvSpawn` builds the real grid the moment it lands (and a JIP
-  joiner's walls arrive in the addressed catch-up burst anyway). Pinned by `eaNetWalls()` section
-  5 + `tools/headless/probes/net_walls.txt`, mutation-tested by reverting the decline.
+  `CreatePuppet` returns null on `len < 1` -- the same null-return mechanism `PowerupDescriptor`
+  uses for a bad type byte (that one deliberately still builds generic at `len == 0`; the trade
+  goes the other way for a sprite-sized pickup). The decline reports as
+  **`SnapUnknownKind.Declined` / `snapDecl`, ordinary traffic** -- folding it into `Refused`
+  would have made `snapBad` track the world's wall-spawn rate, the exact conflation card
+  48ab9b2f's split exists to prevent. The decline's `MarkRemoved` gates only the self-heal lane's
+  retries; `OnSpawn` never consults the removal window, so the reliable `EvSpawn` builds the real
+  grid the moment it lands (and a JIP joiner's walls arrive in the addressed catch-up burst
+  anyway). **The self-heal's third trigger -- a client-only purge of a world the host still has,
+  where no EvSpawn ever comes -- would leave the wall ABSENT for the rest of the section**;
+  accepted, because no shipped flow performs such a purge for a wall (a reset is host-broadcast
+  and relaunches the section, fresh wall and EvSpawn included), and an absent wall still beats a
+  wrong collidable one. Pinned by `eaNetWalls()` section 5 + `tools/headless/probes/net_walls.txt`,
+  mutation-tested by reverting the decline.
   **Historical note for wall-flash reports**: the Aug-1 live deploy predates this AND the
   staleness guard (f5cf7a5c) AND the scale/anchor fixes above, so a joiner-side "wrong walls for
   a beat" sighting on that build has three already-fixed candidate causes before any new hunt.

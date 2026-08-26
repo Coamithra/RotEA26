@@ -4583,17 +4583,19 @@ namespace EvilAliensWeb.Compat.Net
                     // link's reorder rate into snapUnk, which is exactly the conflation card
                     // 48ab9b2f split these counters to remove.
                     //
-                    // Keep the total AND why (card 48ab9b2f). Rebuilt/LeftDead are ordinary
-                    // traffic -- their rates track the world's spawn and removal rates, so a
-                    // busy level logs plenty of both on a perfectly healthy link. Refused is
-                    // the fault shape (an unknown typeIdx re-counts every turn; the other two
-                    // causes mark the id removed first and so tick more slowly -- NetMetrics).
+                    // Keep the total AND why (card 48ab9b2f). Rebuilt/LeftDead -- and, since
+                    // card 430494a7, Declined (a wall refusing the zero-extras rebuild) -- are
+                    // ordinary traffic; their rates track the world's spawn and removal rates,
+                    // so a busy level logs plenty on a perfectly healthy link. Refused is the
+                    // fault shape (an unknown typeIdx re-counts every turn; the bin swallow
+                    // marks the id removed first and so ticks more slowly -- NetMetrics).
                     metrics.SnapUnknownIds++;
                     switch (kind)
                     {
                     case SnapUnknownKind.Rebuilt:  metrics.SnapNew++; break;
                     case SnapUnknownKind.LeftDead: metrics.SnapDead++; break;
                     case SnapUnknownKind.Refused:  metrics.SnapBad++; break;
+                    case SnapUnknownKind.Declined: metrics.SnapDecl++; break;
                     }
                 }
             }

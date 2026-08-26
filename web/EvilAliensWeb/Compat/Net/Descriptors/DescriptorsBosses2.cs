@@ -268,10 +268,20 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             // CollisionLevelMap is derived from the blocks -- at whatever scroll offset the wire
             // reported. On a joining peer that is "a different set of walls, looks like a section
             // from previously in the game" (card 430494a7), plus local collisions against
-            // geometry the host does not have. No wall for a beat beats a wrong wall: the decline
-            // arms only the SELF-HEAL lane's retry window (OnSpawn never consults it), so the
-            // reliable EvSpawn builds the real grid the moment it lands -- and a JIP joiner's
-            // walls arrive in the addressed catch-up burst anyway. NetWallTest section 5 pins it.
+            // geometry the host does not have. Same null-return mechanism PowerupDescriptor uses
+            // for a bad type byte (that one deliberately still builds generic at len 0 -- the
+            // trade goes the other way for a sprite-sized pickup).
+            //
+            // The decline arms only the SELF-HEAL lane's retry window (OnSpawn never consults
+            // it), and it reports as SnapUnknownKind.Declined -- ordinary traffic, not snapBad.
+            // In the spawn-raced-the-stream and JIP cases the reliable EvSpawn (or the addressed
+            // catch-up burst) builds the real grid moments later. The self-heal's third trigger
+            // -- a client-only purge of a world the host still has, where no EvSpawn ever comes
+            // -- would leave the wall ABSENT for the rest of the section; accepted, because no
+            // shipped flow performs such a purge for a wall (a reset is host-broadcast and
+            // relaunches the section, fresh wall and fresh EvSpawn included), and if one ever
+            // arises an absent wall still beats a wrong collidable one. NetWallTest section 5
+            // pins the decline.
             if (len < 1)
             {
                 return null;

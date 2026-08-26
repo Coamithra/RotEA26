@@ -101,7 +101,7 @@ namespace EvilAliensWeb.Compat.Net
                 SectionAnchoredMotion(bin, game, Check);
 
                 sb.Append(" 5. a zero-extras self-heal DECLINES -- no variation byte, no wall\n");
-                SectionSelfHealDeclines(sb, Check);
+                SectionSelfHealDeclines(Check);
             }
             finally
             {
@@ -358,48 +358,6 @@ namespace EvilAliensWeb.Compat.Net
         // that difference carries the host's frame pacing, and a level's `speedup` reaches the
         // client a whole turn late. Anchoring it also makes a speed change a step the velocity
         // ease absorbs, which is the "resync on a scroll-speed change" the card asked for.
-        // ---- 5. the zero-extras self-heal ----------------------------------------------------
-        // The snapshot self-heal (card de4d5d65) constructs with a literal extras length of 0,
-        // and WallDescriptor used to read that as VARIATION 0 -- a full screen of the FIRST
-        // section's grid, drawn AND collidable, at whatever scroll offset the wire reported. On a
-        // joining peer that is "a different set of walls, looks like a section from previously in
-        // the game" until the reliable EvSpawn rebuild lands (card 430494a7). The descriptor now
-        // DECLINES the extras-less build; this section pins both halves -- the refusal, and that
-        // the EvSpawn lane is untouched by the removal window the refusal arms.
-        private static void SectionSelfHealDeclines(StringBuilder sb, System.Action<string, bool> check)
-        {
-            NetBaseState state = default(NetBaseState);
-            state.Pos = new Vector2(0f, -9000f); // far above the screen: never drawn, never collides
-            byte[] none = new byte[0];
-            bool popped;
-            SnapUnknownKind kind;
-            NetPuppets.OnSnapshotEntryNextSeq(IdWallC, TypeWall, NetProtocol.NetSnapshotFlags.None,
-                state, none, 0, 0, out popped, out kind);
-            check("an unknown wall id's snapshot entry is REFUSED, not built as variation 0",
-                kind == SnapUnknownKind.Refused);
-            check("...and no puppet exists afterwards", NetPuppets.FindPuppet(IdWallC) == null);
-
-            // The reliable EvSpawn, arriving moments later with the real variation byte, still
-            // lands: the decline's MarkRemoved gates only the self-heal lane.
-            byte[] extras = new byte[1];
-            extras[0] = 4; // the pre-boss grid the card was reported on
-            SpawnRejectKind reject = NetPuppets.OnSpawn(IdWallC, TypeWall, state, extras, 0, 1);
-            check("the reliable EvSpawn still builds it through the removal window",
-                reject == SpawnRejectKind.None);
-            Wall puppet = NetPuppets.FindPuppet(IdWallC) as Wall;
-            check("...as a Wall", puppet != null);
-            if (puppet == null)
-            {
-                return;
-            }
-            check("...on the SENT variation, not a default", puppet.NetVariation == 4);
-            // And its later snapshot turns apply normally -- the removal-ledger entry matters
-            // only to ids the layer does not hold.
-            bool applied = NetPuppets.OnSnapshotEntryNextSeq(IdWallC, TypeWall,
-                NetProtocol.NetSnapshotFlags.None, state, none, 0, 0, out popped, out kind);
-            check("...and its snapshot turns apply once it is live", applied);
-        }
-
         private static void SectionAnchoredMotion(ComponentBin bin, Game game,
             System.Action<string, bool> check)
         {
@@ -491,6 +449,50 @@ namespace EvilAliensWeb.Compat.Net
             NetPuppets.Drive(100f);
             check("...and converges on the new speed, so the ease is not a leak",
                 Near(puppet.Position.Y - settled, 62f, 1f));
+        }
+
+        // ---- 5. the zero-extras self-heal ----------------------------------------------------
+        // The snapshot self-heal (card de4d5d65) constructs with a literal extras length of 0,
+        // and WallDescriptor used to read that as VARIATION 0 -- a full screen of the FIRST
+        // section's grid, drawn AND collidable, at whatever scroll offset the wire reported. On a
+        // joining peer that is "a different set of walls, looks like a section from previously in
+        // the game" until the reliable EvSpawn rebuild lands (card 430494a7). The descriptor now
+        // DECLINES the extras-less build -- reported as SnapUnknownKind.Declined, ordinary
+        // traffic, NOT the fault-shaped Refused -- and this section pins all three halves: the
+        // refusal, its benign classification, and the EvSpawn lane sailing through the removal
+        // window the refusal arms.
+        private static void SectionSelfHealDeclines(System.Action<string, bool> check)
+        {
+            NetBaseState state = default(NetBaseState);
+            state.Pos = new Vector2(0f, -9000f); // far above the screen: never drawn, never collides
+            byte[] none = new byte[0];
+            bool popped;
+            SnapUnknownKind kind;
+            NetPuppets.OnSnapshotEntryNextSeq(IdWallC, TypeWall, NetProtocol.NetSnapshotFlags.None,
+                state, none, 0, 0, out popped, out kind);
+            check("an unknown wall id's snapshot entry is DECLINED, not built as variation 0",
+                kind == SnapUnknownKind.Declined);
+            check("...and no puppet exists afterwards", NetPuppets.FindPuppet(IdWallC) == null);
+
+            // The reliable EvSpawn, arriving moments later with the real variation byte, still
+            // lands: the decline's MarkRemoved gates only the self-heal lane.
+            byte[] extras = new byte[1];
+            extras[0] = 4; // the pre-boss grid the card was reported on
+            SpawnRejectKind reject = NetPuppets.OnSpawn(IdWallC, TypeWall, state, extras, 0, 1);
+            check("the reliable EvSpawn still builds it through the removal window",
+                reject == SpawnRejectKind.None);
+            Wall puppet = NetPuppets.FindPuppet(IdWallC) as Wall;
+            check("...as a Wall", puppet != null);
+            if (puppet == null)
+            {
+                return;
+            }
+            check("...on the SENT variation, not a default", puppet.NetVariation == 4);
+            // And its later snapshot turns apply normally -- the removal-ledger entry matters
+            // only to ids the layer does not hold.
+            bool applied = NetPuppets.OnSnapshotEntryNextSeq(IdWallC, TypeWall,
+                NetProtocol.NetSnapshotFlags.None, state, none, 0, 0, out popped, out kind);
+            check("...and its snapshot turns apply once it is live", applied);
         }
 
         // ---- helpers ---------------------------------------------------------------------------

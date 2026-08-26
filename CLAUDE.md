@@ -502,10 +502,18 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   pop builds the blast. Console `eaRespawn.raise(slot)` + `eaPowerupLevel(slot,type,level)`
   (`eval RespawnRaise` / `eval PowerupLevel`) are the rig; **`RespawnRaise` is DESTRUCTIVE**.
   Since card 045c5a92 the ring wears the owner's mock
-  (`new_assets_raw/respawndesign.png`): near-black disc, magenta rim swept by a thick round-capped
-  pink arc, 12 radiating spikes, a **whole-second countdown numeral** (no tenths -- ruled by the
-  owner) that PUNCHES on every change, and an italic "RESPAWNING!" label. No new art -- `blank` +
-  `lazerglow` + `menufont`, all three already in `GameScene.PreloadGraphicalContent`.
+  (`new_assets_raw/respawndesign.png`): a dark disc, a rim swept by a round-capped arc, 12 radiating
+  spikes, a **whole-second countdown numeral** (no tenths -- ruled by the owner) that PUNCHES on
+  every change, and an italic "RESPAWNING!" label. No new art -- `blank` + `lazerglow` + `menufont`,
+  all three already in `GameScene.PreloadGraphicalContent`.
+  **Card d44a49a4 then retuned four things about it, and the colour is the one to know**: the whole
+  widget is a HUE ROTATION of that design onto the OWNER'S hue, so it is only pink for player 2 --
+  whose hue (300) is the anchor, which is what makes their ring byte-identical to the shipped
+  design. Slot 0's hue is the `-1` "do not colorize" sentinel and resolves to 215. The disc is also
+  a 0.22 VEIL now rather than a near-opaque backdrop (and is drawn as non-overlapping scanlines,
+  because at that alpha the old wedge fan drew a radial moire), and the arc is 6 design px rather
+  than 10. Read all four back as data with `eaRespawn.state()`
+  (`wantHue= drawnHue= discAlpha= arcPx= digitDy=`); details in web CLAUDE.md.
   **`?respawnphase=<0..1>` parks the fill at a chosen point** -- negative =
   live, the `?ripplephase=` convention -- and **`?harness=respawn`** is the frozen rig for it; a
   ~10 s fill with a 220 ms pop cannot be caught by a timed screenshot. **The park now sits on the

@@ -141,7 +141,7 @@ _Further testing would be nice:_ verified over the in-process wire, not a live t
 
 _No description or comments — the card title is the whole ticket._
 
-**Done** (PR pending link). The client hands a dying boss its own death animation
+**Done** ([#359](https://github.com/Coamithra/RotEA26/pull/359)). The client hands a dying boss its own death animation
 (`NetPuppets.ReleaseDyingPuppet`), which drops the id from every map and marks it removed so the
 world-snapshot **self-heal** will not rebuild it. That suppression ran on the flat 3 s
 `RecentRemovalWindowMs`, justified in a comment with *"the host stops streaming the id within a
@@ -194,7 +194,7 @@ degrades to the pre-card behaviour, which shipped.
 
 _No description or comments — the card title is the whole ticket._
 
-**Done** (PR pending link). The suspicion was right on both counts, and the second half is what
+**Done** ([#360](https://github.com/Coamithra/RotEA26/pull/360)). The suspicion was right on both counts, and the second half is what
 makes it read as **loud** rather than busy: N copies of the *same* sample started at the *same*
 instant are phase-identical and sum **coherently** — amplitude × N, i.e. **+20·log10(N) dB**. Ten
 simultaneous `expl1` is one explosion twenty decibels louder, not ten explosions.
@@ -248,7 +248,7 @@ _Further testing would be nice:_ the fix is verified as a **decision**, not as a
 listened to it, here or on a real pairing. Worth one pass with the sound on: a screen-clearing bomb
 offline, and a joining peer during a boss death.
 
-## 8. `d44a49a4` — the respawning timer gfx need a bit of tweaking.
+## 8. `d44a49a4` — the respawning timer gfx need a bit of tweaking. — **DONE**
 
 **Description / notes:**
 
@@ -259,6 +259,63 @@ offline, and a joining peer during a boss death.
 3) Needs to have the color of the player who will respawn there (rather than pink)
 
 4) the text is not nicely vertically centered rn. Needs to move down a bit.
+
+**Done** (PR pending link). All four, and one of them was not the one-line change it looked like.
+
+**1) The disc is a veil.** `DiscAlpha` 0.95 → **0.22**. Not 0 — it is what the numeral reads
+against. Measured on `?bg=mars` against a third arm built with **no veil at all**, because "how dark
+is it" means nothing without the undarkened reference: over the r=14..30 annulus the disc keeps
+**78.4 %** of the background's luminance, against the pre-card disc's **15.5 %**.
+
+**…which forced it off the wedge fan.** The disc was 96 rectangles widened to overlap, all crossing
+at the centre. Alpha blending is *not* idempotent — 0.22 over 0.22 reads 0.39 — so at the new alpha
+every overlap darkened twice and it drew a radial **moiré**, blackest in the middle. It is
+non-overlapping horizontal rows now: idempotent at any alpha, an exact circle rather than a 96-gon,
+and cheaper (68 quads vs 96). Angular luminance spread inside the disc, which is what isolates a
+fan: at r=16/22/28 px the fan **at the new alpha** reads 7.4 / 9.9 / 10.1 and the scanlines
+2.7 / 2.0 / 4.0 — and the same frame with **no disc at all** reads 3.4 / 2.7 / 3.8, which is the
+number that matters: the scanline disc adds no angular structure rather than merely less of it.
+Invisible over space — the harness's default background — so a bare screenshot would have passed
+the fan.
+
+**2) `ArcThickness` 10 → 6**, exactly 60 %. The round line caps follow (`ArcThickness * 0.5`).
+
+**3) The widget wears the owner's colour** — a **hue rotation of the shipped design**, not a
+per-slot palette. Every colour was tuned together off the owner's mock (the rim sits 5° off the arc
+core, the disc is a violet tint 35° away), and a table of flat colours would throw that away. The
+anchor is 300 **because that is slot 1's own hue**, so **player 2's ring is byte-identical to the
+shipped pink**. Slot 0's hue is the `-1` "do not colorize" sentinel, so the ring substitutes 215 —
+the centre of the band `PlayerShip.Draw` itself treats as untinted. Passing `-1` through as an angle
+would swing the ring 300° back to a near-identical pink, which is the one way this could be wrong
+and still look plausible; the probe asserts against it.
+
+**4) The numeral is centred on its ink**, not on its line box. `MeasureString`'s height is the
+font's *line spacing* — a box sized for descenders a digit does not use — so centring the box left
+it high. Derived per string from the glyph metrics rather than nudged by a constant, so it survives
+a font rebuild. Measured off the frame: the ink centre moves **y = 295.5 → 299.0** against the
+widget centre of 300.
+
+All four are readable as data on the `[respawn]` line (`wantHue= drawnHue= hueShift= discAlpha=
+arcPx= digitDy=`), because three of them are exactly the kind of thing two people read two ways off
+one screenshot.
+
+**Every one of those fields comes off an argument that reached a draw call**, and review is why:
+two earlier cuts of this got it wrong in two different ways and it demonstrated the reported defect
+back on screen with every probe green. Printing the *constant* restates the diagnostic's own
+subject; latching the expression on the line *before* the draw is no better. So the probe now
+mutates the **use site** — `DrawVeilDisc` handed 0.95, `SegScale` handed a literal 10, `Tint`
+rotating by 0 (the ring draws pink again), the offset dropped from the `DrawString` — and each fails
+exactly its own line. Pinned by `tools/headless/probes/respawn_ring_style.txt` plus `logic_probe`'s
+`ProbeRespawnRingHue` for the rotation maths (whose own identity leg was a tautology until review
+caught it comparing the function against itself).
+
+_Further testing would be nice:_ at 0.22 the disc still removes ~21 % of the background. That is
+emphatically no longer "pure black", but whether it is "very subtle" enough is the owner's call and
+it is a one-constant dial. Sub-ask 4 says "the text", which I read as the **numeral** — it is
+the thing that is supposed to be centred in the disc, and the fix direction (down) matches the
+ink-vs-box asymmetry exactly. If the owner meant the "RESPAWNING!" label instead, that is a
+one-constant change (`LabelOffsetY`). And the per-slot colours are only *seen* here for slot 0: the
+other three are verified as maths plus the roster table, not by a four-player screenshot.
 
 ## 9. `745728f9` — space mines (lvl 3, aka death stars) seem to also explore when they reach a dead player's location
 

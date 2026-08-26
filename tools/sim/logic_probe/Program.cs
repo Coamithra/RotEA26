@@ -250,6 +250,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeRespawnRingHue(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         // LAST ON PURPOSE -- it is the only set that seeds RandomHelper, and it cannot unseed
         // afterwards (there is no un-seed API and adding one for a probe would be a production
         // change made for a test). Nothing above draws from RandomHelper, so the order costs
@@ -262,6 +268,144 @@ internal static class Program
 
         Console.WriteLine(failures == 0 ? "ALL PASS" : failures + " FAILURE(S)");
         return failures == 0 ? 0 : 1;
+    }
+
+    // Card d44a49a4 -- the respawn ring wears the OWNER'S colour, by hue-rotating the shipped
+    // design rather than by a per-slot palette table.
+    //
+    // WHY IT IS HERE. A colour is exactly the kind of thing two people can read differently off a
+    // screenshot, and the rotation is a pure static (`PlayerShipSummon.HueRotate`) with no Game,
+    // no content and no ServiceHelper in reach -- which is this tool's whole shape. The WIRING
+    // (that the summon resolves its owner's hue and hands it to every draw) is the probe's job,
+    // over on `respawn_ring_style.txt`; this is the maths.
+    //
+    // WHAT IS ASSERTED, and none of it restates the implementation:
+    //   * ROUND TRIP. Rotate the design colour by (target - DesignHue) and MEASURE the hue of the
+    //     result, with an independent RGB->hue reading rather than by re-running the code under
+    //     test. **It must be the DESIGN'S hue plus that delta, not the target itself** -- the
+    //     design's arc core sits ~9.5 degrees off the anchor on purpose (the rim, the disc and the
+    //     spikes each carry their own offset, and rotating preserves the whole spread), so a
+    //     rotation onto 215 correctly measures 224.2. A leg that demanded the target exactly would
+    //     be demanding the design be flattened onto one hue, which is the per-slot palette this
+    //     card deliberately did not build.
+    //   * IDENTITY AT ZERO, byte for byte -- which is the whole reason DesignHue is 300, the hue
+    //     Oracle gives slot 1. Player 2's ring must be the shipped pink, unchanged.
+    //   * SATURATION AND VALUE ARE UNTOUCHED. A rotation that quietly renormalised would still
+    //     pass the round trip while flattening the design's contrast.
+    //   * 360 IS IDENTITY, and a greyscale colour has no hue to move.
+    //   * THE SLOT TABLE. Oracle's constructor gives 300 / 0 / 39 and -1 for slot 0, and -1 is a
+    //     SENTINEL: passed to the rotation as a number it would swing the widget 300 degrees to a
+    //     near-identical pink, so the summon substitutes the untinted ship's own band centre.
+    //     Asserted against Oracle's real values, so a re-hued roster fails here.
+    private static int ProbeRespawnRingHue(Assembly asm)
+    {
+        Console.WriteLine("ProbeRespawnRingHue (card d44a49a4)");
+        Type summon = asm.GetType("EvilAliens.PlayerShipSummon", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo rot = summon.GetMethod("HueRotate", anyStatic);
+        FieldInfo designHueF = summon.GetField("DesignHue", anyStatic);
+        FieldInfo untintedF = summon.GetField("UntintedShipHue", anyStatic);
+        if (rot == null || designHueF == null || untintedF == null)
+        {
+            Console.WriteLine("FAIL: could not reflect the targets (HueRotate=" + (rot != null)
+                + " DesignHue=" + (designHueF != null) + " UntintedShipHue=" + (untintedF != null)
+                + ") -- renamed or moved?");
+            return 2;
+        }
+        float designHue = (float)designHueF.GetRawConstantValue();
+        float untinted = (float)untintedF.GetRawConstantValue();
+
+        // An INDEPENDENT reading of a colour's hue/sat/val, so the assertions below are not the
+        // implementation checking itself. Microsoft.Xna.Framework.Color stores bytes, so the
+        // tolerances are in byte quantisation, not float noise.
+        Func<object, float[]> hsv = c =>
+        {
+            Type ct = c.GetType();
+            float r = (byte)ct.GetProperty("R").GetValue(c) / 255f;
+            float g = (byte)ct.GetProperty("G").GetValue(c) / 255f;
+            float b = (byte)ct.GetProperty("B").GetValue(c) / 255f;
+            float mx = Math.Max(r, Math.Max(g, b));
+            float mn = Math.Min(r, Math.Min(g, b));
+            float d = mx - mn;
+            float h;
+            if (d <= 0f) { h = 0f; }
+            else if (mx == r) { h = 60f * (((g - b) / d % 6f + 6f) % 6f); }
+            else if (mx == g) { h = 60f * ((b - r) / d + 2f); }
+            else { h = 60f * ((r - g) / d + 4f); }
+            return new float[] { (h % 360f + 360f) % 360f, mx <= 0f ? 0f : d / mx, mx };
+        };
+        Func<float, float, float, float, float, object> call = (r, g, b, a, deg) =>
+            rot.Invoke(null, new object[] { r, g, b, a, deg });
+        Func<float, float, float> hueGap = (x, y) =>
+        {
+            float d = Math.Abs(x - y) % 360f;
+            return d > 180f ? 360f - d : d;
+        };
+
+        // The shipped arc core at pulse 0 -- the design's own signature colour.
+        const float dr = 1f, dg = 0.48f, db = 0.92f;
+        float[] baseHsv = hsv(call(dr, dg, db, 1f, 0f));
+
+        // AGAINST AN INDEPENDENTLY CONSTRUCTED Color, not against a second call of the function
+        // under test -- `f(x).Equals(f(x))` is true of any function at all, and the 0.62 alpha is
+        // exactly what it cannot see (an early-out returning `a * 0.5f` passed it; found in
+        // review). This is the leg that says player 2's ring is BYTE-IDENTICAL to the shipped pink.
+        Type colorT = asm.GetType("Microsoft.Xna.Framework.Color", false)
+            ?? typeof(object).Assembly.GetType("Microsoft.Xna.Framework.Color", false);
+        object expected = Activator.CreateInstance(
+            call(dr, dg, db, 0.62f, 0f).GetType(), new object[] { dr, dg, db, 0.62f });
+        Check("identity at 0 degrees keeps the design byte-for-byte, ALPHA INCLUDED",
+            call(dr, dg, db, 0.62f, 0f).Equals(expected),
+            "hue=" + baseHsv[0].ToString("0.0", Inv) + " colorT=" + (colorT != null));
+
+        // The round trip, over Oracle's real slot hues plus the untinted stand-in.
+        float[] targets = new float[] { designHue, 0f, 39f, untinted, 120f, 240f };
+        foreach (float target in targets)
+        {
+            object c = call(dr, dg, db, 1f, target - designHue);
+            float[] got = hsv(c);
+            // 2.5 degrees of slack: Color quantises each channel to a byte, which at this
+            // saturation moves the measured hue by up to ~1.5.
+            Check("rotating onto " + target.ToString("0", Inv)
+                + " carries the design's own offset with it",
+                hueGap(got[0], (baseHsv[0] - designHue + target % 360f + 720f) % 360f) < 2.5f,
+                "asked " + target.ToString("0", Inv) + " -> measured " + got[0].ToString("0.0", Inv));
+            Check("...with saturation and value untouched at " + target.ToString("0", Inv),
+                Math.Abs(got[1] - baseHsv[1]) < 0.02f && Math.Abs(got[2] - baseHsv[2]) < 0.01f,
+                "s " + baseHsv[1].ToString("0.000", Inv) + "->" + got[1].ToString("0.000", Inv)
+                + " v " + baseHsv[2].ToString("0.000", Inv) + "->" + got[2].ToString("0.000", Inv));
+        }
+
+        // THE ANCHOR ITSELF. `DesignHue` has to BE slot 1's hue for player 2's ring to stay the
+        // shipped pink, and `UntintedShipHue` has to sit inside the band `PlayerShip.Draw` uses to
+        // mean "untinted" -- both are constants, so both are reachable here.
+        //
+        // WHAT IS NOT ASSERTED HERE, and where it is instead: that Oracle's roster really gives
+        // slot 1 that hue. `Oracle`'s constructor subscribes to `game.Components`, so constructing
+        // one throws in this loader -- the tool's documented limit. The roster is pinned under
+        // eahl instead, by `respawn_ring_style.txt` reading `hues=` off the live oracle. Do not
+        // "fix" this by hardcoding 300 twice; the point of the pair is that neither file alone
+        // can drift without the other failing.
+        Type shipT = asm.GetType("EvilAliens.PlayerShip", true);
+        Check("the untinted stand-in sits inside PlayerShip.Draw's own colorize band (180..250)",
+            untinted > 180f && untinted < 250f, "UntintedShipHue=" + untinted.ToString("0", Inv));
+        Check("...and is a real angle, not the -1 sentinel it stands in for",
+            untinted >= 0f && shipT != null, "UntintedShipHue=" + untinted.ToString("0", Inv));
+        Check("DesignHue is a real angle too, so a 0 shift is reachable",
+            designHue >= 0f && designHue < 360f, "DesignHue=" + designHue.ToString("0", Inv));
+        Check("the design and the untinted stand-in are far enough apart to read as two colours",
+            hueGap(untinted, designHue) > 30f,
+            "gap=" + hueGap(untinted, designHue).ToString("0", Inv) + " deg");
+
+        // Degenerate inputs. A greyscale colour has no hue, and 360 is a full turn -- both are
+        // early-outs in the implementation, so both would be easy to break with a "tidy-up".
+        float[] grey = hsv(call(0.5f, 0.5f, 0.5f, 1f, 90f));
+        Check("greyscale has no hue to rotate", grey[1] < 0.01f,
+            "s=" + grey[1].ToString("0.000", Inv));
+        float[] full = hsv(call(dr, dg, db, 1f, 360f));
+        Check("a full turn is identity", hueGap(full[0], baseHsv[0]) < 2.5f,
+            "hue " + baseHsv[0].ToString("0.0", Inv) + " -> " + full[0].ToString("0.0", Inv));
+        return 0;
     }
 
     // Card e6927ef8 -- TeamChallenge's two seat decisions. The bug was a seating decision whose

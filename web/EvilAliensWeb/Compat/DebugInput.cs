@@ -1543,6 +1543,15 @@ namespace EvilAliensWeb.Compat
 			}
 			string seats = "";
 			string alive = "";
+			// The per-slot HUES, which are the roster's OTHER identity (card d44a49a4): -1 is the
+			// "do not colorize" sentinel slot 0 flies under, and 300 / 0 / 39 are the angles
+			// PlayerShip.Draw remaps its sprite onto for the other three. Reported for every slot,
+			// seated or not, because they are a property of the roster rather than of who is
+			// playing -- and because the respawn ring now reads them, so a re-hued roster is a
+			// silent re-colour of that widget too. Read by tools/headless/probes/
+			// respawn_ring_style.txt, which is where PlayerShipSummon.DesignHue's "this IS slot
+			// 1's hue" claim is pinned (logic_probe cannot construct an Oracle).
+			string hues = "";
 			for (int slot = 0; slot < EvilAliens.Oracle.MaxPlayers; slot++)
 			{
 				if (oracle.IsSeated(slot))
@@ -1553,10 +1562,13 @@ namespace EvilAliensWeb.Compat
 				{
 					alive += (alive.Length > 0 ? "," : "") + slot;
 				}
+				hues += (hues.Length > 0 ? "," : "")
+					+ oracle.Hue(slot).ToString("0", System.Globalization.CultureInfo.InvariantCulture);
 			}
 			return "[debug] eaOracleRoster: players=" + oracle.Players
 				+ " seated=" + (seats.Length > 0 ? seats : "-")
-				+ " aliveSlots=[" + alive + "]";
+				+ " aliveSlots=[" + alive + "]"
+				+ " hues=" + hues;
 		}
 
 		// JS bridge for a couch join RIGHT NOW (eaNetCouchJoin in wwwroot/index.html):

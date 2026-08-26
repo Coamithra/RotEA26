@@ -1585,6 +1585,62 @@ uses `Enabled=false`, not a pause layer -- so they still play here while a `shot
   fills clockwise from 12 o'clock, pulses as it nears full, and flares outward over its last 220 ms
   as the ship arrives -- dropping a **free `Blast` sized by the player's own "2" powerup** at the respawn point
   as the reward (card ed32efe1; it was a fixed level 3).
+  - **CARD d44a49a4 -- four owner tweaks on top of that restyle, and one of them was not the
+    one-line change it looked like.**
+    - **The disc is a VEIL now** (`DiscAlpha` 0.95 -> **0.22**): *"the middle circle is pure black,
+      obstructing the game - should be transparent (can be slightly darkened but very subtle)"*.
+      Not 0 -- it is what the numeral reads against. Measured on `?bg=mars`, the only background
+      bright enough to judge it -- against a THIRD arm built with no veil at all, because "how dark
+      is it" means nothing without the undarkened reference: over the r=14..30 annulus the disc
+      keeps **78.4%** of the background's luminance, against the pre-card disc's **15.5%**.
+    - **...which forced the disc off the WEDGE FAN.** It was 96 rectangles widened to overlap, all
+      crossing at the centre. Alpha blending is NOT idempotent -- 0.22 over 0.22 reads 0.39 -- so
+      at the new alpha every overlap darkened twice and the disc drew a radial MOIRE, blackest in
+      the middle. It is non-overlapping horizontal ROWS now (`DrawVeilDisc`), which is idempotent
+      at any alpha, exact rather than a 96-gon, and cheaper (68 quads vs 96). Measured as the
+      ANGULAR luminance spread inside the disc, which is what isolates a fan: at r=16/22/28 px the
+      fan AT THE NEW ALPHA reads **7.4 / 9.9 / 10.1**, the scanlines **2.7 / 2.0 / 4.0** -- and the
+      same frame with NO disc at all reads **3.4 / 2.7 / 3.8**, which is the number that matters:
+      the scanline disc adds no angular structure rather than merely less of it. **Invisible over
+      space**, the harness's default background -- so a bare screenshot would have passed it. The wedge fan STAYS for the round
+      line caps, which draw opaque (idempotent) and would read as a staircase as scanlines.
+    - **`ArcThickness` 10 -> 6** -- *"about 60% of what it is now"*, exactly. The round caps follow
+      (they are `ArcThickness * 0.5`).
+    - **THE WIDGET WEARS THE OWNER'S COLOUR** -- *"the color of the player who will respawn there
+      (rather than pink)"*. A **hue rotation of the shipped design**, not a per-slot palette: every
+      colour was tuned together off the mock (the rim sits 5 degrees off the arc core, the disc is
+      a violet tint 35 degrees away), and a table of flat colours would throw that away. The anchor
+      `DesignHue` is **300 because that IS slot 1's hue**, so **player 2's ring is byte-identical
+      to the shipped pink** -- check that first if this ever looks wrong. Slot 0's hue is the
+      **-1 sentinel** for "do not colorize", so it substitutes `UntintedShipHue` 215, the centre of
+      `PlayerShip.Draw`'s own (180, 250) colorize band; passing -1 through as an angle would swing
+      the ring 300 degrees to a near-identical pink, which is the one failure here that still looks
+      plausible.
+    - **The numeral is centred on its INK, not its line box** -- *"not nicely vertically centered
+      rn. Needs to move down a bit."* `MeasureString`'s height is the font's LINE SPACING, a box
+      sized for descenders a digit does not use, so centring the box left it high. DERIVED per
+      string from `SpriteFont.Glyph.Cropping` (design units -- the atlas is supersampled but every
+      metric is not), so it survives a font rebuild. Measured off the frame: the ink centre moves
+      **y=295.5 -> 299.0** against the widget centre of 300.
+    - **Verify all four as DATA on the `[respawn]` line** -- `wantHue= drawnHue= hueShift=
+      discAlpha= arcPx= digitDy=`. Three of the four are exactly the kind of thing two people read
+      two ways off one screenshot, and the widget pulses besides.
+    - **EVERY ONE OF THOSE FIELDS COMES OFF AN ARGUMENT THAT REACHED A DRAW CALL**, and that is not
+      pedantry -- two earlier cuts of this card got it wrong in two different ways and review
+      demonstrated the reported defect back on screen with every probe green. Printing the CONSTANT
+      restates the diagnostic's own subject (`DrawVeilDisc(r, 0.95f * popAlpha)` draws a near-opaque
+      disc while the report still says 0.22); latching the expression on the line BEFORE the draw is
+      no better (deleting the offset from the `DrawString` leaves the latch green). So: the alpha of
+      the Color the veil was drawn with, the thickness read back out of the quad scale the arc was
+      drawn with, the HUE of the Color the arc core was drawn with, and the offset derived back out
+      of the position the numeral was drawn at. `wantHue` sits beside `drawnHue` for the same
+      reason: one is the decision, the other is what happened, and a `Tint` that stopped rotating is
+      caught by their disagreement. (The `[confirm] overlap=` tautology of card bec47239, twice
+      more.) Pinned by
+      `tools/headless/probes/respawn_ring_style.txt` (mutation-tested four ways) plus
+      `logic_probe`'s `ProbeRespawnRingHue` for the rotation maths; the roster anchor
+      (`hues=-1,300,0,39`) is pinned in the probe because `Oracle` cannot be constructed under
+      `logic_probe`.
   - **Card 045c5a92 restyled it to the owner's mock** (`new_assets_raw/respawndesign.png`): a
     near-black disc, a magenta rim swept by a thick round-capped pink arc, 12 radiating spikes, a
     **whole-second countdown numeral** and an italic "RESPAWNING!" label. The numeral is the 2008

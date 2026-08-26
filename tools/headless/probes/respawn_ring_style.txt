@@ -1,0 +1,126 @@
+# PROBE: the respawn clock ring's four owner-requested tweaks (card d44a49a4).
+#
+# THE ASKS, verbatim:
+#   1) the middle circle is pure black, obstructing the game - should be transparent (can be
+#      slightly darkened but very subtle)
+#   2) the growing ring is a bit too thick, make it about 60% of what it is now.
+#   3) Needs to have the color of the player who will respawn there (rather than pink)
+#   4) the text is not nicely vertically centered rn. Needs to move down a bit.
+#
+# ALL FOUR ARE READ AS DATA, off `[respawn]`'s own line, and that is not laziness -- it is the
+# only way three of them can be argued about at all. "Is the disc subtle enough", "is that the
+# player's colour" and "is the numeral centred now" are exactly the questions two people read two
+# ways off one screenshot, and the widget also PULSES, so a live capture is a sample rather than a
+# statement (this file's siblings respawn_summon / respawn_digit exist for the same reason).
+#
+# WHAT EACH FIELD PINS:
+#   * `discAlpha=0.22` -- the veil. It shipped at 0.95, i.e. near-opaque, over a widget that sits
+#     where your ship was for ten to fifteen seconds. It is not 0: the numeral has to read against
+#     something. MEASURED on `?bg=mars` (the only background bright enough to judge it) against a
+#     THIRD arm built with no veil at all, because "how dark is it" is meaningless without the
+#     undarkened reference: over the r=14..30 annulus the disc keeps **78.4%** of the background's
+#     luminance, against the pre-card disc's **15.5%**.
+#   * `arcPx=6.0` -- 60% of the shipped 10, exactly as asked. Everything measured off it follows
+#     (the round line caps are ArcThickness * 0.5).
+#   * `wantHue=215.0` / `drawnHue=224.2` -- the ring wears the OWNER's colour. The harness's summon
+#     is slot 0, whose Oracle hue is the -1 "do not colorize" SENTINEL, so the widget substitutes
+#     the centre of the band PlayerShip.Draw itself treats as untinted. A build that passed -1
+#     through as an angle would report `wantHue=-1.0` and swing the ring 300 degrees back to a
+#     near-identical pink -- the one failure mode this ask could have that still LOOKS plausible.
+#     The TWO fields are the point: `wantHue` is the decision (what the owner's hue resolves to)
+#     and `drawnHue` is the hue of the Color the arc was really drawn with, so a `Tint` that
+#     stopped rotating is caught by their disagreement rather than by either alone. 224.2 rather
+#     than 215 because the design's arc core sits ~9.5 degrees off its 300 anchor and the rotation
+#     carries the whole spread with it -- that offset surviving IS the "rotate the design, do not
+#     flatten it onto a per-slot palette" decision.
+#   * `digitDy=4.00` -- the numeral is centred on its INK, not on its line box. `MeasureString`'s
+#     height is the font's LINE SPACING, a box sized for descenders a digit does not use, so
+#     centring the box left the numeral sitting high. Derived per string from the glyph metrics
+#     rather than nudged by a constant, and DERIVED BACK OUT OF THE POSITION THAT WAS DRAWN AT --
+#     see below. MEASURED off the rendered frame: the numeral's ink centre moves y=295.5 -> 299.0
+#     against the widget's own centre of 300.
+#
+# AND `hues=-1,300,0,39` IS THE ANCHOR CLAIM. `PlayerShipSummon.DesignHue` is 300 because that IS
+# slot 1's hue, which is what makes **player 2's ring byte-identical to the shipped pink**. That
+# claim cannot be checked in `logic_probe` (Oracle's constructor subscribes to `game.Components`,
+# so it cannot be constructed there), so it is pinned HERE, off a live oracle, while
+# `ProbeRespawnRingHue` pins the rotation maths. Neither file alone can drift without the other
+# failing; read them as one check.
+#
+# THE MOIRE, which is why sub-ask 1 was not a one-line alpha change. The disc was 96 wedge quads
+# widened to overlap, all crossing at the centre. Alpha blending is NOT idempotent -- 0.22 over
+# 0.22 reads 0.39 -- so at the new alpha every overlap darkened twice and the disc drew a radial
+# fan, blackest in the middle. It is now non-overlapping horizontal rows. Measured as the ANGULAR
+# luminance spread inside the disc on `?bg=mars` (a fan is a function of angle, so this isolates
+# it), at r=16/22/28 px:
+#     the fan AT THE NEW ALPHA   7.4 / 9.9 / 10.1
+#     the shipped scanlines      2.7 / 2.0 /  4.0
+#     the SAME FRAME with NO disc at all   3.4 / 2.7 / 3.8
+# The third row is the one that matters: the scanline disc's angular variation is at or below the
+# background's own, i.e. it adds no structure rather than merely less of it. Invisible over space,
+# the harness's default background -- so a bare screenshot would have passed the fan.
+#
+# MUTATION-TESTED AT THE USE SITE, which is the only place worth mutating. Changing a CONSTANT the
+# report prints proves nothing -- the constant and the report are the same expression -- so each of
+# these leaves the constants alone and breaks the DRAW:
+#   * `DrawVeilDisc` handed `0.95f * popAlpha` -> the `discAlpha=` line. (Measured effect: the disc
+#     is near-opaque again, r=14..30 retention 78.4% -> 15.5%.)
+#   * `SegScale` handed a literal `10f` -> the `arcPx=` line. (Arc core 6.0 -> 10.5 design px.)
+#   * `Tint` calling `HueRotate(..., 0f)` -> the `drawnHue=` line. (THE RING DRAWS PINK AGAIN,
+#     309 degrees; `wantHue` still reads 215, which is exactly why both are printed.)
+#   * the offset dropped from the `DrawString` position -> the `digitDy=` line. (Ink centre back to
+#     296 against the widget's 300.)
+# ALL FOUR PASSED AN EARLIER CUT OF THIS FILE, with the reported defect visibly back on screen --
+# including one where the offset was latched on the line BEFORE the draw, which is still a
+# restatement. That is the `[confirm] overlap=` tautology of card bec47239 in its third form, and
+# it is why every field here is derived from an argument that reached a draw call.
+#
+# The disc's MOIRE is the one thing here with no assertion: it is a Draw-time artefact with no
+# state to read, and reverting to the wedge fan fails nothing in this file. Its record is the
+# three-arm `?bg=mars` measurement in the header above -- which is also why that capture is named
+# there, with its no-disc reference, rather than left as "looks fine".
+#
+# eahl: --flags "?harness=respawn&respawnphase=0.55"
+#
+# ?respawnphase= parks the whole widget -- the fill, the pulse, the pop, the numeral and its
+# punch are all derived from the parked milliseconds -- so this run is repeatable. 0.55 is a
+# deliberately ordinary point: below PulseStartFill (0.72) and far from the pop, so nothing here
+# is measured mid-flare.
+
+step 200 nodraw
+# ONE DRAWN FRAME, and it is load-bearing: ALL FOUR fields come off what the last Draw actually
+# did, so a summon that has not drawn yet honestly reports zeroes. That is the whole point --
+# printing the CONSTANTS instead restates the diagnostic's own subject, and every one of the four
+# use-site mutations below slipped past an earlier cut of this file that did exactly that.
+step 1
+mark
+eval RespawnState
+eval OracleRoster
+
+# The four asks, in order.
+expect \[respawn\] .* discAlpha=0\.22
+expect \[respawn\] .* arcPx=6\.0
+expect \[respawn\] .* wantHue=215\.0 drawnHue=224\.2 hueShift=275\.0
+expect \[respawn\] .* digitDy=3\.80
+# 3.80, not the 4.00 the raw metric gives: it is the offset in DESIGN px AS DRAWN, i.e. through
+# the numeral's own 0.95 scale. That is deliberate -- what moved the glyph is what is reported.
+expect-not \[respawn\] .* digitDy=0\.00
+
+# ...and the one failure that would look plausible while being wrong: the -1 sentinel passed
+# through as an angle swings the ring 300 degrees, back to a near-identical pink.
+expect-not \[respawn\] .* wantHue=-1
+# The design's own hue is ~309.5 (the arc core is 5 degrees off the 300 anchor). A `drawnHue`
+# anywhere near it means the rotation did not happen and the ring is PINK -- which is the whole
+# ask, and the one failure that still looks like a working widget.
+expect-not \[respawn\] .* drawnHue=30[0-9]\.
+expect-not \[respawn\] .* drawnHue=-1\.0
+
+# THE ANCHOR: DesignHue (300) IS slot 1's hue, so player 2's ring is the shipped pink. Slot 0's
+# -1 is the sentinel the ring substitutes for.
+expect eaOracleRoster: .* hues=-1,300,0,39
+
+# The park really held -- otherwise every number above is a sample of a moving widget rather than
+# a statement about it.
+expect \[respawn\] summons=1 park=0\.55
+expect-not FAIL
+quit

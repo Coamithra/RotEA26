@@ -161,6 +161,12 @@ public class SoundManager : ISoundManagerService
 	private long _sfxAdmitted;
 	private long _sfxPlayed;
 	private readonly Dictionary<string, long> _coalescedByCue = new();
+
+	// Per-cue REQUEST counts. `SfxRequests` alone says a sound was asked for; this says WHICH,
+	// which is what lets a suite assert that a specific cue was played on a box with no audio
+	// device at all (card 745728f9's join-peer homing cue is verified exactly this way -- there is
+	// no other observable for it, since a puppet's cue leaves no state and eahl has no mixer).
+	private readonly Dictionary<string, long> _requestsByCue = new();
 	private readonly Dictionary<string, SoundEffect> _voCache = new();
 	private SoundEffectInstance _speech;
 	private SoundEffectInstance _narration;
@@ -227,6 +233,8 @@ public class SoundManager : ISoundManagerService
 	{
 		CueConfig cfg = ConfigFor(cue);
 		_sfxRequests++;
+		_requestsByCue.TryGetValue(cue, out long asked);
+		_requestsByCue[cue] = asked + 1;
 		if (coalescable && !cfg.Loop && DebugFlags.SfxCoalesce
 			&& _lastStartTick.TryGetValue(cue, out int startedAt) && startedAt == _tick)
 		{
@@ -545,6 +553,13 @@ public class SoundManager : ISoundManagerService
 
 	internal long SfxPlayed => _sfxPlayed;
 
+	// How many times ONE cue has been asked for since the last reset -- see _requestsByCue.
+	internal long SfxRequestsOf(string cue)
+	{
+		_requestsByCue.TryGetValue(cue, out long asked);
+		return asked;
+	}
+
 	internal long SfxCoalesced => _sfxCoalesced;
 
 	// "expl1=11 expl2=3", ordered by count then name so the string is stable across runs.
@@ -600,6 +615,7 @@ public class SoundManager : ISoundManagerService
 		_sfxPlayed = 0;
 		_sfxCoalesced = 0;
 		_coalescedByCue.Clear();
+		_requestsByCue.Clear();
 	}
 
 	public void Stop(SoundEffectInstance inst)

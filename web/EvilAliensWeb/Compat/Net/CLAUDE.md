@@ -1262,6 +1262,42 @@ Four pieces, none changing what replicates -- only how well the star holds up at
     first place, so the entity types expose narrow `Net*` readbacks for it. Mutation-tested five
     ways. **The second Ball exists to stop a vacuous leg**: the first is already blinking, so
     `!hittimer.Active` would refuse a post-detach chip beat whatever the latch said.
+  - **`MineTargetAcquired` (kind 3, card 745728f9) is the family's fourth kind and its first
+    PURE-AUDIO one -- "the homing sound doesnt play for joining clients".** A `StarMine` plays
+    `targetacquired` from its own `Update` when it locks onto a ship; a puppet mine is FROZEN, so
+    that Update -- and that cue -- never ran on the joiner. It is a WORLD event both players are
+    dodging, so by the player-vs-world rule above it is audible on both screens (the enemy-charge
+    precedent, card c146422f); `StarMine.NetPlayFx` plays it and **falls through to base for every
+    other kind**, which is load-bearing -- `StarMine` IS a `KillableAlien`, so an override that
+    returned would silently delete the hit blink for every mine on the joiner's screen.
+  - **THE BEAT IS GATED ON THE SAME `soundtimer` AS THE LOCAL CUE, and the emission is INSIDE that
+    gate rather than beside it.** `StarMine`'s 300 ms `soundtimer` is what stops a mine that keeps
+    losing and retaking a lock (a target crossing the release ring, a swarm around one ship) from
+    re-playing the cue every tick -- so one beat per SOUND, not one per lock. Ungated, that same
+    mine streams a reliable event per tick at the joiner.
+    **A cadence assertion here has to drive a real RE-ACQUIRE or it measures nothing**: the acquire
+    loop lives in the `free` branch and a locked mine never re-enters it, so "hold the lock and
+    require no further beats" is true whatever the emission is gated on (measured -- the mutation
+    passed). Park the mine away, tick, park it back; inside the window that must send nothing, past
+    it (417 ms) it must send again.
+  - **NO PROTOCOL BUMP for a new kind** -- `NetFxKind` is APPEND-ONLY, the `EvFx` frame is
+    unchanged, and the `eaBuildHash` compat key pins peers to an identical binary, so a peer that
+    can receive kind 3 is by construction one that knows it. What DOES have to move is
+    `NetProtocol.TryFxKind`'s bound; `logic_probe`'s `ProbeWireEnums` cross-checks every validator
+    against `Enum.IsDefined` over the whole byte domain, so a missed bound fails there rather than
+    silently refusing the kind off the wire.
+  - **Verify with `eaMineTarget()` / `eval MineTarget`** (`Compat/Net/MineTargetTest.cs`, 43
+    assertions; `tools/headless/probes/starmine_dead_target.txt`). **DESTRUCTIVE** -- it kills the
+    local player's ship for real -- so a throwaway `?level=Level2&invuln` boot. Its section 4
+    drives `NetPlayFx` directly and section 5 reads the frames a scripted peer really RECEIVED over
+    a `NetWire`: section 4 alone leaves a build that stopped EMITTING perfectly green while the
+    joiner hears nothing, which is the reported symptom exactly. Headlessly there is no mixer, so
+    the only thing observable about a cue is that it was REQUESTED -- card 8732568e's per-cue
+    counters are what make that readable at all.
+  - **THIS CUE IS THE HALF OF CARD 745728f9 THAT IS ACTUALLY FIXED.** The card's other half
+    ("mines explode at a dead player's location") is offline, is NOT closed, and its `IsDead`
+    guards turned out to be one-tick hardening rather than the fix -- web CLAUDE.md has the
+    measurement and the two refuted hypotheses. Do not read this section as evidence for it.
   - **KNOWN LIMIT, pre-existing and NOT introduced by these cards: a client's `Ball` keeps its own
     hp.** It can therefore detach on its own schedule, and in principle twice. The beats are
     idempotent against that (whichever lands first latches), but the two peers' chip COUNTS still

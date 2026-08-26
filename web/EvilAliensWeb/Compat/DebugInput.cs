@@ -379,6 +379,16 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.SfxBurstTest.Run();
 		}
 
+		// The StarMine lock + join-peer homing cue suite (card 745728f9): eaMineTarget() /
+		// `eval MineTarget`. **DESTRUCTIVE** and LEVEL-ONLY -- it kills the local player's ship for
+		// real and respawns it through the scene's own seam. Run it in a throwaway
+		// `?level=Level2&invuln` boot.
+		[JSInvokable("debugMineTarget")]
+		public static string MineTarget()
+		{
+			return EvilAliensWeb.Compat.Net.MineTargetTest.Run();
+		}
+
 		// JS bridge for QA/demo of the hit-stop (eaHitstop in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugHitstop', ms). Freezes game time for
 		// `ms` milliseconds of real time (0/omitted => 120ms) — most visible in a level

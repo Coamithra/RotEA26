@@ -298,7 +298,7 @@ namespace EvilAliensWeb.Compat.Net
         internal static bool TryFxKind(int raw, out NetFxKind kind)
         {
             kind = default;
-            if (raw < 0 || raw > (int)NetFxKind.EnemyLazerFire)
+            if (raw < 0 || raw > (int)NetFxKind.MineTargetAcquired)
             {
                 return false;
             }
@@ -1568,9 +1568,14 @@ namespace EvilAliensWeb.Compat.Net
     //
     // Every kind here is DRAW/AUDIO ONLY on the receiving peer: nothing an EvFx applies may
     // damage, kill, award, spawn a replicable entity or move gameplay state, or the two worlds
-    // diverge. They are also all IDEMPOTENT against the client's own local simulation -- a client
-    // hit-tests puppets with its own bullets, so it may already have run the same feedback, and
-    // each apply no-ops when the effect it would start is already running.
+    // diverge.
+    //
+    // IDEMPOTENCE IS PER KIND, not a property of the family. It is REQUIRED of any kind whose
+    // effect the client can also start for itself -- a client hit-tests puppets with its own
+    // bullets, so `EnemyHitFlash` and `BallDetach` must no-op when the effect they would start is
+    // already running, and they gate on `hittimer.Active` / `netDetached` to do it. A kind the
+    // client can never raise locally carries no such gate: `MineTargetAcquired` restarts its cue
+    // unconditionally, because a puppet mine is FROZEN and its own Update can never play one.
     public enum NetFxKind : byte
     {
         // The host landed a hit on the entity `netId`: light it up (and play its own per-type hit
@@ -1585,6 +1590,12 @@ namespace EvilAliensWeb.Compat.Net
         // layer cannot tell that from a fresh spawn -- which would salvo every live beam's cue at
         // the joiner the instant it arrives.
         EnemyLazerFire = 2,
+        // A StarMine locked onto a player: the "targetacquired" homing cue (card 745728f9).
+        // ADDRESSED TO THE MINE (netId), unlike EnemyLazerFire, because the cue is a per-entity
+        // one -- the receiver stops that mine's own previous instance before starting the new one,
+        // exactly as the host does. Emitted at the host's real acquire and gated on the same
+        // soundtimer, so the wire carries one beat per SOUND rather than one per tick of a lock.
+        MineTargetAcquired = 3,
     }
 
     public struct ShipSample

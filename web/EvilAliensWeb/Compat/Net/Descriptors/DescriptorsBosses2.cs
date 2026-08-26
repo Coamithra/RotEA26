@@ -260,7 +260,23 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
 
         public override AlienDrawableGameComponent CreatePuppet(ComponentBin bin, Game game, in NetBaseState state, byte[] buf, int off, int len)
         {
-            int variation = len >= 1 ? buf[off] : 0;
+            // DECLINE a build with no variation byte -- that is the snapshot self-heal's shape
+            // (card de4d5d65 constructs with a literal extras length of 0; every real EvSpawn
+            // carries the byte). The "generically-dressed puppet beats no puppet" trade the
+            // self-heal makes elsewhere INVERTS for a wall: `len == 0` used to build variation 0,
+            // which is a full screen of the FIRST section's grid -- drawn AND collidable, the
+            // CollisionLevelMap is derived from the blocks -- at whatever scroll offset the wire
+            // reported. On a joining peer that is "a different set of walls, looks like a section
+            // from previously in the game" (card 430494a7), plus local collisions against
+            // geometry the host does not have. No wall for a beat beats a wrong wall: the decline
+            // arms only the SELF-HEAL lane's retry window (OnSpawn never consults it), so the
+            // reliable EvSpawn builds the real grid the moment it lands -- and a JIP joiner's
+            // walls arrive in the addressed catch-up burst anyway. NetWallTest section 5 pins it.
+            if (len < 1)
+            {
+                return null;
+            }
+            int variation = buf[off];
             Wall w = Wall.NewWall(bin, game);
             w.Setup(variation);
             return w;

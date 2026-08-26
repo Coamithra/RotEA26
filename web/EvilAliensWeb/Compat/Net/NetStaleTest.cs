@@ -191,6 +191,16 @@ namespace EvilAliensWeb.Compat.Net
                     // defaults rather than throwing. One (Ball, with no JunkBoss) returns null
                     // by design; that is a skip, not a failure.
                     c = desc.CreatePuppet(bin, game, blank, noExtras, 0, 0);
+                    if (c == null)
+                    {
+                        // A descriptor may DECLINE the zero-extras build outright (WallDescriptor
+                        // since card 430494a7: a defaulted wall is the wrong section's whole
+                        // grid). The census still wants such a type in the table -- the Wall is
+                        // the very type the pre-card comparison anchors on -- so retry with a
+                        // minimal one-byte extra (variation 0 for the wall; noExtras is a zeroed
+                        // byte[1] already). Ball still declines both, which stays the skip.
+                        c = desc.CreatePuppet(bin, game, blank, noExtras, 0, 1);
+                    }
                 }
                 catch (Exception ex)
                 {

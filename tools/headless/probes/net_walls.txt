@@ -76,8 +76,13 @@ expect 402px apart by row 122
 # The SKIP guard: a run that skipped prints no tally, so this is what tells "menu was busy" from
 # "the suite passed".
 expect-not SKIP \(run from the main menu
+# Section 5 (card 430494a7): the snapshot self-heal constructs with NO spawn extras, and a wall
+# built that way is VARIATION 0 -- the first section's grid, drawn and collidable, on the joiner.
+# The descriptor declines instead; the header is asserted so a suite that stopped reaching the
+# section cannot pass on the tally of the ones before it.
+expect 5\. a zero-extras self-heal DECLINES
 # A TALLY, never `expect-not FAIL` on its own: an absence assertion passes on a run where the
 # eval never happened at all. Raise it when legs are added; never lower it to make a run green.
-expect \[netwalls\] 28 passed, 0 failed
+expect \[netwalls\] 34 passed, 0 failed
 expect-not FAIL
 quit

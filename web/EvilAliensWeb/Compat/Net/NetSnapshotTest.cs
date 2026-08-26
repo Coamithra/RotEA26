@@ -191,7 +191,8 @@ namespace EvilAliensWeb.Compat.Net
                 //    split is worth having: Rebuilt happens once per id and LeftDead decays
                 //    after RecentRemovalWindowMs, so both are bounded per entity, while an
                 //    unbuildable typeIdx re-counts on every snapshot turn for as long as the
-                //    host streams that id. (The other two Refused causes mark the id removed
+                //    host streams that id. (The bin-swallow Refused cause -- and the wall's benign
+                //    Declined, card 430494a7 -- mark the id removed
                 //    first, so they tick more slowly -- not covered here, hence the narrow
                 //    assertion name.) A climbing snapBad is the one shape that means trouble.
                 NetPuppets.OnSnapshotEntryNextSeq(IdRefused, badType, NetProtocol.NetSnapshotFlags.None, state, noExtras, 0, 0, out popped, out kind);

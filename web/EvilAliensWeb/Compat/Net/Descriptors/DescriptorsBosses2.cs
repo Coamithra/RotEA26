@@ -260,7 +260,33 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
 
         public override AlienDrawableGameComponent CreatePuppet(ComponentBin bin, Game game, in NetBaseState state, byte[] buf, int off, int len)
         {
-            int variation = len >= 1 ? buf[off] : 0;
+            // DECLINE a build with no variation byte -- that is the snapshot self-heal's shape
+            // (card de4d5d65 constructs with a literal extras length of 0; every real EvSpawn
+            // carries the byte). The "generically-dressed puppet beats no puppet" trade the
+            // self-heal makes elsewhere INVERTS for a wall: `len == 0` used to build variation 0,
+            // which is a full screen of the FIRST section's grid -- drawn AND collidable, the
+            // CollisionLevelMap is derived from the blocks -- at whatever scroll offset the wire
+            // reported. On a joining peer that is "a different set of walls, looks like a section
+            // from previously in the game" (card 430494a7), plus local collisions against
+            // geometry the host does not have. Same null-return mechanism PowerupDescriptor uses
+            // for a bad type byte (that one deliberately still builds generic at len 0 -- the
+            // trade goes the other way for a sprite-sized pickup).
+            //
+            // The decline arms only the SELF-HEAL lane's retry window (OnSpawn never consults
+            // it), and it reports as SnapUnknownKind.Declined -- ordinary traffic, not snapBad.
+            // In the spawn-raced-the-stream and JIP cases the reliable EvSpawn (or the addressed
+            // catch-up burst) builds the real grid moments later. The self-heal's third trigger
+            // -- a client-only purge of a world the host still has, where no EvSpawn ever comes
+            // -- would leave the wall ABSENT for the rest of the section; accepted, because no
+            // shipped flow performs such a purge for a wall (a reset is host-broadcast and
+            // relaunches the section, fresh wall and fresh EvSpawn included), and if one ever
+            // arises an absent wall still beats a wrong collidable one. NetWallTest section 5
+            // pins the decline.
+            if (len < 1)
+            {
+                return null;
+            }
+            int variation = buf[off];
             Wall w = Wall.NewWall(bin, game);
             w.Setup(variation);
             return w;

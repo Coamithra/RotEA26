@@ -101,7 +101,10 @@ inputs; the other peer's ship is an interpolated puppet.
   grid variation the wire already carries, so the base state's u16-at-1/256 copy (4.9% out on the
   12-wide grid, 402px of divergence down it) stops being applied; the collision grid takes its tile
   size from the wall, closing the joiner-local hit-before-you-touch-it gap; and the scroll is
-  anchored. No protocol change -- see the LEVEL-3 WALLS section.
+  anchored. No protocol change -- see the LEVEL-3 WALLS section. **Card 430494a7 later closed
+  the last wall-flash hole there**: a zero-extras snapshot self-heal used to build a wall as
+  variation 0 (the first section's grid, on-screen and collidable, on a joiner) until the
+  `EvSpawn` rebuild -- `WallDescriptor` now declines the extras-less build.
 - **The level-3 alien ruler stops staircasing, and stops dying twice under a pause**
   (`5f506d11`, no protocol change): a free-running BODY loop is the client's to run
   (`BattleSkull`/`ClassicBoss`/`FakeBoss` -- the `NetFrameLocal` rule, for the types that animate
@@ -1648,7 +1651,10 @@ Four pieces, none changing what replicates -- only how well the star holds up at
     P2; the fix is type-agnostic, so size, sheet, behaviour and every boss variant come with it.**
   - **THE STALE PUPPET IS NOT TOUCHED UNTIL THE REPLACEMENT HAS BEEN BUILT AND LANDED.** The
     spawn extras are bytes off a stranger's wire (public game browser), and a descriptor can
-    genuinely decline them -- `PowerupDescriptor` returns null for an unrecognised type byte.
+    genuinely decline them -- `PowerupDescriptor` returns null for an unrecognised type byte,
+    and `WallDescriptor` declines the self-heal's zero-length extras outright (card 430494a7:
+    a defaulted wall is a full screen of the WRONG section's grid, the one case where a
+    generically-dressed puppet is worse than none -- see LEVEL-3 WALLS).
     Tearing the puppet down first would let one bad byte DELETE a working enemy and
     `MarkRemoved` its id, after which every snapshot for `RecentRemovalWindowMs` reads
     `LeftDead`. So all three failure branches (no descriptor, declined, `TryAdd` refused) report
@@ -2841,12 +2847,15 @@ Four pieces, none changing what replicates -- only how well the star holds up at
     to `clTx`, which was WRONG and cost card 48ab9b2f's JIP pass its verdict: `MarkRemoved`
     fires on every local removal, host-authoritative `EvDeath`s included, so an IDLE joiner
     watching the host's AI clear a field logs plenty of `snapDead` with `clTx` pinned at 0.
-  - `snapBad` = the rebuild was REFUSED (no descriptor for the typeIdx, the descriptor declined,
-    or the bin swallowed the add). **This is the one that means trouble** -- it re-counts on
-    every turn the host streams that id. An unknown typeIdx re-counts on literally every turn;
-    the other two mark the id removed first, so they show as one `snapBad` then `snapDead` for
-    3s, then another retry -- i.e. a slow, steady tick rather than a burst. Any sustained
-    `snapBad` deserves a look.
+  - `snapBad` = the rebuild FAILED (no descriptor for the typeIdx, or the bin swallowed the
+    add). **This is the one that means trouble** -- an unknown typeIdx re-counts on literally
+    every turn the host streams that id; the bin swallow marks the id removed first, so it shows
+    as one `snapBad` then `snapDead` for 3s, then another retry -- a slow, steady tick rather
+    than a burst. Any sustained `snapBad` deserves a look.
+  - `snapDecl` = the DESCRIPTOR declined the zero-extras rebuild on purpose (card 430494a7:
+    `WallDescriptor` -- see LEVEL-3 WALLS). Ordinary traffic, split out of `snapBad` so the
+    fault counter stays fault-only; reads 0 in steady state and ticks around joins and wall
+    section seams (same removed-then-`snapDead` rhythm as the swallow, benign polarity).
   Attribution is pinned by **`eaNetSnap()`** (`Compat/Net/NetSnapshotTest.cs`), which drives the
   real `OnSnapshotEntry` through all four outcomes from the main menu -- a classification is
   invisible in any frame, and a second peer tab throttles too hard to show it anyway.
@@ -3818,6 +3827,34 @@ sent per block or per frame.
     per-turn write, `OnSpawn`'s initial `TargetScale`, and the SELF-HEAL REBUILD's pose carry-over.
     A self-healed puppet is built from DEFAULT spawn extras (card de4d5d65), so its derived scale is
     the wrong grid's -- carrying it onto the `EvSpawn` rebuild would defeat the whole thing.
+    (Since card 430494a7 a wall can no longer BE self-healed at all -- the bullet below -- so for
+    the one shipped `NetScaleLocal` type the third site is a belt-and-braces guard rather than a
+    reachable path. It stays: the skip is generic and the next scale-local type inherits it.)
+- **A WALL DECLINES THE ZERO-EXTRAS SELF-HEAL (card 430494a7).** The snapshot self-heal constructs
+  with a literal extras length of 0, and `WallDescriptor` read that as **variation 0 -- a full
+  screen of the FIRST section's grid, drawn AND collidable (the `CollisionLevelMap` is derived
+  from the blocks), at whatever scroll offset the wire reported** -- until the reliable `EvSpawn`
+  rebuild tore it down. On a joining peer that is "a different set of walls, looks like a section
+  from previously in the game" for the lane-skew beat, plus local collisions against geometry the
+  host does not have. The "generically-dressed puppet beats no puppet" trade (see the self-heal
+  bullet under "World authority, puppets & snapshots") INVERTS for a screen-filling grid, so
+  `CreatePuppet` returns null on `len < 1` -- the same null-return mechanism `PowerupDescriptor`
+  uses for a bad type byte (that one deliberately still builds generic at `len == 0`; the trade
+  goes the other way for a sprite-sized pickup). The decline reports as
+  **`SnapUnknownKind.Declined` / `snapDecl`, ordinary traffic** -- folding it into `Refused`
+  would have made `snapBad` track the world's wall-spawn rate, the exact conflation card
+  48ab9b2f's split exists to prevent. The decline's `MarkRemoved` gates only the self-heal lane's
+  retries; `OnSpawn` never consults the removal window, so the reliable `EvSpawn` builds the real
+  grid the moment it lands (and a JIP joiner's walls arrive in the addressed catch-up burst
+  anyway). **The self-heal's third trigger -- a client-only purge of a world the host still has,
+  where no EvSpawn ever comes -- would leave the wall ABSENT for the rest of the section**;
+  accepted, because no shipped flow performs such a purge for a wall (a reset is host-broadcast
+  and relaunches the section, fresh wall and EvSpawn included), and an absent wall still beats a
+  wrong collidable one. Pinned by `eaNetWalls()` section 5 + `tools/headless/probes/net_walls.txt`,
+  mutation-tested by reverting the decline.
+  **Historical note for wall-flash reports**: the Aug-1 live deploy predates this AND the
+  staleness guard (f5cf7a5c) AND the scale/anchor fixes above, so a joiner-side "wrong walls for
+  a beat" sighting on that build has three already-fixed candidate causes before any new hunt.
 - **THE SECOND SYMPTOM IS A JOINER-LOCAL COLLISION/DRAW MISMATCH -- NOT host-side authority.**
   Worth stating flatly because the card asked and the wrong answer is the intuitive one:
   `PlayerShip.CollidesWith` refuses damage to a `ControlDevice.Remote` puppet outright ("you never

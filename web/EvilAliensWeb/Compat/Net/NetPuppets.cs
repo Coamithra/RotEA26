@@ -19,11 +19,17 @@ namespace EvilAliensWeb.Compat.Net
                     // a deferred death is suppressed until its EvDeath instead of on a clock at
                     // all (cards 444eb614 / 5f506d11 -- the host streams a dying id for the whole
                     // animation, and a PAUSE makes that "for as long as the pause lasts")
-        Refused,    // the rebuild was declined. Three causes, which tick at very different
-                    // rates: no descriptor for the typeIdx (a registry/protocol mismatch)
-                    // re-counts on EVERY turn, while a descriptor declining -- no live
-                    // CreatePuppet does today -- or the bin swallowing the add both mark the id
-                    // removed first, so they tick about once per RecentRemovalWindowMs.
+        Refused,    // the rebuild FAILED for a fault-shaped reason: no descriptor for the
+                    // typeIdx (a registry/protocol mismatch), which re-counts on EVERY turn,
+                    // or the bin swallowing the add, which marks the id removed first and so
+                    // ticks about once per RecentRemovalWindowMs.
+        Declined,   // the DESCRIPTOR refused the zero-extras construction (card 430494a7:
+                    // WallDescriptor -- a defaulted wall is the wrong section's whole grid, so
+                    // no wall for a beat beats a wrong wall; the reliable EvSpawn builds the
+                    // real one). Ordinary traffic, split out of Refused because it tracks the
+                    // world's wall-spawn rate -- folding it into the fault counter would make
+                    // snapBad unreadable, the exact conflation card 48ab9b2f removed. Marks
+                    // the id removed, so it ticks about once per RecentRemovalWindowMs.
     }
 
     // Why an EvSpawn did not produce a live puppet (card 4c9448c8). Reported by
@@ -664,13 +670,16 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 else
                 {
-                    // The rebuild's own reject reason is DISCARDED here on purpose: the
-                    // snapshot lane's split is Rebuilt/LeftDead/Refused, and every non-None
-                    // kind means the same thing to it -- the entry did not apply. The finer
-                    // causes are the EvSpawn lane's business (SpawnRejectKind), and folding
-                    // them in would make snapBad and dupBad count the same event twice.
-                    kind = OnSpawn(netId, typeIdx, state, buf, extraOff, 0, selfHealed: true) == SpawnRejectKind.None
-                        ? SnapUnknownKind.Rebuilt
+                    // Only Declined is split out of the rebuild's reject reason -- since card
+                    // 430494a7 a descriptor decline is ROUTINE traffic (WallDescriptor refuses
+                    // the zero-extras shape on purpose), and folding it into Refused would make
+                    // snapBad track the world's wall-spawn rate instead of staying the fault
+                    // counter. The remaining causes still collapse: they are the EvSpawn lane's
+                    // business (SpawnRejectKind), and enumerating them here would make snapBad
+                    // and dupBad count the same event twice.
+                    SpawnRejectKind rebuilt = OnSpawn(netId, typeIdx, state, buf, extraOff, 0, selfHealed: true);
+                    kind = rebuilt == SpawnRejectKind.None ? SnapUnknownKind.Rebuilt
+                        : rebuilt == SpawnRejectKind.Declined ? SnapUnknownKind.Declined
                         : SnapUnknownKind.Refused;
                 }
                 return false;

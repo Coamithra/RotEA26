@@ -107,14 +107,21 @@ namespace EvilAliensWeb.Compat.Net
                                         // RELEASED to finish a deferred death holds until its own
                                         // EvDeath, so a boss death reads here for as long as the
                                         // host streams it (cards 444eb614 / 5f506d11)
-        public long SnapBad;            // the rebuild was declined -- the one shape here that means
+        public long SnapBad;            // the rebuild FAILED -- the one shape here that means
                                         // something is actually wrong. An unknown typeIdx (a
                                         // protocol/registry mismatch) re-counts on EVERY turn the
-                                        // host streams that id; the other two causes -- a descriptor
-                                        // declining, or the bin swallowing the add -- mark the id
-                                        // removed first, so they tick roughly once per
+                                        // host streams that id; the bin swallowing the add marks
+                                        // the id removed first, so it ticks roughly once per
                                         // RecentRemovalWindowMs with snapDead in between. Any
                                         // sustained nonzero reading deserves a look either way.
+                                        // A DESCRIPTOR decline is NOT here any more -- card
+                                        // 430494a7 made it routine traffic (snapDecl below).
+        public long SnapDecl;           // the descriptor DECLINED the zero-extras rebuild on
+                                        // purpose (WallDescriptor, card 430494a7: a defaulted
+                                        // wall is the wrong section's whole grid). Benign --
+                                        // tracks how often a wall's snapshot outruns its
+                                        // reliable EvSpawn, so it reads 0 in steady state and
+                                        // ticks around joins and section seams.
 
         // Snapshot entries REFUSED as stale by the per-netId seq guard (card f5cf7a5c) -- an
         // entry that decoded fine and named a puppet we hold, but was older than the sample
@@ -184,7 +191,7 @@ namespace EvilAliensWeb.Compat.Net
             // corrections. Printed because pupPops cannot be judged without it -- a big world
             // stretches the turn and pops follow, on a perfectly healthy link (card 48ab9b2f).
             return string.Format(CultureInfo.InvariantCulture,
-                "[net] role={0} peer={1} localShip={2} remoteShip={3} roster={38} txStream={4} rxStream={5} drop={6} sgap={7} buf={8:0}ms interp={9} extrap={10} pops={11} maxPop={12:0.0}px evTx={13} evRx={14} dup={15} dupLive={41} dupDecl={42} dupBad={43} ordViol={16} seqGap={17} liveIds={18} snapTurn={19}ms snapTx={20} snapRx={21} snapEnt={22} snapUnk={23} snapNew={24} snapDead={25} snapBad={26} snapStale={46} pupPops={27} clTx={28} clRx={29} clKill={30} clPaid={31} beatTx={32} beatRx={33} resets={34} wins={35} pauses={36} tetherBrk={37} hudTx={39} hudRx={40} teleports={44} tpUnmarked={45} txB={47} rxB={48} txBps={49:0} rxBps={50:0}",
+                "[net] role={0} peer={1} localShip={2} remoteShip={3} roster={38} txStream={4} rxStream={5} drop={6} sgap={7} buf={8:0}ms interp={9} extrap={10} pops={11} maxPop={12:0.0}px evTx={13} evRx={14} dup={15} dupLive={41} dupDecl={42} dupBad={43} ordViol={16} seqGap={17} liveIds={18} snapTurn={19}ms snapTx={20} snapRx={21} snapEnt={22} snapUnk={23} snapNew={24} snapDead={25} snapBad={26} snapStale={46} pupPops={27} clTx={28} clRx={29} clKill={30} clPaid={31} beatTx={32} beatRx={33} resets={34} wins={35} pauses={36} tetherBrk={37} hudTx={39} hudRx={40} teleports={44} tpUnmarked={45} txB={47} rxB={48} txBps={49:0} rxBps={50:0} snapDecl={51}",
                 isHost ? "host" : "join", peerUp ? "up" : "down",
                 localShip ? 1 : 0, remoteShip ? 1 : 0,
                 StreamTx, StreamRx, StreamDropped, StreamSeqGaps,
@@ -194,7 +201,7 @@ namespace EvilAliensWeb.Compat.Net
                 ClaimsTx, ClaimsRx, ClaimsHonored, ClaimsPaidDead,
                 BeatsTx, BeatsRx, Resets, Victories, Pauses, TetherBreaks, roster,
                 HudTx, HudRx, DupLive, DupDeclined, DupBad, Teleports, UnmarkedTeleports,
-                SnapStale, TxBytes, RxBytes, TxBps, RxBps) + imp;
+                SnapStale, TxBytes, RxBytes, TxBps, RxBps, SnapDecl) + imp;
         }
     }
 }

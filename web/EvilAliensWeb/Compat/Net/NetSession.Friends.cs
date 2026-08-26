@@ -252,7 +252,7 @@ namespace EvilAliensWeb.Compat.Net
         }
 
         // ---- per-tick puppet management + interpolation clock (either role) --------------------
-        private static void TickFriends(PeerChannel p)
+        private static void TickFriends(PeerChannel p, bool worldTakesPuppets)
         {
             if (p.Extras.Count == 0)
             {
@@ -316,7 +316,12 @@ namespace EvilAliensWeb.Compat.Net
                     continue;
                 }
                 AdvanceShipClock(ch);
-                if (ch.Puppet == null && p.Up && ch.Buffer.HasSamples && FindLocalShip() != null)
+                // The SAME gate as the primary remote ship's (card c1cdd3e5), and it has to be:
+                // a peer's couch player and a host AI friend are "other players' ships" to the
+                // person reading the screen, so gating them on OUR ship being alive hid exactly
+                // the ships the card is about. Passed in rather than re-evaluated -- see the
+                // hoist in NetSession.Update.
+                if (ch.Puppet == null && p.Up && ch.Buffer.HasSamples && worldTakesPuppets)
                 {
                     SpawnFriend(ch, slot);
                 }

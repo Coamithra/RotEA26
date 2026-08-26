@@ -22,7 +22,7 @@
 # Both are asserted BY TEXT below, not merely as a count, so a run that failed two OTHER
 # assertions for unrelated reasons cannot pass this probe.
 #
-# THE TALLY IS THE POSITIVE HALF. `61 passed, 2 failed` says the other 61 assertions -- the whole
+# THE TALLY IS THE POSITIVE HALF. `73 passed, 2 failed` says the other 73 assertions -- the whole
 # reset/TryAdd suite, the INetHost and INetScene seams, leg 5's death-FX legs -- are UNAFFECTED by
 # the flag. A flag that broke something else would move that number, and a probe asserting only
 # the two failures would not notice.
@@ -32,7 +32,7 @@
 # That is what makes it a control of `AddHitStop` itself rather than of the session gate.
 #
 # MUTATION-TESTED: dropping `&& !DebugFlags.NetHitstop` from `Juice.HitStopSuppressed` makes this
-# probe fail (the suite goes back to 63/0 and neither expected FAIL line appears) while
+# probe fail (the suite goes back to 75/0 and neither expected FAIL line appears) while
 # net_reset_spawn.txt stays green -- which is precisely the blind spot this file closes.
 #
 # DESTRUCTIVE for the same reason net_reset_spawn.txt is (it IS that suite): a real session is
@@ -61,6 +61,6 @@ expect FAIL PRECONDITION the session is what suppresses it
 expect FAIL \.\.\. and game time was NOT frozen \(TimeScale=0\)
 
 # ... and nothing else did.
-expect \[netreset\] 61 passed, 2 failed
+expect \[netreset\] 73 passed, 2 failed
 expect-not SKIP
 quit

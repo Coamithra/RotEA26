@@ -105,9 +105,37 @@ _Further testing would be nice:_ the letterbox coverage is **derived and brute-f
 observed in a real window** — worth one look at a non-4:3 browser window during a big explosion.
 The foreground-Chrome smoke check was also not possible here.
 
-## 5. `c1cdd3e5` — On a joining client - while I was dead and respawning, the other players' ships (who respawned before me) did not appear on the playing field until mine did.
+## 5. `c1cdd3e5` — On a joining client - while I was dead and respawning, the other players' ships (who respawned before me) did not appear on the playing field until mine did. — **DONE**
 
 _No description or comments — the card title is the whole ticket._
+
+**Done** (PR pending link). Both puppet spawners gated on `FindLocalShip() != null`. Our own ship
+being absent says nothing about whether *theirs* should be drawn — in co-op a death is not a world
+wipe, the level keeps running, and the peer really is out there flying.
+
+Both, deliberately: `ManagePuppet` draws the peer's primary ship and `TickFriends` draws its couch
+players and the host's AI friends. All of those are "the other players' ships" to whoever is reading
+the screen, and a room holds four machines plus couch seats, so a fix reaching only the first would
+have left the report standing for most of a full room. (Review caught exactly that — the first round
+of this change fixed `ManagePuppet` alone.)
+
+The gate now also opens while **our own respawn summon** is up, and it must be ours and
+non-cosmetic. The safety argument is not "every wipe purges the summon" — a joining client's own
+`LoseLife` early-returns before its purges — it is that **every wipe arms a standing `Purge<T>`
+filter, and the filter and that wipe's queued removals expire in the same `TopOfTickFlush`**. So a
+summon still standing after a wipe means the filter that ate it is still armed, and `bin.TryAdd`
+refuses the puppet regardless; that pairing is exact, and `TryAdd` was always the real guard.
+
+One new visible behaviour, stated rather than hidden: `UpdateWin` does not purge for four seconds,
+so if you die and a partner wins, their ship can now appear during the victory choreography.
+
+Pinned by a new `NetResetSpawnTest` leg 1b — the pair of the existing leg 1, identical shiplessness
+with one bit different — asserting both spawners and opening with one near miss per term of the
+predicate (a real summon on another seat, then a cosmetic summon on our own). Mutation-tested five
+ways, including the `ManagePuppet`-only shape; deleting the gate outright reddens legs 1 and 2
+instead, so the suite bounds the fix from both sides.
+
+_Further testing would be nice:_ verified over the in-process wire, not a live two-machine session.
 
 ## 6. `444eb614` — spider boss (lvl 2) - on a joining client, after the boss was defeated and its death animation played, the original sprite still appeared for a few frames
 

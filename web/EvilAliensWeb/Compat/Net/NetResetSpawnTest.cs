@@ -44,10 +44,20 @@ namespace EvilAliensWeb.Compat.Net
     //      fails exactly one assertion here and names the service.
     //   1. NEGATIVE. The GameScene.LoseLife / UpdateWin / UpdateResetting purges run in
     //      base.Update, and collectionHelper.Update() flushes them BEFORE the rx drain -- so by
-    //      the time SpawnPuppet could run, FindLocalShip() is null and both callers' gates are
-    //      shut. Asserted by the seats: neither Remote nor RemoteFriend is allocated at all,
-    //      which distinguishes "the caller was never entered" from "TryAdd refused". Without this
-    //      leg the whole scenario could pass on a path that never reaches the code.
+    //      the time SpawnPuppet could run, the world holds neither a local ship nor a summon and
+    //      both callers' gates are shut. Asserted by the seats: neither Remote nor RemoteFriend is
+    //      allocated at all, which distinguishes "the caller was never entered" from "TryAdd
+    //      refused". Without this leg the whole scenario could pass on a path that never reaches
+    //      the code.
+    //   1b. POSITIVE, THE OTHER SHIPLESS STATE (card c1cdd3e5). Leg 1's exact pair: identically
+    //      shipless, one bit different -- our own RESPAWN SUMMON is up, so the level is running
+    //      and the peer's ships belong in it. Both spawners are asserted, because the reported
+    //      symptom ("the other players' ships") covers the couch/AI friends TickFriends draws as
+    //      well as the primary ManagePuppet draws. It opens with ONE NEAR MISS PER TERM of the
+    //      predicate -- a real summon on another seat, then a COSMETIC summon on our own -- since
+    //      the positive alone passes on a build that reads neither. It releases both seats in its
+    //      own teardown: leg 2 proves the spawners were ENTERED by the seats they take, and a
+    //      seat carried over from here would satisfy that with no spawner running.
     //   2. POSITIVE, filter live. Only NetApplyReset can reach the branch, because it purges from
     //      INSIDE the drain: the local ship's purge death is still merely QUEUED there, so
     //      FindLocalShip() is non-null and the gate is OPEN. Both callers take their seat and both
@@ -328,6 +338,122 @@ namespace EvilAliensWeb.Compat.Net
                     !oracle.DeviceIsPlaying(ControlDevice.Remote));
                 Check("SpawnFriend was never entered -- no RemoteFriend seat allocated",
                     !oracle.IsSeated(FriendSlot));
+
+                // ---- 1b. THE OTHER SHIPLESS STATE: our own RESPAWN (card c1cdd3e5) ----------
+                //
+                // Leg 1 above is a WIPE -- the world is being torn down, so keeping the peer's
+                // ships out of it is right. A CO-OP RESPAWN is the opposite: our ship is gone, the
+                // level is still running, and the peer is flying around out there. Both gates used
+                // to be a bare `FindLocalShip() != null`, which cannot tell the two apart, and the
+                // reported symptom is exactly that -- "while I was dead and respawning, the other
+                // players' ships did not appear on the playing field until mine did".
+                //
+                // BOTH SPAWNERS, deliberately. `ManagePuppet` draws the peer's primary ship and
+                // `TickFriends` draws its couch players and the host's AI friends -- all of them
+                // "other players' ships" to whoever is reading the screen -- so a fix that reached
+                // only the first would leave the symptom standing for a four-machine room. Leg 1
+                // and legs 2/3 assert both; so does this one.
+                //
+                // The discriminator is our own RESPAWN SUMMON, and this leg is the pair of leg 1:
+                // identical shiplessness, one bit different. It opens with TWO near misses, one per
+                // term of the predicate, because the positive below passes on a build that reads
+                // neither.
+                sb.Append(" 1b. POSITIVE -- shipless because WE are respawning: the peer's ships"
+                    + " still belong in the world\n");
+                // Expire leg 1's standing filter first, or TryAdd is refused for that reason
+                // instead and this leg would be testing the wrong thing.
+                bin.TopOfTickFlush();
+                Check("PRECONDITION still no local ship after the flush", !oracle.IsAlive(GrantedSlot));
+                Check("PRECONDITION leg 1 left no puppet adopted",
+                    !NetSession.HasRemotePuppet && !NetSession.HasFriendPuppet(FriendSlot));
+
+                // NEAR MISS 1 -- THE SEAT TERM: a real, non-cosmetic summon for SOMEBODY ELSE'S
+                // slot. Same object, same world, same moment; only the seat differs. FriendSlot
+                // rather than the peer's own primary is the production shape of it -- a couch
+                // partner respawning while we are still flying. Asserted by SEAT as well as by
+                // adoption, leg 1's standard, so "never entered" stays distinguishable from
+                // "TryAdd refused".
+                PlayerShipSummon theirs = PlayerShipSummon.NewPlayerShipSummon(bin, game);
+                theirs.Setup(FriendSlot, 0f, new Vector2(200f, 200f), 0);
+                bin.Add((GameComponent)(object)theirs);
+                rx = ours.RxDelivered;
+                peer.SendStream(ShipFrame(ref shipSeq, ref shipMs));
+                peer.SendStream(FriendFrame(ref friendSeq, ref friendMs));
+                wire.Pump();
+                NetSession.Update();
+                Check("a summon for ANOTHER slot does not open the gate (frames rx+"
+                    + (ours.RxDelivered - rx) + ")",
+                    ours.RxDelivered - rx == 2 && !NetSession.HasRemotePuppet
+                    && !NetSession.HasFriendPuppet(FriendSlot)
+                    && !oracle.DeviceIsPlaying(ControlDevice.Remote) && !oracle.IsSeated(FriendSlot));
+                bin.Remove((GameComponent)(object)theirs);
+                bin.TopOfTickFlush();
+
+                // NEAR MISS 2 -- THE `!IsCosmetic` TERM: the summon is on OUR OWN slot, but it is
+                // the PEER's respawn indicator rather than ours. That is separable state and not a
+                // restatement of near miss 1: HandleRespawnEvent refuses a cosmetic summon over a
+                // slot we own, but `OwnsSlot` is DEVICE-based, so an unseated slot answers "not
+                // ours" -- and `SlotAdopt.TakeSlot` assigns localPrimarySlot without seating it.
+                // A reconnect race inside that window is exactly what the term is for.
+                PlayerShipSummon cosmetic = PlayerShipSummon.NewPlayerShipSummon(bin, game);
+                cosmetic.SetupRemote(GrantedSlot, new Vector2(200f, 200f), 10000, 0);
+                bin.Add((GameComponent)(object)cosmetic);
+                Check("PRECONDITION near miss 2 is a COSMETIC summon on our own slot",
+                    cosmetic.IsCosmetic && cosmetic.Owner == GrantedSlot);
+                rx = ours.RxDelivered;
+                peer.SendStream(ShipFrame(ref shipSeq, ref shipMs));
+                peer.SendStream(FriendFrame(ref friendSeq, ref friendMs));
+                wire.Pump();
+                NetSession.Update();
+                Check("a COSMETIC summon on our own slot does not open the gate either (frames rx+"
+                    + (ours.RxDelivered - rx) + ")",
+                    ours.RxDelivered - rx == 2 && !NetSession.HasRemotePuppet
+                    && !NetSession.HasFriendPuppet(FriendSlot)
+                    && !oracle.DeviceIsPlaying(ControlDevice.Remote) && !oracle.IsSeated(FriendSlot));
+                bin.Remove((GameComponent)(object)cosmetic);
+                bin.TopOfTickFlush();
+
+                // THE POSITIVE.
+                PlayerShipSummon respawning = PlayerShipSummon.NewPlayerShipSummon(bin, game);
+                respawning.Setup(GrantedSlot, 0f, new Vector2(400f, 300f), 0);
+                bin.Add((GameComponent)(object)respawning);
+                Check("PRECONDITION our own respawn summon is up and is not a cosmetic copy",
+                    !respawning.IsCosmetic && respawning.Owner == GrantedSlot);
+
+                rx = ours.RxDelivered;
+                peer.SendStream(ShipFrame(ref shipSeq, ref shipMs));
+                peer.SendStream(FriendFrame(ref friendSeq, ref friendMs));
+                wire.Pump();
+                NetSession.Update();
+                Check("the peer's 2 stream frames were delivered into the session",
+                    ours.RxDelivered - rx == 2);
+                Check("the peer's PRIMARY ship IS adopted while we wait out our own respawn",
+                    NetSession.HasRemotePuppet);
+                Check("...and it really entered the world in the peer's seat",
+                    oracle.GetPlayerShip(NetSession.HostPrimarySlot) != null);
+                Check("the peer's COUCH/AI FRIEND ship is adopted too -- TickFriends carries the"
+                    + " same gate",
+                    NetSession.HasFriendPuppet(FriendSlot));
+                Check("...and it really entered the world in the friend seat",
+                    oracle.GetPlayerShip(FriendSlot) != null);
+
+                // Hand the world back to leg 2's preconditions: no summon, no puppet, AND NO SEAT.
+                // The seats matter: leg 2 asserts that SpawnPuppet/SpawnFriend TOOK them, which is
+                // how it separates "the spawner was entered" from "TryAdd refused" -- and a seat
+                // left standing here would satisfy that assertion without the spawner running at
+                // all. So release both by hand and assert the release took.
+                bin.Remove((GameComponent)(object)respawning);
+                bin.Purge<PlayerShip>();
+                bin.Update();
+                bin.TopOfTickFlush();
+                NetSession.Update();
+                oracle.RemovePlayerAt(NetSession.HostPrimarySlot, ControlDevice.Remote);
+                oracle.RemovePlayerAt(FriendSlot, ControlDevice.RemoteFriend);
+                Check("teardown -- the 1b puppets, summon and BOTH SEATS are gone again",
+                    !NetSession.HasRemotePuppet && !NetSession.HasFriendPuppet(FriendSlot)
+                    && oracle.GetPlayerShip(NetSession.HostPrimarySlot) == null
+                    && oracle.GetPlayerShip(FriendSlot) == null
+                    && !oracle.DeviceIsPlaying(ControlDevice.Remote) && !oracle.IsSeated(FriendSlot));
 
                 // ---- 2. POSITIVE: EvReset purges from INSIDE the drain ----------------------
                 sb.Append(" 2. POSITIVE -- EvReset purges inside the drain: both TryAdds refused\n");

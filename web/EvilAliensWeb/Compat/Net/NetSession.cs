@@ -1383,14 +1383,22 @@ namespace EvilAliensWeb.Compat.Net
                     }
                 }
             }
+            // ONE evaluation for the whole peer sweep (card c1cdd3e5). It is peer-invariant --
+            // it asks about OUR world, not about any channel -- and nothing this loop does can
+            // change it: `FindLocalShip` matches a LOCALLY-OWNED ship in `localPrimarySlot`,
+            // while SpawnPuppet/SpawnFriend only ever seat Remote/RemoteFriend devices in a
+            // PEER's slot, and neither raises a summon. Hoisted because it walks
+            // `game.Components` in the miss case and both ticks below need the same answer.
+            bool worldTakesPuppets = WorldTakesPuppets();
             foreach (PeerChannel p in PeersSnapshot())
             {
                 if (p.Refused)
                 {
                     continue;
                 }
-                ManagePuppet(p);
-                TickFriends(p); // spawn/interpolate/expire the peer's couch + AI-friend puppets
+                ManagePuppet(p, worldTakesPuppets);
+                // spawn/interpolate/expire the peer's couch + AI-friend puppets
+                TickFriends(p, worldTakesPuppets);
             }
             if (now - lastMetricsAt >= MetricsIntervalMs)
             {
@@ -5352,7 +5360,7 @@ namespace EvilAliensWeb.Compat.Net
 
         // ---- remote-ship puppet lifecycle ---------------------------------------------------
 
-        private static void ManagePuppet(PeerChannel p)
+        private static void ManagePuppet(PeerChannel p, bool worldTakesPuppets)
         {
             ShipChannel ch = p.Primary;
             // Adopt / release: the GameScene can spawn (SpawnAllPlayers after a reset) or
@@ -5384,7 +5392,7 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             ch.SeenAlive |= ch.Alive && ch.Puppet != null;
-            if (ch.Alive && ch.Puppet == null && ch.Buffer.HasSamples && FindLocalShip() != null)
+            if (ch.Alive && ch.Puppet == null && ch.Buffer.HasSamples && worldTakesPuppets)
             {
                 SpawnPuppet(p);
             }
@@ -5408,6 +5416,73 @@ namespace EvilAliensWeb.Compat.Net
             }
         }
 
+        // Is the world in a state where a peer's ship belongs in it? (Card c1cdd3e5.)
+        //
+        // The gate for BOTH puppet spawners -- `ManagePuppet`'s primary remote ship and
+        // `TickFriends`'s couch/AI-friend ships. It used to be a bare `FindLocalShip() != null`
+        // at each, and the reported bug is what that costs: *"on a joining client, while I was
+        // dead and respawning, the other players' ships (who respawned before me) did not appear
+        // on the playing field until mine did."* Our own ship being absent says nothing about
+        // whether THEIRS should be drawn -- in co-op a death is not a world wipe, the level keeps
+        // running, and the peer really is flying around out there. So the second arm: our own
+        // RESPAWN SUMMON is up.
+        //
+        // WHY THAT IS THE RIGHT SIGNAL, and not merely a convenient one. The gate exists to keep a
+        // puppet out of a world that is being WIPED -- and the load-bearing fact is NOT "every
+        // wipe purges the summon" (see the client caveat below), it is that **every wipe arms a
+        // standing `Purge<T>` filter, and the filter and that wipe's queued removals expire
+        // together in the SAME `TopOfTickFlush`**. So for as long as a summon of ours is still in
+        // `Game.Components` after a wipe, the filter that ate it is still armed -- and
+        // `bin.TryAdd` in SpawnPuppet/SpawnFriend honours it, so the add is refused anyway. That
+        // pairing is exact, and it is what makes relaxing this safe at all. (`Purge` matches with
+        // `Type.IsInstanceOfType`, so the base-typed purges -- `Terminate`, `UpdateWin`,
+        // `UpdateResetting`, all `Purge<AlienDrawableGameComponent>` -- cover `PlayerShip` too.
+        // `UpdateStartup`'s `standing: false` purge is host-only AND is flushed before the rx
+        // drain, so it is not exposed.)
+        //
+        // THE ONE WIPE THAT ARMS NOTHING is a CLIENT's own `GameScene.LoseLife`, which early-returns
+        // on `NetSession.IsClient` before both its purges -- a joining client's wipe only ever
+        // arrives as the host's `EvReset`. So between "our world went shipless" and that EvReset
+        // landing there is genuinely no filter. It is still safe, but for a different reason: a
+        // wipe means every peer reported dead, so `ch.Alive` is false on every channel and neither
+        // spawner is reached. Do not restate the purge argument for that window; it does not hold
+        // there.
+        //
+        // `PlayerShipSummon.ShouldSummon` seals the other end: a summon is only ever raised while
+        // ANOTHER ship is still alive, so in single player -- where a death IS the wipe -- there is
+        // never one and this arm can never open. And the summon must be OURS -- a summon for
+        // another seat says nothing about whether this world is still running for us.
+        //
+        // The `!IsCosmetic` term is NOT redundant, though the seat test covers today's shapes.
+        // A cosmetic summon is the PEER's respawn, and `HandleRespawnEvent` refuses to raise one
+        // over a slot we own -- but `OwnsSlot` is DEVICE-based, so an UNSEATED slot answers "not
+        // ours", and `SlotAdopt.TakeSlot` assigns `localPrimarySlot` without seating it. That
+        // window is exactly the "slot disagreement (a reconnect race, a refused move)" the
+        // respawn handler names, so the two terms are separable state and the suite pins the
+        // cosmetic case on its own leg.
+        //
+        // KNOWN NEW BEHAVIOUR: `UpdateWin` does not purge until t+4 s, so if we die and a partner
+        // wins, their ship can now pop into the world during the victory choreography and be
+        // purged four seconds later. That is arguably right -- their ship really is flying the
+        // victory thrust -- but it is new, it is visible, and nothing pins it.
+        private static bool WorldTakesPuppets()
+        {
+            if (FindLocalShip() != null)
+            {
+                return true;
+            }
+            foreach (IGameComponent item
+                in (System.Collections.ObjectModel.Collection<IGameComponent>)(object)game.Components)
+            {
+                if (item is PlayerShipSummon summon && !summon.IsCosmetic
+                    && summon.Owner == localPrimarySlot)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         // Take a ship out of the Remote seat with no death FX and no cue -- see ManagePuppet.
         // Same teardown as ExplodePuppet minus the explosions, the sound and the log's meaning.
         private static void ReleasePuppetQuietly(ShipChannel ch)
@@ -5429,7 +5504,11 @@ namespace EvilAliensWeb.Compat.Net
         // which is only right for the levels that happen to use it: `startdir` is also the
         // direction PlayerShip.Update's hasWon arm thrusts at forever, so at victory the remote
         // ship flew UP off Level 2 while every local ship flew RIGHT. The scene owns the angle;
-        // the fallback only covers a spawn with no scene up, which the callers' gates exclude.
+        // the fallback only covers a spawn with no scene up. That used to follow from the
+        // callers' gate being "we have a live local ship"; since card c1cdd3e5 it follows from
+        // `NetScene.Current` instead -- `Terminate` nulls it ABOVE its own purges, so a world
+        // being torn down has no scene AND no summon, and `NetApplyReset` runs inside the rx
+        // drain with a live scene. A spawn reaching here at all would be news.
         private const float FallbackSpawnDirection = 4.712389f;
 
         internal static float PuppetSpawnDirection()
@@ -5468,7 +5547,8 @@ namespace EvilAliensWeb.Compat.Net
                 // reach us is NetApplyReset's, because it purges from inside this very rx
                 // drain; the LoseLife / UpdateWin / UpdateResetting purges run back in
                 // base.Update and their deaths are flushed by collectionHelper.Update() before
-                // the drain, which leaves FindLocalShip() null and the caller's gate shut. The
+                // the drain, so the summon those wipes purged is gone with them and
+                // WorldTakesPuppets answers false -- the caller's gate is shut. The
                 // ship being purged is CORRECT either way (a reset wipes all ships and
                 // SpawnAllPlayers respawns every seated slot), but adopting one that never
                 // entered the world points `puppet` at a ship the world does not have, and the

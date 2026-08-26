@@ -1424,10 +1424,16 @@ public class Game1 : Game
 			// the WHOLE composited frame moves as one (scene, HUD, bloom) and no gameplay
 			// coordinate (collision, mouse aim via WindowToDesign) is ever affected. The zoom
 			// scales with the sampled magnitude, so ?shake= tuning keeps edges covered too.
+			// The coefficient lives in Juice beside the offset and roll it has to stay in
+			// proportion with -- see MaxBlitZoom for why it is not a literal here.
 			float toWindow = (float)dest.Width / RenderScale.DesignWidth;
 			Vector2 center = new Vector2(dest.X + dest.Width * 0.5f, dest.Y + dest.Height * 0.5f)
 				+ Juice.ShakeOffset * toWindow;
-			float zoom = 1f + 0.06f * Juice.ShakeMagnitude;
+			float zoom = 1f + Juice.MaxBlitZoom * Juice.ShakeMagnitude;
+			// Reported from HERE, where it is actually used, so the eaShake.state() readback
+			// observes the draw instead of restating Juice's constant -- a peak recomputed in
+			// Juice.Update measures perfectly even on a build that drops this zoom entirely.
+			Juice.NoteBlitZoom(zoom);
 			Vector2 blitScale = new Vector2(
 				(float)dest.Width / ((Texture2D)sceneTarget).Width,
 				(float)dest.Height / ((Texture2D)sceneTarget).Height) * zoom;

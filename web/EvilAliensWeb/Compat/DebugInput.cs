@@ -284,6 +284,27 @@ namespace EvilAliensWeb.Compat
 			Console.WriteLine("[debug] eaShake " + trauma);
 		}
 
+		// Read the PEAK shake sampled since the last call (`eaShake.state()` /
+		// `eval ShakeState`), card 085ebddc. Read-and-clear, so each call describes the window
+		// since the previous one -- arm it, fire a burst, let it run, read.
+		//
+		// It exists because the shake has NO other honest observable. The offset and roll are
+		// re-rolled from a uniform random every tick, so one frame's value is a sample and not a
+		// bound; it is applied at the PRESENT BLIT, so it touches no gameplay state a census could
+		// see; and it is by definition a moving thing, so a screenshot of it is worth nothing (the
+		// project-wide "never verify motion with timed live screenshots" rule). A running peak
+		// over a burst is what a halving actually changes.
+		[JSInvokable("debugShakeState")]
+		public static string ShakeState()
+		{
+			Juice.TakePeaks(out float offsetPx, out float rollDeg, out float zoom);
+			return "[shake] peakOffsetPx=" + offsetPx.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture)
+				+ " peakRollDeg=" + rollDeg.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture)
+				+ " peakZoom=" + zoom.ToString("0.0000", System.Globalization.CultureInfo.InvariantCulture)
+				+ " trauma=" + Juice.TraumaNow.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture)
+				+ " amount=" + DebugFlags.ShakeAmount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+		}
+
 		// JS bridge for QA/demo of the hit-stop (eaHitstop in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugHitstop', ms). Freezes game time for
 		// `ms` milliseconds of real time (0/omitted => 120ms) — most visible in a level

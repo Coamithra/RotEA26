@@ -49,6 +49,7 @@
 //     it lets a hit-stop freeze game time inside a co-op session again, i.e. it
 //     reintroduces the desync above, so it is IN DebugFlags.Active.
 //   * Console: eaShake() / eaShake(0.8) fires a shake burst on demand;
+//     eaShake.state() reads the PEAK offset/roll/zoom since the last call;
 //     eaHitstop() / eaHitstop(250) a freeze — see DebugInput + index.html.
 // Update cadence: Game1.Update calls Update(realDt) ONCE per tick with the
 // UNSCALED frame delta (before turbo/slowmo/hit-stop scaling), so shake keeps
@@ -61,12 +62,41 @@ namespace EvilAliensWeb.Compat
 {
     public static class Juice
     {
-        // Peak shake at full trauma: max per-axis offset in 800x600 design px, and
-        // max roll in degrees. Both sampled fresh every tick, scaled by strength.
-        // Halved from the original 14/2 (Trello 8e439865) — full trauma was strong
-        // enough to impact gameplay (readability of bullets/aim), not just "juice".
-        public const float MaxOffsetDesignPx = 7f;
-        public const float MaxRollDegrees = 1f;
+        // Peak shake at full trauma: max per-axis offset in 800x600 design px, max roll
+        // in degrees, and the blit's edge-covering zoom coefficient. Offset and roll are
+        // re-rolled from a uniform random every tick; the zoom is not randomised. All
+        // three scale with `strength`.
+        //
+        // HALVED TWICE. 14/2 -> 7/1 (Trello 8e439865) because full trauma was strong
+        // enough to impact gameplay -- readability of bullets and aim -- rather than
+        // just being juice; then 7/1/0.06 -> 3.5/0.5/0.03 (card 085ebddc), the owner
+        // asking for "a global reduction by 50% across the board".
+        //
+        // THE ZOOM IS PART OF "THE MAGNITUDE" AND MUST MOVE WITH THEM -- and the reason
+        // is arithmetic, not taste. It exists to keep the letterbox from showing at the
+        // frame edges: containment of the axis-aligned destination rect inside the
+        // rotated, offset, scaled quad needs
+        //
+        //     Z >= A/300 + (4/3) * radians(R)
+        //
+        // (A = MaxOffsetDesignPx, R = MaxRollDegrees; the vertical axis is the tighter
+        // one on a 4:3 design frame). At the shipped values that is
+        // 0.01167 + 0.01164 = 0.02330, so Z = 0.03 is a **1.28x margin** -- and the
+        // pre-card 7/1/0.06 triple had 0.04686 against 0.06, i.e. **1.281x**. The
+        // halving preserves the shipped safety factor exactly, which is what makes it
+        // safe; it is not "lots of spare cover".
+        //
+        // SO DO NOT READ SPARE ROOM INTO THIS. **The roll is half the budget** (0.01164
+        // of 0.02330): dropping the zoom on its own -- say to 0.02, which looks generous
+        // beside a 3.5px offset -- exposes black at the edge on every strong shake.
+        // Verified by brute force over all four sign choices, sixteen window shapes
+        // (4:3, 16:9, 21:9, portrait, 4K, sizes with integer WindowDestRect rounding)
+        // and strength swept 0.05..3.0: worst-case Zmin = 0.023496. `?shake=` is safe at
+        // its 3x ceiling because offset, roll and zoom all scale by the same `strength`,
+        // so the condition is scale-invariant.
+        public const float MaxOffsetDesignPx = 3.5f;
+        public const float MaxRollDegrees = 0.5f;
+        public const float MaxBlitZoom = 0.03f;
 
         // Trauma lost per real second — a full bar shakes for ~0.7s (strength, being
         // trauma^2, falls below "visible" well before trauma itself reaches 0).
@@ -97,6 +127,51 @@ namespace EvilAliensWeb.Compat
         // Current shake strength (trauma^2 x the ?shake= multiplier), 0..~3. Drives
         // the blit's edge-covering zoom as well, so tuning ?shake= keeps them in step.
         public static float ShakeMagnitude { get; private set; }
+
+        // PEAK sampled shake since the last read, read-and-cleared (card 085ebddc). The offset and
+        // roll are re-rolled from a uniform random EVERY tick, so no single frame is the maximum
+        // and a one-shot reading of ShakeOffset says almost nothing -- a build with the peak
+        // halved and one with it intact both produce small values most ticks. A running peak over
+        // a burst is the observable that separates them, and it is the only one: shake is applied
+        // at the present blit, so it moves no gameplay state and a screenshot of it is a frame of
+        // a moving thing. Spent on read so two consecutive reads describe two different windows.
+        //
+        // PRIVATE, with TakePeaks the sole accessor, deliberately: a non-destructive property read
+        // cannot coexist with a destructive take -- a second reader would silently eat the first
+        // one's window.
+        private static float peakOffsetPx;
+
+        private static float peakRollDegrees;
+
+        private static float peakZoom;
+
+        // The live trauma, for the same readback -- it is what says whether a burst is still
+        // running, i.e. whether a zero peak means "damped" or "never fired".
+        public static float TraumaNow => trauma;
+
+        // The zoom the PRESENT BLIT actually drew with, reported by Game1 rather than recomputed
+        // here (card 085ebddc). Recomputing `MaxBlitZoom * strength` in Update would be a second
+        // copy of the blit's own expression, so the readback would restate the constant instead of
+        // observing the draw -- and a Game1 that dropped the zoom entirely (the very shipping bug
+        // the zoom exists to prevent) would still measure perfectly. Mutation-proven: with the peak
+        // taken here, `float zoom = 1f;` at the blit left the probe GREEN.
+        //
+        // Takes the FULL factor and stores the coefficient, so it reads on the same scale as the
+        // constant. Only called while ShakeActive, i.e. only while there is a shake to measure.
+        public static void NoteBlitZoom(float zoomFactor)
+        {
+            peakZoom = Math.Max(peakZoom, zoomFactor - 1f);
+        }
+
+        public static void TakePeaks(out float offsetPx, out float rollDegrees, out float zoom)
+        {
+            offsetPx = peakOffsetPx;
+            rollDegrees = peakRollDegrees;
+            zoom = peakZoom;
+            peakOffsetPx = 0f;
+            peakRollDegrees = 0f;
+            peakZoom = 0f;
+        }
 
         public static bool ShakeActive => ShakeMagnitude > 0f;
 
@@ -227,6 +302,13 @@ namespace EvilAliensWeb.Compat
                 MaxOffsetDesignPx * strength * ((float)rng.NextDouble() * 2f - 1f),
                 MaxOffsetDesignPx * strength * ((float)rng.NextDouble() * 2f - 1f));
             ShakeRoll = MathHelper.ToRadians(MaxRollDegrees) * strength * ((float)rng.NextDouble() * 2f - 1f);
+            // Off what was just SAMPLED, not off the constants -- a peak recomputed from
+            // MaxOffsetDesignPx would restate the number under test instead of measuring it.
+            // (The zoom's peak is NOT taken here for exactly that reason; Game1 reports the
+            // factor it drew with, through NoteBlitZoom.)
+            peakOffsetPx = Math.Max(peakOffsetPx,
+                Math.Max(Math.Abs(ShakeOffset.X), Math.Abs(ShakeOffset.Y)));
+            peakRollDegrees = Math.Max(peakRollDegrees, Math.Abs(MathHelper.ToDegrees(ShakeRoll)));
         }
     }
 }

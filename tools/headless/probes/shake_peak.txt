@@ -1,0 +1,142 @@
+# PROBE: the peak screen shake at full trauma is HALVED (card 085ebddc).
+#
+# PINS:  Juice's three peak constants -- MaxOffsetDesignPx, MaxRollDegrees and MaxBlitZoom -- as a
+#        MEASUREMENT rather than as three numbers restated beside themselves. The owner asked for
+#        "a global reduction by 50% across the board", and the three move together on purpose:
+#        what a player calls screen shake is the offset, the roll and the blit's swell at once, so
+#        halving one and leaving another is the failure this file exists to catch.
+#
+# WHY A RUNNING PEAK AND NOT A SCREENSHOT OR A SINGLE READ:
+#   * shake is applied at the PRESENT BLIT. It touches no gameplay state, so no census, roster or
+#     entity readback can see it, and the frame it produces is a frame of a MOVING thing -- the
+#     project-wide "never verify motion with timed live screenshots" rule applies squarely.
+#   * the offset and roll are re-rolled from a UNIFORM RANDOM every tick, so any single tick is a
+#     sample, not a bound. A halved build and an intact one both read small on most ticks. Only a
+#     maximum over many samples separates them, which is what Juice.PeakOffsetPx accumulates (off
+#     what was SAMPLED, never recomputed from the constants) and `eval ShakeState` reads and clears.
+#
+# THE RIG: 30 `Shake 1` bursts three ticks apart. One burst is not enough -- trauma decays at
+# 1.4/s, so strength (trauma^2) is only near 1 for the first few ticks and the peak lands well
+# short of the ceiling (measured 2.57 over a single burst, against 3.30 here). Re-arming keeps
+# trauma pinned at 1 so the maximum converges on the real ceiling.
+#
+# THE BURST STEPS DRAW, and must: peakZoom is reported by Game1's present blit
+# (Juice.NoteBlitZoom), not recomputed in Juice.Update, so under `nodraw` it never moves. That
+# indirection is the point -- a peak recomputed from MaxBlitZoom measures perfectly even on a build
+# that drops the zoom at the blit entirely, which is the shipping bug the zoom exists to prevent
+# (mutation-proven: `float zoom = 1f;` at the blit left an earlier version of this file GREEN).
+#
+# MEASURED over ten runs: peakOffsetPx 3.15..3.34, peakRollDeg 0.443..0.475, peakZoom 0.0286
+# exactly (the zoom is not randomised). The analytic ceilings are 3.339 and 0.477, so the bands'
+# UPPER edges are unreachable and only the floors can flake -- P(offset < 3.0) = 2.8e-5 and
+# P(roll < 0.4) = 1.1e-5 over this rig's draw count. Do NOT tighten the floors onto the observed
+# minimum: four early runs read 3.29..3.33 and reading that as the floor would have set a band the
+# real spread breaks.
+#
+# FAILURE MEANS:
+#   peakOffsetPx 6.x / peakRollDeg 0.9x / peakZoom 0.057 -> that constant went back to its pre-card
+#     value. Read WHICH of the three: the point of the card is that they move together.
+#   peak 0.000 after the bursts -> the shake stopped being sampled at all (or ?shake=0 is in force,
+#     which the `amount=` field on the same line reports).
+#   peakZoom 0.0000 with the other two healthy -> the blit is no longer reporting (or the burst
+#     steps were made `nodraw`, see above), NOT a changed constant.
+#   ONLY the zoom leg red, at a value near but outside 0.028x -> read TraumaDecayPerSecond and the
+#     step rate before the constant. peakZoom is MaxBlitZoom * strength at the peak, so pinning it
+#     to three decimals also pins strength to [0.9333, 0.9667) -- which a decay change past ~2.4/s,
+#     or running this at `eahl --fps 30`, moves on its own.
+#
+# MUTATION-TESTED FOUR WAYS, each reddening its own leg alone -- which is what says the three are
+# measured independently rather than through one shared number:
+#   MaxOffsetDesignPx 3.5f -> 7f      -> peakOffsetPx=6.443
+#   MaxRollDegrees    0.5f -> 1f      -> peakRollDeg=0.914
+#   MaxBlitZoom       0.03f -> 0.06f  -> peakZoom leg red
+#   Game1's blit `float zoom = 1f;`   -> peakZoom leg red -- the edge cover dropped ENTIRELY, i.e.
+#     the shipping bug the zoom exists to prevent. An earlier version of this file took the zoom
+#     peak in Juice.Update from `MaxBlitZoom * strength` and stayed GREEN through it; that is why
+#     the peak is reported by the blit instead.
+#
+# eahl: --flags "?menu&noattract"
+
+# Settle, then take the pre-state. Nothing has shaken yet, so this must read zero -- without it,
+# a build whose peak never moves off 0 would satisfy nothing but would also fail nothing here.
+step 300 nodraw
+mark
+eval ShakeState
+expect \[shake\] peakOffsetPx=0\.000 peakRollDeg=0\.000 peakZoom=0\.0000 trauma=0\.000 amount=1\.00
+
+mark
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval Shake 1
+step 3
+eval ShakeState
+# Trauma is still pinned near 1, which is the positive control: a zero peak below would otherwise
+# be indistinguishable from a burst that never fired.
+expect \[shake\] .* trauma=0\.9[0-9][0-9] amount=1\.00
+# The offset: ceiling 3.5, measured 3.29..3.33. Pre-card 7.0 measured 6.6.
+expect \[shake\] peakOffsetPx=3\.[0-4][0-9][0-9]
+expect-not \[shake\] peakOffsetPx=([0-2]|[4-9]|[1-9][0-9])\.
+# The roll: ceiling 0.5 deg, measured 0.458..0.475. Pre-card 1.0 measured 0.94.
+expect \[shake\] .* peakRollDeg=0\.4[0-9][0-9]
+expect-not \[shake\] .* peakRollDeg=(0\.[5-9]|[1-9])
+# The blit zoom: MaxBlitZoom * strength, not randomised, so it is exact. Pre-card 0.06 -> 0.0571.
+expect \[shake\] .* peakZoom=0\.028[0-9]
+expect-not \[shake\] .* peakZoom=0\.0(5|6)
+
+quit

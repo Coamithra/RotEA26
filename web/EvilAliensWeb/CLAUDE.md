@@ -469,7 +469,9 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   from the console). GOTCHA: range inputs need `autocomplete='off'` or Chrome's form restoration
   re-seeds them post-load and desyncs from the defaults.
 - Console QA helpers (via `Compat/DebugInput.cs`): `eaPress`/`eaHold` (input), `eaHitboxes()`,
-  `eaShake()`, `eaHitstop(ms)`, `eaSlowmo()`,
+  `eaShake()` + `eaShake.state()` (fire a shake burst; read the PEAK offset/roll/zoom sampled
+  since the last call -- the only honest observable for an effect re-rolled every tick and applied
+  at the present blit, card 085ebddc), `eaHitstop(ms)`, `eaSlowmo()`,
   `eaRipple.fire(x,y,power)`/`.park(phase)`/`.state()` (throw a bomb ripple on demand, park one
   at a phase for a screenshot, read the knobs -- a real bomb needs a pickup and a live ship),
   `eaMouseState()` (where the cursor resolved to last tick and where it came from -- the only
@@ -1369,8 +1371,33 @@ site now lives under:
 
 - **Juice (`Compat/Juice.cs`): screen shake + hit-stop.** Shake is the trauma model
   (`Juice.AddTrauma` from explosions/blasts/player death; strength = trauma², decays ~0.7s, max
-  7px/1° — deliberately halved from the first pass, full shake impacted gameplay). Applied at the
-  PRESENT BLIT only — no gameplay coordinate, collision, or mouse mapping is touched. An explosion
+  **3.5px / 0.5° / a 0.03 blit zoom**). **HALVED TWICE**: 14/2 -> 7/1 (Trello 8e439865, full shake
+  impacted gameplay rather than just adding juice), then 7/1 -> 3.5/0.5 (card 085ebddc, the owner
+  asking for "a global reduction by 50% across the board").
+  - **The blit's edge-covering ZOOM is one of the three and lives in `Juice.MaxBlitZoom`**, not as
+    a literal at the blit -- so a later halving cannot take the offset and leave the swell behind.
+    **DO NOT READ SPARE ROOM INTO IT.** Containing the destination rect inside the rotated, offset,
+    scaled quad needs `Z >= A/300 + (4/3)*radians(R)` = 0.0235 at the shipped values, so 0.03 is a
+    **1.28x** margin -- and the pre-card 7/1/0.06 triple had 1.281x. *The halving preserves the
+    shipped safety factor exactly*; that is what makes it safe. **The roll is HALF that budget**,
+    so dropping the zoom alone (to 0.02, say, which looks generous beside a 3.5px offset) puts
+    black at the frame edge on every strong shake. Brute-forced over all sign choices, sixteen
+    window shapes and `strength` 0.05..3.0: worst case 0.023496. `?shake=` is safe at its 3x
+    ceiling because all three scale by the same `strength`, so the condition is scale-invariant.
+  - **Verify with `eaShake.state()` / `eval ShakeState`, never a screenshot.** The offset and roll
+    are re-rolled from a UNIFORM RANDOM every tick, so one tick is a sample and not a bound -- a
+    halved build and an intact one read small on most ticks alike -- and the effect is applied at
+    the present blit, so it moves no gameplay state and is by definition a moving picture. The
+    seam accumulates the PEAK of what was actually sampled, never recomputed from the constants:
+    **the zoom's peak is reported by `Game1`'s blit through `Juice.NoteBlitZoom`**, because a peak
+    recomputed as `MaxBlitZoom * strength` in `Juice.Update` measures perfectly even on a build
+    that dropped the zoom at the blit entirely (mutation-proven -- an earlier version of the probe
+    stayed green through exactly that). **One burst is not enough**: trauma decays at 1.4/s, so
+    re-arm to keep it pinned or the maximum lands short (measured 2.57 on one burst against 3.30
+    over thirty), and the burst steps must DRAW or the zoom leg never moves. Pinned by
+    `tools/headless/probes/shake_peak.txt`; four mutations, each reddening its own leg alone.
+  Applied at the PRESENT BLIT only — no gameplay coordinate, collision, or mouse mapping is
+  touched. An explosion
   series can opt out per instance (`Explosion.Setup(..., noShake: true)` — the L3 BattleSkull death
   does, so only its finale shakes). Hit-stop folds into `Game1.Update`'s time scale as
   `Juice.TimeScale` while REAL time keeps ticking Juice/shake/input; the per-kill micro-stop +
@@ -1380,7 +1407,7 @@ site now lives under:
   animating during a freeze -- that line was true until card d79a2f48 and is now wrong except for
   `BombRipple`**: they read `Compat/WorldTime`, which carries the hit-stop scale like the rest of
   the world. The one deliberate exception is the bomb ripple, whose wavefront is a travelling wave
-  that would read as a dropped frame if it stopped (see its bullet below). `?shake=<0..3>`, `eaShake()`, `eaHitstop(ms)`.
+  that would read as a dropped frame if it stopped (see its bullet below). `?shake=<0..3>`, `eaShake()` / `eaShake.state()`, `eaHitstop(ms)`.
   - **ONLINE CO-OP REFUSES EVERY HIT-STOP, whatever the caller (card 68f62e92).** `AddHitStop`
     early-returns while `NetSession.Active`, so the death stop, the `?hitstop=1` kill/boss stops
     and `eaHitstop()` alike are no-ops in a session. It is a DESYNC fix, not a feel decision: a

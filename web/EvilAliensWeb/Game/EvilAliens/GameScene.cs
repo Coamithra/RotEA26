@@ -2230,15 +2230,21 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		// bullets into the next play of this level, where the host never announced one.
 		netIntroVolley = null;
 		netScriptGateHeld = false;
-		// Card 3b6c12e7: a FINISHED level keeps an online co-op pairing alive and sends both
-		// peers back to the lobby, so the host can pick the next one. Latched here rather than
-		// read at the scene-down edge because by then the scene is gone -- and keyed off the
-		// terminate MODE, not _state, so a quit taken during the victory choreography (which
-		// leaves _state == Victory) is still an ordinary match end. Must be ABOVE the
-		// NetActiveScene null below, which is what raises that edge.
-		if (mode == FinishedMode.finishedlevel)
+		// Cards 3b6c12e7 / c600c55a: a level that PLAYED ITSELF OUT -- won or lost -- keeps an
+		// online co-op pairing alive and sends both peers back to the lobby, so the host can pick
+		// the next one (or the same one again). Latched here rather than read at the scene-down
+		// edge because by then the scene is gone -- and keyed off the terminate MODE, not _state,
+		// so a quit taken during the victory choreography (which leaves _state == Victory) is
+		// still an ordinary match end. Must be ABOVE the NetActiveScene null below, which is what
+		// raises that edge.
+		//
+		// `lostlevel` is safe to read as "the Mission Failed choreography ran to its end" because
+		// it has exactly ONE producer: Defeat(), called only from defeatmessage_OnFinished. Every
+		// other way out of a level -- the pause menu's Exit, NetApplyPeerLeft's force-exit, a
+		// demo ending -- is FinishedMode.exit, which stays a match end.
+		if (mode == FinishedMode.finishedlevel || mode == FinishedMode.lostlevel)
 		{
-			EvilAliensWeb.Compat.Net.NetSession.OnLevelFinished();
+			EvilAliensWeb.Compat.Net.NetSession.OnLevelEndedCleanly();
 		}
 		// KEEP THIS ABOVE THE PURGES (card 74403f83). ComponentBin.Add exempts the puppet layer
 		// from the standing purge filter, and the only thing stopping that exemption dropping a
@@ -2252,6 +2258,14 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		Collection.Purge<AnimatedMessage>();
 		Collection.Purge<TutorialMessage>();
 		Collection.Purge<AlienDrawableGameComponent>();
+		// Card c600c55a: a clean level end takes its scene-down edge NOW, not on the next
+		// NetSession.Update(). OnFinished below adds MenuScene synchronously for every ending
+		// that does not route through CreditsScene -- a lost level always, a won challenge level
+		// too -- and MenuScene.Initialize polls TakeLobbyReturn() as its last act, so an edge
+		// that is one frame late leaves the host on the main menu with a live session behind it.
+		// Below the purges so the ordering NetSession sees is the one it always saw; a no-op
+		// unless the latch above is set, so a quit or a drop is untouched.
+		EvilAliensWeb.Compat.Net.NetSession.OnLevelEndSceneDown();
 		if (this.OnFinished != null)
 		{
 			this.OnFinished(this, new FinishedArgs(mode, level));

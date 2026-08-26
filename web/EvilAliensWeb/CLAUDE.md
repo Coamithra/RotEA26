@@ -552,6 +552,14 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   hard-coded South the puppets used to assume. Boot
   `?level=Level2&invuln&netallowdebug&noattract` (`&win` for the host half); pinned by
   `tools/headless/probes/net_level_end.txt` + `net_level_end_lobby.txt`),
+  `eaNetLevelEnd.armLost()`/`.checkLost()` and `.armLostHost()`/`.menu()` (the same claim for a
+  level you LOSE -- card c600c55a: a Mission Failed must end a co-op level the way a victory
+  does, so the host can pick another. Same shape and the same boot, minus the `&win`; the wait
+  is the ~14.5 s defeat choreography rather than the 7 s victory one, and the host half needs no
+  script flag because its arm sets the level to its last life and asplodes the ships. Also
+  **DESTRUCTIVE**. The lobby half reuses `.menu()` -- what a lobby return looks like does not
+  depend on how the level ended. Pinned by `tools/headless/probes/net_level_lost.txt` +
+  `net_level_lost_lobby.txt`; net CLAUDE.md has the two-changes-not-one story),
   `eaNetIntroGate()` (Level 1's intro cinematic in co-op — card 8a7772d6: the replicated
   player-spawn hold and the cosmetic intro bullet volley, driven over the in-process wire against
   the REAL Level 1 script. **DESTRUCTIVE and LEVEL-1-ONLY** — it pairs real sessions onto the live

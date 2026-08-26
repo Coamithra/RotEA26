@@ -1,0 +1,67 @@
+# PROBE: after an online co-op level is LOST, the HOST comes back to its lobby -- the level pick
+# menu, with the main menu gone and the net flow live -- rather than to the main menu
+# (card c600c55a, "should be the same as when you beat a level, the host can select a new level
+# (or the same) to try"). The sibling net_level_lost.txt covers the SESSION; this one covers the
+# MENUS, split for the same reason net_level_end_lobby.txt is split from net_level_end.txt:
+# EnterNetLobby's two roles land in DIFFERENT menus, and the host's row is the one the card asks
+# for. Phase 2 is net_level_end_lobby.txt's own check, reused verbatim -- what a lobby return has
+# to look like does not depend on whether the level was won or lost, and sharing it is what stops
+# the two drifting.
+#
+# WHY THIS PROBE IS THE ONE THAT FAILS WITHOUT NetSession.OnLevelEndSceneDown. A defeat has no
+# CreditsScene: Game1's gameScene_OnFinished routes FinishedMode.lostlevel straight to MenuScene,
+# and that Add happens INSIDE GameScene.Terminate. MenuScene.Initialize polls the take-once
+# TakeLobbyReturn() as its last act, so with the edge still waiting for the next
+# NetSession.Update() the menus decide first: the session survives (net_level_lost.txt stays
+# green) and the host nonetheless sits on the MAIN MENU with a live pairing behind it, unable to
+# pick the next mission. That is why the latch alone is not the whole card. A won STORY level
+# hid the same hazard behind seconds of text crawl -- a won CHALLENGE level did not, and this
+# fix covers that pre-existing case too.
+#
+# WHY THERE IS NO ?lose FLAG TO PAIR WITH ?win. A host's game over comes out of the level itself
+# (UpdateNormal -> AllShipsDead -> LoseLife -> the lives-exhausted branch), so the arm puts the
+# level in the state a Hard+ run reaches on its last life -- Lives 0, no InfiniteLives, no
+# DirectRespawn (Easy's respawn-in-place arm returns from LoseLife before the game over) -- and
+# then asplodes every locally-owned ship through the real Asplode()->Die() path. Everything after
+# that is the game's own code: the broadcast, the choreography, Terminate.
+#
+# WHY THE MENU CENSUS AND NOT A SCREENSHOT (card 72143c11): NetStatusMenu draws its own 50%
+# darken at DrawOrder 2000 and MenuSub1 has NO modality at all, so a main menu left live under
+# the lobby merely looks dim while moving a second selection on every arrow and invoking a second
+# entry on every Enter. That is invisible in a frame and moves no counter.
+#
+# WHY THE STEP IS SHORTER THAN net_level_end_lobby.txt's 4600: there is no text crawl on this
+# side. ~1000 frames covers the ships dying, LoseLife, the 4 s wait and the message's 1.5/6/3 s.
+#
+# THE netMode LEG IS NOT DECORATION. It is what reroutes the shared level/difficulty selectors'
+# OnExit back to netPickMenu and what makes the difficulty pick REPLICATE the launch
+# (MenuScene.difficultyMenu_difficultySelected). A lobby whose menus are right but whose netMode
+# is false would look correct and then launch a solo game off a live pairing.
+#
+# DESTRUCTIVE: it drives the live level to its end. Boot it throwaway.
+#
+# MUTATION-TESTED both halves of the fix, failing NESTED sets: dropping
+# `|| mode == FinishedMode.lostlevel` from GameScene.Terminate fails 4 -- the two session legs
+# and both menu legs (the pairing is torn down, so there is no lobby to return to); dropping only
+# the NetSession.OnLevelEndSceneDown() call leaves both session legs PASSING and fails just the
+# two menu legs, plus the netMode line -- i.e. exactly the reported symptom, a host on the main
+# menu with a live pairing behind it.
+#
+# eahl: --flags "?level=Level2&invuln&netallowdebug&noattract&seed=1234"
+
+step 200 nodraw
+mark
+
+eval NetLevelLostArmHost
+
+# The ships dying, LoseLife, then the ~14.5 s Mission Failed choreography.
+step 1000 nodraw
+
+eval MenuNetState
+expect \[menunetstate\] netMode=True
+
+eval NetLevelEndMenu
+
+expect \[netlevelendmenu\] 10 passed, 0 failed
+expect-not FAIL
+quit

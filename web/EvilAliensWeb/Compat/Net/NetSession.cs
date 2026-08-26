@@ -1118,9 +1118,10 @@ namespace EvilAliensWeb.Compat.Net
             sessionRtc = false;
             lobbyRosterMaskRx = -1;
             lobbyRosterMaskTx = -1;
-            // Card 3b6c12e7. Both are per-MATCH latches; a session that ends outright must not
-            // leave the menus about to enter a lobby for a pairing that no longer exists.
-            levelFinishedCleanly = false;
+            // Cards 3b6c12e7 / c600c55a. Both are per-MATCH latches; a session that ends
+            // outright must not leave the menus about to enter a lobby for a pairing that no
+            // longer exists.
+            levelEndedCleanly = false;
             pendingLobbyReturn = false;
             pendingStopAt = 0;
             pendingStopNotice = null;
@@ -1544,24 +1545,56 @@ namespace EvilAliensWeb.Compat.Net
             return (NetHost.Current.DebugActive && !presentClean) ? NetProtocol.HelloFlagDebugActive : (byte)0;
         }
 
-        // FINISHING A LEVEL RETURNS A MENU-LOBBY PAIRING TO ITS LOBBY WITH THE SESSION ALIVE
-        // (card 3b6c12e7). Latched by GameScene.Terminate off the terminate MODE, immediately
-        // before it nulls NetActiveScene -- the scene-down edge below is the only teardown
-        // trigger for a normal level end and by the time it fires the scene is already gone, so
-        // it cannot ask NetEndingNormally (and _state alone would also accept a quit taken
-        // during the victory choreography). Spent by that edge, so it can never survive into a
-        // later level.
-        private static bool levelFinishedCleanly;
+        // A LEVEL THAT PLAYED ITSELF OUT RETURNS A MENU-LOBBY PAIRING TO ITS LOBBY WITH THE
+        // SESSION ALIVE (card 3b6c12e7 for a WIN, card c600c55a for a LOSS). Latched by
+        // GameScene.Terminate off the terminate MODE, immediately before it nulls
+        // NetActiveScene -- the scene-down edge below is the only teardown trigger for a normal
+        // level end and by the time it fires the scene is already gone, so it cannot ask
+        // NetEndingNormally (and _state alone would also accept a quit taken during the victory
+        // choreography). Spent by that edge, so it can never survive into a later level.
+        //
+        // "CLEANLY" MEANS THE LEVEL ENDED ON ITS OWN TERMS ON BOTH PEERS, NOT THAT IT WAS WON.
+        // Both endings are host-authoritative and already broadcast -- EvVictory and
+        // EvReset(ResetModeGameOver) -- so each peer independently runs the same wind-down and
+        // reaches its own Terminate. That is what lets this stay a purely local latch with no
+        // wire message of its own. The one terminate mode NOT covered is `exit`: a quit, or the
+        // force-exit a peer leaving triggers, really is a match end.
+        private static bool levelEndedCleanly;
 
-        internal static void OnLevelFinished()
+        internal static void OnLevelEndedCleanly()
         {
             if (Active)
             {
-                levelFinishedCleanly = true;
+                levelEndedCleanly = true;
             }
         }
 
-        // Set when a finished level left the session standing: the menus poll it once and enter
+        // A CLEAN LEVEL END RAISES THE SCENE-DOWN EDGE IMMEDIATELY, NOT ON THE NEXT Update()
+        // (card c600c55a). GameScene.Terminate calls this once it has nulled NetActiveScene and
+        // run its purges, and crucially BEFORE it raises OnFinished -- because Game1's handler
+        // adds MenuScene SYNCHRONOUSLY for every ending that does not route through CreditsScene:
+        // a lost level always, and a won challenge level too. MenuScene.Initialize polls
+        // TakeLobbyReturn() at its very end, so an edge left for the next NetSession.Update()
+        // raises pendingLobbyReturn one frame too late: the menus have already decided, and the
+        // host sits on the MAIN MENU with a live session behind it. That is the half of card
+        // c600c55a the latch alone does not fix, and it is why card 3b6c12e7 looked complete --
+        // the three story levels return through CreditsScene, which puts seconds between the
+        // scene going down and the menus coming up.
+        //
+        // DELIBERATELY NARROW: it returns without touching anything unless THIS scene-down is a
+        // clean level end, so a quit / drop / force-exit keeps the exact teardown timing it has
+        // always had (its Stop() and menu notice still land on the following Update). And
+        // UpdateSceneEdges is edge-guarded by sceneWasUp, so that Update sees no change at all.
+        internal static void OnLevelEndSceneDown()
+        {
+            if (!Active || !levelEndedCleanly)
+            {
+                return;
+            }
+            UpdateSceneEdges();
+        }
+
+        // Set when a played-out level left the session standing: the menus poll it once and enter
         // the lobby instead of the main menu. Take-once, so a second MenuScene.Initialize (the
         // credits -> menu hop, a later return) cannot re-enter the lobby off a stale flag.
         public static bool TakeLobbyReturn()
@@ -1578,9 +1611,9 @@ namespace EvilAliensWeb.Compat.Net
         // GameScene lifecycle edges (card 11.4): the client announces its scene coming up
         // (EvReady -> the host replays the live world into it, covering a client that
         // finished its level warm after the host started spawning); a scene going DOWN in
-        // a menu session means the local match ended (quit, game over, drop) -- so tell the
-        // peer and wind the session down. Since card 3b6c12e7 a level FINISHED is the
-        // exception: the pairing survives and both peers walk back to the lobby.
+        // a menu session means the local match ended (quit, drop) -- so tell the peer and wind
+        // the session down. Since cards 3b6c12e7 / c600c55a a level PLAYED OUT is the exception,
+        // won or lost alike: the pairing survives and both peers walk back to the lobby.
         private static void UpdateSceneEdges()
         {
             bool sceneUp = NetScene.Current != null;
@@ -1597,16 +1630,17 @@ namespace EvilAliensWeb.Compat.Net
                 }
                 return;
             }
-            bool finished = levelFinishedCleanly;
-            levelFinishedCleanly = false;
-            if (finished && menuSession)
+            bool endedCleanly = levelEndedCleanly;
+            levelEndedCleanly = false;
+            if (endedCleanly && menuSession)
             {
-                // Card 3b6c12e7: the host picks the next level and the pair keeps playing. No
-                // EvLeave and no Stop -- each peer independently reaches this off the EvVictory
-                // both already ran, so nothing new crosses the wire. listedSession is excluded
-                // deliberately: a join-in-progress host has no lobby to return to, so its level
-                // ending is still a match end (and its joiner sees the EvLeave as before).
-                Console.WriteLine("[net] level finished -- session kept alive, returning to the lobby");
+                // Cards 3b6c12e7 / c600c55a: the host picks the next level and the pair keeps
+                // playing. No EvLeave and no Stop -- each peer independently reaches this off the
+                // host broadcast both already ran (EvVictory for a win, EvReset(ResetModeGameOver)
+                // for a Mission Failed), so nothing new crosses the wire. listedSession is
+                // excluded deliberately: a join-in-progress host has no lobby to return to, so its
+                // level ending is still a match end (and its joiner sees the EvLeave as before).
+                Console.WriteLine("[net] level ended -- session kept alive, returning to the lobby");
                 ResetPerMatchState();
                 pendingLobbyReturn = true;
                 return;

@@ -294,6 +294,15 @@ namespace EvilAliensWeb.Compat.Net
         public static bool IsHost => Active && isHost;
         public static bool IsClient => Active && !isHost;
 
+        // Which session KIND is live -- a read seam for NetLevelEndTest (card 51566427), whose
+        // listed arm has to assert that a survived level end really converted the session into a
+        // menu-lobby one. The conversion has no other observable: every downstream reader of the
+        // pair already tests `menuSession || listedSession`, so a rig could not tell a converted
+        // session from an unconverted one by behaviour until a peer departs at the menus -- one
+        // step past what that probe can drive.
+        internal static bool IsMenuSession => Active && menuSession;
+        internal static bool IsListedSession => Active && listedSession;
+
         // Client sim-split: the join peer never runs the level script / spawners (GameScene
         // checks this before eventList.Update) and never lets game code add replicable
         // types to the world (ComponentBin.Add checks SuppressWorldSpawn).
@@ -915,14 +924,22 @@ namespace EvilAliensWeb.Compat.Net
         // it -- so such a scenario must boot with `?netallowdebug` beside its `?level=`, which
         // is the production flag for exactly this (a debug-flagged peer in a menu lobby), and
         // must assert its own pairing so a refusal reads as a FAIL rather than a vacuous pass.
+        //
+        // `asListedSession` (card 51566427) is the same opt-in for the JOIN-IN-PROGRESS shape,
+        // whose match-end semantics that card changed. It needs no `?netallowdebug` beside its
+        // `?level=`: HandleHello's debug refusal is menuSession-only, which is production's own
+        // asymmetry (a debug-flagged game is stopped from being LISTED by NetListing's
+        // eligibility predicate, not from pairing once it has been). Host-only in practice --
+        // StartListedSession never builds a client -- but not enforced here, for the same reason
+        // StartForTest enforces nothing else: a scenario that wants a nonsense shape may have one.
         internal static void StartForTest(Game g, bool host, INetTransport t, string room,
-            bool asMenuSession = false)
+            bool asMenuSession = false, bool asListedSession = false)
         {
             if (Active)
             {
                 return;
             }
-            StartWith(g, host, t, room, asMenuSession, asListedSession: false);
+            StartWith(g, host, t, room, asMenuSession, asListedSession);
         }
 
         // The hash a scripted peer's hello must carry to be accepted. READ rather than recomputed:
@@ -1632,17 +1649,36 @@ namespace EvilAliensWeb.Compat.Net
             }
             bool endedCleanly = levelEndedCleanly;
             levelEndedCleanly = false;
-            if (endedCleanly && menuSession)
+            if (endedCleanly && (menuSession || listedSession))
             {
                 // Cards 3b6c12e7 / c600c55a: the host picks the next level and the pair keeps
                 // playing. No EvLeave and no Stop -- each peer independently reaches this off the
                 // host broadcast both already ran (EvVictory for a win, EvReset(ResetModeGameOver)
-                // for a Mission Failed), so nothing new crosses the wire. listedSession is
-                // excluded deliberately: a join-in-progress host has no lobby to return to, so its
-                // level ending is still a match end (and its joiner sees the EvLeave as before).
+                // for a Mission Failed), so nothing new crosses the wire.
+                //
+                // CARD 51566427 BROUGHT listedSession IN HERE. It used to be excluded, on the
+                // stated grounds that "a join-in-progress host has no lobby to return to" -- true
+                // when it was written, and expired with card 0257f8ba: a listed session holds a
+                // real room code on the real WebRTC transport, EnterNetLobby is a public door,
+                // NetLobby renders room + roster straight off the live session, and rooms take
+                // four machines. So the exclusion was ejecting a stranger who had joined our
+                // listed game the moment the two of us FINISHED a level together, with the host
+                // still sitting right there -- the one match end left that the host had not
+                // walked away from.
                 Console.WriteLine("[net] level ended -- session kept alive, returning to the lobby");
                 ResetPerMatchState();
                 pendingLobbyReturn = true;
+                // ...and a listed session that outlived its level IS a lobby session now. The
+                // flag is CONVERTED rather than tested alongside menuSession at each reader,
+                // because exactly one live decision still separates them once the level is down:
+                // ReleaseDepartedPeer's tail keeps the room open for `menuSession && isHost` and
+                // Stop()s with "The other player left / Match ended" for anything else. Leaving
+                // it set would re-open this very card's bug one step later -- host in a lobby,
+                // guest disconnects, host thrown to the main menu. Every other reader is already
+                // `menuSession || listedSession` or start-time-only (the Start log line), and
+                // nothing keys off "this session began as a listing" after its level is gone.
+                menuSession = true;
+                listedSession = false;
                 return;
             }
             if (menuSession || listedSession)
@@ -1667,9 +1703,11 @@ namespace EvilAliensWeb.Compat.Net
         // collide with the next level's ids.
         //
         // DELIBERATELY KEPT, because they describe the PAIRING rather than the match: the
-        // transport, PeerUp/menuSession, the peer identity and block list, the roster grants
-        // (the same two peers keep their seats), the monotone tx/rx event sequences, and
-        // pendingLaunch* (the host may already have picked the next level).
+        // transport, PeerUp and the session KIND, the peer identity and block list, the roster
+        // grants (the same two peers keep their seats), the monotone tx/rx event sequences, and
+        // pendingLaunch* (the host may already have picked the next level). The kind is kept
+        // rather than fixed: this helper's clean-level-end caller converts a listedSession into a
+        // menuSession immediately after calling it (card 51566427 -- see the branch above).
         //
         // A URL `?net=` SESSION IS THE ONE OTHER SHAPE THAT OUTLIVES A LEVEL, and it deliberately
         // does NOT come through here -- the scene-down branch below only reaches menu/listed

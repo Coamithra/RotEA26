@@ -1200,9 +1200,22 @@ internal class MenuScene : Scene
 
 	private string HostLobbyPanelText()
 	{
-		// The DEBUG code only ever shows under the test seam -- the real panel is unreachable
-		// before the lobby has a room code (the Hosting phase precedes it).
-		string code = EvilAliensWeb.Compat.Net.NetLobby.RoomCode;
+		// THE LIVE SESSION'S OWN ROOM COMES FIRST, NetLobby's second (card 51566427). They are
+		// the same string for a menu-lobby host -- StartMenuSession is handed NetLobby.RoomCode --
+		// but a session born from NetListing -> StartListedSession never passed through NetLobby
+		// at all, so its RoomCode is still "". Since that card such a session can reach this
+		// panel: a finished level keeps it alive and converts it to a lobby one, and Cancel off
+		// netPickMenu shows the panel. Reading NetLobby alone printed "Room code:" with nothing
+		// after it, re-texted that way every NetUpdate tick.
+		// NetLobby stays the fallback because the panel is also reachable BEFORE any session
+		// exists (the Hosting phase, where the code has arrived and the pairing has not).
+		string code = EvilAliensWeb.Compat.Net.NetSession.SessionRoomCode;
+		if (code == "")
+		{
+			code = EvilAliensWeb.Compat.Net.NetLobby.RoomCode;
+		}
+		// The DEBUG code only ever shows under the test seam -- with neither source holding one,
+		// the panel is unreachable in any real flow.
 		if (code == "" && netDebugLobbyMask.HasValue)
 		{
 			code = "DEBUG";

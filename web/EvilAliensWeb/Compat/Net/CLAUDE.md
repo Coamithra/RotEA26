@@ -85,8 +85,9 @@ inputs; the other peer's ship is an interpolated puppet.
 - **The respawn indicator crosses the wire** (`37f3a663`, v17): a dead player's clock ring is
   drawn on BOTH screens, so you can see your buddy coming back and where -- see the
   respawn-indicator bullet at the end of "Claims, score & per-slot HUD".
-- **A lobby pairing survives a level that PLAYED ITSELF OUT** (`3b6c12e7` for a win, `c600c55a`
-  for a Mission Failed; no protocol change either time): both peers walk back to the lobby with
+- **A pairing survives a level that PLAYED ITSELF OUT** (`3b6c12e7` for a win, `c600c55a`
+  for a Mission Failed, `51566427` for the join-in-progress shape the first two left out; no
+  protocol change any of the three times): both peers walk back to the lobby with
   the session up and the host picks the next mission, instead of the match ending -- and the
   remote ship now flies off in the level's own spawn direction rather than always upward
   (`b4a9fe60`). Three bullets at the end of "Signaling, menu lobby & handshake".
@@ -721,9 +722,50 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     `EndMatchPeerGone`) is unreachable there. `_state` would also be the wrong question -- it reads
     `Victory` for a quit taken DURING the victory choreography, which is an ordinary match end. The
     latch is SPENT by the edge, so it can never survive into a later level.
-  - **`listedSession` (join-in-progress) is DELIBERATELY EXCLUDED and keeps the old teardown**: a
-    JIP host has no lobby to return to -- it was playing single-player when a stranger arrived --
-    so its level ending is still a match end, and its joiner still sees the `EvLeave`.
+  - **`listedSession` (join-in-progress) WAS DELIBERATELY EXCLUDED, AND CARD `51566427` BROUGHT IT
+    IN.** The exclusion's stated ground -- a JIP host has no lobby to return to, having been
+    playing single-player when the stranger arrived -- was true when it was written and expired
+    with card `0257f8ba`: a listed session holds a real room code on the real WebRTC transport,
+    `MenuScene.EnterNetLobby()` is a public door, `NetLobby` renders room + roster straight off the
+    live session, and rooms take four machines. Until that card, finishing the level together
+    ejected the stranger (`EvLeave` + `Stop`) with the host still sitting right there -- the last
+    match end left that nobody had walked away from, which is exactly what the card asked about
+    (*"as long as the host doesnt disconnect we don't need to end the game"*). The guard is now
+    `endedCleanly && (menuSession || listedSession)`.
+  - **AND THE SURVIVING LISTED SESSION IS CONVERTED: `menuSession = true; listedSession = false`.**
+    Not a fib to reach a branch -- a listed session that outlived its level IS a lobby session, and
+    exactly one live decision still separates the two kinds once the level is down.
+    `ReleaseDepartedPeer`'s tail keeps the room open for `menuSession && isHost` and `Stop()`s with
+    *"The other player left / Match ended"* for anything else, so leaving the flag set would
+    re-open the very same bug one step later: host in a lobby, guest disconnects, host thrown to
+    the main menu. Every other reader is already `menuSession || listedSession`
+    (`HostOpenToJoinInProgress`, `PeerConnected`, `PeerLost`, the `EvLeave` rx) or start-time-only
+    (the session-start log line), and nothing keys off *this session began as a listing* after its
+    level is gone. **The `?net=jiphost` dev re-arm loses one of its two triggers**: it fires off
+    `!Active`, so a clean level end on that rig now keeps the session and walks the dev host to a
+    lobby instead of ending the match and re-arming for the next stranger. The re-arm still covers
+    the peer-drop path, which is the one a jiphost soak actually exercises, and
+    `tools/sim/net_jip_sync.py` never plays a level out -- but a soak that DOES would get one join
+    per level now rather than one per match end.
+  - **THE CLIENT HALF NEEDED NOTHING.** A JIP joiner is a normal menu-session client
+    (`StartListedSession` is always host-side), so its own clean level end already survived and
+    already raised `pendingLobbyReturn`; it was the host's `EvLeave` that killed it. With that gone
+    both ends walk to the lobby on their own beat.
+  - **Verified by `tools/headless/probes/net_level_end_listed.txt`** (`NetLevelEndTest.ArmListed`
+    -- `ArmHost`'s twin on `StartForTest(..., asListedSession: true)`, reusing `MenuCheck` for
+    phase 2). Its discriminator is that NO `EvLeave` reached the joiner, since a build that merely
+    forgot the `Stop()` would still eject them from their own side; the conversion has no
+    behavioural observable at all until a peer departs at the menus, so `NetSession.IsMenuSession`
+    / `IsListedSession` are read seams for that leg alone. It needs no `?netallowdebug` -- unlike
+    every menu-session probe here -- because `HandleHello`'s debug refusal is `menuSession`-only,
+    production's own asymmetry (a debug-flagged game is stopped from being LISTED by `NetListing`,
+    not from pairing once it has been). Mutation-tested: the old guard fails 7 of its 14 legs (and
+    stops the probe one line earlier still, at `netMode=False`). The one leg that stops SHORT of
+    its subject is the room code: a converted host's lobby panel reads
+    `NetSession.SessionRoomCode` now, because a listed session never passed through `NetLobby` and
+    `NetLobby.RoomCode` is `""` for it -- the panel printed *"Room code:"* with nothing after it --
+    but putting that panel up adds a second live `MenuSub1`, which the shared census legs would
+    fail, so the probe asserts the source and the panel is one `eval NetLobbyShow 3` away.
   - **`ResetPerMatchState()` is what makes a SECOND level correct, and the split is the interesting
     part.** It is the WORLD-scoped subset of `ResetPerSessionState`: the interpolation buffer (or
     the next level's puppet spawns at the LAST level's final position), the rx queue, the puppet +
@@ -856,7 +898,12 @@ tabs, LocalSocketNet `--net-peers`) remain how it is exercised headlessly.
   **Consequence at N=2, deliberate:** a menu-session host whose partner drops now keeps playing
   solo instead of being thrown to the menu. A level that plays itself out still keeps every
   pairing alive, won or lost (cards 3b6c12e7 / c600c55a; `ResetPerMatchState` loops the
-  channels).
+  channels) -- and since card `51566427` that holds for a LISTED / join-in-progress session too,
+  which becomes a menu-lobby one on the way (see the level-end bullets above). **So the only
+  thing that ends a SESSION with the host still present is somebody leaving it**: a quit or
+  force-exit (`FinishedMode.exit`), a kick, a reject -- or the LAST client dropping mid-level,
+  which is `RevertToSinglePlayer` and ends no game at all (the host plays its level on, solo, and
+  `NetListing` re-lists it).
 - **EVERY SLOT DECISION KEYS OFF `p.PrimarySlot`, never a `ControlDevice.Remote` scan** --
   `GetPlayerIndex(Remote)` / `DeviceIsPlaying(Remote)` / `ReleasePlayer(Remote)` are ambiguous
   with two remote peers, and every one of them was load-bearing in the 2-peer code

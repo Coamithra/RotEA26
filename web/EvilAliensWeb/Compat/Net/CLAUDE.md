@@ -1726,8 +1726,51 @@ Four pieces, none changing what replicates -- only how well the star holds up at
     - **...which is exactly why `MarkRemoved` has to run BY HAND in the release.** That seam is
       what normally marks the id, and skipping it leaves the next snapshot entry an UNKNOWN id:
       the self-heal then rebuilds a fresh, intact, collidable enemy standing on top of the one
-      that is visibly dying. Short window (the host stops streaming the id within a turn or two),
-      so it would have been a rare unreproducible ghost.
+      that is visibly dying.
+    - **AND THAT SUPPRESSION NEEDS ITS OWN, LONGER WINDOW -- the flat one is NOT enough, and this
+      bullet used to say it was (card 444eb614).** It read "short window (the host stops streaming
+      the id within a turn or two), so it would have been a rare unreproducible ghost". **False,
+      for exactly the deaths that reach this line**: a dying entity is still in the host's world,
+      so it is still in `NetIdRegistry.Live`, so the host keeps streaming its id for the WHOLE
+      animation. `SpiderBoss`'s debris fall is `5000 / DifficultyFactorized(0.5)` -- **5.0 s at
+      Very_Hard, up to 7.4 s on Easy**, ~3.3 s once the modifier has ramped -- and the surviving
+      `MarsBoss`'s crash is 5 s, the `FakeBoss`'s is 4 s, the `JunkBoss`'s 25 explosions run
+      2.5-3.75 s, and the **`BrainBoss`'s asplode is TWENTY seconds**. `RecentRemovalWindowMs` is
+      **3000**. So the ghost was not rare at all: it appeared partway through most boss deaths and
+      stood until the host's `EvDeath`.
+      Reported as *"spider boss (lvl 2) -- on a joining client, after the boss was defeated and
+      its death animation played, the original sprite still appeared for a few frames"*, and it
+      names the SpiderBoss because once `dead` its `Draw` shows only debris, so the rebuilt puppet
+      is the only thing on screen still wearing the boss's own sprite. (On a `KillableAlien` the
+      rebuild is worse than cosmetic: hp arrives as 0, so `ApplyHostKilledFromSnapshot` re-runs
+      `BeginDeferredDeath` and the client plays a SECOND death.)
+      - `NetPuppets.releasedDying` flags the ids `ReleaseDyingPuppet` marked, and
+        `IsRecentlyRemoved` gives those `DyingReleaseWindowMs` (**30 s**, 1.5x the BrainBoss's
+        20 s) instead. **The honest deadline is an EVENT, not a duration**: the host stops
+        streaming when its own copy leaves
+        its world and says so with `EvDeath` on the reliable lane, so the flag is CLEARED there
+        (and on a successful `OnSpawn`, for an id the host re-used) and the 30 s is only the
+        backstop for an `EvDeath` that never comes. Erring long costs only a refused self-heal,
+        and while the entity is still dying the host IS still streaming it, so there is nothing to
+        rebuild anyway. **`NetDeathFxTest` measures each boss's real animation against the
+        constant**, so a future longer death fails there instead of quietly ghosting.
+      - **It is its OWN ledger, not a flag beside `recentlyRemoved`, and that is correctness.**
+        Read off that dictionary's timestamp it would have to be evicted with it -- and
+        `MarkRemoved` fires on EVERY local puppet removal against a 512-deep FIFO, while
+        `BrainBoss.KilledBy` purges bullets, braineroids, skulls, mines, UFOs, lazers and plasma
+        balls on its way into that twenty-second death. The boss's own slot would be pushed out by
+        the churn of its own opening frame.
+      - **The long window is for RELEASED deaths ONLY** -- widening `RecentRemovalWindowMs`
+        itself would leave a genuinely-missed spawn missing for thirty seconds. That is a
+        separate leg in the suite, not an argument.
+      - Pinned by `NetDeathFxTest` section 9's GHOST legs: the same call at three clock readings
+        (inside the flat window, past it, and after the host's `EvDeath`) plus an
+        ordinarily-removed id as the control, plus the OnSpawn clear on its own leg -- and
+        `NetDeathFxTest`'s per-boss legs additionally require each MEASURED animation to fit the
+        window. Mutation-tested four ways; reverting the fix reproduces the report in numbers
+        (`4 vs 3` SpiderBosses in the world). The ledger's own eviction cap is the one part with
+        no leg: reaching it needs 64 concurrent deferred deaths, and it degrades to the
+        pre-card behaviour, which shipped.
     - **`OnRemoteDeath` makes the same decision** when neither the beat nor the snapshot got
       there first -- the last-resort fallback, and the only one before card 303bfb5b.
     - **A DEFERRED DEATH THAT DOES NOT RUN THROUGH `KillableAlien` AT ALL: the SpiderBoss, and
@@ -2687,8 +2730,10 @@ Four pieces, none changing what replicates -- only how well the star holds up at
     unreliable stream lane routinely outruns the ordered reliable one, so a fresh spawn's first
     correction can beat its `EvSpawn`. **Benign, and it tracks the world's SPAWN rate** -- in a
     continuously spawning fight it never stops climbing, which is not a fault.
-  - `snapDead` = an id removed HERE inside the 3s `RecentRemovalWindowMs`, deliberately left
-    dead. **Benign, and it tracks the world's TOTAL removal rate.** The old note here tied this
+  - `snapDead` = an id removed HERE recently enough to still be settling, deliberately left
+    dead -- the 3 s `RecentRemovalWindowMs` for an ordinary removal, and the longer
+    `DyingReleaseWindowMs` for a puppet RELEASED to finish a deferred death (card 444eb614), so a
+    boss death reads here for as long as the host keeps streaming it. **Benign, and it tracks the world's TOTAL removal rate.** The old note here tied this
     to `clTx`, which was WRONG and cost card 48ab9b2f's JIP pass its verdict: `MarkRemoved`
     fires on every local removal, host-authoritative `EvDeath`s included, so an IDLE joiner
     watching the host's AI clear a field logs plenty of `snapDead` with `clTx` pinned at 0.

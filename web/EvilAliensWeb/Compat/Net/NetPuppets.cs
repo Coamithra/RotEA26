@@ -14,7 +14,10 @@ namespace EvilAliensWeb.Compat.Net
         None = 0,   // the id WAS puppeted; the entry applied normally
         Rebuilt,    // never-seen id, self-heal built it from the snapshot (stream outran the
                     // reliable EvSpawn, or a local purge dropped a world the host's still has)
-        LeftDead,   // removed here < RecentRemovalWindowMs ago: a death still settling
+        LeftDead,   // removed here recently enough that a death is still settling:
+                    // RecentRemovalWindowMs for an ordinary removal, the longer
+                    // DyingReleaseWindowMs for a puppet RELEASED to finish a deferred death
+                    // (card 444eb614 -- the host streams a dying id for the whole animation)
         Refused,    // the rebuild was declined. Three causes, which tick at very different
                     // rates: no descriptor for the typeIdx (a registry/protocol mismatch)
                     // re-counts on EVERY turn, while a descriptor declining -- no live
@@ -166,6 +169,60 @@ namespace EvilAliensWeb.Compat.Net
         private static readonly Dictionary<ushort, long> recentlyRemoved = new Dictionary<ushort, long>();
         private static readonly Queue<ushort> recentlyRemovedOrder = new Queue<ushort>();
 
+        // Ids we RELEASED to finish a deferred death locally (card 444eb614). They need a LONGER
+        // suppression than the flat window above, and the reason is a mismatch that was live:
+        //
+        //   * `ReleaseDyingPuppet` drops the id from every map, so the host's next snapshot entry
+        //     for it is an unknown id and the self-heal rebuilds the enemy we just released --
+        //     "a fresh, intact, collidable puppet standing where one is visibly dying", which is
+        //     exactly what that method's own comment says MarkRemoved is there to stop.
+        //   * ...but the HOST keeps streaming the id for the WHOLE deferred death, because the
+        //     entity is still in its world and so still in `NetIdRegistry.Live`. "The host stops
+        //     streaming the id within a turn or two" was simply wrong for a deferred death.
+        //   * And most of those OUTLIVE 3000 ms. THE CENSUS -- every type that reaches
+        //     ReleaseDyingPuppet, with the duration its own dying state runs for:
+        //
+        //       Parachute                 100 ms                      under
+        //       BattleSkull               2500 ms                     under
+        //       JunkBoss                  25 x 125 ms x U(0.8,1.2)    STRADDLES (2500-3750)
+        //       FakeBoss                  4000 ms                     over
+        //       MarsBoss (the survivor)   5000 ms                     over
+        //       SpiderBoss                5000 / DifficultyFactorized(0.5) = 2941-7407 ms
+        //       BrainBoss                 20000 ms + a 300 ms fade    over, and the LONGEST
+        //       SpiderHelperMothership    NetDyingStaysReplicated -- never released at all
+        //
+        //     So the ghost appeared partway through most boss deaths and stood until the host's
+        //     EvDeath ended it: reported as *"after the boss was defeated and its death animation
+        //     played, the original sprite still appeared for a few frames"* (the SPIDER boss,
+        //     whose fall draws only debris -- so the rebuilt puppet is the only thing on screen
+        //     wearing the boss's own sprite; on a KillableAlien it is worse than cosmetic, since
+        //     hp arrives as 0 and the client plays a SECOND death).
+        //     The SpiderBoss row is also why the report says "a few frames" rather than "seconds":
+        //     the ghost lasts `fall - 3 s`, and on a fully-ramped save the fall's floor is 2941 ms,
+        //     i.e. just under the flat window.
+        //
+        // THE HONEST DEADLINE IS AN EVENT, NOT A DURATION: the host stops streaming the id when
+        // its own copy leaves the world, and it says so with `EvDeath` on the RELIABLE lane. So
+        // this ledger is cleared there (and by a successful `OnSpawn`, for an id the host has
+        // re-used), and the window below is only the backstop for an id whose EvDeath never comes.
+        // 30 s is 1.5x the longest row above rather than a tuned value; nothing is drawn or
+        // spawned while it stands, so erring long costs only a refused self-heal -- and while the
+        // entity is still dying the host IS still streaming it, so there is nothing to rebuild
+        // anyway. `NetDeathFxTest` measures each boss's real animation against this constant, so a
+        // future longer death fails there instead of quietly ghosting.
+        internal const float DyingReleaseWindowMs = 30000f;
+
+        // ITS OWN LEDGER, not a flag beside `recentlyRemoved`, and that is a correctness point
+        // rather than tidiness. Read off that dictionary's timestamp it would also have to be
+        // evicted with it -- and `MarkRemoved` fires on EVERY local puppet removal against a
+        // 512-deep FIFO, while `BrainBoss.KilledBy` purges bullets, braineroids, skulls, mines,
+        // UFOs, lazers and plasma balls on its way into a TWENTY-SECOND death. The boss's own
+        // slot would be pushed out by the churn of its own opening frame. This ledger only ever
+        // takes a deferred death, of which a handful can be in flight at once.
+        private const int DyingLedgerCap = 64;
+        private static readonly Dictionary<ushort, long> releasedDying = new Dictionary<ushort, long>();
+        private static readonly Queue<ushort> releasedDyingOrder = new Queue<ushort>();
+
         private static Game game;
         private static ComponentBin bin;
         private static ScoreVisualiser score;
@@ -238,7 +295,8 @@ namespace EvilAliensWeb.Compat.Net
         //
         // The distinction it is for: ReleaseDyingPuppet hands a puppet its own death animation and
         // drops it from every map, while the host keeps the entity in NetIdRegistry for the whole
-        // 2.5-5 s of that animation. So the two ends legitimately disagree about the id set for
+        // of that animation -- 0.1 s for a Parachute, 20 s for the BrainBoss (the census is on
+        // `releasedDying`). So the two ends legitimately disagree about the id set for
         // seconds at a time, by design and in one direction only. An id in neither this ledger nor
         // a host-side death is the real defect: a joiner that never got an entity at all.
         //
@@ -305,6 +363,8 @@ namespace EvilAliensWeb.Compat.Net
             live.Clear();
             recentlyRemoved.Clear();
             recentlyRemovedOrder.Clear();
+            releasedDying.Clear();
+            releasedDyingOrder.Clear();
             remoteDeaths.Clear();
         }
 
@@ -420,6 +480,11 @@ namespace EvilAliensWeb.Compat.Net
                 MarkRemoved(netId);
                 return SpawnRejectKind.Swallowed;
             }
+            // The id is LIVE again, so any dying-release suppression on it is spent (card
+            // 444eb614). Reached when the host re-uses a freed id and the reliable EvSpawn for the
+            // new entity arrives before the backstop expires; without this the id would keep the
+            // long window and a later self-heal for it would be refused.
+            releasedDying.Remove(netId);
             if (stale != null)
             {
                 // The replacement has landed, so the stale one goes now. Detach BEFORE asking the
@@ -626,8 +691,9 @@ namespace EvilAliensWeb.Compat.Net
 
         // THE FALLBACK deferred-death trigger, since card f62116b5: the host's copy of this
         // killable is at ZERO HIT POINTS and still in its world, so its death has begun and is
-        // taking a while -- BattleSkull's 2.5s dying state, MarsBoss's 5s crash and the other
-        // types KillableAlien.NoteDeathBegan censuses (cards 13aa596c / 303bfb5b). The EvDeath for it does not arrive until that animation ENDS, so waiting for
+        // taking a while -- BattleSkull's 2.5s dying state, MarsBoss's 5s crash, BrainBoss's 20s
+        // asplode and the other types KillableAlien.NoteDeathBegan censuses (cards 13aa596c /
+        // 303bfb5b; the full list with durations is on `releasedDying`). The EvDeath for it does not arrive until that animation ENDS, so waiting for
         // it means the peer sees an intact enemy and then, seconds later, one frame of removal.
         //
         // The FAST path is now the host's explicit EvDying beat (NetSession.OnDeathBegan ->
@@ -772,8 +838,29 @@ namespace EvilAliensWeb.Compat.Net
 
         private static bool IsRecentlyRemoved(ushort netId)
         {
+            long now = NetHost.Current.NowMs;
+            // The released-dying ledger is consulted FIRST and independently -- see its header for
+            // why it is not a flag on `recentlyRemoved`.
+            if (releasedDying.TryGetValue(netId, out long released)
+                && now - released < DyingReleaseWindowMs)
+            {
+                return true;
+            }
             return recentlyRemoved.TryGetValue(netId, out long at)
-                && NetHost.Current.NowMs - at < RecentRemovalWindowMs;
+                && now - at < RecentRemovalWindowMs;
+        }
+
+        private static void MarkReleasedDying(ushort netId)
+        {
+            if (!releasedDying.ContainsKey(netId))
+            {
+                releasedDyingOrder.Enqueue(netId);
+                while (releasedDyingOrder.Count > DyingLedgerCap)
+                {
+                    releasedDying.Remove(releasedDyingOrder.Dequeue());
+                }
+            }
+            releasedDying[netId] = NetHost.Current.NowMs;
         }
 
         private static void MarkRemoved(ushort netId)
@@ -940,7 +1027,7 @@ namespace EvilAliensWeb.Compat.Net
 
         // A DEFERRED death: the type's death path ran, but it did not remove the component --
         // it entered a multi-second dying STATE that its own Update drives (BattleSkull's 2.5s
-        // shrink-and-flicker, MarsBoss's 5s crash to the ground). A puppet is frozen for life,
+        // shrink-and-flicker, MarsBoss's 5s crash to the ground, BrainBoss's 20s asplode). A puppet is frozen for life,
         // so as a puppet it would stand there intact and then blink out; that is cards 303bfb5b
         // and 13aa596c ("explosions and death animation don't properly play on P2's view").
         //
@@ -968,9 +1055,16 @@ namespace EvilAliensWeb.Compat.Net
             // ...which is exactly why MarkRemoved has to run HERE instead. Without it the next
             // snapshot entry for this id is an unknown id, and the self-heal REBUILDS the enemy
             // we just released -- a fresh, intact, collidable puppet standing where one is
-            // visibly dying. The host stops streaming the id within a turn or two, so the window
-            // is short and would have made this a rare, unreproducible ghost.
+            // visibly dying.
+            //
+            // AND IT NEEDS THE LONGER WINDOW (card 444eb614). This comment used to end "the host
+            // stops streaming the id within a turn or two, so the window is short" -- and that is
+            // false for exactly the deaths that reach this line. The host keeps the dying entity
+            // in `NetIdRegistry.Live` for the WHOLE animation and keeps streaming it, and MOST of
+            // those outlive `RecentRemovalWindowMs` -- FakeBoss, MarsBoss, SpiderBoss and, at 20 s,
+            // BrainBoss. So the ghost was not rare at all. The census is on `releasedDying`.
             MarkRemoved(netId);
+            MarkReleasedDying(netId);
             // It is dying, so it must not still be able to kill the local player -- both shipped
             // types clear this in their own KilledBy, but a released puppet is live code now and
             // may not rely on that. The cast back is the documented one (INetEntity's header):
@@ -1002,6 +1096,13 @@ namespace EvilAliensWeb.Compat.Net
             {
                 return;
             }
+            // THE AUTHORITATIVE END of a released dying puppet's suppression (card 444eb614), and
+            // the reason `DyingReleaseWindowMs` is a backstop rather than the mechanism: this beat
+            // says the host's copy has left ITS world, so it has stopped streaming the id and
+            // there is nothing left for the self-heal to rebuild. Before the branches below rather
+            // than inside one of them, because the case it is for is the one that matches NO
+            // branch: a released puppet is out of `byId`, so this event falls all the way through.
+            releasedDying.Remove(netId);
             if (byId.TryGetValue(netId, out PuppetInfo info))
             {
                 INetEntity comp = info.Comp;
@@ -1025,7 +1126,7 @@ namespace EvilAliensWeb.Compat.Net
                         // A death path has run and the entity is STILL IN THE WORLD, which for a
                         // killable means exactly one thing: its KilledBy deferred its own removal
                         // into a dying animation (BattleSkull's 2.5 s, the surviving MarsBoss's
-                        // 5 s crash). The pre-card `bin.Remove` here is what deleted those
+                        // 5 s crash, BrainBoss's 20 s asplode). The pre-card `bin.Remove` here is what deleted those
                         // mid-animation. Note this also covers the NetKill that no-opped because
                         // WE had already killed the puppet locally -- same state, and its dying
                         // animation had not played either, so it wants the same answer.

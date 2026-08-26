@@ -160,6 +160,23 @@
 # ticks until the component removes ITSELF now, up to a generous ceiling, and reports the count;
 # do not turn any of those back into a fixed budget.
 #
+# MUTATION-TESTED FIVE WAYS for the GHOST legs (card 444eb614), each isolated and rebuilt
+# (counts are failing assertions; the tallies are what the run printed):
+#   * the whole fix reverted (the removal window flat again) -> **4**, 203/4, and one of them
+#     REPRODUCES THE REPORT IN NUMBERS: "no second, intact boss was built beside the dying one
+#     (4 vs 3)". Two of the four are cascades -- leg C reads `None` because the id is puppeted by
+#     that very rebuild, and GHOST REUSE's precondition cannot hold with no suppression at all.
+#   * the `releasedDying.Remove` in OnRemoteDeath dropped (suppression permanent) -> **1**,
+#     206/1: leg C alone. The leg that stops the fix being "never self-heal a released id again".
+#   * the `releasedDying.Remove` in OnSpawn dropped -> **1**, 206/1: GHOST REUSE alone. That
+#     clear was defence-in-depth NOBODY TESTED until this leg existed (found in review).
+#   * the long window applied to EVERY removed id -> **3**, 204/3: the GHOST NEGATIVE control,
+#     GHOST REUSE and leg C. That control is the whole difference between this card and simply
+#     widening `RecentRemovalWindowMs`.
+#   * `DyingReleaseWindowMs` back to the card's FIRST cut, 15000 -> **1**, 206/1: the BrainBoss's
+#     fits-inside leg, naming its measured 20316 ms. That is the leg that would have caught the
+#     under-sized constant on its own; it was caught in review instead, which is why it exists.
+#
 # eahl: --flags "?menu&noattract"
 #
 # ?noattract, not ?menu alone: the idle main menu drops into an attract demo after 20s and the
@@ -208,6 +225,43 @@ expect SpiderBoss: the fall ENDED on its own and the boss left the world
 expect SpiderBoss: a snapshot turn does NOT un-do the local death
 expect SpiderBoss: \.\.\.so the host's beat after it fires NO second burst
 
+# THE GHOST (card 444eb614): "after the boss was defeated and its death animation played, the
+# original sprite still appeared for a few frames". `ReleaseDyingPuppet` marks the id removed so
+# the snapshot self-heal will not rebuild it -- but on the flat 3 s `RecentRemovalWindowMs`, while
+# the host keeps streaming a DYING entity for the whole animation (it is still in its world, so
+# still in NetIdRegistry.Live) and the longest of those run 5 s (this boss's debris fall at
+# Very_Hard; 5 s again for the surviving MarsBoss's crash; up to 7.4 s on Easy). At t=3 s the
+# suppression lapsed and the next turn built a fresh, intact, COLLIDABLE boss standing where one
+# was visibly dying. The SpiderBoss is why the report names it: once `dead` its Draw shows only
+# debris, so the rebuilt puppet is the only thing on screen still wearing the sprite.
+#
+# THE THREE LEGS ARE THE SAME CALL AT THREE MOMENTS, which is what makes any one of them
+# meaningful: inside the flat window (the era control), past it (the fix), and after the host's
+# EvDeath (not permanent -- the suppression ends on the host's authoritative word, and the
+# 15 s window is only the backstop for an EvDeath that never comes).
+expect GHOST: inside the 3 s window a released dying id reports LeftDead
+expect GHOST: PAST the 3 s window it STILL reports LeftDead
+expect GHOST: \.\.\.so no second, intact boss was built beside the dying one
+expect GHOST: the host's EvDeath ENDS the suppression
+# ...and the long window is for RELEASED deaths ONLY. Without this the card would read as
+# "lengthen the window for everything", which leaves a genuinely-missed spawn missing for 15 s.
+expect GHOST NEGATIVE: an ordinarily-removed id reports LeftDead at once
+expect GHOST NEGATIVE: \.\.\.and past 3 s it self-heals as before
+# The OTHER clear site: a reliable EvSpawn for a re-used id must take the suppression with it,
+# or a genuinely new enemy on that id would be refused a self-heal for the whole 30 s.
+expect GHOST REUSE: the reliable EvSpawn builds the re-used id anyway
+expect GHOST REUSE: \.\.\.and the spawn TOOK the suppression with it
+
+# THE CONSTANT IS CHECKED AGAINST THE REAL ANIMATIONS, not against a census in a comment -- a
+# census drifts and cannot fail. Each boss leg ticks its own choreography to completion and then
+# requires the MEASURED duration to fit inside NetPuppets.DyingReleaseWindowMs, so a death that
+# grows past the window fails here instead of quietly ghosting. This is not hypothetical: the
+# first cut of this card shipped 15000 ms, and the BrainBoss measures 20316.
+expect BrainBoss: the whole dying animation \([0-9]+ ms measured\) fits inside
+expect FakeBoss: the whole dying animation \([0-9]+ ms measured\) fits inside
+expect JunkBoss: the whole dying animation \([0-9]+ ms measured\) fits inside
+expect SpiderBoss: the whole dying animation \([0-9]+ ms measured\) fits inside
+
 # Card 1878b321's SpiderHelperMothership legs -- the deferred death whose entity stays ALIVE on
 # the host (it finishes its charge/fire mission before crashing). Individually named because each
 # is a different way the join peer's "hangs around when dead" comes back:
@@ -228,7 +282,7 @@ expect this peer's own killing blow FILED ITS CLAIM at death-began
 expect NEGATIVE an INSTANT kill claims nothing at death-began
 
 expect 10\. teardown
-expect \[netdeathfx\] 187 passed, 0 failed
+expect \[netdeathfx\] 207 passed, 0 failed
 
 # LEAVE-NO-TRACE: two more runs in the SAME process, which is what makes the teardown's own
 # claims mean something. A leaked Explosion, BloodExplosion or BrainAura, an unrestored score

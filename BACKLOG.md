@@ -19,7 +19,7 @@ browser/dev server in this environment); verified headlessly via `eahl` instead.
 
 _No description or comments — the card title is the whole ticket._
 
-**Done** (PR pending link). The respawn pop's reward bomb was a fixed level 3; it is now
+**Done** ([#355](https://github.com/Coamithra/RotEA26/pull/355)). The respawn pop's reward bomb was a fixed level 3; it is now
 `Score.GetPowerupLevel(Powerup.PowerupType.Linker, slot)` — `Linker` is the powerup the game draws
 as **"2"**, and it is already the respawn powerup (its level buys `respawntimebonus`, i.e. a shorter
 version of this very countdown). Level 0 is a legal small blast for a player who never picked one up.
@@ -44,7 +44,7 @@ a live two-machine session — multiplayer is not testable in this environment.
 
 _No description or comments — the card title is the whole ticket._
 
-**Done** (PR pending link). Diagnosed: the culprit is the HOST's `EnemyHitFlash` beat.
+**Done** ([#356](https://github.com/Coamithra/RotEA26/pull/356)). Diagnosed: the culprit is the HOST's `EnemyHitFlash` beat.
 `KillableAlien.HitBy` announced it for *every* hit, and the announcement sits above the
 `hitpoints <= 0` branch — so a lethal hit told the peer "flash", and an `EvDeath` a beat later
 told it "explode". On a 1 hp enemy that is every kill. The beat is now sent only when the enemy
@@ -78,7 +78,7 @@ session — multiplayer is not testable in this environment.
 
 _No description or comments — the card title is the whole ticket._
 
-**Done** (PR pending link). All three peak constants halved: `Juice.MaxOffsetDesignPx` 7 → 3.5,
+**Done** ([#357](https://github.com/Coamithra/RotEA26/pull/357)). All three peak constants halved: `Juice.MaxOffsetDesignPx` 7 → 3.5,
 `MaxRollDegrees` 1 → 0.5, and the present blit's edge-covering zoom coefficient 0.06 → 0.03 — the
 last of which moved into `Juice.MaxBlitZoom` from a literal at the blit, so a future halving cannot
 take the offset and leave the swell behind. "Across the board" is what makes the zoom part of it:
@@ -109,7 +109,7 @@ The foreground-Chrome smoke check was also not possible here.
 
 _No description or comments — the card title is the whole ticket._
 
-**Done** (PR pending link). Both puppet spawners gated on `FindLocalShip() != null`. Our own ship
+**Done** ([#358](https://github.com/Coamithra/RotEA26/pull/358)). Both puppet spawners gated on `FindLocalShip() != null`. Our own ship
 being absent says nothing about whether *theirs* should be drawn — in co-op a death is not a world
 wipe, the level keeps running, and the peer really is out there flying.
 
@@ -137,9 +137,58 @@ instead, so the suite bounds the fix from both sides.
 
 _Further testing would be nice:_ verified over the in-process wire, not a live two-machine session.
 
-## 6. `444eb614` — spider boss (lvl 2) - on a joining client, after the boss was defeated and its death animation played, the original sprite still appeared for a few frames
+## 6. `444eb614` — spider boss (lvl 2) - on a joining client, after the boss was defeated and its death animation played, the original sprite still appeared for a few frames — **DONE**
 
 _No description or comments — the card title is the whole ticket._
+
+**Done** (PR pending link). The client hands a dying boss its own death animation
+(`NetPuppets.ReleaseDyingPuppet`), which drops the id from every map and marks it removed so the
+world-snapshot **self-heal** will not rebuild it. That suppression ran on the flat 3 s
+`RecentRemovalWindowMs`, justified in a comment with *"the host stops streaming the id within a
+turn or two"* — which is false for exactly the deaths that reach it. A dying entity is still in
+the host's world, so it stays in `NetIdRegistry.Live` and the host keeps streaming its id for the
+**whole** animation. Measured, per type:
+
+| type | dying duration | vs the 3 s window |
+|---|---|---|
+| Parachute | 100 ms | under |
+| BattleSkull | 2500 ms | under |
+| JunkBoss | 25 × 125 ms × U(0.8,1.2) | **straddles** (2500–3750) |
+| FakeBoss | 4000 ms | over |
+| MarsBoss (the survivor) | 5000 ms | over |
+| SpiderBoss | `5000 / DifficultyFactorized(0.5)` | over (2941–7407) |
+| **BrainBoss** | 20000 ms + a 300 ms fade | **over, and the longest** |
+
+So at t=3 s the suppression lapsed, the next snapshot turn read as an unknown id, and the
+self-heal built a fresh, **intact, collidable** boss standing where one was visibly dying. The
+report names the spider boss because once `dead` its `Draw` shows only debris, so the rebuilt
+puppet is the only thing on screen still wearing the boss's sprite — and its ghost lasts
+`fall − 3 s`, i.e. "a few frames" on a save whose difficulty has ramped. On a `KillableAlien` it
+is worse than cosmetic: hp arrives as 0, so the client plays a **second** death.
+
+Released ids now get their own ledger and a longer window, and the real deadline is an **event**:
+the host's `EvDeath` says its copy has left its world, so it has stopped streaming the id, and the
+suppression is cleared there (and by a reliable `EvSpawn`, for an id the host re-used). The 30 s
+window is only the backstop for an `EvDeath` that never comes. The long window is for released
+deaths **only** — widening the flat one would leave a genuinely-missed spawn missing for thirty
+seconds, which is its own leg in the suite.
+
+**Review caught the first cut shipping 15 s**, which still ghosted the BrainBoss, and caught that
+piggybacking the flag on `recentlyRemoved`'s 512-deep ledger would let the boss's *own* opening
+purge evict its suppression. Both fixed. The constant is no longer defended by a census in a
+comment: each boss leg ticks its real choreography to completion and requires the **measured**
+duration to fit the window, so a future longer death fails there (the BrainBoss measures 20316 ms).
+
+Pinned by `NetDeathFxTest` section 9's GHOST legs — the same call at three clock readings (inside
+the flat window, past it, after the host's `EvDeath`), the `EvSpawn` clear on its own leg, and an
+ordinarily-removed id as the control. Mutation-tested five ways; reverting the fix reproduces the
+report in numbers (4 SpiderBosses in the world where there should be 3), and restoring the 15 s
+constant reddens the BrainBoss leg alone.
+
+_Further testing would be nice:_ verified over the in-process wire and the real component
+`Update`s, not a live two-machine session — multiplayer is not testable in this environment. The
+ledger's own 64-deep eviction cap has no leg (reaching it needs 64 concurrent deferred deaths) and
+degrades to the pre-card behaviour, which shipped.
 
 ## 7. `8732568e` — multiplayer games (on a joining peer side) seem to have a lot of loud explosion effect sounds. I suspect we get a big packet with a bunch of dead enemies and play the sound a couple of times in the same frame perhaps? I propose either adding a function to our audio engine to limit the nr of sounds played at exactly the same time (to one) or create special case code just for the explosion sfx.
 

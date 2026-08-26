@@ -100,9 +100,13 @@ namespace EvilAliensWeb.Compat.Net
         // at the branch.
         public long SnapNew;            // never-seen id: the self-heal BUILT it (stream outran the
                                         // reliable spawn) -- benign, tracks the world's spawn rate
-        public long SnapDead;           // removed HERE < RecentRemovalWindowMs ago: a death still
+        public long SnapDead;           // removed HERE recently enough that a death is still
                                         // settling -- benign, tracks the world's TOTAL removal rate
-                                        // (host EvDeaths included, NOT just our own clTx claims)
+                                        // (host EvDeaths included, NOT just our own clTx claims).
+                                        // RecentRemovalWindowMs for an ordinary removal; a puppet
+                                        // RELEASED to finish a deferred death holds the longer
+                                        // DyingReleaseWindowMs, so a boss death reads here for as
+                                        // long as the host streams it (card 444eb614)
         public long SnapBad;            // the rebuild was declined -- the one shape here that means
                                         // something is actually wrong. An unknown typeIdx (a
                                         // protocol/registry mismatch) re-counts on EVERY turn the

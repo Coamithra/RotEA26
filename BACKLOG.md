@@ -74,9 +74,36 @@ predicate from the rejected one.
 _Further testing would be nice:_ verified over the in-process wire, not a live two-machine
 session — multiplayer is not testable in this environment.
 
-## 4. `085ebddc` — we should probably reduce the max magnitude of screenshake by 50% (so a global reduction by 50% across the board)
+## 4. `085ebddc` — we should probably reduce the max magnitude of screenshake by 50% (so a global reduction by 50% across the board) — **DONE**
 
 _No description or comments — the card title is the whole ticket._
+
+**Done** (PR pending link). All three peak constants halved: `Juice.MaxOffsetDesignPx` 7 → 3.5,
+`MaxRollDegrees` 1 → 0.5, and the present blit's edge-covering zoom coefficient 0.06 → 0.03 — the
+last of which moved into `Juice.MaxBlitZoom` from a literal at the blit, so a future halving cannot
+take the offset and leave the swell behind. "Across the board" is what makes the zoom part of it:
+what a player calls screen shake is the offset, the roll and the swell together.
+
+New readback `eaShake.state()` / `eval ShakeState` reports the PEAK sampled since the last call.
+That is the only honest observable — the offset and roll are re-rolled from a uniform random every
+tick (so one frame is a sample, not a bound) and the effect is applied at the present blit, so it
+moves no gameplay state and a screenshot of it is a frame of a moving thing.
+
+Pinned by `tools/headless/probes/shake_peak.txt` (measured 3.15–3.34px / 0.44–0.48° / 0.0286 over
+ten runs of a sustained burst, against a 3.5 / 0.5 / 0.03 ceiling). Mutation-tested four ways, each
+reddening its own leg alone — including `Game1` dropping the zoom entirely, which an earlier
+version of the probe was blind to because it recomputed the zoom peak from the constant instead of
+reading what the blit drew.
+
+Review derived the letterbox-coverage condition properly: `Z >= A/300 + (4/3)·radians(R)` = 0.0235
+at the shipped values, so 0.03 is a **1.28× margin — the same factor the pre-card 7/1/0.06 had**.
+The halving preserves the shipped safety factor exactly, which is the real argument for it; my
+first comment claimed "~7× cover", which omitted the roll (half the budget) and would have licensed
+a later editor to drop the zoom alone and put black at the frame edge.
+
+_Further testing would be nice:_ the letterbox coverage is **derived and brute-forced, never
+observed in a real window** — worth one look at a non-4:3 browser window during a big explosion.
+The foreground-Chrome smoke check was also not possible here.
 
 ## 5. `c1cdd3e5` — On a joining client - while I was dead and respawning, the other players' ships (who respawned before me) did not appear on the playing field until mine did.
 

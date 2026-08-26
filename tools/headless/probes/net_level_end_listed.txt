@@ -25,10 +25,6 @@
 # GameScene.UpdateWin's 7 s choreography, and Level 2's whole post-level text crawl -- story
 # levels return through CreditsScene, so the menus are seconds behind the scene going down.
 #
-# WHY --nettime game: the wire's cadences have to track the stepped world rather than the wall
-# clock, or the 77 s of game time pass in a couple of real seconds and nothing on the session
-# side keeps up.
-#
 # THE EvLeave LEG IS THE DISCRIMINATOR. "The session survived" also passes on a build that merely
 # forgot to Stop() -- the joiner would still be ejected from its own side by the EvLeave. Its
 # positive control sits beside it (a listed host's PeerConnected sends the joiner an EvLaunch, so
@@ -40,14 +36,24 @@
 # keeps ReleaseDepartedPeer's tail from throwing this host to the main menu with "The other
 # player left / Match ended" the moment the joiner disconnects from the lobby.
 #
+# THE ROOM-CODE LEG stops one step short of the panel, deliberately. A listed session never
+# passed through NetLobby, so `NetLobby.RoomCode` is "" and the converted host's lobby panel used
+# to print "Room code:" with nothing after it; MenuScene.HostLobbyPanelText now prefers
+# NetSession.SessionRoomCode, and this asserts that source is live. The PANEL itself cannot be
+# asserted here -- putting it up adds a second live MenuSub1 and the census legs are shared with
+# the menu-session arms -- so to see it, swap the last eval for `eval NetLobbyShow 3` and expect
+# `Room code:  levelend`.
+#
 # DESTRUCTIVE: it drives the live level to its end. Boot it throwaway.
 #
-# MUTATION-TESTED: reverting the guard to `endedCleanly && menuSession` fails 6 of the 13 legs --
-# the session, the peer, the EvLeave discriminator, the conversion and both menu-census legs --
-# and drops `eval MenuNetState` to netMode=False. The two positive controls and the teardown legs
-# stay green on that build, which is what makes the failures mean something.
+# MUTATION-TESTED: reverting the guard to `endedCleanly && menuSession` stops the run AT the
+# `eval MenuNetState` line (netMode=False), so the check phase is never reached. Drop that expect
+# and the check itself fails 7 of its 14 legs -- the session, the peer, the EvLeave
+# discriminator, the conversion, the room code and both menu-census legs. The two positive
+# controls and the teardown legs stay green on that build, which is what makes the failures mean
+# something.
 #
-# eahl: --flags "?level=Level2&invuln&noattract&win&seed=1234" --nettime game
+# eahl: --flags "?level=Level2&invuln&noattract&win&seed=1234"
 
 step 200 nodraw
 mark
@@ -63,6 +69,6 @@ expect \[menunetstate\] netMode=True
 
 eval NetLevelEndMenu
 
-expect \[netlevelendmenu\] 13 passed, 0 failed
+expect \[netlevelendmenu\] 14 passed, 0 failed
 expect-not FAIL
 quit

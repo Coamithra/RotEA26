@@ -107,6 +107,7 @@ namespace EvilAliensWeb.Compat.Net
             NetHost.Current = new PinnedNetHost();
             armed = true;
             armedHost = false;
+            armedListed = false;
             armedDefeat = false;
             try
             {
@@ -200,6 +201,7 @@ namespace EvilAliensWeb.Compat.Net
             NetHost.Current = new PinnedNetHost();
             armed = true;
             armedHost = true;
+            armedListed = false;
             armedDefeat = false;
             try
             {
@@ -244,7 +246,7 @@ namespace EvilAliensWeb.Compat.Net
         public static string ArmListed()
         {
             StringBuilder sb = new StringBuilder();
-            sb.Append("[netlevelendjip] phase 1 -- arm (listed / join-in-progress host)"
+            sb.Append("[netlevelend] phase 1'''' -- arm (listed / join-in-progress host)"
                 + " (card 51566427)\n");
 
             if (armed)
@@ -349,6 +351,7 @@ namespace EvilAliensWeb.Compat.Net
             NetHost.Current = new PinnedNetHost();
             armed = true;
             armedHost = false;
+            armedListed = false;
             armedDefeat = true;
             try
             {
@@ -435,6 +438,7 @@ namespace EvilAliensWeb.Compat.Net
             NetHost.Current = new PinnedNetHost();
             armed = true;
             armedHost = true;
+            armedListed = false;
             armedDefeat = true;
             try
             {
@@ -551,6 +555,16 @@ namespace EvilAliensWeb.Compat.Net
                         + (NetSession.IsMenuSession ? "yes" : "NO") + " listed="
                         + (NetSession.IsListedSession ? "STILL" : "no") + ")",
                         NetSession.IsMenuSession && !NetSession.IsListedSession);
+                    // The lobby PANEL's room code comes off the live session here, not off
+                    // NetLobby: a listed session never passed through NetLobby, so its RoomCode
+                    // is "" and the panel used to print "Room code:" with nothing after it.
+                    // MenuScene.HostLobbyPanelText prefers this; the panel itself cannot be
+                    // asserted from inside this check, because putting it up adds a second live
+                    // MenuSub1 and the census legs below are shared with the menu-session arms.
+                    // One line to see it: `eval NetLobbyShow 3` in place of this whole check.
+                    Check1("...and the lobby panel has a room code to print (SessionRoomCode="
+                        + (NetSession.SessionRoomCode == "" ? "EMPTY" : NetSession.SessionRoomCode)
+                        + ")", NetSession.SessionRoomCode != "");
                 }
 
                 List<MenuSub1> live = ServiceHelper.Get<IComponentBinService>()
@@ -677,6 +691,7 @@ namespace EvilAliensWeb.Compat.Net
                 peer = null;
                 armed = false;
                 armedDefeat = false;
+                armedListed = false;
             }
 
             sb.Append(TallyLost(pass, fail));
@@ -764,6 +779,7 @@ namespace EvilAliensWeb.Compat.Net
                 peer = null;
                 armed = false;
                 armedDefeat = false;
+                armedListed = false;
             }
 
             sb.Append(Tally(pass, fail));

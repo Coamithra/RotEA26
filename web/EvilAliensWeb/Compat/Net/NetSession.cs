@@ -1703,9 +1703,11 @@ namespace EvilAliensWeb.Compat.Net
         // collide with the next level's ids.
         //
         // DELIBERATELY KEPT, because they describe the PAIRING rather than the match: the
-        // transport, PeerUp/menuSession, the peer identity and block list, the roster grants
-        // (the same two peers keep their seats), the monotone tx/rx event sequences, and
-        // pendingLaunch* (the host may already have picked the next level).
+        // transport, PeerUp and the session KIND, the peer identity and block list, the roster
+        // grants (the same two peers keep their seats), the monotone tx/rx event sequences, and
+        // pendingLaunch* (the host may already have picked the next level). The kind is kept
+        // rather than fixed: this helper's clean-level-end caller converts a listedSession into a
+        // menuSession immediately after calling it (card 51566427 -- see the branch above).
         //
         // A URL `?net=` SESSION IS THE ONE OTHER SHAPE THAT OUTLIVES A LEVEL, and it deliberately
         // does NOT come through here -- the scene-down branch below only reaches menu/listed

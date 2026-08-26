@@ -1888,12 +1888,53 @@ uses `Enabled=false`, not a pause layer -- so they still play here while a `shot
     like the seamless continuation of the previous skull's, and an analysis segmenting volleys by
     shot index alone reported the BROKEN build as clean during this card. That is why the rearm
     line exists. Pinned by `tools/headless/probes/evilskull_volley.txt` (both legs mutation-tested).
-- **The space mine (`StarMine.cs`) locks onto a LIVE ship, and only a live one (card 745728f9) --
-  but this is HARDENING and the card's report is NOT explained by it.** Reported as *"space mines
-  (lvl 3, aka death stars) seem to also explode when they reach a dead player's location"*.
-  `StarMine` is Level 3's mine; `DeathStar` is `ClassicSpawner`'s, and the two share the
-  `deathstarsheet2` sprite, which is where "aka death stars" comes from.
-  - **READ THIS BEFORE RE-INVESTIGATING. The window the `IsDead` guards close is ONE TICK, not the
+- **The space mine (`StarMine.cs`): the card-745728f9 report is CLOSED AS NOT REPRODUCIBLE, and
+  the code structurally cannot produce it. Do not re-open it without new evidence.** Reported as
+  *"space mines (lvl 3, aka death stars) seem to also explode when they reach a dead player's
+  location"*. `StarMine` is Level 3's mine; `DeathStar` is `ClassicSpawner`'s, and the two share
+  the `deathstarsheet2` sprite, which is where "aka death stars" comes from. **The owner's
+  ruling on the evidence below was to change nothing** ("I suspect another fix may have cured
+  this one also"), so what shipped is the INSTRUMENT and this write-up, not a behaviour change.
+  - **THE STRUCTURAL ARGUMENT, which is the durable half.** `Asplode()` has exactly THREE call
+    sites, and each anchors the detonation to a live player:
+    (a) `timer.Finished` inside `attracted_to_player` -- reached only with a `target` that is
+    non-null, `!IsDead`, in `GetShips()` AND inside `releaseRange` (`acquireRange * 1.08`, so
+    ~270 px at the default difficulty factor), all four re-tested every tick;
+    (b) a collision with an `Explosion` -- and an `Explosion` only sets `Collides` while its
+    `collisiontimer` runs, which ONLY `MakeBlue()` starts, whose whole caller set is
+    `StarMine.Asplode`, `WebcamMine.Asplode` (a different level) and `CastDisplayer` (the end
+    credits). So a chain is recursively grounded in (a) or (c);
+    (c) `NetReplayUnattributedDeath` -- a peer mirroring the host's own (a)/(b).
+    **So every StarMine detonation in the game is rooted in a mine going off within ~270 px of
+    a LIVE ship.** Measured median live-ship distance at detonation: **151 px** (n=250).
+    A mine "exploding at a dead player's location" therefore requires a live ship AT that
+    location -- which is what makes the report a co-op observation rather than a mine defect:
+    in co-op the survivor is usually near where their partner just died.
+  - **THE STATED BLOCKER IS GONE, and it did not help.** The card said the symptom needed two
+    machines because "in single player a death wipes the world, mines included". That is a
+    statement about the WIPE, not about the wire: **`?aifriends=1` gives an offline co-op world**
+    where a death is survived by the AI partner and nothing is purged. Four rigs were run --
+    that one, a scripted-kill loop (`eval KillShip 0`), Level 3's own dense `StarMineSpawner`
+    sections, and a REAL two-process host+joiner session (`?net=jiphost` / `?net=jipjoin`, the
+    `net_jip_sync.py` shape) with genuine deaths and respawns on both ends. Result:
+    detonations land within 60 px of a recorded death spot **3.6% of the time against a 2.4%
+    uniform-chance baseline** (pi*60^2 / 800x600), median distance ~240 px, and the rate is
+    FLAT across the 0-4 s / 4-10 s / >10 s windows after a death. There is no clustering.
+  - **THE ONE PATH THAT PUTS A LIVE SHIP ON A CORPSE IS THE RESPAWN, and it was measured**:
+    `PlayerShip_OnDeath` raises the summon at `base.Position` and `PlayerShipSummon`'s pop calls
+    `Setup(player, base.Position, ...)`, so a co-op respawn puts the ship back EXACTLY where it
+    died (single player never sees this -- the wipe gets there first). It is still not the
+    report: **0 of 52** detonations in the 10-18 s respawn window landed within 60 px, the
+    LOWEST rate of any window, because the respawned ship is flying again long before any
+    mine's 1800 ms clock finishes.
+  - **FALSE POSITIVE TO RECOGNISE, because it cost this card a wrong answer.** "A mine detonated
+    25 px from where slot 0 died, 1.7 s later" looks decisive and is not: the rig had slot 0 as
+    a STATIONARY keyboard ship parked mid-screen where the AI partner hovers, so the mine was
+    detonating on the LIVE partner. That is why the `[mine] boom` line carries `live=` beside
+    `deathspot=` -- the distance to the corpse alone cannot tell "the survivor was standing on
+    their partner's body" from "the mine went off with nobody there", and those need opposite
+    conclusions. Any future look at this must read both fields.
+  - **The `IsDead` guards are HARDENING, and the window they close is ONE TICK, not the
     1800 ms detonation clock.** `StarMine` has always been an `IComponentWatcher`, and its
     `OnComponentRemoved` nulls `target`; `Oracle` drops the ship out of `GetShips()` off the same
     `ComponentRemoved` event. `PlayerShip.Asplode` -> `Die()` queues the removal and the next
@@ -1901,7 +1942,9 @@ uses `Enabled=false`, not a pause layer -- so they still play here while a `shot
     target go. **Measured in a real flushed world: `target` is null before the mine's next `Update`
     runs at all, with every `IsDead` clause removed** (`MineTargetTest` section 3b, which asserts
     exactly that and is designed to pass with the guards deleted).
-  - **Two hypotheses REFUTED with evidence -- do not re-run them.** (a) The mine flying to a corpse
+  - **FIVE hypotheses REFUTED with evidence -- do not re-run any of them.** The three above (the
+    structural argument, the four rigs, the respawn window) plus these two from the previous
+    session. (a) The mine flying to a corpse
     and detonating there on the 1800 ms clock: refuted above. (b) Chain-detonation on the player's
     own death explosions -- `StarMine.CollidesWith` does `Asplode()` on any `Explosion`, but an
     `Explosion` only sets `Collides` while its `collisiontimer` runs and **only `MakeBlue()` starts
@@ -1932,11 +1975,31 @@ uses `Enabled=false`, not a pause layer -- so they still play here while a `shot
     EXPLOSION COUNT rather than on `IsDead`: a freed mine re-attaches to the background scroll and
     can legitimately fly off screen and `Die()` on `OffScreen(100f)`, which is a mine leaving, not
     a mine exploding. `Asplode` spawns exactly two blue `Explosion`s and the fly-off spawns none.
-  - **The card's FIRST half is still open.** The second half (the joining client's missing homing
-    cue) is fixed and verified; what actually detonates a mine at a dead player's spot is not known,
-    and the two leading candidates are refuted above. The next look wants a live two-machine co-op
-    session -- the report is a co-op one, and in single player a death WIPES the world, mines
-    included, so the symptom cannot be reproduced there at all.
+  - **`?minelog` IS THE INSTRUMENT, and it is what a future look starts from** rather than
+    re-deriving any of the above. It prints a `[mine]` line for every acquire, release and death:
+    an acquire names its target, a release and a death carry `reason=`, and a detonation carries
+    `reason=` plus `live=` as well --
+    `[mine] boom id=9 at=506,374 reason=timer state=attracted_to_player target=slot1 lockMs=1817`
+    `clock=- live=129.7 t=182450 deathspot=slot1 d=59.5 ago=15.03`. `reason=` separates the
+    1800 ms clock from a neighbour's blue blast from a peer's replay -- three events that produce
+    the identical pair of explosions. `live=` and `deathspot=` are the pair from the
+    false-positive bullet above; `target=`/`lockMs=` read `none`/`-` unless the mine is ACTUALLY
+    locked at that instant, because neither field is cleared by a release-by-RANGE and a stale
+    one would be that same false positive a second time. Distances to the death spot are `d=`
+    and every other distance is `targetD=`, so a grep can anchor on either. `[mine] shipdied
+    slot=<n> at=<x,y>` marks each recorded death.
+    - **The death-spot registry is `Compat/MineLog`, NOT `Oracle`, and that is load-bearing.**
+      `Oracle` keeps a per-slot cached position, but it is written by a LIVE ship's `Update`, so
+      it holds a death spot only until that slot respawns -- and the respawn is the interesting
+      moment (see the bullet above). An earlier cut of this read `Oracle` and was blind to exactly
+      the window the report describes. It is fed from `PlayerShip.Asplode`, `AsplodeWall` and
+      `NetSession.ExplodePuppet` -- that third one because a puppet leaves the world WITHOUT
+      `Die()`, so neither of the other two sees a peer's death -- and cleared per level in
+      `GameScene.Initialize`.
+    - Out of `DebugFlags.Active` (the `?skullvolley` class: it changes no state, no position, no
+      score and no packet). Pinned by the pair `tools/headless/probes/starmine_minelog.txt` +
+      `starmine_minelog_absent.txt`, mutation-tested four ways; read them as ONE probe, since the
+      hard-wired-on mutant is caught only by the absent file.
   - The netplay half -- the lock-on cue reaching a joining client as `NetFxKind.MineTargetAcquired`
     -- is in [`Compat/Net/CLAUDE.md`](Compat/Net/CLAUDE.md).
 - **Flying spider (Level 2):** reuses the HD reared-up sheet, so `FlyingSpider.SizeFactor`

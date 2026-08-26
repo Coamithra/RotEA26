@@ -37,6 +37,21 @@ public class StarMine : KillableAlien
 
 	private CollisionSimpleCircle c = new CollisionSimpleCircle(Vector2.Zero, 1f);
 
+	// ?minelog identity. A `[mine]` line is only useful if the acquire, the release and the death
+	// can be tied to ONE mine -- Level 3 runs nine spawners and a lock is a per-mine decision.
+	// Assigned per LIFE (in Initialize), so a pooled instance coming back out reads as a new mine
+	// rather than silently continuing the previous one's story -- the same trap `target` and
+	// `EvilSkull.bulletsfired` fell into.
+	private static int nextLogId;
+
+	private int logId;
+
+	// Game-time ms since this mine acquired its current target, for the `[mine] boom` line's
+	// `lockMs=`. The detonation clock is 1800 ms, so this is what separates 'went off ON its own
+	// clock' from 'was set off early by something else' -- two events that are otherwise the same
+	// pair of blue explosions.
+	private float lockedMs;
+
 	public override ICollisionType CollisionType
 	{
 		get
@@ -147,6 +162,133 @@ public class StarMine : KillableAlien
 		target = null;
 		hitpointsattached = 3;
 		prevposition = base.Position;
+		logId = ++nextLogId;
+		lockedMs = 0f;
+	}
+
+	// Distance to the nearest LIVE player ship, or 'none' for a shipless world. `IsDead` rather
+	// than list membership, for the same reason the acquire loop uses it: `GetShips()` only drops
+	// a corpse at the removal FLUSH, so on the tick a ship dies it is still in the list.
+	private string NearestLiveShip()
+	{
+		float best = float.MaxValue;
+		foreach (PlayerShip s in oracle.GetShips())
+		{
+			if (s.IsDead)
+			{
+				continue;
+			}
+			float d = (s.Position - base.Position).Length();
+			if (d < best)
+			{
+				best = d;
+			}
+		}
+		return (best == float.MaxValue) ? "none" : best.ToString("0.0");
+	}
+
+	// ---- ?minelog (card 745728f9) --------------------------------------------------------------
+	//
+	// A mine's whole decision surface is invisible: a locked mine and a free one draw the same
+	// sprite, and a mine that reached the end of its 1800 ms clock and one set off by a
+	// neighbour's blast produce the identical pair of blue explosions. So the acquire, every
+	// release and every death report themselves here, with the REASON.
+	//
+	// Every line also carries the nearest recorded player DEATH SPOT and its age, because that is
+	// the correlation the card is about -- *'space mines seem to also explode when they reach a
+	// dead player's location'*. The registry lives in `Compat/MineLog` rather than being read off
+	// `Oracle`'s per-slot cached position: that one is overwritten the moment the slot respawns,
+	// and `PlayerShipSummon` puts the new ship back exactly where the old one died, so an
+	// instrument reading it is blind to the very window the report describes.
+	//
+	// **EVERYTHING IS BUILT INSIDE THE GUARD**, which is the `EvilSkull.ReportVolleyShot`
+	// convention (card d8344c17) and not a style preference: these run from `Update` for every
+	// live mine, and `NearestLiveShip` scans every ship. A shipped build must not concatenate a
+	// string, or walk that list, for a flag that is off. So each reporter takes only cheap
+	// arguments and does its own formatting.
+	//
+	// EVERY KEY IS UNIQUE ON A LINE, so a grep can anchor on one: the distance to the TARGET is
+	// `targetD=` and only the death-spot's is `d=`. They were both `d=` first, which reads fine
+	// and greps terribly.
+	private string MineLogTail()
+	{
+		return $" t={EvilAliensWeb.Compat.WorldTime.Seconds * 1000f:F0}"
+			+ EvilAliensWeb.Compat.MineLog.NearestDeathSpot(base.Position);
+	}
+
+	private void ReportAcquire()
+	{
+		if (EvilAliensWeb.Compat.MineLog.On)
+		{
+			Console.WriteLine($"[mine] acquire id={logId}"
+				+ $" at={EvilAliensWeb.Compat.MineLog.Fmt(base.Position)}"
+				+ $" target=slot{target.Owner}"
+				+ $" targetAt={EvilAliensWeb.Compat.MineLog.Fmt(target.Position)}"
+				+ $" targetD={(target.Position - base.Position).Length():F1}"
+				+ MineLogTail());
+		}
+	}
+
+	// Called BEFORE `target` is cleared, so it can still name what was let go. `IsDead` bails
+	// because `Asplode` does not `break` out of the `attracted_to_player` case: after a
+	// detonation this tick's remaining range test still runs, and a corpse reporting that it
+	// released its target reads as a second event that never happened.
+	private void ReportRelease(string reason)
+	{
+		if (EvilAliensWeb.Compat.MineLog.On && !base.IsDead)
+		{
+			Console.WriteLine($"[mine] release id={logId}"
+				+ $" at={EvilAliensWeb.Compat.MineLog.Fmt(base.Position)}"
+				+ $" reason={reason} lockMs={lockedMs:F0}"
+				+ $" targetD={((target == null) ? "-" : ((target.Position - base.Position).Length()).ToString("F1"))}"
+				+ MineLogTail());
+		}
+	}
+
+	// A quiet death -- shot, wall, off the bottom of the screen. Same `IsDead` bail as
+	// `ReportRelease`, and for the same tick: `OffScreen` is tested after `Asplode` could
+	// already have run.
+	private void ReportDie(string reason)
+	{
+		if (EvilAliensWeb.Compat.MineLog.On && !base.IsDead)
+		{
+			Console.WriteLine($"[mine] die id={logId}"
+				+ $" at={EvilAliensWeb.Compat.MineLog.Fmt(base.Position)}"
+				+ $" reason={reason} state={state}"
+				+ MineLogTail());
+		}
+	}
+
+	// `target=` and `lockMs=` are reported as `none`/`-` unless the mine is ACTUALLY locked,
+	// and that is the finding this instrument exists to avoid making itself. Neither field is
+	// cleared when a lock ends by RANGE (`target` is deliberately kept so the release test can
+	// re-read it, and `lockedMs` is only rezeroed at the next acquire), so a mine set off later
+	// by a neighbour's blast would otherwise print `state=free target=slot1 lockMs=1817` --
+	// naming a ship it stopped homing on and a lock that had already ended. Those are the two
+	// fields the card's whole analysis leans on, so a stale reading is exactly the false
+	// positive `live=` was added to prevent.
+	private void ReportBoom(string reason)
+	{
+		if (EvilAliensWeb.Compat.MineLog.On)
+		{
+			bool locked = state == MineState.attracted_to_player && target != null;
+			// `live=` is the field that makes `deathspot=` READABLE, and it was added because
+			// without it the first measurement of this card was a false positive. A mine can
+			// only ever detonate on its own clock while it is pulling toward a LIVE ship, so a
+			// detonation 'at a dead player's location' decomposes into two very different
+			// events: the survivor was standing on their partner's corpse (live= small --
+			// ordinary homing, and the normal case in co-op, where players fly together), or the
+			// mine went off with no live ship anywhere near it (live= large -- the report).
+			// Reporting only the distance to the corpse cannot tell them apart.
+			Console.WriteLine($"[mine] boom id={logId}"
+				+ $" at={EvilAliensWeb.Compat.MineLog.Fmt(base.Position)}"
+				+ $" reason={reason} state={state}"
+				+ $" target={(locked ? ("slot" + target.Owner) : "none")}"
+				+ $" lockMs={(locked ? lockedMs.ToString("F0") : "-")}"
+				+ $" clock={(timer.Active ? timer.TimeElapsed.ToString("F0") : "-")}"
+				+ $" live={NearestLiveShip()}"
+				+ MineLogTail());
+		}
 	}
 
 	public override void Draw(GameTime gameTime)
@@ -205,6 +347,8 @@ public class StarMine : KillableAlien
 				timer.Duration = 1800f;
 				timer.Reset();
 				timer.Start();
+				lockedMs = 0f;
+				ReportAcquire();
 			}
 			break;
 		}
@@ -249,11 +393,14 @@ public class StarMine : KillableAlien
 			// coasts through the death spot (200px out -> 5px at t=58 ticks) without detonating.
 			if (target == null || target.IsDead || !oracle.GetShips().Contains(target))
 			{
+				ReportRelease((target == null) ? "targetnull"
+					: (target.IsDead ? "targetdead" : "targetgone"));
 				target = null;
 				state = MineState.free;
 				connectToBackground();
 				break;
 			}
+			lockedMs += (float)gameTime.ElapsedGameTime.TotalMilliseconds;
 			float releaseRange = acquireRange + acquireRange * 0.08f;
 			Vector2 pull = target.Position - base.Position;
 			if ((pull).LengthSquared() > 0.25f)
@@ -264,11 +411,12 @@ public class StarMine : KillableAlien
 			base.SpeedVector += pull * (float)gameTime.ElapsedGameTime.TotalMilliseconds;
 			if (timer.Finished)
 			{
-				Asplode();
+				Asplode("timer");
 			}
 			Vector2 toTarget = target.Position - base.Position;
 			if ((toTarget).LengthSquared() >= releaseRange * releaseRange)
 			{
+				ReportRelease("range");
 				state = MineState.free;
 				connectToBackground();
 			}
@@ -301,14 +449,19 @@ public class StarMine : KillableAlien
 		}
 		if (OffScreen(100f))
 		{
+			ReportDie("offscreen");
 			Die();
 		}
 	}
 
-	private void Asplode()
+	// `why` is for the `?minelog` line only -- the three call sites are the 1800 ms clock, a
+	// neighbour's blue blast, and a peer replaying the host's self-destruct, and no frame,
+	// counter or explosion tells them apart.
+	private void Asplode(string why)
 	{
 		if (!base.IsDead)
 		{
+			ReportBoom(why);
 			// Online co-op (card 4e406eba): a mine detonating on its own timer, or set off by a
 			// neighbour's blast, is a real death with NO killing blow -- so KillableAlien.HitBy
 			// never runs and the removal seam had nothing to attribute. Without this note the
@@ -409,6 +562,7 @@ public class StarMine : KillableAlien
 			base.Position = prevposition;
 			if (DetectCollision(other))
 			{
+				ReportDie("wall");
 				Die();
 			}
 		}
@@ -441,7 +595,7 @@ public class StarMine : KillableAlien
 		}
 		if (state != MineState.attracted_to_boss && other is Explosion)
 		{
-			Asplode();
+			Asplode("explosion");
 		}
 		if (state != MineState.attracted_to_boss || (!(other is StarMine) && !(other is JunkBoss)))
 		{
@@ -488,6 +642,7 @@ public class StarMine : KillableAlien
 		explosion.Setup(base.Position, 1f, 1f, 0f, 0f);
 		collection.Add((GameComponent)(object)explosion);
 		sound.PlayCue("expl1");
+		ReportDie("shot");
 		Die();
 	}
 
@@ -497,7 +652,7 @@ public class StarMine : KillableAlien
 	// call on a puppet and removes it itself.
 	internal override void NetReplayUnattributedDeath(ICollidable agent)
 	{
-		Asplode();
+		Asplode("netreplay");
 	}
 
 	internal void AttractByBoss(JunkBoss junkBoss)
@@ -507,6 +662,14 @@ public class StarMine : KillableAlien
 			if (boss == null)
 			{
 				junkBoss.AddChild();
+			}
+			// ?minelog: the boss capture ENDS a player lock without going through the release
+			// test, so without this the trace shows an acquire with no matching release. It
+			// reports only -- `target` and `lockedMs` are deliberately left alone, exactly as
+			// before, and `ReportBoom` reads them as `none`/`-` from this state anyway.
+			if (state == MineState.attracted_to_player)
+			{
+				ReportRelease("boss");
 			}
 			state = MineState.attracted_to_boss;
 			boss = junkBoss;

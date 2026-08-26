@@ -1407,10 +1407,13 @@ Four pieces, none changing what replicates -- only how well the star holds up at
     joiner hears nothing, which is the reported symptom exactly. Headlessly there is no mixer, so
     the only thing observable about a cue is that it was REQUESTED -- card 8732568e's per-cue
     counters are what make that readable at all.
-  - **THIS CUE IS THE HALF OF CARD 745728f9 THAT IS ACTUALLY FIXED.** The card's other half
-    ("mines explode at a dead player's location") is offline, is NOT closed, and its `IsDead`
-    guards turned out to be one-tick hardening rather than the fix -- web CLAUDE.md has the
-    measurement and the two refuted hypotheses. Do not read this section as evidence for it.
+  - **THIS CUE IS THE HALF OF CARD 745728f9 THAT WAS A DEFECT.** The card's other half
+    ("mines explode at a dead player's location") is CLOSED AS NOT REPRODUCIBLE, and its `IsDead`
+    guards turned out to be one-tick hardening rather than a fix. Five hypotheses are refuted
+    there with measurements, INCLUDING over a real two-process host+joiner session, and the
+    structural argument is that every mine detonation is anchored within ~270 px of a LIVE ship.
+    web CLAUDE.md has all of it plus `?minelog`, the instrument. Do not read this section as
+    evidence either way, and do not re-open that half from the net side without new evidence.
   - **KNOWN LIMIT, pre-existing and NOT introduced by these cards: a client's `Ball` keeps its own
     hp.** It can therefore detach on its own schedule, and in principle twice. The beats are
     idempotent against that (whichever lands first latches), but the two peers' chip COUNTS still

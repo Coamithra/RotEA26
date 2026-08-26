@@ -166,9 +166,12 @@ public class StarMine : KillableAlien
 			foreach (PlayerShip ship in oracle.GetShips())
 			{
 				// A DEAD ship is not a target (card 745728f9). `GetShips()` is updated at the
-				// ComponentBin's removal FLUSH, not at Die(), so a ship that died this tick is
-				// still in it with IsDead already true -- and locking onto one is how a mine ended
-				// up flying to a corpse's last position and detonating there.
+				// ComponentBin's removal FLUSH, not at Die(), so for the rest of the tick in which
+				// a ship died it is still in this list with `IsDead` already true -- "in the list"
+				// is not "alive". THAT ONE TICK is the whole window this guard closes: from the
+				// flush onward `OnComponentRemoved` (below) has already dropped the corpse out of
+				// `GetShips()` by itself. See the `attracted_to_player` branch for the measurement,
+				// and for what the card's report is still NOT explained by.
 				if (ship.IsDead)
 				{
 					continue;
@@ -207,22 +210,43 @@ public class StarMine : KillableAlien
 		}
 		case MineState.attracted_to_player:
 		{
-			// THE LOCK IS ON A LIVE SHIP, and losing it is the whole of card 745728f9's first
-			// half: *"space mines (lvl 3, aka death stars) seem to also explode when they reach a
-			// dead player's location"*. `target` was only ever cleared by the release-RANGE test,
-			// and nothing set it to null when the ship died -- so the mine kept pulling toward a
-			// corpse's frozen Position and, 1800 ms after the acquire, Asplode()d there.
+			// THE LOCK IS ON A LIVE SHIP (card 745728f9).
 			//
-			// Worse, `PlayerShip` is POOLED: a dead target's instance can be handed back out by
-			// `Recycle<PlayerShip>` for a respawn, at which point the mine is silently homing on a
-			// live ship it never acquired, on somebody else's timer. Testing `IsDead` closes that
-			// too, because the death is visible for at least one tick before the recycle.
+			// **THIS IS HARDENING, NOT THE CARD'S REPORTED BUG -- do not read it as the fix for
+			// "space mines seem to also explode when they reach a dead player's location".** An
+			// earlier cut of this change claimed `target` was only ever cleared by the release-
+			// RANGE test, so a mine flew to a corpse and detonated there 1800 ms later. That is
+			// FALSE, and `OnComponentRemoved` (above) is why: `PlayerShip.Asplode` -> `Die()`
+			// queues `collection.Remove(this)`, and the flush fires `ComponentRemoved`, which
+			// this class already watched -- it nulls `target`, and drops the ship out of
+			// `Oracle.GetShips()` off the same event. MEASURED in a real flushed world: the
+			// target is null before the mine's next Update runs at all, with every guard on this
+			// line removed. So the pre-card window was ONE TICK (~17 ms), never 1800 ms.
+			//
+			// What this line is still worth: that one tick is real (a mine CAN acquire or hold a
+			// corpse between `Die()` and the flush), and `PlayerShip` is POOLED -- a dead target's
+			// instance can be handed back out by `Recycle<PlayerShip>` for a respawn, at which
+			// point a mine that kept the reference would be homing on a live ship it never
+			// acquired, on somebody else's timer. `IsDead` closes both.
+			//
+			// The third clause is belt-and-braces, NOT the load-bearing test: a ship leaves
+			// `GetShips()` and gets nulled here off the same event, so `target` is already null by
+			// the time the scan could miss it. It is kept because the two lists are maintained by
+			// two independent handlers and a future reordering of them is exactly the kind of
+			// change nobody would think to re-verify here.
 			//
 			// Going back to `free` rather than just dropping the pull is deliberate: `free` does
 			// not consult `timer`, so a mine whose target dies cannot detonate on the old clock,
-			// and a re-acquire Resets it. It also has to be within `acquireRange` of someone to
-			// re-acquire at all, which is the behaviour the report asks for -- the mine loses
-			// its lock.
+			// and a re-acquire Resets it.
+			//
+			// STILL UNEXPLAINED, and the card's first half is NOT closed by any of this: what
+			// actually detonates a mine at a dead player's spot. Refuted so far, with evidence --
+			// (a) the 1800 ms flight to a corpse, above; (b) chain-detonation on the player's own
+			// death explosions: `CollidesWith` does `Asplode()` on any `Explosion`, but an
+			// `Explosion` only sets `Collides` while its `collisiontimer` runs and ONLY
+			// `MakeBlue()` starts it -- `PlayerShip.Asplode`'s two explosions are never made blue,
+			// so they are inert. Measured alongside: a freed mine keeps its inward SpeedVector and
+			// coasts through the death spot (200px out -> 5px at t=58 ticks) without detonating.
 			if (target == null || target.IsDead || !oracle.GetShips().Contains(target))
 			{
 				target = null;
@@ -342,15 +366,6 @@ public class StarMine : KillableAlien
 
 	internal bool NetDetonationClockRunning => state == MineState.attracted_to_player && timer.Active;
 
-	// Drive one acquire/steer tick with no scene attached -- the isolation-sim pattern. The suite
-	// ticks the MINE and nothing else, so the level's own state machine cannot advance underneath
-	// it (a real player death would otherwise wipe the world a tick later and take the mine with
-	// it, destroying the very observation).
-	internal void NetTickForTest(GameTime gameTime)
-	{
-		Update(gameTime);
-	}
-
 	// Park a mine at an exact point, at rest and off the background scroll. The production entries
 	// cannot: `Setup()` drops it at a RANDOM x above the screen (the spawner's own entry) and
 	// `SetupLaunch` gives it `MaxSpeed`, which over the 1800 ms detonation clock carries it ~324 px
@@ -369,6 +384,10 @@ public class StarMine : KillableAlien
 	private void Fire()
 	{
 		float holdFireRange = 200f / Settings.GetInstance().DifficultyFactorized(0.4f);
+		// DELIBERATELY NOT `IsDead`-filtered, unlike the acquire loop in Update (card 745728f9).
+		// This is a hold-fire test, so counting the one tick's corpse errs toward NOT shooting --
+		// the safe direction, and 2008 behaviour. Skipping corpses here would make a mine start
+		// firing next to a body, which is a new behaviour nobody asked for.
 		foreach (PlayerShip ship in oracle.GetShips())
 		{
 			Vector2 toShip = ship.Position - base.Position;

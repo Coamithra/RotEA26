@@ -1568,9 +1568,14 @@ namespace EvilAliensWeb.Compat.Net
     //
     // Every kind here is DRAW/AUDIO ONLY on the receiving peer: nothing an EvFx applies may
     // damage, kill, award, spawn a replicable entity or move gameplay state, or the two worlds
-    // diverge. They are also all IDEMPOTENT against the client's own local simulation -- a client
-    // hit-tests puppets with its own bullets, so it may already have run the same feedback, and
-    // each apply no-ops when the effect it would start is already running.
+    // diverge.
+    //
+    // IDEMPOTENCE IS PER KIND, not a property of the family. It is REQUIRED of any kind whose
+    // effect the client can also start for itself -- a client hit-tests puppets with its own
+    // bullets, so `EnemyHitFlash` and `BallDetach` must no-op when the effect they would start is
+    // already running, and they gate on `hittimer.Active` / `netDetached` to do it. A kind the
+    // client can never raise locally carries no such gate: `MineTargetAcquired` restarts its cue
+    // unconditionally, because a puppet mine is FROZEN and its own Update can never play one.
     public enum NetFxKind : byte
     {
         // The host landed a hit on the entity `netId`: light it up (and play its own per-type hit

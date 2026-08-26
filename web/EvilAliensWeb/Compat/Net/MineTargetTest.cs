@@ -23,21 +23,34 @@ namespace EvilAliensWeb.Compat.Net
     // is no mixer at all, so the only thing that can be observed is the REQUEST, which is exactly
     // what card 8732568e's per-cue counters make readable.
     //
-    // FOUR SECTIONS:
+    // **WHAT THIS SUITE DOES AND DOES NOT PIN.** The `IsDead` guards it covers are HARDENING of a
+    // ONE-TICK window, not the fix for the report. Section 3b measures why: `StarMine` already
+    // watched `ComponentRemoved` and nulled `target` there, so from the removal FLUSH onward the
+    // pre-card build dropped a dead target by itself. The card's first half is still OPEN, and the
+    // hypotheses this suite has REFUTED are recorded in `StarMine.Update`'s `attracted_to_player`
+    // comment so nobody re-runs them.
+    //
+    // SIX SECTIONS:
     //   1. THE LOCK, and the POSITIVE CONTROL first: a mine parked on a LIVE ship acquires it and
     //      detonates on schedule. Without that leg every assertion below passes on a mine that
     //      simply stopped working.
-    //   2. THE DEFECT: the target dies, and the mine must lose its lock rather than fly to the
-    //      corpse and detonate there.
+    //   2. THE SAME-TICK WINDOW: the target dies and the world has NOT flushed yet, which is the
+    //      only moment the guards are load-bearing -- the mine must drop the lock anyway.
     //   3. THE ACQUIRE LOOP: a DEAD ship in range is not a target at all -- the other half of the
     //      same rule, and the one that stops the mine re-acquiring the body it just let go.
+    //   3b. THE FLUSHED WORLD, the honesty leg: with the flush the real game runs every tick, the
+    //      target is already null before the mine's next Update, with the guards' help or without
+    //      it. This is what bounds the claim sections 2 and 3 are allowed to make.
     //   4. THE JOIN PEER's cue, over a real client session: an EvFx beat on a frozen mine puppet
     //      must ask for `targetacquired`, and must still leave the hit BLINK working (StarMine is
     //      a KillableAlien, so its NetPlayFx override sits on top of the one that blinks).
+    //   5. THE SEND HALF: a real host session over a NetWire, reading the frames a scripted peer
+    //      actually received, and the once-per-SOUND cadence.
     //
-    // IT TICKS THE MINE AND NOTHING ELSE (`NetTickForTest`), which is what makes section 2
-    // possible at all: a real player death advances `GameScene` into a world WIPE a tick later,
-    // and that purge would take the mine with it before anything could be read off it.
+    // IT TICKS THE MINE AND NOTHING ELSE (`Tick`), which is what makes sections 2 and 3 possible
+    // at all: a real player death advances `GameScene` into a world WIPE a tick later, and that
+    // purge would take the mine with it before anything could be read off it. Section 3b is the
+    // deliberate exception -- it flushes, because the flush is the thing it measures.
     //
     // **DESTRUCTIVE** -- it kills the local player's ship for real and respawns it through the
     // scene's own seam. Run it in a throwaway `?level=Level2&invuln` boot.
@@ -100,6 +113,7 @@ namespace EvilAliensWeb.Compat.Net
                 Section1LockAndDetonate(sb, Check, bin, game, ship, planted);
                 Section2TargetDies(sb, Check, bin, game, oracle, ship, planted);
                 Section3DeadShipIsNotAcquired(sb, Check, bin, game, oracle, sound, planted);
+                Section3bFlushedWorld(sb, Check, bin, game, oracle, scene, deadSlot, planted);
                 Section4JoinPeerCue(sb, Check, bin, game, sound, planted);
                 Section5HostEmission(sb, Check, bin, game, oracle, scene, deadSlot, planted);
             }
@@ -170,11 +184,17 @@ namespace EvilAliensWeb.Compat.Net
                 + " the mine's 1800 ms)", mine.IsDead);
         }
 
-        // ---- 2. THE DEFECT ------------------------------------------------------------------------
+        // ---- 2. THE SAME-TICK WINDOW ---------------------------------------------------------------
+        //
+        // The world is deliberately NOT flushed here, and that is the whole point: between `Die()`
+        // and the removal flush the corpse is still in `GetShips()` with `IsDead` true, and
+        // `target` still points at it. That tick is the only moment the guards do any work -- see
+        // section 3b for the measurement that bounds this.
         private static void Section2TargetDies(StringBuilder sb, Action<string, bool> Check,
             ComponentBin bin, Game game, Oracle oracle, PlayerShip ship, List<GameComponent> planted)
         {
-            sb.Append(" 2. THE DEFECT -- the target dies, and the lock must go with it\n");
+            sb.Append(" 2. THE SAME-TICK WINDOW -- the target dies before the flush, and the lock"
+                + " must go with it\n");
             StarMine mine = Plant(bin, game, ship.Position + Offset, planted);
             Check("PRECONDITION a second mine was planted", mine != null);
             if (mine == null)
@@ -184,11 +204,6 @@ namespace EvilAliensWeb.Compat.Net
             Tick(mine, 1);
             Check("PRECONDITION it is locked on before the death", mine.NetLockedOn);
 
-            // A REAL death -- Die() is the same call PlayerShip.Asplode ends in -- so `IsDead` and
-            // the queued removal are the genuine article. The SCENE is deliberately not ticked:
-            // GameScene.UpdateNormal would see AllShipsDead and wipe the world a tick later, and
-            // that purge takes the mine too (Purge<AlienDrawableGameComponent>), destroying the
-            // observation this leg exists to make.
             // THE REAL DEATH PATH -- `Asplode()` is what a collision calls, so `isdead`, the queued
             // removal and the death FX are all genuine. The SCENE is deliberately not ticked:
             // GameScene.UpdateNormal would see AllShipsDead and wipe the world a tick later, and
@@ -268,6 +283,63 @@ namespace EvilAliensWeb.Compat.Net
                 !mine.NetLockedOn && !mine.NetDetonationClockRunning && !mine.IsDead);
         }
 
+        // ---- 3b. THE FLUSHED WORLD -- what the guards are NOT ---------------------------------------
+        //
+        // THE HONESTY LEG, and the one that stops this suite overstating its own subject. Sections
+        // 2 and 3 hold the world at the single tick between `Die()` and the removal flush. The real
+        // game flushes every tick (`ComponentBin.TopOfTickFlush`), and `StarMine` has ALWAYS watched
+        // `ComponentRemoved` -- `OnComponentRemoved` nulls `target`, and `Oracle` drops the ship out
+        // of `GetShips()` off the same event. So from the flush onward the PRE-CARD build let a dead
+        // target go all by itself.
+        //
+        // This leg asserts exactly that, and it asserts it with the mine NEVER TICKED after the
+        // flush: no guard in `Update` can have run, so a pass here is attributable to the removal
+        // path alone. Delete every `IsDead` clause the card added and this section still passes --
+        // which is the point. It is why the card's first half is NOT claimed as fixed, and why
+        // `StarMine.Update` carries the refuted hypotheses rather than a fix note.
+        private static void Section3bFlushedWorld(StringBuilder sb, Action<string, bool> Check,
+            ComponentBin bin, Game game, Oracle oracle, INetScene scene, int slot,
+            List<GameComponent> planted)
+        {
+            sb.Append(" 3b. THE FLUSHED WORLD -- the removal path drops a dead target on its own\n");
+            // Sections 2 and 3 left a corpse in the roster on purpose; clear it and get a live ship
+            // back through the scene's own spawn, the same seam section 5 and the teardown use.
+            bin.TopOfTickFlush();
+            PlayerShip ship = FindLiveShip(oracle);
+            if (ship == null && oracle.IsSeated(slot))
+            {
+                scene.SpawnPlayer(oracle.Controller(slot), slot);
+                ship = FindLiveShip(oracle);
+            }
+            Check("PRECONDITION a live ship is back in the world", ship != null);
+            if (ship == null)
+            {
+                return;
+            }
+            StarMine mine = Plant(bin, game, ship.Position + Offset, planted);
+            Check("PRECONDITION a mine was planted beside it", mine != null);
+            if (mine == null)
+            {
+                return;
+            }
+            Tick(mine, 1);
+            Check("PRECONDITION it locked on to the live ship", mine.NetLockedOn && mine.NetTarget == ship);
+
+            ship.Asplode();
+            // The window sections 2 and 3 live in, asserted here as a POSITIVE so this leg cannot
+            // silently become vacuous: before the flush the corpse is still addressable.
+            Check("before the flush the corpse is still in GetShips() and still the target",
+                oracle.GetShips().Contains(ship) && mine.NetTarget == ship);
+
+            bin.TopOfTickFlush();
+            // THE MEASUREMENT. The mine has not ticked since the flush, so no guard in `Update`
+            // has run -- this is `OnComponentRemoved` and nothing else.
+            Check("after the flush, and with the mine NEVER ticked, the target is already null"
+                + " -- the removal path, not the card's guards", mine.NetTarget == null);
+            Check("...and the corpse has left GetShips() off that same event",
+                !oracle.GetShips().Contains(ship));
+        }
+
         // ---- 4. THE JOIN PEER'S CUE ---------------------------------------------------------------
         //
         // A puppet mine is FROZEN, so its own Update -- and the cue in it -- never runs on the
@@ -307,6 +379,11 @@ namespace EvilAliensWeb.Compat.Net
                 puppet.NetHitBlinking);
             Check("...and did NOT also play the homing cue",
                 sound.SfxRequestsOf(HomingCue) == cueBefore);
+            // Hand the puppet layer back HERE, not in Run's outer finally. Section 5 starts a real
+            // HOST session, and a host with the puppet layer still enabled -- and this section's
+            // parked mine puppet still in the world -- is a state the game never reaches. The
+            // teardown's own Disable() stays as the belt-and-braces for an early return above.
+            NetPuppets.Disable();
         }
 
         // ---- 5. THE SEND HALF ----------------------------------------------------------------------
@@ -481,8 +558,11 @@ namespace EvilAliensWeb.Compat.Net
             return mine;
         }
 
-        // The mine's own Update at a fixed 60 Hz dt, and NOTHING else in the world -- see the
-        // class header for why that isolation is what makes section 2 observable.
+        // The mine's own Update at a fixed 60 Hz dt, and NOTHING else in the world -- the
+        // isolation-sim pattern. Ticking the MINE alone is what makes sections 2 and 3 observable
+        // at all: a real player death advances `GameScene` into a world WIPE a tick later, and
+        // that purge (`Purge<AlienDrawableGameComponent>`) takes the mine with it before anything
+        // could be read off it. `Update` is public, so this needs no seam on `StarMine`.
         private static void Tick(StarMine mine, int ticks)
         {
             TimeSpan step = TimeSpan.FromTicks(166667); // 16.6667 ms
@@ -490,7 +570,7 @@ namespace EvilAliensWeb.Compat.Net
             for (int i = 0; i < ticks; i++)
             {
                 total += step;
-                mine.NetTickForTest(new GameTime(total, step));
+                mine.Update(new GameTime(total, step));
             }
         }
 

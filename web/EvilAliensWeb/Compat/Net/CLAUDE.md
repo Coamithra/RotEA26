@@ -1286,15 +1286,18 @@ Four pieces, none changing what replicates -- only how well the star holds up at
     `NetProtocol.TryFxKind`'s bound; `logic_probe`'s `ProbeWireEnums` cross-checks every validator
     against `Enum.IsDefined` over the whole byte domain, so a missed bound fails there rather than
     silently refusing the kind off the wire.
-  - **Verify with `eaMineTarget()` / `eval MineTarget`** (`Compat/Net/MineTargetTest.cs`, 37
+  - **Verify with `eaMineTarget()` / `eval MineTarget`** (`Compat/Net/MineTargetTest.cs`, 43
     assertions; `tools/headless/probes/starmine_dead_target.txt`). **DESTRUCTIVE** -- it kills the
     local player's ship for real -- so a throwaway `?level=Level2&invuln` boot. Its section 4
     drives `NetPlayFx` directly and section 5 reads the frames a scripted peer really RECEIVED over
     a `NetWire`: section 4 alone leaves a build that stopped EMITTING perfectly green while the
     joiner hears nothing, which is the reported symptom exactly. Headlessly there is no mixer, so
     the only thing observable about a cue is that it was REQUESTED -- card 8732568e's per-cue
-    counters are what make that readable at all. The suite's other half is offline (the lock
-    dropping a dead target); web CLAUDE.md has it.
+    counters are what make that readable at all.
+  - **THIS CUE IS THE HALF OF CARD 745728f9 THAT IS ACTUALLY FIXED.** The card's other half
+    ("mines explode at a dead player's location") is offline, is NOT closed, and its `IsDead`
+    guards turned out to be one-tick hardening rather than the fix -- web CLAUDE.md has the
+    measurement and the two refuted hypotheses. Do not read this section as evidence for it.
   - **KNOWN LIMIT, pre-existing and NOT introduced by these cards: a client's `Ball` keeps its own
     hp.** It can therefore detach on its own schedule, and in principle twice. The beats are
     idempotent against that (whichever lands first latches), but the two peers' chip COUNTS still

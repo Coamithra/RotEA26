@@ -13,19 +13,35 @@
 # is no mixer at all, so the only thing observable about a sound is that it was REQUESTED -- which
 # is exactly what card 8732568e's per-cue counters made readable, and is why section 4 can exist.
 #
+# **WHAT THIS PROBE DOES NOT PROVE, stated up front because an earlier cut of this card claimed
+# the opposite.** The `IsDead` guards are HARDENING of a ONE-TICK window. `StarMine` has always
+# been an `IComponentWatcher` and its `OnComponentRemoved` nulls `target`, off the same
+# `ComponentRemoved` event that drops the ship out of `Oracle.GetShips()` -- so from the removal
+# FLUSH onward the pre-card build already let a dead target go (section 3b measures it). The card's
+# FIRST half is therefore still OPEN: what detonates a mine at a dead player's spot is unknown.
+# Refuted with evidence, do not re-run: (a) a 1800 ms flight to a corpse; (b) chain-detonation on
+# the player's own death explosions -- `Explosion` only sets `Collides` while its `collisiontimer`
+# runs and only `MakeBlue()` starts it, and `PlayerShip.Asplode`'s two explosions are never blue.
+# The SECOND half (the joining client's missing homing cue, sections 4 and 5) IS fixed here.
+#
 # WHAT IT ASSERTS (Compat/Net/MineTargetTest.cs has the reasoning):
 #   1. THE POSITIVE CONTROL, FIRST -- a mine parked on a LIVE ship locks on, starts its clock and
 #      detonates on schedule. Everything below asserts that a mine STOPS doing something, and
 #      without this leg all of it passes on a mine that never locks on or never goes off at all.
-#   2. THE DEFECT -- the target dies (through the REAL `PlayerShip.Asplode`) and the mine must drop
-#      the lock, stop the clock, and never detonate on the corpse. `target` was only ever cleared
-#      by a release-RANGE test, so nothing cleared it on death: the mine kept pulling toward a
-#      corpse's frozen Position and went off there 1800 ms after the acquire.
+#   2. THE SAME-TICK WINDOW -- the target dies (through the REAL `PlayerShip.Asplode`) and the
+#      world has NOT flushed yet, which is the only moment the card's guards do any work: the mine
+#      must drop the lock, stop the clock, and never detonate on the corpse.
 #   3. THE ACQUIRE LOOP -- a DEAD ship in range is not a target in the first place, which is what
 #      stops the mine re-acquiring the body it just let go. Section 2's corpse is still in
 #      `GetShips()` when this runs, because the oracle drops a ship at the ComponentBin's removal
 #      FLUSH and the suite deliberately has not flushed: in-the-list AND dead is the exact window
 #      the loop had to be taught about.
+#   3b. THE FLUSHED WORLD -- the honesty leg, and the one to read FIRST if you are here to
+#      re-investigate. With the flush the real game runs every tick, `target` is already null
+#      before the mine's next Update, and the mine is NEVER TICKED after the flush in this leg --
+#      so the pass is attributable to `StarMine.OnComponentRemoved` alone. **It passes with every
+#      `IsDead` clause the card added deleted, by design.** That is what bounds sections 2 and 3:
+#      the window they cover is ONE TICK (~17 ms), not the 1800 ms detonation clock.
 #   4. THE JOIN PEER (RECEIVE) -- an `EvFx(MineTargetAcquired)` beat on a FROZEN mine puppet must
 #      ask for `targetacquired`, with the NEGATIVE that the new override still falls through to
 #      `KillableAlien.NetPlayFx` for the hit BLINK. That negative is not decoration: `StarMine` IS
@@ -58,8 +74,9 @@
 #
 # MUTATION-TESTED, each isolated and rebuilt:
 #   * the death test dropped from the `attracted_to_player` state (the pre-card build) -> section
-#     2's three lock assertions AND its FX assertion, i.e. the report reproduced: the mine holds a
-#     corpse and detonates on it.
+#     2's three lock assertions AND its FX assertion: inside the unflushed window the mine holds a
+#     corpse and detonates on it. NOT the reported bug -- section 3b is why; in a flushed world the
+#     removal path drops the target before the mine's next Update either way.
 #   * the `IsDead` skip dropped from the ACQUIRE loop -> section 3's three legs. **Section 3 ticks
 #     EXACTLY ONCE for this reason**: the two guards mask each other over several ticks -- the mine
 #     locks onto the corpse on tick 1 and the `attracted_to_player` death test drops it again on
@@ -79,6 +96,19 @@
 #     then never again.
 #   * the new `NetPlayFx` override made to `return` instead of falling through to base -> section
 #     4's blink negative alone. That is the regression the negative exists for.
+#   * `OnComponentRemoved`'s `target = null` deleted -> section 3b's measurement leg ALONE (42/1),
+#     with its sibling "the corpse has left GetShips()" still green, which is the point: that
+#     sibling is `Oracle`'s handler and is independent. This is the mutation that gives 3b teeth --
+#     without it the leg would only be restating that the suite flushed.
+#   * ALL of the card's guards reverted to the pre-card `if (target == null)` -> sections 2 and 3
+#     redden (6 legs) and **section 3b stays GREEN** (37/6). That is the documented asymmetry, and
+#     the whole reason 3b is in the suite: the guards own one tick, the removal path owns the rest.
+#
+# MIND THE STALE BINARY when reproducing any of the above by hand. `mv`ing a backup back over a
+# source file restores its OLD mtime, so MSBuild reports "Build succeeded" and silently keeps the
+# mutated binary -- five consecutive runs were misread here as a flaky 3b before that was spotted.
+# Use `cp` + `touch`, or drive it through run_probes.py, whose staleness guard (card 74998f22)
+# exists for exactly this.
 #
 # **DESTRUCTIVE** -- it kills the local player's ship for real and respawns it through the scene's
 # own seam, and it sweeps the explosions and puts the screen shake back (both asserted). Own
@@ -110,13 +140,17 @@ expect \[minetarget\] the StarMine's lock, and its cue on a join peer
 expect 1\. CONTROL -- a mine on a LIVE ship locks on and detonates on schedule
 expect it LOCKED ON to the live ship
 expect \.\.\.and it detonated on schedule
-expect 2\. THE DEFECT -- the target dies, and the lock must go with it
+expect 2\. THE SAME-TICK WINDOW -- the target dies before the flush
 expect the mine DROPPED the dead target
 expect \.\.\.and it did NOT detonate on the corpse
 expect \.\.\.and no detonation FX ever appeared
 expect 3\. \.\.\.and a DEAD ship in range is not acquired in the first place
 expect it did NOT acquire the corpse it is sitting on
 expect \.\.\.and no homing cue was played
+expect 3b\. THE FLUSHED WORLD -- the removal path drops a dead target on its own
+expect before the flush the corpse is still in GetShips\(\) and still the target
+expect after the flush, and with the mine NEVER ticked, the target is already null
+expect \.\.\.and the corpse has left GetShips\(\) off that same event
 expect 4\. THE JOIN PEER -- an EvFx beat plays the homing cue on a frozen puppet
 expect the beat asked for the homing cue \(targetacquired \+1\)
 expect NEGATIVE the hit-flash beat still reaches KillableAlien's blink
@@ -128,7 +162,7 @@ expect PRECONDITION it re-acquired inside the 300 ms sound window
 expect \.\.\.and that re-acquire sent NOTHING -- one beat per SOUND, not per lock \(\+0\)
 expect CONTROL a re-acquire PAST the window sends again \(\+1\)
 expect 6\. teardown
-expect \[minetarget\] 37 passed, 0 failed
+expect \[minetarget\] 43 passed, 0 failed
 expect-not FAIL
 expect-not SKIP
 

@@ -420,6 +420,17 @@ namespace EvilAliensWeb.Compat
 		// built on it. Diagnostic only -- reading it changes nothing.
 		public static bool SkullVolley { get; private set; }
 
+		// ?minelog: make every StarMine (Level 3's "space mine", aka death star) report each
+		// lock-on, each release and each death on a `[mine]` line -- the state change, the mine's
+		// position, its target's seat, and for a death the REASON it went off (card 745728f9).
+		// None of that is visible in a frame: a locked mine and a free one draw the same sprite,
+		// and a mine that detonates on its 1800 ms clock looks exactly like one set off by a
+		// neighbour's blast. Each death line also reports the nearest DEAD player's last known
+		// position, which is the correlation the card's report is about -- *"space mines seem to
+		// also explode when they reach a dead player's location"*. Diagnostic only -- reading it
+		// changes nothing.
+		public static bool MineLog { get; private set; }
+
 		// Master multiplier on the trauma-based screen shake (Compat/Juice.cs). 1 = the
 		// shipped feel, 0 = off, >1 exaggerates while tuning (?shake=, clamped 0..3).
 		// A pure camera/render look, so — like MetalScore/SlowmoTrail — kept OUT of `Active`.
@@ -2218,6 +2229,9 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "skullvolley":
 					SkullVolley = IsOn(val);
+					break;
+				case "minelog":
+					MineLog = IsOn(val);
 					break;
 				case "blastactive":
 					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var ba))

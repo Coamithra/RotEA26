@@ -5662,6 +5662,10 @@ namespace EvilAliensWeb.Compat.Net
             ch.HasLastPuppetPos = false;
             metrics.RemoteShipExplosions++;
             Vector2 at = exploded.GetPosition();
+            // ?minelog: a puppet leaves the world WITHOUT Die(), so neither PlayerShip.Asplode
+            // nor AsplodeWall records this one -- and the peer's death spot is exactly the
+            // location the card's report is about. See Compat/MineLog.
+            MineLog.NoteShipDeath(exploded.Owner, at);
             Explosion explosion = Explosion.NewExplosion(bin, game);
             explosion.Setup(at, 2f, 2f, 0f, 0f);
             bin.Add((GameComponent)(object)explosion);

@@ -1,0 +1,30 @@
+# PROBE: the ABSENT half of starmine_minelog.txt -- no ?minelog, no `[mine]` lines anywhere
+#
+# PINS:   that the card-745728f9 instrument is OFF by default, i.e. that a shipped build is not
+#         printing a trace line per mine decision and per player death. Read this file and
+#         starmine_minelog.txt AS ONE PROBE: on its own the positive one passes on a build that
+#         logs unconditionally, and this one passes on a build where the flag does nothing at
+#         all.
+#
+#         The same boot as its twin, minus `&minelog`, and the same scripted co-op death -- so
+#         the only difference between the two runs is the flag. Both `[mine]` shapes the twin
+#         asserts are refused here by ONE expect-not, because the whole family shares the tag.
+#
+# FAILURE MEANS: `?minelog`'s guard has been lost somewhere -- most likely `MineLog.On` inlined
+#         away, or `NoteShipDeath`'s own `if (On)` dropped when its unconditional registry write
+#         was added beside it (the write must stay unconditional and the PRINT must not).
+#
+# eahl: --flags "?level=OwnLevel&nowalls&aifriends=1&noattract&invuln&difficulty=Very_Hard&seed=11"
+
+step 600 nodraw
+mark
+step 900 nodraw
+eval KillShip 0
+step 1800 nodraw
+
+# The positive control this file needs is its TWIN: the same script under `&minelog` prints
+# these lines, so a run that reached nothing at all would fail there rather than passing here.
+# What is asserted here is only the silence.
+expect-not \[mine\]
+
+quit

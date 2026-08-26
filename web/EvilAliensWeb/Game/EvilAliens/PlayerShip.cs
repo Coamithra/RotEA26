@@ -4263,6 +4263,9 @@ public class PlayerShip : AlienDrawableGameComponent
 		// without queueing, so the causer field belongs to some EARLIER death here and reading it
 		// would file a wall clip under whatever killed the ship last.
 		EvilAliensWeb.Compat.AiBench.NoteDeath(this, "Wall");
+		// ?minelog: remember WHERE this slot died, for the `[mine]` line's `deathspot=` field.
+		// Nothing else keeps it once the slot respawns -- see Compat/MineLog.
+		EvilAliensWeb.Compat.MineLog.NoteShipDeath(player, base.Position);
 		// Game juice: the player's own death is the biggest impact in the game — a real
 		// freeze-frame + extra trauma on top of what the two explosions below add.
 		EvilAliensWeb.Compat.Juice.AddHitStop(DeathHitStopSeconds);
@@ -4289,6 +4292,8 @@ public class PlayerShip : AlienDrawableGameComponent
 			// here: the field gates the early-out in Update, so spending it would let a dead ship
 			// run the rest of its Update a tick sooner. Initialize clears it per life.
 			EvilAliensWeb.Compat.AiBench.NoteDeath(this, asplodeOnNextFrame ? asplosionCauser : null);
+			// ?minelog -- see AsplodeWall above.
+			EvilAliensWeb.Compat.MineLog.NoteShipDeath(player, base.Position);
 			// Game juice: same death punch as AsplodeWall — freeze-frame + extra trauma on
 			// top of the two explosions' own shake.
 			EvilAliensWeb.Compat.Juice.AddHitStop(DeathHitStopSeconds);

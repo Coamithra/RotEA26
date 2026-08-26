@@ -1,0 +1,79 @@
+# PROBE: ?minelog traces a StarMine's decisions, and reads them against a real death spot
+#
+# PINS:   the instrument card 745728f9 was closed with. The card's report -- *"space mines
+#         (lvl 3, aka death stars) seem to also explode when they reach a dead player's
+#         location"* -- was investigated over three sessions and could not be reproduced; what
+#         survives the card is the tool that made it answerable, plus the argument in
+#         web/EvilAliensWeb/CLAUDE.md that no longer needs re-deriving. This probe is what stops
+#         that tool rotting silently, because EVERY PART OF IT IS INVISIBLE:
+#
+#         1. THE MINE'S DECISIONS ARE NOT DRAWN. A locked mine and a free one are the same
+#            sprite; a mine that ran its 1800 ms clock out and one set off by a neighbour's blue
+#            blast produce the identical pair of explosions. `[mine]` lines are the only
+#            observable either has.
+#         2. THE DEATH SPOT IS NOT RECORDED ANYWHERE ELSE. `Oracle`'s per-slot cached position
+#            is overwritten the moment that slot respawns -- and `PlayerShipSummon` puts the new
+#            ship back EXACTLY where the old one died, so an instrument reading it is blind to
+#            the whole second half of the question. `Compat/MineLog` keeps its own registry for
+#            that reason; an earlier cut of this card read `Oracle` and was blind in exactly
+#            that way, which cost a false positive.
+#
+#         So the two assertions are the two HALVES of the instrument: `shipdied` proves the
+#         registry is being WRITTEN (PlayerShip.Asplode's hook is live and the flag is parsed),
+#         and a mine line carrying `deathspot=slot0 d=` proves it is being READ back into the
+#         trace. Neither implies the other -- a hook that stopped writing leaves every later
+#         line reading `deathspot=none`, which is a perfectly plausible-looking trace.
+#
+# CO-OP IS THE PRECONDITION, and `?aifriends=1` is what supplies it. A death is only survivable
+# by the world when another ship is still flying -- otherwise GameScene.LoseLife wipes it, mines
+# included, and there is nothing left to trace. That is also the card's own reason the symptom
+# is unreachable in single player. `?invuln` keeps the AI partner alive for the whole run;
+# `eval KillShip 0` asplodes through it regardless, which is what makes the death scriptable.
+#
+# FAILURE MEANS:
+#   * no `shipdied` line       -> either ?minelog stopped parsing, or MineLog.NoteShipDeath is
+#                                 no longer called from PlayerShip.Asplode. The registry is
+#                                 empty and every `deathspot=` field below it is a lie by
+#                                 omission.
+#   * no `deathspot=slot0 d=`  -> MineLog.NearestDeathSpot is not reaching the `[mine]` line,
+#                                 or MineLog.Reset is being called somewhere it should not be
+#                                 (a mid-level reset would clear the registry under the trace).
+#   * `acquire` missing        -> the run never reached a mine at all, so the leg above is
+#                                 vacuous. Check OwnLevel's StarMineSpawner still runs at this
+#                                 tier -- it is Very_Hard-gated, which is why the flag is here.
+#
+# MUTATION-TESTED THREE WAYS, each reddening a different line:
+#   * deleting MineLog.NoteShipDeath from PlayerShip.Asplode -> `shipdied` gone AND every later
+#     line reads `deathspot=none`, so both assertions redden. (This is the one that shows the
+#     two are not independent in the write direction -- they are in the read direction.)
+#   * dropping NearestDeathSpot from MineLog.Line            -> `shipdied` still passes,
+#     `deathspot=slot0 d=` reddens alone.
+#   * calling MineLog.Reset() every tick                     -> `shipdied` still passes (it
+#     prints before the clear), `deathspot=` reads none, reddens alone.
+#
+# eahl: --flags "?level=OwnLevel&nowalls&aifriends=1&noattract&invuln&minelog&difficulty=Very_Hard&seed=11"
+
+# Settle past the intro white fade and let the AI partner seat itself, then take the world far
+# enough in that StarMineSpawner has produced mines. `?seed=` keeps that reachable rather than a
+# coin flip -- the spawner rolls its x and its cadence off RandomHelper.
+step 600 nodraw
+mark
+step 900 nodraw
+
+# --- PRECONDITION: mines exist and are making decisions, or every assertion below is vacuous.
+# It has to be asserted on lines printed AFTER the mark, which is why the settle and the soak
+# are two steps with the mark between them rather than one step before it.
+expect \[mine\] acquire id=\d+ at=-?\d+,-?\d+ target=slot\d+
+
+# --- 1. THE WRITE HALF. A co-op death is recorded, with the position, at the moment it happens.
+eval KillShip 0
+expect \[mine\] shipdied slot=0 at=-?\d+,-?\d+
+
+# --- 2. THE READ HALF. From here on every `[mine]` line resolves that spot rather than
+# reporting `none`. Stepped long enough for the spawner to produce a mine AFTER the death --
+# the lines already printed above carry `deathspot=none` correctly, so an assertion that did not
+# step first would be testing the wrong side of the boundary.
+step 1800 nodraw
+expect \[mine\] \w+ id=\d+ .* deathspot=slot0 d=[\d.]+ ago=[\d.]+
+
+quit

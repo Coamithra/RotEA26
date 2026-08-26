@@ -1330,6 +1330,10 @@ internal abstract class GameScene : Scene, EvilAliensWeb.Compat.Net.INetScene
 		pausestopper.Reset();
 		pausestopper.Stop();
 		Background.Reset();
+		// ?minelog's death-spot registry is per LEVEL (card 745728f9): slots are reused, and a
+		// spot carried over from the previous level would be reported against this level's mines
+		// -- on an 800x600 field a ghost like that lands plausibly close to something.
+		EvilAliensWeb.Compat.MineLog.Reset();
 		// Arm the scene-swap replication for this play (card ca4fd94f). Deliberately NOT folded
 		// into Reset(): every scene setter calls that too, so it cannot tell a level entry from a
 		// mid-level swap. Initialize can, and a checkpoint revert does not re-run it.

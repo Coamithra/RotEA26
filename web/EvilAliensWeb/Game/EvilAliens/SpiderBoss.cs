@@ -682,8 +682,13 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		{
 			return;
 		}
-		sound.PlayCue("bugdies");
-		sound.PlayCue("bugdies");
+		// TWICE ON PURPOSE, verbatim 2008 (src_decompiled/EvilAliens/SpiderBoss.cs:673-674): two
+		// copies of one sample started together sum coherently, so this is an authored +6 dB
+		// emphasis on landing a beam on the boss. `allowSameTick` opts it out of card 8732568e's
+		// same-tick coalescer, which would otherwise quietly halve it. The ONLY opt-out in the
+		// game; every other same-tick repeat is the pile-up that card is about.
+		sound.PlayCue("bugdies", allowSameTick: true);
+		sound.PlayCue("bugdies", allowSameTick: true);
 		hp--;
 		if (hp <= 0 && !base.IsDead)
 		{
@@ -1198,8 +1203,9 @@ internal class SpiderBoss : AlienDrawableGameComponent
 		{
 			return;
 		}
-		sound.PlayCue("bugdies");
-		sound.PlayCue("bugdies");
+		// The peer's copy of the authored double above -- same opt-out, same reason.
+		sound.PlayCue("bugdies", allowSameTick: true);
+		sound.PlayCue("bugdies", allowSameTick: true);
 		hittimer.Start();
 		hittimer.Reset();
 		for (int i = 0; i < 5; i++)

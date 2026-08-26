@@ -1,0 +1,51 @@
+# PROBE: `?sfxcoalesce=0` really reaches the coalescer (card 8732568e).
+#
+# THE HALF `sfx_coalesce.txt` CANNOT COVER. That suite flips `DebugFlags.SfxCoalesce` directly
+# through `SetSfxCoalesceForTest`, so it proves the PROPERTY is read -- not that the URL flag
+# parses to it. A flag that silently stopped reaching the property would leave every assertion
+# over there green while the A/B arm measured the SHIPPED build twice, which is exactly the
+# `[aiwallnav] steering:` trap. It is parsed once at boot, so this has to be its own process.
+#
+# READ IT WITH `sfx_coalesce.txt`, which boots BARE and gets `started=1 coalesced=11` from the
+# identical burst. Neither file alone means anything: this one passes on a build with no
+# coalescer at all, and that one passes on a build that ignores the flag.
+#
+# `eval SfxBurst expl1 12` asks for one cue twelve times with no tick in between -- the shape the
+# card is about -- and reports what the audio layer did with them. The `coalescing=OFF` readback
+# is asserted too, and separately: "the flag parsed" and "the flag bit" are different promises,
+# and a build can keep one while breaking the other.
+#
+# NO `expect-not admitted=1` HERE, deliberately. It discriminates nothing the positive above does
+# not already exclude, and its obvious spelling silently matches `admitted=12` as a prefix -- a
+# control that cannot fail, written in a way that can only fail wrongly (tools/CLAUDE.md's
+# explicit-control-line lesson).
+#
+# MUTATION-TESTED: deleting the `case "sfxcoalesce":` arm from DebugFlags.Parse fails this file
+# (`started=1 coalesced=11` where 12 were asked for) while sfx_coalesce.txt stays green -- which
+# is precisely the blind spot this file closes. Only the FIRST leg is reached: the runner stops at
+# the first failed expect, so the `coalescing=OFF` readback below is a second, independent way in
+# rather than a second observed failure.
+#
+# eahl: --flags "?menu&noattract&sfxcoalesce=0"
+
+# ASSERTED BEFORE THE FIRST `mark`, because the line is printed during the BOOT flag parse and a
+# mark placed after the settle would put it outside the window.
+#
+# The parse announced ITSELF, on its own line. The flag is deliberately out of DebugFlags.Active,
+# so it never appears in the `[debug] flags active:` dump -- and an A/B arm with no boot-time
+# confirmation that the arm you think you are measuring is the one that ran is the `[aiwallnav]
+# steering:` trap. (?seed carries its own line for the same reason.)
+expect \[sfx\] same-tick coalescing OFF \(\?sfxcoalesce=0\)
+# ...and an unrecognised value would say THAT instead, which is what tells a typo from a working
+# off switch (the value-carrying flag convention).
+expect-not \[debug\] unknown \?sfxcoalesce=
+
+step 200 nodraw
+mark
+
+eval SfxBurst expl1 12
+expect \[sfx\] burst cue=expl1 asked=12 admitted=12 coalesced=0
+
+eval SfxState
+expect \[sfx\] tick=[0-9]+ requests=12 admitted=12 played=[0-9]+ coalesced=0 byCue=none coalescing=OFF
+quit

@@ -303,6 +303,21 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   peers simply disagree about where an enemy is aiming, which is what the card was reported for.
   Console `eaNetChargeAim()` / `eval NetChargeAim` is the suite (it drives the flag through the
   injected host, so no reboot); no protocol change, still v19. Details: net CLAUDE.md.
+- **`?sfxcoalesce=0`** (card 8732568e): let every request for a cue start its own copy again, so
+  N deaths landing on one tick each play the same sample at the same instant. That is the reported
+  bug -- *"a lot of loud explosion effect sounds"* on a joining peer -- and the physics is why it
+  reads as LOUD rather than busy: identical samples started together sum COHERENTLY, +20*log10(N)
+  dB (exactly at the attack transient; the 5% humanize decorrelates the tail). Shipped behaviour
+  is at most ONE start per cue per tick, **on the `PlayCue` surface only** -- `Play` and `PlayText`
+  hand their caller the instance, and `PlayText` stops the in-flight line before assigning it, so
+  a coalesced one would leave the announcer silent. `SpiderBoss`'s authored double "bugdies" is
+  the one deliberate opt-out (`allowSameTick: true`). Like `?netstaleguard=0` it turns a shipped FIX off and so DEFAULTS TRUE, but
+  unlike it this one is **deliberately OUT of `DebugFlags.Active`**: it changes no gameplay state,
+  no position, no score and no packet, only whether a local mixer starts a second copy of a sound
+  (the `?slowmotrail` / `?walltowers` class). Console `eaSfx()` reads the decision back as data --
+  the only observable it has, since a screenshot cannot see it and eahl has no audio. `eaSfxBurst()`
+  / `eval SfxBurstTest` is the suite; pinned by `tools/headless/probes/sfx_coalesce.txt` +
+  `sfx_coalesce_off.txt`. Details: web CLAUDE.md -> "Audio runtime".
 - **`?nethpraise=0`** (card 87310afa): restore the pre-card DOWNWARD-ONLY clamp on a client
   puppet's hit points, so the host can no longer correct one back UP. `KillableAlien.NetApplyHp`
   now takes the host's value in both directions; under the old clamp a client's local

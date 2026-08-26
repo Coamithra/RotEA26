@@ -305,6 +305,80 @@ namespace EvilAliensWeb.Compat
 				+ " amount=" + DebugFlags.ShakeAmount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
 		}
 
+		// The SFX same-tick coalescer's readback (card 8732568e): eaSfx() in the browser,
+		// `eval SfxState` under eahl.
+		//
+		// The ONLY honest observable this change has. An SFX decision has no pixels, and
+		// headlessly it has no sound either -- eahl silences the mixer and a container has no
+		// audio device at all, in which case `GetEffect` caches null and nothing would even
+		// reach a mixer to be measured. So what is read back is the DECISION: how many starts
+		// were requested, how many actually started, how many were folded into a start already
+		// made this tick, and which cues those were.
+		[JSInvokable("debugSfxState")]
+		public static string SfxState()
+		{
+			EvilAliens.SoundManager sm = EvilAliens.ServiceHelper.Get<EvilAliens.ISoundManagerService>().SoundManager;
+			// `admitted` rather than "started": it is counted before the effect is loaded and
+			// before the 32-instance Default cap, which is what makes the decision readable on a
+			// box with no audio device. `played` is the one that only counts a real Play().
+			return "[sfx] tick=" + sm.SfxTick + " requests=" + sm.SfxRequests
+				+ " admitted=" + sm.SfxAdmitted + " played=" + sm.SfxPlayed
+				+ " coalesced=" + sm.SfxCoalesced
+				+ " byCue=" + sm.SfxCoalescedByCue()
+				+ " coalescing=" + (DebugFlags.SfxCoalesce ? "on" : "OFF");
+		}
+
+		// Zero the counters so a caller can measure ONE window (eaSfx.reset()).
+		[JSInvokable("debugSfxReset")]
+		public static string SfxReset()
+		{
+			EvilAliens.ServiceHelper.Get<EvilAliens.ISoundManagerService>().SoundManager.SfxResetCounters();
+			return "[sfx] counters reset";
+		}
+
+		// Request one cue `n` times WITHOUT a tick in between -- the burst the coalescer exists
+		// for, on demand. `eaSfx.burst('expl1', 12)` / `eval SfxBurst expl1 12`.
+		//
+		// It is a rig, not a shortcut around the real path: the real path is a batch of remote
+		// deaths landing in one rx drain, and `eaSfxBurst()` (Compat/Net/SfxBurstTest.cs) drives THAT
+		// as well. This one exists because the decision is a property of the audio layer alone
+		// and deserves an assertion that no world state can confound.
+		[JSInvokable("debugSfxBurst")]
+		public static string SfxBurst(string cue, int n)
+		{
+			if (string.IsNullOrEmpty(cue) || n <= 0)
+			{
+				return "[sfx] burst needs a cue name and a count > 0";
+			}
+			// A LOOPING cue is refused rather than burst: PlayCue discards the handle and nothing
+			// reaps a Playing instance, so `eaSfx.burst('bees', 50)` would start fifty loops that
+			// nothing in the process can ever stop. Reported, not silently swallowed.
+			if (EvilAliens.SoundManager.SfxCueLoops(cue))
+			{
+				return "[sfx] burst refuses the LOOPING cue '" + cue + "' -- PlayCue discards the"
+					+ " handle, so each one would be an unstoppable loop";
+			}
+			EvilAliens.SoundManager sm = EvilAliens.ServiceHelper.Get<EvilAliens.ISoundManagerService>().SoundManager;
+			long admittedBefore = sm.SfxAdmitted;
+			long coalescedBefore = sm.SfxCoalesced;
+			for (int i = 0; i < n; i++)
+			{
+				sm.PlayCue(cue);
+			}
+			return "[sfx] burst cue=" + cue + " asked=" + n
+				+ " admitted=" + (sm.SfxAdmitted - admittedBefore)
+				+ " coalesced=" + (sm.SfxCoalesced - coalescedBefore)
+				+ " tick=" + sm.SfxTick;
+		}
+
+		// The whole SFX-coalescing suite, incl. the REAL path (a batch of remote deaths applied
+		// in one tick): eaSfxBurst() / `eval SfxBurstTest`. Menu-only and leave-no-trace.
+		[JSInvokable("debugSfxBurstTest")]
+		public static string SfxBurstTest()
+		{
+			return EvilAliensWeb.Compat.Net.SfxBurstTest.Run();
+		}
+
 		// JS bridge for QA/demo of the hit-stop (eaHitstop in wwwroot/index.html):
 		// DotNet.invokeMethod('EvilAliensWeb', 'debugHitstop', ms). Freezes game time for
 		// `ms` milliseconds of real time (0/omitted => 120ms) — most visible in a level

@@ -1,0 +1,108 @@
+# PROBE: at most ONE start of any given SFX cue per game tick (card 8732568e).
+#
+# THE REPORT: "multiplayer games (on a joining peer side) seem to have a lot of loud explosion
+# effect sounds. I suspect we get a big packet with a bunch of dead enemies and play the sound a
+# couple of times in the same frame perhaps?" That suspicion is right on both counts, and the
+# second half is what makes it read as LOUD rather than as busy: N copies of the SAME sample
+# started at the SAME instant are phase-identical and sum COHERENTLY -- amplitude x N, i.e.
+# +20*log10(N) dB. Ten simultaneous `expl1` is ONE explosion twenty decibels louder.
+#
+# WHY A JOINING PEER HITS IT HARDER, though the defect is not net-specific: `EvDeath` rides the
+# reliable ORDERED lane and a client applies a whole batch in ONE `DrainRx`, inside one tick -- so
+# deaths the host spread over several of its own frames all fire their cue on the same client
+# tick. Offline the same shape exists (a bomb clearing the screen) and is fixed with it, which is
+# what lets this be verified with no second machine.
+#
+# WHY A SUITE AND NOT A LISTEN. An SFX decision has NO PIXELS; headlessly it has no sound either
+# (eahl silences the mixer, and this box has no audio device at all, so `SoundManager.GetEffect`
+# caches null and nothing reaches a mixer to be measured); and a human ear cannot count starts in
+# a browser. The DECISION read back as data is the only honest observable -- which is why the
+# coalescer takes its decision BEFORE it loads the effect, and why `SoundManager` counts
+# requests / starts / coalesced rather than logging a line per start (a busy frame coalesces
+# dozens, and a per-start log would be its own noise problem).
+#
+# WHAT `eaSfxBurst()` ASSERTS, in three sections (Compat/Net/SfxBurstTest.cs has the reasoning):
+#   1. THE DECISION, with no world involved -- a 12-request burst inside one tick starts ONCE;
+#      the same requests spread over three ticks ALL start (the control that says the window is a
+#      TICK, not "this cue, forever" -- without it the suite passes on a build that plays a cue
+#      once and never again, a far worse bug than the one being fixed); two DIFFERENT cues in one
+#      tick BOTH start (the control that says it is per CUE, not a global one-sound cap, which
+#      would silence deliberate layering like SpiderBoss's two-cue death); and a LOOPING cue is
+#      exempt (callers hold those handles and stop them later).
+#   2. THE FLAG -- `?sfxcoalesce=0` restores the pre-card behaviour, driven through the real
+#      `DebugFlags` property. This suite's negative control.
+#   3. THE REPORTED PATH -- eight real `UFO` puppets killed by eight `NetPuppets.OnRemoteDeath`
+#      calls in ONE tick, through the real death path that plays the real cue. Sections 1 and 2
+#      would both pass on an audio layer the ticket's own situation never reaches; this is what
+#      says it does.
+#
+# MUTATION-TESTED EIGHT WAYS, each isolated and rebuilt (counts are failing assertions; the
+# tallies are what the run printed):
+#   * the coalescer removed entirely (the pre-card build) -> **6**, 16/6 -- including section 3's,
+#     which is the report itself: "admitted=8 for 8 requests, coalesced=0".
+#   * the LOOP exemption dropped -> **1**, 21/1: the looping-cue control alone.
+#   * the SURFACE rule dropped (`Play`/`PlayText` coalescable again) -> **3**, 19/3: both surface
+#     controls plus the opt-out (which routes through the same argument). This is the shape review
+#     caught: `PlayText` STOPS the in-flight announcer line and then assigns Spawn's result, so a
+#     coalesced second call plays nothing at all.
+#   * the `allowSameTick` opt-out ignored -> **1**, 21/1: the opt-out leg alone, while its
+#     ordinary-surface control stays green -- which is what says the opt-out is the CALL, not the
+#     cue.
+#   * `_tick++` never runs (the window becomes "forever") -> **4**, 18/4: the across-ticks control
+#     first. That is the mutation that control exists for -- a build that plays a cue once and
+#     never again is a far worse bug than the one being fixed.
+#   * the cap made GLOBAL (one start of ANY cue per tick) -> **1**, 21/1: the per-cue control.
+#   * `DebugFlags.SfxCoalesce` ignored -> **1**, 21/1: the flag leg. An A/B arm that measured the
+#     shipped build twice while labelled as the control is the `[aiwallnav] steering:` trap.
+#   * the teardown's score and trauma restores dropped -> **2**, 20/2, reading `trauma=0.930`.
+#     Those two legs are not decoration: without the restores one run of this suite adds 80 points
+#     to a menu score panel and leaves the main menu visibly shaking.
+#
+# THE FLAG'S BOOT PARSE IS A SEPARATE PROBE -- `sfx_coalesce_off.txt`. The suite flips the
+# property directly (`SetSfxCoalesceForTest`), which cannot show that `?sfxcoalesce=0` on the
+# COMMAND LINE reaches it. Read the two as one probe.
+#
+# MENU-ONLY and leave-no-trace: it plants puppets far off-screen, kills them and prunes the
+# survivors, and the teardown asserts both. ?noattract because the idle main menu drops into an
+# attract demo after 20 s and the suite would then SKIP itself.
+#
+# eahl: --flags "?menu&noattract"
+
+step 200 nodraw
+mark
+eval SfxBurstTest
+
+expect \[sfxburst\] same-tick SFX coalescing
+expect 1\. THE DECISION -- one start per cue per tick
+expect 12 requests for one cue in ONE tick start it ONCE \(admitted=1\)
+expect CONTROL the same 3 requests spread over 3 TICKS all start
+expect CONTROL two DIFFERENT cues in one tick BOTH start
+expect CONTROL the Play\(\) surface is NEVER coalesced
+expect CONTROL PlayText is NEVER coalesced
+expect CONTROL a LOOPING cue is exempt even through PlayCue
+expect the deliberate opt-out plays BOTH copies
+expect CONTROL the SAME cue through the ordinary surface still coalesces
+expect 2\. THE FLAG -- \?sfxcoalesce=0 restores the pre-card behaviour
+expect with coalescing OFF all 12 start, exactly as before the card \(admitted=12
+expect 3\. THE REPORTED PATH -- a batch of remote deaths applied in ONE tick
+expect \.\.\.and the tick started EXACTLY ONE copy \(admitted=1 for 8 requests
+expect \.\.\.and the cue that piled up is an EXPLOSION
+expect 4\. teardown
+# LEAVE-NO-TRACE IS ASSERTED, not claimed. Section 3 drives REAL UFO deaths, which award score,
+# spawn Explosions into the live bin and add real screen TRAUMA -- measured, before the teardown
+# existed, at +80 score per run and trauma 0.000 -> 0.930, i.e. a visibly rattling main menu.
+expect every planted puppet left the world \(0 leaked\)
+expect \.\.\.and every Explosion the real deaths spawned went with them
+expect every score panel was put back where it was found
+expect the screen shake was put back
+expect \[sfxburst\] 22 passed, 0 failed
+expect-not FAIL
+expect-not SKIP
+
+# LEAVE-NO-TRACE, the eaBinTest rule: two more runs in the SAME process. A leaked puppet, a
+# flag left flipped or an un-reset counter would surface as failures HERE and not above.
+eval SfxBurstTest
+eval SfxBurstTest
+expect-not FAIL
+expect-not SKIP
+quit

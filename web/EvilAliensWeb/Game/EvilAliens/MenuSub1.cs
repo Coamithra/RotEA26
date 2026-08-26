@@ -491,6 +491,42 @@ internal class MenuSub1 : Scene
 		return true;
 	}
 
+	// The design-space TOP of the first row the last DrawMenu pass actually recorded, i.e. the
+	// DRAWN geometry rather than a re-derivation of the layout formula. `ConfirmationMenu` reports
+	// its prompt-vs-rows overlap off this (card bec47239): a diagnostic computed from the same
+	// expression that positioned the rows is a tautology and cannot fail, which is exactly the
+	// hole a first version of that report fell into. False when the pass drew no rows.
+	// Valid only between DrawMenu and the end of Draw -- entryHitBounds is cleared at the top of
+	// the next Draw.
+	protected bool TryGetFirstEntryTop(out float y)
+	{
+		y = 0f;
+		if (entryHitBounds.Count == 0)
+		{
+			return false;
+		}
+		y = entryHitBounds[0].rect.Top;
+		return true;
+	}
+
+	// The design-space BOTTOM of the last row the last DrawMenu pass recorded -- the companion of
+	// TryGetFirstEntryTop, and observed for the same reason. False when the pass drew no rows.
+	protected bool TryGetLastEntryBottom(out float y)
+	{
+		y = 0f;
+		if (entryHitBounds.Count == 0)
+		{
+			return false;
+		}
+		y = entryHitBounds[entryHitBounds.Count - 1].rect.Bottom;
+		return true;
+	}
+
+	// The row list's layout anchor, for a subclass that has to reason about where the base pass
+	// will put its rows (ConfirmationMenu's collision test). Exposed rather than copied so a move
+	// of `origin` cannot silently desync a subclass's model of it.
+	protected Vector2 ListOrigin => origin;
+
 	// Records entry `index`'s clickable box (design space, 800x600), centred at `centre`.
 	// Each DrawMenu calls this for every entry it actually draws; consumed by HandleMouse
 	// on the next frame.

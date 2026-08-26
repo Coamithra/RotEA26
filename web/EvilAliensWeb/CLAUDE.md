@@ -1051,6 +1051,41 @@ site now lives under:
   ride ~10px into the title's bottom banner, 9+ (debug menus only) keep shifting under the same one
   rule. **`DrawRows` and `GetListCentre` must both go through it** or the HUD ring parks where the
   rows no longer are.
+- **A `ConfirmationMenu` lays its PROMPT and its ROWS out as one composite once they would
+  collide** (card bec47239, `ConfirmationMenu.DrawMenu`). The prompt block and the entry rows were
+  placed from two INDEPENDENT fixed anchors -- the prompt centred at y=240, the rows at
+  `y=300+75` -- so nothing noticed when a prompt grew past the gap between them. The online co-op
+  host lobby panel is 8 or 9 lines (room code + four roster seats + the call to action), and it
+  drew "Start when your crew is aboard!" straight across Cancel (measured: 98px of overlap, 120px
+  on the 9-line variant). `DrawMenu` now measures the prompt and, **only when the default layout
+  WOULD collide**, centres prompt+gap+rows as one block inside a band (`BandTop` 48 ..
+  `BandBottom` 524, which is where `MenuScene.drawButtonTips` puts the back/select tips),
+  shrinking the prompt uniformly if the pair cannot fit. Every pre-existing (short) prompt takes
+  the early-out and is pixel-identical to before -- the else branch IS the pre-card expression.
+  - **The mouse hit boxes follow for free**: the rows are still drawn by the base
+    `MenuSub1.DrawMenu`, which is what calls `RecordEntryHit`.
+  - **`GetListCentre()`/`GetBelowListY()` are deliberately NOT overridden** and so keep reporting
+    the un-offset layout -- pre-existing (the base class never knew about the `+75` either), and
+    the only consumer is the HUD ring, which frames the whole panel rather than the rows (it lands
+    at 285/292.5 against the band's centre of 286, so the relayout improves its framing).
+  - **Verify with the `[confirm]` line, not a screenshot** -- "the prompt overlaps Cancel" and
+    "the prompt sits above it" are both just text on a screen. It prints on CHANGE, prints the
+    non-overlapping case too, and carries two numbers:
+    `[confirm] lines=8 entries=2 layout=relaid overlap=none bottom=523`.
+    - **BOTH ARE OBSERVED OFF THE RECORDED HIT BOXES** (`MenuSub1.TryGetFirstEntryTop` /
+      `TryGetLastEntryBottom`), never re-derived from the layout formula. The first version of
+      this line took the row top from the same expression that had just positioned the rows,
+      which made `overlap` algebraically constant: a model that had stopped mirroring
+      `MenuSub1.DrawMenu` then reproduced the reported bug ON SCREEN while the probe stayed
+      green (demonstrated in review, `ListOrigin.Y` 300 -> 380). **Do not "simplify" it back to
+      a formula.**
+    - **`bottom=` is what says the BAND CLAMP bit.** Break the clamp and the layout is still
+      non-overlapping -- the rows just draw lower, past `BandBottom` into the button tips.
+      `[backtip]` cannot see that: it is a RECTANGLE test and a row centred on x=400 never meets
+      the tip's x-range (40..146), so no purely vertical push trips it.
+    - Pinned by `tools/headless/probes/confirm_prompt_layout.txt`, mutation-tested three ways
+      (pre-card branch -> `overlap=98px`; model drift -> `overlap=56px`; clamp dropped ->
+      `bottom=545`), each hitting a different assertion.
 - **A mouse click SHORTER than one tick is latched, not dropped** (card 724f2abc,
   `Compat/MouseLatch.cs`). `InputHandler.Update` polls `Mouse.GetState()` once per tick and
   edge-detects, so a mousedown/mouseup pair landing entirely BETWEEN two polls was never seen and

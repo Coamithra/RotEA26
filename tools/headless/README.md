@@ -80,6 +80,7 @@ eahl --script probe.txt         # same commands from a file; first failure exits
 | command | |
 |---|---|
 | `step [n] [nodraw]` | advance n frames at the fixed dt (default 1) |
+| `stepdt <ms> [nodraw]` | ONE frame at a caller-chosen dt — the browser-hitch rig (card 430494a7): the browser's variable timestep hands the game a single dt of up to 500 ms after a main-thread stall, which the fixed-step loop here can never produce. What `Game1`'s world-dt clamp is demonstrated and probed with. |
 | `shot <path.png>` | render the **current** state to a PNG — does not advance time |
 | `eval <method> [args…]` | call a `Compat.DebugInput` method |
 | `info` | frame counter, sim time, buffer sizes, scene |

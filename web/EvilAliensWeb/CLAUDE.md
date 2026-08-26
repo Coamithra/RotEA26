@@ -10,6 +10,37 @@ net layer, split out of this file so it loads only when you work under `Compat/N
 - **Game loop is JS-driven:** `wwwroot/index.html` (`initRenderJS`/`tickJS`) →
   `Pages/Index.razor.cs` `TickDotNet()` → `new EvilAliens.Game1()`. `ContentTestGame.cs` /
   `SpikeGame.cs` are dead harnesses, safe to delete.
+- **The world-dt hitch clamp (card 430494a7).** The loop is `IsFixedTimeStep=false`, and after a
+  main-thread stall (GC pause, cold decode, compositor jank) KNI's `GameStrategy.Tick` hands the
+  game its whole real elapsed time as ONE dt, clamped only by `MaxElapsedTime` -- 500 ms, and its
+  setter *throws* below 0.5 s. The 2008 build was fixed-step and never saw a dt over ~17 ms; a
+  500 ms step teleports every mover half a second of travel in one frame (360 px of wall at the
+  Level-3 pre-boss scroll -- the reported "brief stutter where a different set of walls is
+  shown", reproduced and bounded with eahl's `stepdt 500`). `Game1.UpdateCore` therefore clamps
+  the world dt to **`DefaultMaxWorldDtMs` (100 ms)** before anything consumes it, so a hitch
+  costs LOST GAME TIME (KNI zeroes its accumulator per tick; the remainder is dropped) instead
+  of a teleport. Things to know before touching it:
+  - **Net sessions are exempt** (`ClampedWorldDtTicks`'s `netActive` arm): the co-op dead
+    reckoning assumes both worlds track real time, and a host that quietly loses time after its
+    own hitch produces exactly the backward corrections card 68f62e92 measured on a host stall.
+    Same condition, and the same reason, as the `?aiff` exclusion beside it.
+  - **The LEADING tick of a run over the 100 ms default prints a `[maxdt]` line, clamped or
+    passed** -- the `?netstaleguard` rule (the flag changes the drag, never the measurement),
+    with the `[hitch]` watchdog's edge detection: a backgrounded tab hands KNI's full 500 ms
+    EVERY tick, so per-tick logging would print once a second forever. The delivered ms is
+    read back OFF the reassigned `gameTime`, never restated from the local, so a mutant that
+    prints without applying names the raw number and fails the probe (the card d44a49a4 "off
+    an argument that reached a draw call" rule). Don't reformat the line -- the probe pair
+    greps it.
+  - **`eval WorldClock` CANNOT verify this** -- `WorldTime.Advance` caps its own dt at 0.1 s
+    (card d79a2f48 gave cosmetic phases the same protection), so the world CLOCK reads 0.100
+    for a 500 ms tick on the fixed and the broken build alike; an earlier cut of the probe had
+    exactly that vacuous leg. Positions are what teleported, and the clamp ARITHMETIC is pinned
+    by `logic_probe`'s `ProbeMaxWorldDt` against the real `Game1.ClampedWorldDtTicks`.
+  - `?maxdt=<ms>` overrides, `0` = off (the deliberate bug reproduction, IN `Active` when
+    overridden); Draw-side raw-dt cosmetics (bomb ripple, the slowmo-trail ease) deliberately
+    keep the unclamped frame dt. Rig: eahl `stepdt <ms>`; pinned by
+    `tools/headless/probes/maxdt_clamp.txt` + `maxdt_clamp_off.txt`.
 - **Resolution = a unified presenter, not a pinned back buffer.** KNI's BlazorGL forces the back
   buffer to the browser window size (rewrites `PreferredBackBuffer` on resize — don't reintroduce a
   pinned one). `Game1.Draw` renders the whole frame into one offscreen `sceneTarget` sized to the

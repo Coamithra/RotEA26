@@ -192,35 +192,52 @@ namespace EvilAliensWeb.Headless
         {
             for (int i = 0; i < frames; i++)
             {
-                // KNI brings OpenAL up lazily on the first sound, so the mixer-level half of
-                // the mute can only be applied once a context exists -- which may happen
-                // anywhere inside a long `step`, not before it. One bool test per frame after
-                // it lands. (Hoisting this out of the loop looks like an optimisation and is
-                // a bug: a script that does the whole run in one `step 3600` would then check
-                // exactly once, before any sound had ever played, and never apply it.)
-                HeadlessAudio.Pump();
-                if (_netClock != null)
-                {
-                    _netClockCarry += _step.TotalMilliseconds;
-                    long whole = (long)_netClockCarry;
-                    _netClockCarry -= whole;
-                    _netClock.Advance(whole);
-                }
-                _total += _step;
-                var gt = new GameTime(_total, _step);
-                // FrameProfiler's per-phase brackets live inside Game1 and so already run here,
-                // but the sample only ENTERS the ring on EndFrame -- which in the browser is
-                // called from Index.razor.cs, i.e. code this host does not run. Without this the
-                // headless profiler reports a permanently stale window and `eval FpsStatsLine`
-                // is useless. One stopwatch, same contract as the browser's tick timer.
-                long tickStart = FrameProfiler.Enabled ? Stopwatch.GetTimestamp() : 0L;
-                _game.UpdateFrame(gt);
-                if (draw)
-                    _game.DrawFrame(gt);
-                if (tickStart != 0L)
-                    FrameProfiler.EndFrame(
-                        (Stopwatch.GetTimestamp() - tickStart) * 1000.0 / Stopwatch.Frequency);
+                StepOnce(_step, draw);
             }
+        }
+
+        // One frame at a CALLER-CHOSEN dt, in ms -- the browser-hitch rig (card 430494a7).
+        // The browser runs IsFixedTimeStep=false, and after a main-thread stall KNI's
+        // GameStrategy.Tick hands the game its whole real elapsed time as ONE dt, clamped
+        // only by MaxElapsedTime (500 ms, and its setter refuses anything lower). The
+        // fixed-step loop above can never produce such a tick, so this is the only headless
+        // way to look at what one does to the world -- and the rig Game1's world-dt clamp
+        // is demonstrated and probed with.
+        internal void StepDt(double ms, bool draw)
+        {
+            StepOnce(TimeSpan.FromMilliseconds(ms), draw);
+        }
+
+        private void StepOnce(TimeSpan dt, bool draw)
+        {
+            // KNI brings OpenAL up lazily on the first sound, so the mixer-level half of
+            // the mute can only be applied once a context exists -- which may happen
+            // anywhere inside a long `step`, not before it. One bool test per frame after
+            // it lands. (Hoisting this out to the callers looks like an optimisation and is
+            // a bug: a script that does the whole run in one `step 3600` would then check
+            // exactly once, before any sound had ever played, and never apply it.)
+            HeadlessAudio.Pump();
+            if (_netClock != null)
+            {
+                _netClockCarry += dt.TotalMilliseconds;
+                long whole = (long)_netClockCarry;
+                _netClockCarry -= whole;
+                _netClock.Advance(whole);
+            }
+            _total += dt;
+            var gt = new GameTime(_total, dt);
+            // FrameProfiler's per-phase brackets live inside Game1 and so already run here,
+            // but the sample only ENTERS the ring on EndFrame -- which in the browser is
+            // called from Index.razor.cs, i.e. code this host does not run. Without this the
+            // headless profiler reports a permanently stale window and `eval FpsStatsLine`
+            // is useless. One stopwatch, same contract as the browser's tick timer.
+            long tickStart = FrameProfiler.Enabled ? Stopwatch.GetTimestamp() : 0L;
+            _game.UpdateFrame(gt);
+            if (draw)
+                _game.DrawFrame(gt);
+            if (tickStart != 0L)
+                FrameProfiler.EndFrame(
+                    (Stopwatch.GetTimestamp() - tickStart) * 1000.0 / Stopwatch.Frequency);
         }
 
         // Draw one frame and write it to disk. Split from Step so a screenshot never

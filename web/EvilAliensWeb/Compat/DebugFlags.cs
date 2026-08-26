@@ -57,6 +57,10 @@ namespace EvilAliensWeb.Compat
 	//                  screen edge -- separate without bound again (card 2cfab019). Another
 	//                  deliberate bug reproduction, ON by default, in `Active` for the same
 	//                  reason, and the negative control the fix's probe pair rests on.
+	//   ?maxdt=<ms>    move the world-dt hitch clamp (default Game1.DefaultMaxWorldDtMs, 100 ms),
+	//                  or `0` to turn it OFF so a browser stall teleports the world one full
+	//                  500 ms step again (card 430494a7). Another deliberate bug reproduction --
+	//                  IN `Active` whenever overridden.
 	//   ?metalscore    re-enable the chrome-sheen (metal.fx) on the in-game score + "Press Start"
 	//                  text (OFF by default since card 37c4ccca — the chrome's dark mid-band reads
 	//                  crunchy on the tiny HUD glyphs) to A/B against the plain flattened drop shadow
@@ -447,6 +451,20 @@ namespace EvilAliensWeb.Compat
 		// reach a public lobby. A negative control you cannot run two months later is not a
 		// negative control, which is why it ships rather than living inside the test suite.
 		public static bool NetSnapshotStaleGuard { get; private set; } = true;
+
+		// THE WORLD-DT HITCH CLAMP OVERRIDE (card 430494a7), `?maxdt=<ms>`. Null = the baked
+		// `Game1.DefaultMaxWorldDtMs` (100); `0` = clamp OFF, restoring the pre-card behaviour
+		// where a browser main-thread stall hands the world ONE dt of up to KNI's 500 ms
+		// `MaxElapsedTime` (whose setter refuses anything lower) -- which at the pre-boss wall
+		// scroll (0.72 px/ms) teleports every block 360 px in a single frame and reads as "a
+		// different set of walls" for a beat. So `?maxdt=0` is the deliberate bug reproduction,
+		// the `?netstaleguard=0` idiom, and ANY override is IN `Active` for that idiom's
+		// reason: a bug-repro boot must never reach a public lobby, and a run whose clamp was
+		// moved must be tellable from a stock one. (Not because it could desync a session --
+		// Game1 skips the clamp entirely while one is up, override or not, since the dead
+		// reckoning wants real-time catch-up; see UpdateCore. Conservatism, like the pre-boot
+		// gameplay of a host that lists itself before anyone joins.)
+		public static float? MaxWorldDtMs { get; private set; }
 
 		// SAME-TICK SFX COALESCING (card 8732568e), ON by default -- `?sfxcoalesce=0` turns it OFF,
 		// restoring the pre-card behaviour where N deaths landing on one tick each start their own
@@ -1870,6 +1888,21 @@ namespace EvilAliensWeb.Compat
 					break;
 				case "hitstop":
 					Hitstop = IsOn(val);
+					break;
+				case "maxdt":
+					// 0 is legal and means "clamp off" (the deliberate bug reproduction); a
+					// negative or unparseable value is refused per the value-carrying rule.
+					// Capped at KNI's own 500 ms MaxElapsedTime -- above it the flag could
+					// never engage, so a bigger ask is a misunderstanding worth reporting.
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var maxdt)
+						&& maxdt >= 0f && maxdt <= 500f)
+					{
+						MaxWorldDtMs = maxdt;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number of ms 0..500 (0 = clamp off)", InForce(MaxWorldDtMs));
+					}
 					break;
 				case "nethitstop":
 					NetHitstop = IsOn(val);
@@ -4078,7 +4111,7 @@ namespace EvilAliensWeb.Compat
 					+ "flag that unfreezes the sprite harness' object, and no harness was requested, so "
 					+ "it does nothing. Add &harness=<object>.");
 			}
-			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || FakeBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || !NetChargeAimEase || !NetHpRaise || !NetTetherWall || AiWallNav2008 || AiFastForward > 1;
+			Active = SkipSplash || AutoStart || Level.HasValue || UnlockAll || Invuln || LoadLog || Harness != null || Bulletshot || Lazershot || Textshot || CastBrain || CastShow || CreditsShot.HasValue || CrawlPos.HasValue || TexViewer || WallsOnly || NoWalls || BrainBoss || FakeBoss || TutorialTraining || FlySpiders || NetRole != NetRole.None || AIPlayer || TeamPartner != TeamPartnerSeat.None || NetScript || GameBrowser || NetJip || NetKickShot || NetHitstop || !NetSnapshotStaleGuard || !NetChargeAimEase || !NetHpRaise || !NetTetherWall || AiWallNav2008 || AiFastForward > 1 || MaxWorldDtMs.HasValue;
 			if (Active)
 			{
 				Console.WriteLine("[debug] flags active: skipSplash=" + SkipSplash
@@ -4124,6 +4157,10 @@ namespace EvilAliensWeb.Compat
 						// the ORIGINAL algorithm must be tellable from one that measured the
 						// shipped one -- the two produce plausible tables either way.
 						+ (AiWallNav2008 ? " aiwallnav2008" : "")
+						// Prints only when overridden -- the ?netstaleguard=0 rule: a run whose
+						// hitch clamp was moved (or disabled, the bug repro) must be tellable
+						// from a stock one.
+						+ (MaxWorldDtMs.HasValue ? " maxdt=" + MaxWorldDtMs.Value.ToString(CultureInfo.InvariantCulture) : "")
 						+ (Harness != null
 							? " harness=" + Harness + " frame=" + HarnessFrame + (HarnessPlay ? " play" : "")
 								+ (HarnessRun ? " run" : "") + " bg=" + HarnessBg

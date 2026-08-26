@@ -3515,6 +3515,18 @@ Nothing is doubled. The count is defect C multiplying the authored series.
   A turn is 60 ms in a small world and up to ~1.2 s in a big one, against a 50 ms loop: the
   animation does not slow down, it STAIRCASES. **Measured over 60 driven ticks at a 150 ms turn:
   the host advanced on 20 of them in steps of 1, the puppet on 6 in steps of 3.**
+  - **THE OPT-OUT IS DECLARED, NOT INFERRED: `AlienDrawableGameComponent.NetBodyAnimLocal`**,
+    default FALSE (the `NetScaleLocal` polarity -- it describes a thing most types do not have).
+    True means the puppet advances the loop itself and the descriptor's byte, though still sent,
+    is not applied. **The layer never asks it**: a type that owns its loop does so in its own
+    `NetDriveExtras`, so the seam exists for the one reader that has no other way to know --
+    `NetJipDump`'s `LocalSeams`, which prints `bodyanim` beside `frame`/`rot`/`scale`/`path`.
+    Without it the two ends' `state` extras legitimately drift on that byte with nothing on the
+    line saying why, which is the exact confusion that field exists to prevent (the diff compares
+    extras by LENGTH, so nothing fails either way). Declared rather than a type list in the dump,
+    per this file's own rule that a skip is the GAME's statement and never a type name in a tool.
+    Pinned by `eaNetEntity` (53 checks now, up from 47), which is where its polarity trap lives:
+    it sits directly below `NetFrameLocal` in every one of these files and defaults the other way.
   - **THREE TYPES TOOK THE FIX AND ONE DID NOT, and the audit is the whole risk.** It is
     `NetFrameLocal`'s two questions, restated for an accumulator that is not `curframe`: (i)
     nothing but `Draw` reads it, so a local phase that differs by a frame changes a pixel and
@@ -3545,16 +3557,20 @@ Nothing is doubled. The count is defect C multiplying the authored series.
   finishing its animation over a frozen screen is cosmetic. **Measured at ~40 explosions and a
   full 2.5 s shrink-and-flicker** (42 / 39 / 45 over three runs) -- and it is the ONLY thing
   moving, so it is the only thing you look at.
-  - **`ComponentBin.PauseAdopt(component)` is the registration that comment said could not
-    exist**: it puts a component into the INNERMOST live pause layer, leaving it disabled, and
-    answers false when no pause is up (the caller's cue to enable it itself). A component
-    ALREADY in the layer -- the ordinary case, the pause captured it before the release -- just
-    stays there. `Pop` then starts it, correctly and for free: it asks `IsFrozenPuppet`, and a
-    released puppet has just stopped being one.
-  - **It matches `Push` exactly on the watcher bookkeeping.** `ComponentBin.watchers` mirrors
-    the MULTISET collection + idleList + Σinactive, so a component in both the collection and a
-    layer is counted twice and `Pop`'s `WatcherRemove` takes the second count back out. An adopt
-    that skipped `WatcherAdd` would make `Pop` under-count.
+  - **`ComponentBin.PauseAdopt(component)` is that registration -- and it is not new code, it is
+    `ComponentBin.Add`'s own pause branch lifted out.** `Add` has always frozen a world object
+    that ARRIVES during a pause into the innermost layer; what did not exist was a way to ask the
+    same of a component the pause had already captured. So the comment was half right: nothing can
+    retro-register a component the pause never walked, and a released puppet is never that -- it
+    was in the collection when the `Push` ran. `Add` is now `PauseAdopt`'s other caller (the type
+    gate stays at that call site, since what counts as the pause UI is its policy), which is what
+    keeps the two halves from drifting and gives the registering half its coverage in `eaBinTest`.
+  - **`Pop` starts it, correctly and for free**: it asks `IsFrozenPuppet`, and a released puppet
+    has just stopped being one.
+  - **Disable unconditionally, record ONCE.** The postcondition is "frozen", and re-disabling a
+    component `Push` already disabled costs nothing -- but `watchers` mirrors the MULTISET
+    collection + idleList + Σinactive, so a second `Add` of the same component would leave a count
+    `Pop`'s single `WatcherRemove` cannot take back out.
   - Pause layers do not nest today (a remote pause defers to a local one --
     `GameScene.NetSetRemotePaused`), so there is only ever one; the innermost is what a component
     would have been caught by had it been there at the time.

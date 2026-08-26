@@ -41,6 +41,12 @@ namespace EvilAliensWeb.Compat.Net
             INetHost hostBefore = NetHost.Current;
             PinnedNetHost clock = new PinnedNetHost();
             NetHost.Current = clock;
+            // Section 2 PUSHES a real pause layer over the live world, and everything inside it
+            // is live code -- so a throw there would otherwise leave the whole game frozen, every
+            // menu component Enabled=false for the rest of the process, in a suite whose contract
+            // is leave-no-trace. Drained in the finally against the depth we FOUND, so a caller
+            // who was already paused keeps their own layer. (The NetSceneOrderTest pattern.)
+            int freezeAtStart = bin.FreezeDepth;
             try
             {
                 NetPuppets.Enable(game);
@@ -54,7 +60,11 @@ namespace EvilAliensWeb.Compat.Net
             }
             finally
             {
-                sb.Append(" 9. teardown\n");
+                sb.Append(" 9. teardown").Append(NL);
+                while (bin.FreezeDepth > freezeAtStart)
+                {
+                    bin.Pop();
+                }
                 foreach (GameComponent c in planted)
                 {
                     if (InWorld(game, c)) { bin.Remove(c); }
@@ -68,6 +78,8 @@ namespace EvilAliensWeb.Compat.Net
                 Check("every entity this suite planted left the world", !anyLeft);
                 Check("the puppet layer is disabled again", NetPuppets.LiveCount == 0);
                 Check("no death FX component was left in the world", CountType<Explosion>(game) == 0);
+                Check("the world is not left frozen (pause depth " + freezeAtStart + " -> "
+                    + bin.FreezeDepth + ")", bin.FreezeDepth == freezeAtStart);
                 NetHost.Current = hostBefore;
             }
             // TAGGED, so a probe can anchor on it -- an untagged "16 passed" is what a dozen
@@ -105,6 +117,11 @@ namespace EvilAliensWeb.Compat.Net
             // frame the host would be showing at that moment.
             int loop = pup.NetAnimFrameCount;
             sb.Append("    the alienboss loop is ").Append(loop).Append(" frames").Append(NL);
+            // Stated rather than divided by: 0 means LoadContent has not run, and leg 1b's modulo
+            // would then throw into the outer handler and report a DivideByZeroException where
+            // the real news is that the puppet has no sheet.
+            Check("PRECONDITION the puppet's sheet is loaded (" + loop + " frames)", loop > 0);
+            if (loop <= 0) { return; }
             List<int> pupFrames = new List<int>();
             for (int i = 0; i < 60; i++)
             {
@@ -134,7 +151,7 @@ namespace EvilAliensWeb.Compat.Net
             // A frame four ahead of what the puppet is showing, i.e. a fifth of a second of drift.
             int frameBefore = pup.NetAnimFrame;
             SnapshotWithExtra(IdSkullA, skullType, hp: 25,
-                extra: new byte[] { (byte)((frameBefore + 4) % pup.NetAnimFrameCount) });
+                extra: new byte[] { (byte)((frameBefore + 4) % loop) });
             sb.Append("    a wire frame 4 ahead: ").Append(frameBefore).Append(" -> ")
               .Append(pup.NetAnimFrame).Append(NL);
             Check("a snapshot frame does NOT move the puppet's own loop (" + frameBefore + " -> "

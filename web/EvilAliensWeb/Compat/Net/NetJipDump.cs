@@ -239,6 +239,11 @@ namespace EvilAliensWeb.Compat.Net
         {
             string s = "";
             if (comp.NetFrameLocal) { s += (s.Length > 0 ? "," : "") + "frame"; }
+            // A type animating its OWN accumulator rather than curframe (card 5f506d11). Without
+            // it the two ends' `state` extras legitimately drift on the animFrame byte with
+            // nothing on the line saying why -- which is the exact confusion this field exists to
+            // prevent. The diff compares extras by LENGTH, so nothing fails either way.
+            if (comp.NetBodyAnimLocal) { s += (s.Length > 0 ? "," : "") + "bodyanim"; }
             if (comp.NetSpinPerMs != 0f) { s += (s.Length > 0 ? "," : "") + "rot"; }
             if (comp.NetScaleLocal) { s += (s.Length > 0 ? "," : "") + "scale"; }
             if (comp.NetPathOffset != Vector2.Zero) { s += (s.Length > 0 ? "," : "") + "path"; }

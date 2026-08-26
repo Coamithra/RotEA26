@@ -900,6 +900,11 @@ site now lives under:
   added under a pause goes in `Enabled=false` and registers in the newest pause layer, so
   `Pop()` thaws it. Non-world components (pause menus, darkener, overlays) stay live — they ARE
   the pause UI. A spawn that races the pause appears parked and resumes on unpause, by design.
+  **That block is `ComponentBin.PauseAdopt` since card 5f506d11, and it has a second caller**:
+  `NetPuppets.ReleaseDyingPuppet` freezes a puppet it is (re-)enabling mid-pause the same way,
+  instead of stepping outside the pause layer and animating a death over a stopped screen (net
+  CLAUDE.md -> BODY LOOPS). The type gate stays at the `Add` site -- what counts as the pause UI
+  is that call site's policy, not the helper's.
 - **A pass that walks a live collection must FREEZE its count first.** Instant births mean any
   callback that spawns (a kill's asteroid split / powerup drop, a wall-hit explosion) grows
   `Game.Components` — and every mirror list fed by `ComponentAdded` — *while* the pass is

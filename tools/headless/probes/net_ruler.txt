@@ -33,7 +33,12 @@
 # animation runs on through the freeze". Measured: ~40 explosions and a full 2.5 s
 # shrink-and-flicker on a screen where nothing else is moving. It is not the harmless divergence
 # that comment assumed -- it is the ONLY thing moving, so it is the only thing you look at.
-# ComponentBin.PauseAdopt is the registration that comment said could not exist.
+#
+# ComponentBin.PauseAdopt is that registration, and it is not new code: it is ComponentBin.Add's
+# own pause branch lifted out, which has always frozen a world object ARRIVING during a pause into
+# the innermost layer. So the comment was half right -- nothing can retro-register a component the
+# pause never walked, and a released puppet is never that, since it was in the collection when the
+# Push ran. Add is its other caller now, which is what keeps the two halves from drifting.
 #
 # ---- C. "keeps playing repeatedly" -- part two, and most of "far too many explosions" -------
 #
@@ -70,7 +75,10 @@
 #     "puppet 6" of 60 ticks, "max step 3", and the wire frame moving the loop.
 #   * the local advance removed alone: 1 leg (puppet 0 -- worse than pre-card, the apply is gone).
 #   * ReleaseDyingPuppet's pre-card unconditional un-freeze: 1 leg, +42/+39/+45 explosions over
-#     three runs against +1 with the fix.
+#     three runs against +1 with the fix. (Read that number off a puppet ticked only while it is
+#     ENABLED *and still in the world*: a component keeps Enabled after its own Die(), and this
+#     type's dying branch fires its finale whenever DeathTimer.Finished -- which a non-repeating
+#     Timer reports forever -- so ticking past the removal reports ~150 where the game makes ~40.)
 #   * the 30 s real-time window reinstated on the released-dying ledger: 3 legs -- Rebuilt, a
 #     replacement ruler in the world, and the second death's opening pop.
 #
@@ -89,6 +97,6 @@ eval NetRuler
 # The tally, not `expect-not FAIL`: an absence assertion passes on a run where the eval never
 # happened, and this suite reports a SKIP (which is not a pass) whenever a session, level or
 # attract demo is up. Raise the count when legs are added.
-expect \[netruler\] 16 passed, 0 failed
+expect \[netruler\] 18 passed, 0 failed
 expect-not SKIP
 quit

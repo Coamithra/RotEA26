@@ -419,22 +419,23 @@ internal class FakeBoss : KillableAlien
 	// The frame is STILL SENT and no longer APPLIED (card 5f506d11): a puppet runs the loop
 	// itself in NetDriveExtras below. Same seam, same audit, same reason as BattleSkull's --
 	// Compat/Net/NetBodyAnim.
-	internal int NetAnimFrame
-	{
-		get
-		{
-			return (int)animationProgress;
-		}
-		set
-		{
-			animationProgress = value;
-		}
-	}
+	// GET-ONLY since card 5f506d11: EncodeStateExtra is the last reader and nothing writes it
+	// any more. A writable seam with no legitimate writer is a trap -- the next use of it would
+	// fight the local loop below, which is the defect that card fixed.
+	internal int NetAnimFrame => (int)animationProgress;
+
+	// The loop's length. 0 before LoadContent has run, which is the "no sheet yet" answer
+	// NetBodyAnim.Advance acts on -- and what a rig reasoning about the wrap reads (NetRulerTest).
+	internal int NetAnimFrameCount => (sprite != null) ? sprite.Frames : 0;
+
+	// This loop is the CLIENT'S to run: see NetBodyAnimLocal, and Compat/Net/NetBodyAnim for the
+	// audit that says this type may.
+	internal override bool NetBodyAnimLocal => true;
 
 	// The client half: advance the body loop on the driver's REAL dt, exactly as Update does.
 	internal override void NetDriveExtras(GameTime gameTime)
 	{
 		animationProgress = EvilAliensWeb.Compat.Net.NetBodyAnim.Advance(animationProgress,
-			(float)gameTime.ElapsedGameTime.TotalSeconds, 20f, (sprite != null) ? sprite.Frames : 0);
+			(float)gameTime.ElapsedGameTime.TotalSeconds, 20f, NetAnimFrameCount);
 	}
 }

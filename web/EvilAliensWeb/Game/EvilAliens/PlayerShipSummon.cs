@@ -57,9 +57,23 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 	private const int RingSegments = 96;
 	private const float RingRadius = 34f;
 	private const float RimThickness = 3f;
-	private const float ArcThickness = 10f;
+	// 6, down from 10 -- "the growing ring is a bit too thick, make it about 60% of what it is
+	// now" (card d44a49a4). Everything else measured off it follows: DrawCap's round cap is
+	// ArcThickness * 0.5, and SegScale sizes each quad from the stroke's OUTER radius.
+	private const float ArcThickness = 6f;
 	private const float DiscRadiusFactor = 0.95f;
 	private const float SegOverlap = 1.02f;
+
+	// THE DISC IS A VEIL, NOT A BACKDROP (card d44a49a4). It shipped at 0.95 -- near-opaque -- and
+	// the owner's report is what that costs: "the middle circle is pure black, obstructing the
+	// game - should be transparent (can be slightly darkened but very subtle)". The widget sits
+	// where the ship was, i.e. in the middle of the fight, for ten to fifteen seconds.
+	//
+	// It is not deleted, because it is what the numeral reads against: 0 puts a bright glyph over
+	// whatever the level happens to be showing. 0.22 is "very subtle" -- a dark tint you can see
+	// the game through -- and the numeral keeps its own additive glow underneath it, which is
+	// where its contrast now mostly comes from.
+	private const float DiscAlpha = 0.22f;
 
 	// The spikes radiating outward from the rim. Each is a short stack of `blank` quads whose width
 	// shrinks toward the tip -- see the taper loop in Draw for why lazerglow is the wrong primitive.
@@ -78,6 +92,124 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 	private const float LabelScale = 0.30f;
 	private const float LabelOffsetY = 54f;
 	private const float LabelItalic = 0.28f;
+
+	// THE WIDGET WEARS THE OWNER'S COLOUR (card d44a49a4): "needs to have the color of the player
+	// who will respawn there (rather than pink)". Two players both waiting out a respawn used to
+	// raise two identical pink clocks, and neither said whose ship was coming back.
+	//
+	// It is a HUE ROTATION of the shipped design, not a per-slot palette. Every colour here was
+	// tuned together off the owner's mock -- the rim sits 5 degrees off the arc core, the disc is
+	// a violet tint 35 degrees away, the spikes and the label each have their own offset -- and a
+	// table of flat per-slot colours would throw all of that away. Rotating the whole set by one
+	// angle keeps the design and only moves it round the wheel.
+	//
+	// DesignHue is 300 because that IS slot 1's hue (Oracle's constructor: 300 / 0 / 39, and -1
+	// for slot 0), so **player 2's ring is byte-identical to the shipped pink**. That is the
+	// property to check first if this ever looks wrong: if slot 1 has moved, the anchor is wrong,
+	// not the rotation.
+	private const float DesignHue = 300f;
+
+	// Slot 0's own hue is -1, the sentinel for "do not colorize" -- its ship keeps the sprite's
+	// native blue, and PlayerShip.Draw's colorize band for the others is (180, 250), so 215 is the
+	// centre of the very band that stands for "untinted" there. A -1 passed to the rotation as a
+	// number would swing the widget 300 degrees to a near-identical pink and quietly break the
+	// one slot that has no hue of its own.
+	private const float UntintedShipHue = 215f;
+
+	// The owner's hue, or the untinted stand-in. Public through DebugStateLine so the resolved
+	// value is DATA -- a colour is exactly the kind of thing a screenshot can be argued about.
+	internal float RingHue
+	{
+		get
+		{
+			if (player < 0 || player >= Oracle.MaxPlayers)
+			{
+				return DesignHue;
+			}
+			float h = oracle.Hue(player);
+			return (h < 0f) ? UntintedShipHue : h;
+		}
+	}
+
+	// The shipped colour, rotated onto the owner's hue. `ringHueShift` is resolved once per Draw.
+	private Color Tint(float r, float g, float b, float a)
+	{
+		return HueRotate(r, g, b, a, ringHueShift);
+	}
+
+	// The hue of a Color, in degrees, or -1 for a greyscale one. Used to REPORT what the arc was
+	// really drawn with -- see the lastArc* header.
+	private static float HueOf(Color c)
+	{
+		float r = (float)(int)c.R / 255f;
+		float g = (float)(int)c.G / 255f;
+		float b = (float)(int)c.B / 255f;
+		float max = Math.Max(r, Math.Max(g, b));
+		float min = Math.Min(r, Math.Min(g, b));
+		float delta = max - min;
+		if (delta <= 0f)
+		{
+			return -1f;
+		}
+		float h;
+		if (max == r)
+		{
+			h = 60f * MyMath.Mod((g - b) / delta, 6f);
+		}
+		else if (max == g)
+		{
+			h = 60f * ((b - r) / delta + 2f);
+		}
+		else
+		{
+			h = 60f * ((r - g) / delta + 4f);
+		}
+		return MyMath.Mod(h, 360f);
+	}
+
+	// HSV hue rotation on a straight-alpha colour. Saturation and value are untouched, so the
+	// design's own contrast survives; alpha is carried through unchanged (straight alpha
+	// project-wide -- never premultiply here).
+	private static Color HueRotate(float r, float g, float b, float a, float degrees)
+	{
+		if (degrees == 0f)
+		{
+			return new Color(r, g, b, a);
+		}
+		float max = Math.Max(r, Math.Max(g, b));
+		float min = Math.Min(r, Math.Min(g, b));
+		float delta = max - min;
+		if (delta <= 0f || max <= 0f)
+		{
+			return new Color(r, g, b, a); // greyscale has no hue to rotate
+		}
+		float h;
+		if (max == r)
+		{
+			h = 60f * MyMath.Mod((g - b) / delta, 6f);
+		}
+		else if (max == g)
+		{
+			h = 60f * ((b - r) / delta + 2f);
+		}
+		else
+		{
+			h = 60f * ((r - g) / delta + 4f);
+		}
+		h = MyMath.Mod(h + degrees, 360f);
+		float sat = delta / max;
+		float c = max * sat;
+		float x = c * (1f - Math.Abs(MyMath.Mod(h / 60f, 2f) - 1f));
+		float m = max - c;
+		float rr, gg, bb;
+		if (h < 60f) { rr = c; gg = x; bb = 0f; }
+		else if (h < 120f) { rr = x; gg = c; bb = 0f; }
+		else if (h < 180f) { rr = 0f; gg = c; bb = x; }
+		else if (h < 240f) { rr = 0f; gg = x; bb = c; }
+		else if (h < 300f) { rr = x; gg = 0f; bb = c; }
+		else { rr = c; gg = 0f; bb = x; }
+		return new Color(rr + m, gg + m, bb + m, a);
+	}
 
 	// The "little snappy animation when the nr changes" the owner asked for: the numeral punches
 	// out and settles inside PunchMs of every whole-second change. See DigitPunch.
@@ -129,6 +261,33 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 	// ship's own progression is still standing -- the same instant `respawntimebonus` is read off
 	// it, and that value comes from this very powerup.
 	private int rewardBlastLevel;
+
+	// Resolved once per Draw and read by every Tint() below -- see RingHue.
+	private float ringHueShift;
+
+	// WHAT THE LAST DRAW ACTUALLY DID -- the four numbers card d44a49a4's asks live in, each taken
+	// FROM THE ARGUMENT THAT WAS DRAWN WITH rather than recomputed beside it.
+	//
+	// THIS IS THE WHOLE VALUE OF THESE FIELDS, and the first two cuts of this card got it wrong in
+	// two different ways. Printing the CONSTANT (`DiscAlpha`, `ArcThickness`) restates the
+	// diagnostic's own subject: `DrawVeilDisc(r, 0.95f * popAlpha)` at the call site draws a
+	// near-opaque disc while the report still says 0.22. Latching the expression on the line
+	// BEFORE the draw is no better -- deleting `+ new Vector2(0f, lastDigitDy)` from the DrawString
+	// leaves the latch, and the report, green. Both were demonstrated in review, with the reported
+	// defect visibly back on screen and every probe passing.
+	//
+	// So each of these is derived from the value that REACHED a draw call: the alpha of the Color
+	// the veil was drawn with, the thickness read back out of the quad scale the arc was drawn
+	// with, the hue of the Color the arc core was drawn with, and the offset of the position the
+	// numeral was drawn at. The `[xfade] seal src=` rule, and the `[confirm] overlap=` tautology of
+	// card bec47239 in its third form.
+	private float lastDiscAlpha;
+
+	private float lastArcPx;
+
+	private float lastArcHue;
+
+	private float lastDigitDy;
 
 	// The mock's soft halos (spikes, the glow behind the disc, the glow behind the text) and the
 	// numeral/label. Both are preloaded by GameScene, so this is a dictionary hit -- see the header.
@@ -224,6 +383,10 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 		base.Position = position;
 		cosmetic = false;
 		wipeReported = false;
+		lastDiscAlpha = 0f;
+		lastArcPx = 0f;
+		lastArcHue = -1f;
+		lastDigitDy = 0f;
 		rewardBlastLevel = Score.GetPowerupLevel(Powerup.PowerupType.Linker, player);
 		countdown = (int)Math.Round((float)(15 - respawntimebonus) * Settings.GetInstance().CurrentDifficulty switch
 		{
@@ -242,7 +405,12 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 	}
 
 	// The peer's respawn, announced over NetProtocol.EvRespawn (card 37f3a663). `slot` is the
-	// peer's roster slot; nothing here reads the local roster, because that seat is not ours --
+	// peer's roster slot; nothing here reads the local roster for its CLOCK, because that seat is
+	// not ours -- (the RING's colour does read it, and must: `RingHue` looks the slot's hue up in
+	// the local Oracle, which is the same table the remote player's puppet SHIP is coloured from,
+	// so the indicator matches the ship it belongs to on each screen. Hue is per-machine state
+	// that is never persisted and defaults identically on both peers, so this introduces no new
+	// divergence -- card d44a49a4.)
 	// and since card ed32efe1 that includes the reward level, which arrives on the wire (v26)
 	// rather than being re-derived from our ~10 Hz view of their powerups. See
 	// NetProtocol.EncodeRespawnEvent for why: the reward Blast is not itself replicated, so a
@@ -255,6 +423,10 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 		base.Position = position;
 		cosmetic = true;
 		wipeReported = false;
+		lastDiscAlpha = 0f;
+		lastArcPx = 0f;
+		lastArcHue = -1f;
+		lastDigitDy = 0f;
 		// The OWNER'S latched value, straight off the wire -- see the header above.
 		rewardBlastLevel = Math.Clamp(rewardLevel, 0, 4);
 		countdown = 0;
@@ -418,6 +590,25 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 			+ " remainMs=" + (int)RemainingMs
 			+ " totalMs=" + (int)totalMs
 			+ " slot=" + player
+			// Card d44a49a4's three tweaks that a screenshot cannot settle an argument about:
+			// the resolved owner HUE (and the shift from the authored design, which must be 0 for
+			// slot 1), the disc's alpha, and the derived ink correction that centres the numeral.
+			// `hue` is the whole of sub-ask 3 as a number -- "is it the player's colour?" is
+			// exactly the kind of question a picture invites two readings of.
+			// Card d44a49a4's four asks. EVERY ONE OF THESE COMES OFF WHAT THE LAST DRAW DID --
+			// see the lastDisc*/lastArc*/lastDigitDy header for the two ways an earlier cut of
+			// this line restated its own subject instead. A summon that has not DRAWN yet reports
+			// zeroes (and hue -1), which is honest and is why the probe steps a drawn frame.
+			//
+			// `wantHue` is the only DECISION here rather than an observation -- the owner's hue as
+			// resolved, which the -1 sentinel makes non-trivial -- and it is printed BESIDE the
+			// drawn hue precisely so the two can be compared.
+			+ " wantHue=" + RingHue.ToString("0.0")
+			+ " drawnHue=" + lastArcHue.ToString("0.0")
+			+ " hueShift=" + MyMath.Mod(RingHue - DesignHue, 360f).ToString("0.0")
+			+ " discAlpha=" + lastDiscAlpha.ToString("0.00")
+			+ " arcPx=" + lastArcPx.ToString("0.0")
+			+ " digitDy=" + lastDigitDy.ToString("0.00")
 			+ " wiped=" + WorldIsWiped
 			+ (cosmetic ? " cosmetic" : " local");
 	}
@@ -481,6 +672,9 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 		float fill = FillFraction;
 		float pop = PopFraction;
 		float pulse = PulseAmount;
+		// Resolved ONCE per Draw and read by every Tint() below (card d44a49a4). The design was
+		// authored at DesignHue, so this is 0 for player 2 and that ring is byte-identical.
+		ringHueShift = RingHue - DesignHue;
 
 		// The flare: the whole ring grows and fades out over the last PopMs.
 		float radius = RingRadius * (1f + PopRadiusGrowth * pop);
@@ -491,22 +685,25 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 
 		// Magenta throughout, brightening with the pulse. Straight (non-premultiplied) alpha, per
 		// the project-wide rule in the root CLAUDE.md.
-		Color rim = new Color(0.55f, 0.13f, 0.52f, 0.62f * popAlpha);
+		Color rim = Tint(0.55f, 0.13f, 0.52f, 0.62f * popAlpha);
 		// THE CORE'S ALPHA CARRIES THE POP FADE AND NOTHING ELSE -- the pulse brightens it through
 		// RGB instead. Two neighbouring quads must overlap or the ring seams, and blending two
 		// translucent quads is NOT idempotent (0.72 over 0.72 reads 0.92), so any alpha below 1
 		// draws a bright rib at every seam. At alpha 1 the overlap is exactly idempotent, which is
 		// what makes the sweep read as one clean stroke for all but the 220 ms of the pop.
-		Color arcCore = new Color(1f, 0.48f + 0.34f * pulse, 0.92f + 0.08f * pulse, popAlpha);
+		Color arcCore = Tint(1f, 0.48f + 0.34f * pulse, 0.92f + 0.08f * pulse, popAlpha);
 
-		// 1. The ambient halo the whole widget sits in, and the near-black disc over it. The disc
-		//    is 48 wedge quads rather than a round texture -- a 48-gon at this radius is off a true
-		//    circle by 0.08 px -- so it needs no new asset and no alpha-tested sprite.
+		// 1. The ambient halo the whole widget sits in, and the VEIL disc over it -- a translucent
+		//    tint you can see the game through, not a backdrop. See DiscAlpha and DrawVeilDisc.
 		spriteBatch.BlendMode = SpriteBlendMode.Additive;
 		DrawGlow(base.Position, new Vector2(radius * 3.2f, radius * 3.2f),
-			new Color(0.85f, 0.15f, 0.75f, (0.20f + 0.10f * pulse) * popAlpha), 0f);
+			Tint(0.85f, 0.15f, 0.75f, (0.20f + 0.10f * pulse) * popAlpha), 0f);
 		spriteBatch.BlendMode = SpriteBlendMode.AlphaBlend;
-		DrawDisc(radius * DiscRadiusFactor, RingSegments, new Color(0.030f, 0.012f, 0.048f, 0.95f * popAlpha));
+		// ONE Color, drawn with AND reported -- see the lastDisc*/lastArc* header. The pop fade is
+		// divided back out so the number means "the veil's own alpha", comparable at any phase.
+		Color veil = Tint(0.030f, 0.012f, 0.048f, DiscAlpha * popAlpha);
+		DrawVeilDisc(radius * DiscRadiusFactor, veil);
+		lastDiscAlpha = (popAlpha > 0.001f) ? (float)veil.A / 255f / popAlpha : (float)veil.A / 255f;
 
 		// 2. The rim, all the way round: the clock FACE, so the arc reads as sweeping a dial rather
 		//    than growing out of nowhere.
@@ -539,6 +736,13 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 		// ambient lazerglow above -- a radial texture, so it has no seams at all -- plus the
 		// engine's own bloom pass over an opaque, saturated stroke.
 		Vector2 coreScale = SegScale(radius, ArcThickness, step, SegOverlap);
+		// READ BACK OUT OF THE QUAD THE ARC IS DRAWN WITH, not off the constant: SegScale's Y IS
+		// the stroke thickness in texture-widths, so this is the width the segments really have.
+		// A call site handed a literal 10f reports 10.
+		lastArcPx = coreScale.Y * (float)texture.LogicalWidth();
+		// ...and the hue of the Color they are drawn with, which is what says the ring is not pink.
+		// Taken off the Color rather than off RingHue, so a Tint() that stopped rotating is caught.
+		lastArcHue = HueOf(arcCore);
 		for (int j = 0; j < litCount && j < RingSegments; j++)
 		{
 			DrawSegment(j, step, radius, coreScale, arcCore);
@@ -557,7 +761,7 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 		//    first and is the wrong primitive here: that texture concentrates its energy in a small
 		//    core, so at a 15 px length the visible part was a 3 px dot with no point on it.
 		float spikeLen = SpikeLength * (0.85f + 0.15f * pulse) * (1f + PopRadiusGrowth * pop);
-		Color spike = new Color(1f, 0.45f, 0.95f, (0.55f + 0.35f * pulse) * popAlpha);
+		Color spike = Tint(1f, 0.45f, 0.95f, (0.55f + 0.35f * pulse) * popAlpha);
 		float spikeStep = (float)Math.PI * 2f / (float)SpikeCount;
 		for (int s = 0; s < SpikeCount; s++)
 		{
@@ -600,8 +804,52 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 			/ (float)texture.LogicalWidth();
 	}
 
+	// THE VEIL DISC, and why it is SCANLINES and not the wedge fan below (card d44a49a4).
+	//
+	// A wedge fan is 96 rectangles that all cross at the centre, each widened 1.15x so neighbours
+	// meet. At the alpha this disc used to ship at (0.95, near-opaque) the overlaps are invisible.
+	// At the "very subtle" 0.22 the card asks for they are the whole picture: alpha blending is
+	// NOT idempotent -- 0.22 over 0.22 reads 0.39 -- so every overlap darkens twice and the disc
+	// draws a radial moire fan that gets blacker toward the middle. Measured on `?bg=mars`, which
+	// is the only background bright enough to show it; over space it is invisible, so this is
+	// exactly the class of thing a default screenshot would have passed.
+	//
+	// Horizontal rows do not overlap AT ALL -- each spans the circle's true half-width at its own
+	// y and abuts its neighbours on a shared edge -- so the result is idempotent at any alpha, and
+	// the silhouette is exact rather than a 96-gon. AT REST it is also cheaper -- 65 rows against
+	// the fan's fixed 96 -- but not during the POP, which grows the radius 1.9x and so the row
+	// count to 123. Row HEIGHT is what stays ~1 design px, which is the property that matters; the
+	// count is a consequence, and the pop lasts 220 ms.
+	//
+	// The wedge fan stays for the round line CAPS, which are drawn opaque (alpha 1), where the
+	// overlap is idempotent and a 6 px scanline circle would read as a staircase.
+	private void DrawVeilDisc(float radius, Color color)
+	{
+		int rows = Math.Max(1, (int)Math.Ceiling(radius * 2f));
+		float rowH = radius * 2f / (float)rows;
+		float invTexW = 1f / (float)texture.LogicalWidth();
+		for (int i = 0; i < rows; i++)
+		{
+			// The row's CENTRE height, so the widest chord of the row is what is drawn -- sampling
+			// at an edge would clip the disc by half a row top and bottom.
+			float y = 0f - radius + ((float)i + 0.5f) * rowH;
+			float halfW = radius * radius - y * y;
+			if (halfW <= 0f)
+			{
+				continue;
+			}
+			halfW = (float)Math.Sqrt(halfW);
+			spriteBatch.Draw(texture, base.Position + new Vector2(0f, y), 0f,
+				new Vector2(halfW * 2f, rowH) * invTexW, center: true, color);
+		}
+	}
+
 	// A filled circle as a fan of wedge quads sharing the centre -- the same `blank` quad and the
 	// same wrapper overload the ring uses, so the LogicalBounds() clamp still applies.
+	//
+	// USED ONLY BY THE ROUND LINE CAPS since card d44a49a4. The wedges overlap, which is fine at
+	// alpha 1 (blending is idempotent there) and is what a small cap needs -- a 6 px circle drawn
+	// as scanlines reads as a staircase. The big VEIL disc cannot use it: see DrawVeilDisc.
 	private void DrawDisc(float radius, int segments, Color color)
 	{
 		DrawDiscAt(base.Position, radius, segments, color);
@@ -675,16 +923,32 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 		digitScale *= 1f + PunchScale * punch;
 		spriteBatch.BlendMode = SpriteBlendMode.Additive;
 		DrawGlow(base.Position, new Vector2(RingRadius * (1.5f + 0.4f * punch), RingRadius * (1.5f + 0.4f * punch)),
-			new Color(1f, 0.30f, 0.90f, (0.30f + 0.35f * punch) * popAlpha), 0f);
+			Tint(1f, 0.30f, 0.90f, (0.30f + 0.35f * punch) * popAlpha), 0f);
 		spriteBatch.BlendMode = SpriteBlendMode.AlphaBlend;
-		spriteBatch.DrawString(digits, base.Position, new Color(1f, 0.93f + 0.07f * punch, 1f, popAlpha),
+		// CENTRED ON ITS INK, not on its line box (card d44a49a4): "the text is not nicely
+		// vertically centered rn. Needs to move down a bit."
+		//
+		// `centered: true` uses `MeasureString / 2` as the origin, and MeasureString's height is
+		// the font's LINE SPACING -- a box sized for ascenders and descenders alike. A digit's ink
+		// occupies only the upper part of that box, so centring the BOX leaves the ink sitting
+		// high in the disc by exactly half the descender space. DERIVED per string from the glyph
+		// metrics rather than nudged by a constant, so it stays right if the font is rebuilt (the
+		// atlas is regenerated by tools/font/, and its Cropping metrics are what moved last time).
+		// ONE POSITION, drawn at and reported FROM -- not an expression latched on the line before,
+		// which is what the second cut of this did and which a deletion at the draw call left
+		// green. The offset is derived back out of the position that was really handed to
+		// DrawString, so there is no way to draw at base.Position and still report 3.80.
+		Vector2 digitAt = base.Position + new Vector2(0f, DigitInkOffsetY(digits) * digitScale);
+		spriteBatch.DrawString(digits, digitAt,
+			Tint(1f, 0.93f + 0.07f * punch, 1f, popAlpha),
 			0f, centered: true, digitScale, (SpriteEffects)0, 0f);
+		lastDigitDy = digitAt.Y - base.Position.Y;
 
 		// The label, sheared. Lay the text out unscaled and centred on `anchor`, then let the
 		// matrix scale + shear the whole block about that same anchor.
 		Vector2 anchor = base.Position + new Vector2(0f, LabelOffsetY);
 		spriteBatch.BlendMode = SpriteBlendMode.Additive;
-		DrawGlow(anchor, new Vector2(150f, 34f), new Color(0.95f, 0.15f, 0.85f, 0.24f * popAlpha), 0f);
+		DrawGlow(anchor, new Vector2(150f, 34f), Tint(0.95f, 0.15f, 0.85f, 0.24f * popAlpha), 0f);
 		spriteBatch.BlendMode = SpriteBlendMode.AlphaBlend;
 		Vector2 size = font.MeasureString(LabelText);
 		// Row-vector convention: x' = x + y*M21, so a NEGATIVE M21 leans the top (smaller y) right.
@@ -695,8 +959,46 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 			* Matrix.CreateTranslation(anchor.X, anchor.Y, 0f);
 		spriteBatch.BeginPerspective(design);
 		spriteBatch.DrawStringPerspective(font, LabelText, anchor - size * 0.5f,
-			new Color(1f, 0.42f + 0.2f * pulse, 0.95f, popAlpha));
+			Tint(1f, 0.42f + 0.2f * pulse, 0.95f, popAlpha));
 		spriteBatch.EndPerspective();
+	}
+
+	// How far DOWN to move a box-centred string so its INK is centred instead, in design px at
+	// scale 1 (the caller multiplies by its own scale).
+	//
+	// `SpriteFont.Glyph.Cropping` is the glyph's ink box within the line box, in DESIGN units --
+	// the port keeps every SpriteFont metric design-sized while the atlas itself is supersampled
+	// (SpriteBatchWrapper.DrawStringScaled's header), so this needs no supersample divisor. The
+	// ink spans [Cropping.Y, Cropping.Y + Cropping.Height] of a line box `LineSpacing` tall, and
+	// `centered` puts LineSpacing/2 on the anchor -- so the correction is the gap between the two
+	// centres. POSITIVE means "move down", which is the direction the card asks for.
+	//
+	// Measured across the whole string, not per glyph: a two-digit clock must not shift relative
+	// to a one-digit one, and taking the union of the ink boxes is what makes "10" and "9" share
+	// a baseline. A character with no glyph is skipped rather than defaulted -- the digits are all
+	// present, and a missing one should not drag the anchor.
+	private float DigitInkOffsetY(string text)
+	{
+		if (font == null || string.IsNullOrEmpty(text))
+		{
+			return 0f;
+		}
+		float top = float.MaxValue;
+		float bottom = float.MinValue;
+		foreach (char ch in text)
+		{
+			if (!font.Glyphs.TryGetValue(ch, out SpriteFont.Glyph g))
+			{
+				continue;
+			}
+			top = Math.Min(top, g.Cropping.Y);
+			bottom = Math.Max(bottom, g.Cropping.Y + g.Cropping.Height);
+		}
+		if (top > bottom)
+		{
+			return 0f;
+		}
+		return (float)font.LineSpacing * 0.5f - (top + bottom) * 0.5f;
 	}
 
 	// The pop itself: a free bomb at the respawn point, sized by the player's own "2" powerup

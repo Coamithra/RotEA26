@@ -161,8 +161,35 @@ public abstract class KillableAlien : AlienDrawableGameComponent, EvilAliensWeb.
 		// NetApplyHp deliberately does not touch the blink (an older snapshot must not resurrect
 		// one). The blink is 35ms against a 60ms-to-1.2s snapshot turn, so it cannot ride the
 		// snapshot at all; it needs its own beat. A no-op with no session or no peer.
-		EvilAliensWeb.Compat.Net.NetSession.OnGameFx(
-			EvilAliensWeb.Compat.Net.NetFxKind.EnemyHitFlash, this);
+		//
+		// ONLY WHEN THE THING SURVIVES THE HIT (card f6fc1d97), and the predicate is deliberately
+		// `hitpoints > 0` -- THE SAME TERM `isBlinking()` ALREADY CARRIES. That is the whole
+		// argument: the host does not draw a blink on its own killing blow, so a beat sent there
+		// asked the joiner to draw something no screen in the session was drawing. The beat used
+		// to go out for EVERY hit, this one included, so a LETHAL hit told the peer "flash" and
+		// then, an EvDeath later, "explode" -- on a one-hit-point enemy (the ordinary small UFO,
+		// SetHitPoints(1)) that is every single kill, which is exactly how it was reported. Send
+		// side and draw side now agree by construction rather than by two constants matching.
+		// SpiderBoss's own EnemyHitFlash emitter already sat in the `else` of its death test; this
+		// makes KillableAlien consistent with it.
+		//
+		// It ALSO covers a hit landing on something already DYING, and that case is live rather
+		// than theoretical: SpiderHelperMothership's KilledBy only flags `dying` and never clears
+		// `Collides`, so the host keeps hitting it for seconds -- with `hitpoints` already at or
+		// below 0, so the host shows nothing, while the joiner's copy (tracked rather than
+		// released, `dead` still false, hp still positive from its last snapshot) accepted every
+		// beat and flashed. `(hitpoints <= 0) & !dead` -- the shape of the branch below -- would
+		// keep sending exactly there.
+		//
+		// (Precision, because this reasons from `isBlinking()`: Spider and FlyingSpider read the
+		// raw `hittimeractive` instead, so they do flash for the one frame between the collision
+		// pass and the next TopOfTickFlush. One frame, under their own explosion; FlyingSpider
+		// already disagrees with itself, wings on `hittimeractive` and body on `isBlinking`.)
+		if (hitpoints > 0)
+		{
+			EvilAliensWeb.Compat.Net.NetSession.OnGameFx(
+				EvilAliensWeb.Compat.Net.NetFxKind.EnemyHitFlash, this);
+		}
 		if ((hitpoints <= 0) & !dead)
 		{
 			// Game juice: every confirmed kill lands a punch — a micro freeze-frame + a tap

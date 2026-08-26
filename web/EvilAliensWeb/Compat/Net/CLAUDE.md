@@ -1158,6 +1158,38 @@ Four pieces, none changing what replicates -- only how well the star holds up at
     replicated and NEWER than a beat could be, and the entity-free kind plays a 2D cue. The first
     cut carried one and every consumer ignored it. `NetFxKind` is APPEND-ONLY and takes the **REJECT** policy -- the kind
     selects an effect to EXECUTE, so a substituted one is worse than silence.
+  - **AN `EnemyHitFlash` IS SENT ONLY WHEN THE THING SURVIVES THE HIT (card f6fc1d97).**
+    `KillableAlien.HitBy` used to announce it for EVERY hit, and the announcement sits ABOVE the
+    `hitpoints <= 0` branch -- so a LETHAL hit told the peer "flash" and then, an `EvDeath` later,
+    "explode". On a ONE-HIT-POINT enemy that is every single kill, which is how it was reported:
+    *"1 hp ufo's blink white before they blow up (the hit effect for enemies with multiple hit
+    points)"* -- the ordinary small UFO is `SetHitPoints(1)`, so that is the most common enemy in
+    the game.
+    - **THE PREDICATE IS `hitpoints > 0`, WHICH IS THE TERM `isBlinking()` ALREADY CARRIES**
+      (`hittimer.Active & (hitpoints > 0)`). That is the argument, not "a kill is louder": the HOST
+      does not draw a blink on its own killing blow either, so the beat was asking the joiner to
+      draw something no screen in the session was drawing. Send side and draw side now agree by
+      construction. `SpiderBoss`'s own emitter already sat in the `else` of its death test; this
+      makes `KillableAlien` consistent with it.
+    - **It also covers a hit landing on something already DYING, and that case is LIVE.**
+      `SpiderHelperMothership.KilledBy` only flags `dying` and never clears `Collides`, so the host
+      keeps hitting it for seconds with `hitpoints` at or below 0 -- showing nothing -- while the
+      joiner's copy is TRACKED rather than released (`NetDyingStaysReplicated`), so `dead` is still
+      false there, `hitpoints` is still positive from its last snapshot, and `NetPlayFx` accepted
+      every one of those beats. `(hitpoints <= 0) & !dead`, the shape of the branch below the send,
+      would keep sending exactly there.
+    - **The reporter's other half -- "for 1 hp enemies I'd like the joining clients to just
+      immediately blow the monster up and send a message to the host" -- is ALREADY the shipped
+      architecture and was not rebuilt.** A client's bullets hit-test puppets for real
+      (`NetPuppets.CollidableOverride`) and run the real `HitBy`, so the client kills locally and
+      files an `EvClaim`; the host kills its own copy on that claim, or pays the claimant from the
+      recent-death record if it had already died. That is the GENEROUS at-least-once claim design.
+      What the report was actually seeing is the host's beat, above.
+    - **A NON-lethal beat can still swallow the receiver's own next shot**, and that is unchanged:
+      `HitBy` opens with `if (hittimer.Active) return;` and `NetPlayFx` starts that same timer, so
+      for 35 ms after a host blink the client's own hit on that puppet is refused. Shared-gate
+      behaviour, deliberate (it is what makes the apply idempotent against the client's own
+      simulation); suppressing the lethal beat removes the case where it mattered most.
   - **WHY IT CANNOT BE A STATE EXTRA -- answer this before adding a kind.** The snapshot round
     robin corrects an entity every `live/16*60ms` (`SnapshotTurnMs`): 60 ms at best, ~1.2 s in a
     big world. A `KillableAlien` hit blink is **35 ms**. A sampled bit would miss the event
@@ -1218,7 +1250,7 @@ Four pieces, none changing what replicates -- only how well the star holds up at
     from a fresh spawn -- so a cue on the spawn path would salvo every live beam at a
     join-in-progress peer the instant it arrived. A beat fired at the real moment is simply missed
     by a peer who was not there yet, which is correct.
-  - **Verify with `eaNetFx()`** (`Compat/Net/NetFxTest.cs`, 24 assertions; a leg of
+  - **Verify with `eaNetFx()`** (`Compat/Net/NetFxTest.cs`, 37 assertions; a leg of
     `net_selftests.txt`). Real `EvFx` frames from a scripted host over a `NetWire` into a REAL
     client session, asserting the EFFECT on the live puppet -- `eaNetWire.test` covers the layout,
     and the layout was never what was broken. MENU-runnable and leave-no-trace.

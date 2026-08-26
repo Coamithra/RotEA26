@@ -93,6 +93,10 @@ namespace EvilAliensWeb.Compat.Net
             try
             {
                 RunBeats(sb, Check, bin, game, planted);
+                // Its own session, so it starts from a clean one: RunBeats leaves a paired CLIENT
+                // session up and this half needs a HOST. Stopped in the finally either way.
+                NetSession.Stop("netfx host section");
+                RunHostEmission(sb, Check, bin, game, planted);
             }
             catch (Exception ex)
             {
@@ -335,6 +339,199 @@ namespace EvilAliensWeb.Compat.Net
             return n;
         }
 
+        // ---- 5. HOST -- which hits put an EnemyHitFlash on the wire (card f6fc1d97) ----------
+        //
+        // Sections 1-4 are the RECEIVING half: a scripted host sends a beat and the puppet lights
+        // up. This is the SENDING half, and it exists because the reported bug lived entirely
+        // there: `KillableAlien.HitBy` announced the blink for EVERY hit, so a LETHAL one told the
+        // peer "flash" and then, an EvDeath later, "explode". On a one-hit-point enemy that is
+        // every kill -- "1 hp ufo's blink white before they blow up (the hit effect for enemies
+        // with multiple hit points)".
+        //
+        // A REAL host session with a scripted client on an in-process wire, a REAL UFO planted
+        // into the live bin (so NetIdRegistry allocates a real id through the real ComponentAdded
+        // seam), and a REAL Bullet driven through the REAL `CollidesWith` -> `HitBy` path. What is
+        // read is the frames the peer ACTUALLY RECEIVED -- the NetDeathFxTest section-2 shape.
+        //
+        // THE POSITIVE IS THE LOAD-BEARING ONE. "No beat on a lethal hit" is satisfied by a build
+        // that stopped sending beats at all, which would silently delete the whole hit tell for
+        // every multi-hit-point enemy in the game -- so the survivable hit is asserted first, on
+        // the same entity, through the same call.
+        private static void RunHostEmission(StringBuilder sb, Action<string, bool> Check,
+            ComponentBin bin, Game game, List<GameComponent> planted)
+        {
+            sb.Append(" 5. HOST -- a survivable hit announces a blink, a LETHAL one does not"
+                + " (card f6fc1d97)\n");
+            // Two things this section inherits or emits, stated because section 4's own blip is:
+            // it kills a real UFO, so UFO.KilledBy plays "expl1" -- an explosion noise at the main
+            // menu -- and it needs NetScene.Current non-null (OnGameFx's third gate), which it
+            // takes from the FxScene RunBeats installed. Reorder the two and 5a fails with a
+            // message about the fix rather than about the missing scene.
+            NetWire wire = new NetWire(2);
+            InMemoryTransport ours = wire[0];
+            InMemoryTransport peer = wire[1];
+            List<byte[]> flashes = new List<byte[]>();
+            List<byte[]> deaths = new List<byte[]>();
+            int grantedSlot = 0;
+            void Sniff(byte[] payload, bool reliable, string from)
+            {
+                if (payload.Length < 2 || payload[0] != NetProtocol.MsgEvent)
+                {
+                    return;
+                }
+                if (payload[1] == NetProtocol.EvFx && payload.Length >= 5
+                    && payload[4] == (byte)NetFxKind.EnemyHitFlash)
+                {
+                    flashes.Add(payload);
+                }
+                else if (payload[1] == NetProtocol.EvDeath)
+                {
+                    deaths.Add(payload);
+                }
+            }
+
+            try
+            {
+                NetSession.StartForTest(game, host: true, ours, Room);
+                peer.Open(Room);
+                peer.OnData += Sniff;
+                peer.SendReliable(NetProtocol.EncodeHello(NetSession.ProtocolVersion, false,
+                    NetSession.LocalBuildHash, 0, NetProtocol.SlotNone, PeerToken, 0));
+                wire.Pump();
+                NetSession.Update();
+                Check("PRECONDITION the scripted client paired with a real HOST session",
+                    NetSession.IsHost && NetSession.PeerUp);
+                if (!NetSession.PeerUp)
+                {
+                    return; // OnGameFx early-returns with no peer; every leg below would be vacuous
+                }
+                // The hello asks for SlotNone, so the HOST allocates -- read the grant back rather
+                // than assuming it, and release exactly that seat in the finally.
+                grantedSlot = NetSession.UpPeerPrimarySlotsMask();
+
+                // isBig: the real MakeBig() path gives 11 hit points, so 5a's survivable hit needs
+                // no hp seam at all (see there).
+                UFO victim = UFO.NewUFO(bin, game);
+                victim.Setup(Nowhere, isBig: true, EnemyBehaviour.normal);
+                bin.Add((GameComponent)(object)victim);
+                planted.Add((GameComponent)(object)victim);
+                bin.TopOfTickFlush();
+                Check("PRECONDITION the planted UFO got a netId",
+                    NetIdRegistry.TryGetByComp((GameComponent)(object)victim, out _));
+
+                // The killer: a real Bullet, because HitBy is only reachable through
+                // CollidesWith's `other is IAlienKiller` test and the beat's own call site sits
+                // inside it. Never added to the bin -- it is an argument, not a world entity.
+                Bullet shot = Bullet.NewBullet(bin, game);
+
+                // 5a. POSITIVE -- a hit the UFO SURVIVES still announces the blink.
+                // The hp comes from the real MakeBig() path (isBig above -> SetHitPoints(11)),
+                // NOT from NetApplyHp: that is a CLIENT-PUPPET seam by its own header, and under
+                // ?nethpraise=0 -- card 87310afa's own reproduction flag -- its downward-only
+                // clamp refuses the raise, so the "survivable" hit becomes lethal and this
+                // section fails pointing at the fix instead of at its unmet precondition
+                // (measured: 2 FAILs). Asserted before the hit, so the precondition can never be
+                // read off the result.
+                Check("PRECONDITION the UFO has hit points to spare (hp "
+                    + ((INetEntity)victim).NetKillable.NetHitPoints + ")",
+                    ((INetEntity)victim).NetKillable.NetHitPoints > 1);
+                flashes.Clear();
+                victim.CollidesWith((ICollidable)shot);
+                wire.Pump();
+                Check("a survivable hit put exactly one EnemyHitFlash on the wire ("
+                    + flashes.Count + ")", flashes.Count == 1);
+                Check("...and the UFO really did survive it (hp "
+                    + ((INetEntity)victim).NetKillable.NetHitPoints + ")",
+                    ((INetEntity)victim).NetKillable.NetHitPoints > 0 && !victim.IsDead);
+
+                // 5b. THE CARD -- the same entity, the same call, one hit point left.
+                // The 35 ms hittimer HitBy opens with would swallow the next hit outright, so the
+                // blink is run down first with FOUR hand-built 16.7 ms ticks (66.8 ms). Three is
+                // the minimum -- Timer only expires once its remaining time goes NEGATIVE, so two
+                // ticks (33.4 ms) leave a 35 ms timer running. (Nothing advances the injected
+                // clock here; these GameTimes are the tick, and they are safe on a UFO only
+                // because `Nowhere` is off-screen, which is what makes UFO.Update's two
+                // !OffScreen() fire branches unreachable.)
+                RunDownBlink(victim);
+                Check("PRECONDITION the blink has expired, so the lethal hit is not swallowed",
+                    !victim.NetHitBlinking);
+                ((INetEntity)victim).NetKillable.NetApplyHp(1);
+                Check("PRECONDITION the UFO is down to its last hit point (hp "
+                    + ((INetEntity)victim).NetKillable.NetHitPoints + ")",
+                    ((INetEntity)victim).NetKillable.NetHitPoints == 1);
+                flashes.Clear();
+                deaths.Clear();
+                victim.CollidesWith((ICollidable)shot);
+                // PUMP BEFORE ASSERTING. Without it `flashes` is empty whatever the send did, and
+                // this leg -- and 5c below -- pass on the pre-card build. Caught by the mutation
+                // test, which is the whole reason to run one on a leg whose subject is an ABSENCE.
+                wire.Pump();
+                Check("a LETHAL hit put NO EnemyHitFlash on the wire (" + flashes.Count + ")",
+                    flashes.Count == 0);
+                Check("...and the UFO really is dead", victim.IsDead);
+
+                // 5c. WHY THE PREDICATE IS `hitpoints > 0` AND NOT `(hitpoints <= 0) & !dead`.
+                // A hit landing on something ALREADY dying must announce nothing either -- the
+                // host draws no blink there (isBlinking carries the same hp term) and the live
+                // case is SpiderHelperMothership, whose KilledBy flags `dying` without clearing
+                // Collides, so the host really does keep hitting it for seconds. Reproduced here
+                // on the cheapest entity that reaches the same state: the UFO is `dead` and its
+                // removal is still QUEUED, so it is hittable for one more pass. This leg is what
+                // separates the two predicates -- the `& !dead` form SENDS here.
+                RunDownBlink(victim);
+                flashes.Clear();
+                victim.CollidesWith((ICollidable)shot);
+                wire.Pump();
+                Check("a hit on an ALREADY-DEAD entity announces nothing either ("
+                    + flashes.Count + ")", flashes.Count == 0);
+
+                bin.Update(); // the ComponentRemoved seam -> OnHostDeath -> the wire
+                wire.Pump();
+                // The kill itself still crossed. Without this, every "no flash" leg above is
+                // satisfied by a hit that never landed at all.
+                Check("...while the kill itself still announced an EvDeath (" + deaths.Count + ")",
+                    deaths.Count == 1);
+            }
+            finally
+            {
+                peer.OnData -= Sniff;
+                NetSession.Stop("netfx host section finished");
+                bin.TopOfTickFlush();
+                // The scripted peer's GRANTED SEAT is a live trace, not just an untidy one: this
+                // is the only section here that hosts, so it is the only one that allocates a
+                // roster slot for its peer, and Stop does not release it. Left behind it fails a
+                // LATER suite in the same boot (measured: netrespawn's "the roster is empty again"
+                // teardown leg). Released SEAT BY SEAT off the grant mask rather than with
+                // Oracle.ResetPlayers(), which is a blanket wipe and would silently unseat a couch
+                // player who was already sitting there before the run.
+                bool seatsLeft = false;
+                for (int slot = 0; slot < Oracle.MaxPlayers; slot++)
+                {
+                    if ((grantedSlot & (1 << slot)) == 0)
+                    {
+                        continue;
+                    }
+                    NetHost.Current.Oracle.RemovePlayerAt(slot, ControlDevice.Remote);
+                    seatsLeft |= NetHost.Current.Oracle.IsSeated(slot);
+                }
+                Check("the host session was stopped and its peer's granted seats released"
+                    + " (mask " + grantedSlot + ", leave-no-trace)",
+                    !NetSession.Active && !seatsLeft);
+            }
+        }
+
+        // Tick the 35 ms hit blink out. FOUR hand-built 16.7 ms ticks (66.8 ms); THREE is the
+        // minimum, because Timer only expires once its remaining time goes NEGATIVE -- two ticks
+        // is 33.4 ms and leaves a 35 ms timer running.
+        private static void RunDownBlink(AlienDrawableGameComponent victim)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                ((GameComponent)(object)victim).Update(new GameTime(TimeSpan.Zero,
+                    TimeSpan.FromMilliseconds(16.7)));
+            }
+        }
+
         private static void TrackPuppets(Game game, List<GameComponent> planted)
         {
             foreach (GameComponent item in (Collection<IGameComponent>)(object)game.Components)
@@ -371,6 +568,30 @@ namespace EvilAliensWeb.Compat.Net
             }
             Check("every entity this suite built is out of the world (" + planted.Count
                 + " planted, " + left + " left)", left == 0);
+            // The DEATH FX are not in `planted` -- nothing here builds them; section 5's UFO kill
+            // does, through the real KilledBy. They self-clear once the world ticks, so this is a
+            // transient rather than a leak, but the header promises leave-no-trace and the
+            // NetDeathFxTest teardown sweeps the same types. Swept by TYPE for that reason.
+            int swept = 0;
+            foreach (IGameComponent item in (Collection<IGameComponent>)(object)game.Components)
+            {
+                if (item is Explosion || item is SmokeDrawer)
+                {
+                    bin.Remove((GameComponent)item);
+                    swept++;
+                }
+            }
+            bin.TopOfTickFlush();
+            int fxLeft = 0;
+            foreach (IGameComponent item in (Collection<IGameComponent>)(object)game.Components)
+            {
+                if (item is Explosion || item is SmokeDrawer)
+                {
+                    fxLeft++;
+                }
+            }
+            Check("the death FX the suite's kills spawned are swept too (" + swept
+                + " swept, " + fxLeft + " left)", fxLeft == 0);
             Check("no puppets are still registered (live=" + NetPuppets.LiveCount + ")",
                 NetPuppets.LiveCount == 0);
         }

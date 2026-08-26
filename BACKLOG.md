@@ -40,9 +40,39 @@ new `NetRespawnTest` legs.
 _Further testing would be nice:_ the co-op path is covered by the in-process wire self-tests, not by
 a live two-machine session — multiplayer is not testable in this environment.
 
-## 3. `f6fc1d97` — in multiplayer games, on the client, I can see 1 hp ufo's blink white before they blow up (the hit effect for enemies with multiple hit points). Is this a result of how the networking works? That a joining peer just shows the "enemy hit" animation until the host acknowledges that the enemy died? For 1 hp enemies I'd like the joining clients to just immediately blow the monster up and send a message to the host. The host trusts clients and then also blows up that enemy (of if it already had it just ignores the message since it's already dealt with).
+## 3. `f6fc1d97` — in multiplayer games, on the client, I can see 1 hp ufo's blink white before they blow up (the hit effect for enemies with multiple hit points). Is this a result of how the networking works? That a joining peer just shows the "enemy hit" animation until the host acknowledges that the enemy died? For 1 hp enemies I'd like the joining clients to just immediately blow the monster up and send a message to the host. The host trusts clients and then also blows up that enemy (of if it already had it just ignores the message since it's already dealt with). — **DONE**
 
 _No description or comments — the card title is the whole ticket._
+
+**Done** (PR pending link). Diagnosed: the culprit is the HOST's `EnemyHitFlash` beat.
+`KillableAlien.HitBy` announced it for *every* hit, and the announcement sits above the
+`hitpoints <= 0` branch — so a lethal hit told the peer "flash", and an `EvDeath` a beat later
+told it "explode". On a 1 hp enemy that is every kill. The beat is now sent only when the enemy
+SURVIVES the hit.
+
+The ticket's proposed mechanism ("clients blow it up immediately and tell the host; the host
+trusts them, or ignores a duplicate") turned out to be **already how it works** — a client's
+bullets hit-test puppets for real and run the real `HitBy`, so it kills locally and files an
+`EvClaim`, which the host applies or pays from its recent-death record. Nothing needed rebuilding
+there; the blink was the whole visible defect.
+
+Review turned up a **second live instance** of the same defect: `SpiderHelperMothership.KilledBy`
+only flags `dying` and never clears `Collides`, so the host keeps hitting it for seconds with hp
+already at 0 — showing nothing itself — while the joiner's copy (tracked rather than released, so
+`dead` is false and hp still positive there) flashed on every one of those beats. The shipped
+predicate `hitpoints > 0` covers it; the plausible `(hitpoints <= 0) & !dead` would not.
+
+The decisive argument, also from review: `isBlinking()` is `hittimer.Active & (hitpoints > 0)` —
+**the host never draws a blink on its own killing blow**, so the beat was asking the joiner to draw
+something no screen in the session was drawing. Send side and draw side now agree by construction.
+
+Pinned by a new `NetFxTest` section 5 (a real HOST session, a real `Bullet` through the real
+`CollidesWith`, reading the frames the peer actually received). Three legs, mutation-tested three
+ways, each failing the legs that describe it — the already-dead leg is what separates the shipped
+predicate from the rejected one.
+
+_Further testing would be nice:_ verified over the in-process wire, not a live two-machine
+session — multiplayer is not testable in this environment.
 
 ## 4. `085ebddc` — we should probably reduce the max magnitude of screenshake by 50% (so a global reduction by 50% across the board)
 

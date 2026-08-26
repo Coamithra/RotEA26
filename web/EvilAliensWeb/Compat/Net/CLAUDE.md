@@ -281,11 +281,14 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     END. Its subject is that `SpawnPuppet` / `SpawnFriend` must not ADOPT a ship
     `ComponentBin.TryAdd` refused. **Only `NetApplyReset` can reach that branch**, because it
     purges from inside the rx drain where the local ship's death is still merely QUEUED, so
-    `FindLocalShip()` is non-null and the caller's gate is open; the `LoseLife` / `UpdateWin` /
-    `UpdateResetting` purges are flushed by `collectionHelper.Update()` before the drain and
-    both gates are shut -- which the suite asserts as its NEGATIVE leg, by the SEATS (neither
-    `Remote` nor `RemoteFriend` is even allocated, which is what tells "the caller was never
-    entered" from "TryAdd refused").
+    `WorldTakesPuppets()` is true and the caller's gate is open; the `LoseLife` / `UpdateWin` /
+    `UpdateResetting` purges are flushed by `collectionHelper.Update()` before the drain -- they
+    take the local ship AND the respawn summon with them, so both gates are shut -- which the
+    suite asserts as its NEGATIVE leg, by the SEATS (neither `Remote` nor `RemoteFriend` is even
+    allocated, which is what tells "the caller was never entered" from "TryAdd refused").
+    **Leg 1b is that leg's PAIR** (card c1cdd3e5): identically shipless, one bit different -- our
+    own respawn summon is up, so both puppets ARE adopted. See "A PEER'S SHIPS BELONG IN A WORLD
+    WE ARE RESPAWNING INTO" below.
   - **It is the one DESTRUCTIVE suite in this directory.** It needs a live `GameScene`, moves the
     local player's seat and applies a real `EvReset`, so the scene ends in its reset branch. It
     restores the roster and asserts it did, and refuses to run with a real session up -- but run
@@ -1578,6 +1581,53 @@ Four pieces, none changing what replicates -- only how well the star holds up at
   UfoDescriptor.cs.
 
 ## Claims, score & per-slot HUD
+
+- **A PEER'S SHIPS BELONG IN A WORLD WE ARE RESPAWNING INTO (card c1cdd3e5).**
+  Both puppet spawners gated on `FindLocalShip() != null` -- and OUR ship being absent says
+  nothing about whether THEIRS should be drawn. In co-op a death is not a world wipe: the level
+  keeps running and the peer really is flying around out there. Reported as *"on a joining client,
+  while I was dead and respawning, the other players' ships (who respawned before me) did not
+  appear on the playing field until mine did."*
+  - **BOTH SPAWNERS, and that is not a detail.** `ManagePuppet` draws the peer's PRIMARY ship;
+    `TickFriends` draws its couch players (`?netlocal`, card 4d904410) and the host's AI friends.
+    All of them are "the other players' ships" to whoever is reading the screen, and a room holds
+    four machines plus couch seats (card 0257f8ba) -- so a fix reaching only `ManagePuppet` leaves
+    the report standing for most of a full room. The first round of this card did exactly that;
+    the probe now carries that shape as its own mutation.
+  - **The discriminator is our own RESPAWN SUMMON** (`NetSession.WorldTakesPuppets`), and it is
+    exact rather than convenient -- but **the load-bearing fact is NOT "every wipe purges the
+    summon"**. It is that **every wipe arms a standing `Purge<T>` filter, and the filter and that
+    wipe's queued removals expire together in the SAME `TopOfTickFlush`**: so while a summon of
+    ours is still in `Game.Components` after a wipe, the filter that ate it is still armed and
+    `bin.TryAdd` refuses the puppet anyway. (`Purge` matches with `Type.IsInstanceOfType`, so the
+    base-typed `Purge<AlienDrawableGameComponent>` in `Terminate` / `UpdateWin` /
+    `UpdateResetting` covers `PlayerShip` too.) `PlayerShipSummon.ShouldSummon` seals the other
+    end: a summon is only raised while ANOTHER ship still flies, so in single player -- where a
+    death IS the wipe -- there is never one and the second arm can never open.
+  - **THE ONE WIPE THAT ARMS NOTHING is a CLIENT's own `GameScene.LoseLife`**, which early-returns
+    on `NetSession.IsClient` before both its purges -- a joining client's wipe only ever arrives as
+    the host's `EvReset`. Between "our world went shipless" and that EvReset landing there is
+    genuinely no filter. Still safe, but for a different reason: a wipe means every peer reported
+    dead, so `ch.Alive` is false on every channel and neither spawner is reached. **Do not restate
+    the purge argument for that window.**
+  - **`!IsCosmetic` is NOT redundant with the seat test.** `HandleRespawnEvent` refuses to raise a
+    cosmetic summon over a slot we own, but `OwnsSlot` is DEVICE-based, so an UNSEATED slot answers
+    "not ours" -- and `SlotAdopt.TakeSlot` assigns `localPrimarySlot` without seating it. That is
+    the reconnect-race window the respawn handler names, so the two terms are separable state.
+  - **The gate was never the real guard against a standing purge; `bin.TryAdd` in `SpawnPuppet` /
+    `SpawnFriend` is** (card 74403f83), which is what makes it safe to relax at all.
+  - **Evaluated ONCE per `NetSession.Update`**, not per peer: it asks about OUR world, and nothing
+    the peer sweep does can change it (`FindLocalShip` matches a locally-owned ship in
+    `localPrimarySlot`; the spawners only seat `Remote`/`RemoteFriend` in a PEER's slot).
+  - **KNOWN NEW BEHAVIOUR: victory.** `UpdateWin` does not purge until t+4 s, so if we die and a
+    partner wins, their ship can now pop in during the victory choreography and be purged four
+    seconds later. Arguably right -- their ship really is flying the victory thrust -- but it is
+    new, visible, and nothing pins it.
+  - Pinned by `NetResetSpawnTest` leg 1b, the PAIR of leg 1: identical shiplessness, one bit
+    different, both spawners asserted, opening with ONE NEAR MISS PER TERM (a real summon on
+    somebody else's seat, then a COSMETIC summon on our own). Mutation-tested five ways --
+    including the ManagePuppet-only fix and deleting the gate outright, which reddens legs 1 and 2
+    instead, so the suite bounds the fix from both sides.
 
 - **GENEROUS at-least-once claims -- no arbitration, no rejection path.** Kills: local
   hit-testing runs the REAL per-type death on whichever peer observed it (explosion,

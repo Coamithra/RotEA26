@@ -48,7 +48,9 @@
 # ship, which makes the NEGATIVE claim in that file wrong and the whole scenario reachable from
 # purge sites it says it is not. A leg-3 failure means the retry no longer fires.
 #
-# THE POSITIVE IS THE `42 passed` TALLY. Leg 3 is ALSO leg 1's and leg 2's positive control -- it
+# THE POSITIVE IS THE TALLY ON THE `expect` LINE AT THE BOTTOM (it moves as legs are added;
+# do not restate the number here, where nothing would catch it drifting).
+# Leg 3 is ALSO leg 1's and leg 2's positive control -- it
 # runs the identical send/pump/Update sequence and DOES adopt, so their "nothing happened"
 # assertions cannot be passing because the scripted peer's frames never arrived. Each leg
 # additionally asserts the endpoint's RxDelivered advanced by exactly the frames it sent, and leg 0
@@ -64,9 +66,10 @@
 #   * drop `Collection.Purge<PlayerShip>()` from GameScene.NetApplyReset -> **6**. This is the one
 #     that proves leg 2 is not passing for some other reason: with no filter armed, both TryAdds
 #     land and both puppets are adopted early.
-#   * drop `FindLocalShip() != null` from ManagePuppet's spawn gate -> **1** (leg 1's
-#     "SpawnPuppet was never entered").
-#   * drop it from TickFriends' spawn gate -> **1** (leg 1's SpawnFriend twin).
+#   * make ManagePuppet's spawn gate unconditionally true -> **1** (leg 1's "SpawnPuppet was
+#     never entered"). Since card c1cdd3e5 that gate is `WorldTakesPuppets()`, not a bare
+#     `FindLocalShip() != null`; leg 1b is what pins the difference.
+#   * the same in TickFriends' spawn gate -> **1** (leg 1's SpawnFriend twin).
 #   * drop `pendingPurges.Clear()` from ComponentBin.TopOfTickFlush -> **12** (the filter never
 #     expires, so nothing is ever adopted).
 #   * NetSession.NowMs back to Environment.TickCount64 -> **1** (leg 3b's friend-timeout
@@ -169,6 +172,7 @@ expect 0a\. hit-stop baseline
 expect 0b\. the session was built through the INetHost seam
 expect 0c\. handshake
 expect 1\. NEGATIVE
+expect 1b\. POSITIVE -- shipless because WE are respawning
 expect 2\. POSITIVE -- EvReset purges inside the drain
 expect 3\. POSITIVE -- next tick, filter expired
 expect 3b\. the session's cadence runs on the INJECTED clock
@@ -179,7 +183,44 @@ expect 5c\. a puppet adopted while the peer is DEAD
 expect 5d\. positive control
 expect 6\. a player death arms NO hit-stop inside a session
 expect 4\. teardown
-expect \[netreset\] 63 passed, 0 failed
+# Card c1cdd3e5 raised it 63 -> 75: leg 1b, the PAIR of leg 1. Both states are "no local ship",
+# and the old gate (a bare FindLocalShip() != null, at BOTH spawners) could not tell them apart --
+# so a co-op RESPAWN, where the level keeps running and the peer is still flying, kept the peer's
+# ships out of the world exactly like a wipe does. The discriminator is our own respawn SUMMON, and
+# the two legs differ in that one bit and nothing else.
+#
+# IT ASSERTS BOTH SPAWNERS. The symptom is "the other players' SHIPS": `ManagePuppet` draws the
+# peer's primary and `TickFriends` draws its couch players and the host's AI friends, and a room
+# holds four machines plus couch seats -- so a fix reaching only the first leaves the report
+# standing. Leg 1 and legs 2/3 already assert both; this one does too.
+#
+# Its preconditions are asserted rather than assumed (no local ship, no puppet carried over from
+# leg 1, the summon really up and not a cosmetic copy), and it hands the world back to leg 2's own
+# preconditions before it ends -- INCLUDING RELEASING BOTH SEATS, because leg 2 proves the spawners
+# were ENTERED by the seats they take and a seat carried over from here would satisfy that with no
+# spawner running at all.
+#
+# It opens with ONE NEAR MISS PER TERM of the predicate, each the same object in the same world at
+# the same moment: a real summon raised on somebody ELSE'S seat, then a COSMETIC summon on our own.
+#
+# MUTATION-TESTED FIVE WAYS, each isolated and rebuilt (counts are failing ASSERTIONS, and the
+# tallies are what the run printed):
+#   the pre-card gate (FindLocalShip alone) at BOTH spawners -> **4**, 71/4: 1b's four positives,
+#     and ONLY those. Leg 1 stays green, which is what says the two shipless states really are
+#     distinguished rather than merged.
+#   the pre-card gate at TickFriends ONLY -> **2**, 73/2: 1b's two FRIEND positives. This is the
+#     shape the first round of this card actually shipped, and it is why both spawners are here.
+#   the gate REMOVED entirely (both spawners) -> **13**, 62/13: leg 1's two "never entered" seat
+#     assertions, both of 1b's near misses plus its teardown, and leg 2/3's seat assertions. Leg 1
+#     is what stops this card being "fixed" by deleting the gate.
+#   the SEAT test dropped -> **2**, 73/2: near miss 1, and near miss 2 IN ITS WAKE -- the puppet
+#     adopted at near miss 1 is still adopted when 2 asserts. A cascade, not two independent
+#     discriminations; the isolated one is below.
+#   the !IsCosmetic term dropped -> **1**, 74/1: near miss 2 ALONE. So the term is not redundant
+#     with the seat test: EvRespawn's refusal runs on `OwnsSlot`, which is DEVICE-based, so an
+#     UNSEATED slot answers "not ours" and a cosmetic summon can be raised over `localPrimarySlot`
+#     during a slot disagreement (SlotAdopt.TakeSlot assigns it without seating it).
+expect \[netreset\] 75 passed, 0 failed
 expect-not FAIL
 expect-not SKIP
 quit

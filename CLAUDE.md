@@ -569,9 +569,10 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   ramps 4 -> 9 with level time by design and is not a bug** (table in web CLAUDE.md); pinned by
   `tools/headless/probes/evilskull_volley.txt`.
 - **`?minelog`** (card 745728f9): make every `StarMine` (Level 3's space mine, aka death star)
-  report each lock-on, release and death on a `[mine]` line -- the reason it went off, the
-  distance to the nearest LIVE ship, and the distance and AGE of the nearest recorded player
-  death spot. None of that is visible in a frame: a locked mine and a free one draw the same
+  report each lock-on, release and death on a `[mine]` line. Every line carries a timestamp and
+  the distance and AGE of the nearest recorded player death spot; a release or a death also
+  carries the `reason=` it happened, and a detonation additionally carries `live=`, the distance
+  to the nearest LIVE ship. None of that is visible in a frame: a locked mine and a free one draw the same
   sprite, a mine that ran out its 1800 ms clock and one set off by a neighbour's blue blast
   produce the identical pair of explosions, and a dead player's location is not recorded
   anywhere in the game once that player respawns (`Compat/MineLog` keeps its own registry for

@@ -47,7 +47,7 @@
 # two are not listed as independent there:
 #   * deleting MineLog.NoteShipDeath from PlayerShip.Asplode -> FAIL on `shipdied`. (The read
 #     half would fail too -- every later line reads `deathspot=none` -- but the run ends first.)
-#   * dropping NearestDeathSpot from the `[mine]` line       -> `shipdied` PASSES, FAIL on
+#   * dropping NearestDeathSpot from `MineLogTail`           -> `shipdied` PASSES, FAIL on
 #     `deathspot=slot0 d=` alone. This is the pair that shows the two legs are not one leg.
 #   * calling MineLog.Reset() per mine life                  -> `shipdied` PASSES (it prints
 #     before the clear), FAIL on `deathspot=` alone.

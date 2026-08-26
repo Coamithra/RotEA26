@@ -1977,11 +1977,17 @@ uses `Enabled=false`, not a pause layer -- so they still play here while a `shot
     a mine exploding. `Asplode` spawns exactly two blue `Explosion`s and the fly-off spawns none.
   - **`?minelog` IS THE INSTRUMENT, and it is what a future look starts from** rather than
     re-deriving any of the above. It prints a `[mine]` line for every acquire, release and death:
+    an acquire names its target, a release and a death carry `reason=`, and a detonation carries
+    `reason=` plus `live=` as well --
     `[mine] boom id=9 at=506,374 reason=timer state=attracted_to_player target=slot1 lockMs=1817`
-    `clock=- live=129.7 deathspot=slot1 d=59.5 ago=15.03`. `reason=` separates the 1800 ms clock
-    from a neighbour's blue blast from a peer's replay -- three events that produce the identical
-    pair of explosions. `live=` and `deathspot=` are the pair from the false-positive bullet above.
-    `[mine] shipdied slot=<n> at=<x,y>` marks each recorded death.
+    `clock=- live=129.7 t=182450 deathspot=slot1 d=59.5 ago=15.03`. `reason=` separates the
+    1800 ms clock from a neighbour's blue blast from a peer's replay -- three events that produce
+    the identical pair of explosions. `live=` and `deathspot=` are the pair from the
+    false-positive bullet above; `target=`/`lockMs=` read `none`/`-` unless the mine is ACTUALLY
+    locked at that instant, because neither field is cleared by a release-by-RANGE and a stale
+    one would be that same false positive a second time. Distances to the death spot are `d=`
+    and every other distance is `targetD=`, so a grep can anchor on either. `[mine] shipdied
+    slot=<n> at=<x,y>` marks each recorded death.
     - **The death-spot registry is `Compat/MineLog`, NOT `Oracle`, and that is load-bearing.**
       `Oracle` keeps a per-slot cached position, but it is written by a LIVE ship's `Update`, so
       it holds a death spot only until that slot respawns -- and the respawn is the interesting

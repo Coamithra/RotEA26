@@ -24,12 +24,14 @@ net layer, split out of this file so it loads only when you work under `Compat/N
     reckoning assumes both worlds track real time, and a host that quietly loses time after its
     own hitch produces exactly the backward corrections card 68f62e92 measured on a host stall.
     Same condition, and the same reason, as the `?aiff` exclusion beside it.
-  - **Every over-threshold tick prints a `[maxdt]` line, clamped or passed** -- the
-    `?netstaleguard` rule (the flag changes the drag, never the measurement) and the `[hitch]`
-    watchdog precedent. The delivered ms is read back OFF the reassigned `gameTime`, never
-    restated from the local, so a mutant that prints without applying names the raw number and
-    fails the probe (the card d44a49a4 "off an argument that reached a draw call" rule). Don't
-    reformat the line -- the probe pair greps it.
+  - **The LEADING tick of a run over the 100 ms default prints a `[maxdt]` line, clamped or
+    passed** -- the `?netstaleguard` rule (the flag changes the drag, never the measurement),
+    with the `[hitch]` watchdog's edge detection: a backgrounded tab hands KNI's full 500 ms
+    EVERY tick, so per-tick logging would print once a second forever. The delivered ms is
+    read back OFF the reassigned `gameTime`, never restated from the local, so a mutant that
+    prints without applying names the raw number and fails the probe (the card d44a49a4 "off
+    an argument that reached a draw call" rule). Don't reformat the line -- the probe pair
+    greps it.
   - **`eval WorldClock` CANNOT verify this** -- `WorldTime.Advance` caps its own dt at 0.1 s
     (card d79a2f48 gave cosmetic phases the same protection), so the world CLOCK reads 0.100
     for a 500 ms tick on the fixed and the broken build alike; an earlier cut of the probe had

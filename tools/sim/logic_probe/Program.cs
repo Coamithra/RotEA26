@@ -3403,20 +3403,6 @@ internal static class Program
         return 0;
     }
 
-    // Card b4a9fe60 -- the angle a ship flies IN on and, at level end, flies OUT on.
-    // GameScene.SpawnDirectionFor is the one source for it now; both net puppet spawn sites used
-    // to hard-code South instead, so on a West level the remote ship left upward while every
-    // local ship left to the right, on BOTH peers' screens.
-    //
-    // WHY THIS IS HERE AND NOT ONLY IN net_level_end.txt. That probe drives the decision END TO
-    // END, which is the stronger evidence -- but only on the level it boots, so it covers South
-    // (the constant) and West (Level 2). NORTH ships on ClassicAliens, a challenge level whose
-    // victory a rig cannot reach, so the third arm has no end-to-end route at all. A pure sweep
-    // is what covers it, and it needs no Game, no browser and no level.
-    //
-    // The angles are asserted against the VECTORS they have to produce rather than restated as
-    // the same three literals: screen Y grows downward, so South must point UP the screen. A
-    // transcription that swapped two arms would satisfy any literal-vs-literal comparison.
     // ---------------------------------------------------------------------------------------
     // The world-dt hitch clamp (card 430494a7): Game1.ClampedWorldDtTicks, the pure decision
     // behind UpdateCore's clamp. The browser's variable timestep hands the game ONE dt of up
@@ -3468,8 +3454,11 @@ internal static class Program
             run(16.667, false) == TimeSpan.FromMilliseconds(16.667).Ticks, run(16.667, false).ToString());
         Check("exactly 100 ms is the boundary and passes unchanged",
             run(100, false) == ms100, run(100, false).ToString());
+        // Built directly in ticks -- one-past-the-boundary wants a precision a double-ms
+        // round trip cannot promise.
+        long onePast = (long)clamp.Invoke(null, new object[] { ms100 + 1L, false });
         Check("100 ms plus one tick is clamped back to the boundary",
-            clampOnePastBoundary(clamp, ms100), "");
+            onePast == ms100, onePast.ToString());
 
         // Net sessions are exempt: the dead reckoning wants real-time catch-up (a host that
         // quietly loses time after its own hitch produces card 68f62e92's backward
@@ -3510,13 +3499,20 @@ internal static class Program
         return 0;
     }
 
-    // The one-past-the-boundary case wants tick precision a double-ms round trip cannot
-    // promise, so it is built directly in ticks.
-    private static bool clampOnePastBoundary(MethodInfo clamp, long boundaryTicks)
-    {
-        return (long)clamp.Invoke(null, new object[] { boundaryTicks + 1L, false }) == boundaryTicks;
-    }
-
+    // Card b4a9fe60 -- the angle a ship flies IN on and, at level end, flies OUT on.
+    // GameScene.SpawnDirectionFor is the one source for it now; both net puppet spawn sites used
+    // to hard-code South instead, so on a West level the remote ship left upward while every
+    // local ship left to the right, on BOTH peers' screens.
+    //
+    // WHY THIS IS HERE AND NOT ONLY IN net_level_end.txt. That probe drives the decision END TO
+    // END, which is the stronger evidence -- but only on the level it boots, so it covers South
+    // (the constant) and West (Level 2). NORTH ships on ClassicAliens, a challenge level whose
+    // victory a rig cannot reach, so the third arm has no end-to-end route at all. A pure sweep
+    // is what covers it, and it needs no Game, no browser and no level.
+    //
+    // The angles are asserted against the VECTORS they have to produce rather than restated as
+    // the same three literals: screen Y grows downward, so South must point UP the screen. A
+    // transcription that swapped two arms would satisfy any literal-vs-literal comparison.
     private static int ProbeSpawnDirection(Assembly asm)
     {
         Type scene = asm.GetType("EvilAliens.GameScene", true);

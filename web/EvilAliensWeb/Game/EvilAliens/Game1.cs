@@ -1150,6 +1150,13 @@ public class Game1 : Game
 		return TimeSpan.FromTicks(ticks).TotalMilliseconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
 	}
 
+	// Edge detector for the [maxdt] line: only the LEADING tick of a run of over-threshold
+	// ticks logs (LoadProfiler.NoteFrame's `hitch && !_wasHitch` shape). Without it a
+	// backgrounded tab -- where the throttled loop hands KNI's full 500 ms EVERY tick -- or a
+	// level warm's per-tick cold decodes would print once a frame forever, into the console
+	// this project verifies almost everything through.
+	private bool wasOverMaxDt;
+
 	private void UpdateCore(GameTime gameTime)
 	{
 		// The world-dt hitch clamp (DefaultMaxWorldDtMs above). FIRST, so every consumer --
@@ -1157,13 +1164,13 @@ public class Game1 : Game
 		// component update -- sees one consistent dt. TotalGameTime keeps KNI's raw advance
 		// (menus and the glint clock deliberately run on real time).
 		//
-		// EVERY over-threshold tick reports itself, clamped or not -- the ?netstaleguard rule
-		// (the flag changes the drag, never the measurement), and the [hitch] watchdog
-		// precedent: a hitch-sized tick is rare and otherwise invisible, so the line is its
-		// only observable and the probe pair's whole surface. The delivered ms is read back
-		// OFF the reassigned gameTime, never restated from clampedTicks -- a mutant that
-		// prints but forgets the assignment must print the raw number and fail the probe
-		// (the card d44a49a4 "off an argument that reached a draw call" rule).
+		// The LEADING tick of an over-threshold run reports itself, clamped or not -- the
+		// ?netstaleguard rule (the flag changes the drag, never the measurement), with the
+		// [hitch] watchdog's edge detection: a hitch-sized tick is otherwise invisible, so
+		// the line is its only observable and the probe pair's whole surface. The delivered
+		// ms is read back OFF the reassigned gameTime, never restated from clampedTicks -- a
+		// mutant that prints but forgets the assignment must print the raw number and fail
+		// the probe (the card d44a49a4 "off an argument that reached a draw call" rule).
 		//
 		// Do NOT reach for WorldTime/eval WorldClock to verify this: WorldTime.Advance caps
 		// its own dt at 0.1 s (cosmetic phases got this same protection in card d79a2f48), so
@@ -1172,17 +1179,23 @@ public class Game1 : Game
 		long rawTicks = gameTime.ElapsedGameTime.Ticks;
 		bool netActive = EvilAliensWeb.Compat.Net.NetSession.Active;
 		long clampedTicks = ClampedWorldDtTicks(rawTicks, netActive);
+		bool overMaxDt = clampedTicks != rawTicks
+			|| rawTicks > (long)(DefaultMaxWorldDtMs * (float)TimeSpan.TicksPerMillisecond);
 		if (clampedTicks != rawTicks)
 		{
 			gameTime = new GameTime(gameTime.TotalGameTime, TimeSpan.FromTicks(clampedTicks));
-			Console.WriteLine("[maxdt] clamped a " + WholeMs(rawTicks) + "ms tick to "
-				+ WholeMs(gameTime.ElapsedGameTime.Ticks) + "ms");
+			if (!wasOverMaxDt)
+			{
+				Console.WriteLine("[maxdt] clamped a " + WholeMs(rawTicks) + "ms tick to "
+					+ WholeMs(gameTime.ElapsedGameTime.Ticks) + "ms");
+			}
 		}
-		else if (rawTicks > (long)(DefaultMaxWorldDtMs * (float)TimeSpan.TicksPerMillisecond))
+		else if (overMaxDt && !wasOverMaxDt)
 		{
 			Console.WriteLine("[maxdt] passed a " + WholeMs(rawTicks) + "ms tick whole ("
 				+ (netActive ? "net session" : "clamp overridden") + ")");
 		}
+		wasOverMaxDt = overMaxDt;
 		// AI bench fast-forward (?aiff=<n>, card f4d1721f): run the sim n times per rendered frame
 		// so an unattended AI soak covers a whole level in a fraction of the wall clock, WITHOUT
 		// changing the per-tick physics it is measuring (which Settings.Turbo, a dt scale, would).

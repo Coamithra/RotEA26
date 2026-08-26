@@ -309,8 +309,8 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   the reported *"brief visual stutter where a different set of walls is shown"*. The clamp
   (`Game1.DefaultMaxWorldDtMs`, 100 ms) turns that into lost game time instead, is SKIPPED inside
   a net session (the dead reckoning wants real-time catch-up -- a host quietly losing time after
-  its own hitch is card 68f62e92's backward-correction shape), and every over-threshold tick
-  reports itself on a `[maxdt]` line whether clamped or passed. **Another deliberate bug
+  its own hitch is card 68f62e92's backward-correction shape), and the leading tick of an
+  over-threshold run reports itself on a `[maxdt]` line whether clamped or passed. **Another deliberate bug
   reproduction** (the `?netstaleguard=0` idiom) and IN `DebugFlags.Active` whenever overridden.
   Rig: eahl's **`stepdt <ms>`** REPL command (the fixed-step loop can never produce a hitch tick);
   pinned by `tools/headless/probes/maxdt_clamp.txt` + `maxdt_clamp_off.txt` and `logic_probe`'s

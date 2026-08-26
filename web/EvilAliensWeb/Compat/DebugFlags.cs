@@ -458,10 +458,12 @@ namespace EvilAliensWeb.Compat
 		// `MaxElapsedTime` (whose setter refuses anything lower) -- which at the pre-boss wall
 		// scroll (0.72 px/ms) teleports every block 360 px in a single frame and reads as "a
 		// different set of walls" for a beat. So `?maxdt=0` is the deliberate bug reproduction,
-		// the `?netstaleguard=0` idiom -- and ANY override is IN `Active`, because a changed
-		// clamp alters the shared run's physics under hitches. (The default path needs no
-		// `Active` bit: Game1 skips the clamp entirely while a net session is up, since the
-		// dead reckoning wants real-time catch-up -- see UpdateCore.)
+		// the `?netstaleguard=0` idiom, and ANY override is IN `Active` for that idiom's
+		// reason: a bug-repro boot must never reach a public lobby, and a run whose clamp was
+		// moved must be tellable from a stock one. (Not because it could desync a session --
+		// Game1 skips the clamp entirely while one is up, override or not, since the dead
+		// reckoning wants real-time catch-up; see UpdateCore. Conservatism, like the pre-boot
+		// gameplay of a host that lists itself before anyone joins.)
 		public static float? MaxWorldDtMs { get; private set; }
 
 		// SAME-TICK SFX COALESCING (card 8732568e), ON by default -- `?sfxcoalesce=0` turns it OFF,

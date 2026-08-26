@@ -20,18 +20,23 @@
 # arithmetic itself is pinned by logic_probe's ProbeMaxWorldDt against the real
 # Game1.ClampedWorldDtTicks.
 #
-# TWO LEGS:
+# THREE LEGS:
 #   1. stepdt 500 -> `clamped a 500ms tick to 100ms`, exact  (engaged, applied, and said so)
-#   2. six ordinary 60 Hz frames print NO [maxdt] line at all (the clamp never touches normal
+#   2. a SECOND over-threshold tick in the same run stays silent (the [hitch]-style edge
+#      detection -- without it a backgrounded tab, which hands KNI's full 500 ms every tick,
+#      would print once a second forever)
+#   3. six ordinary 60 Hz frames print NO [maxdt] line at all (the clamp never touches normal
 #      play -- a ms->ticks unit slip would clamp every frame and fail here first)
 #
 # FAILURE MEANS:
 #   * leg 1 no match -> the clamp is gone from UpdateCore, was reworded (the line is an
 #                       interface), or prints without applying (the "to 500ms" mutant)
-#   * leg 2 matches  -> the clamp engages on ordinary frames; check the ticks math
+#   * leg 2 matches  -> the edge detection is gone and every slow tick logs
+#   * leg 3 matches  -> the clamp engages on ordinary frames; check the ticks math
 #
 # MUTATION-TESTED: booting the off-pair's `?maxdt=0` (the shipped pre-card behaviour) turns
-# leg 1 red (the line reads `passed ... whole`); DefaultMaxWorldDtMs=5 turns leg 2 red.
+# leg 1 red (the line reads `passed ... whole`); DefaultMaxWorldDtMs=5 turns leg 3 red;
+# dropping the wasOverMaxDt edge turns leg 2 red.
 #
 # eahl: --flags "?menu&noattract"
 
@@ -43,7 +48,12 @@ mark
 stepdt 500 nodraw
 expect \[maxdt\] clamped a 500ms tick to 100ms
 
-# Leg 2 -- ordinary frames are untouched.
+# Leg 2 -- the run CONTINUES over-threshold at a distinctive 400 ms: clamped again, but the
+# edge detector keeps it quiet.
+stepdt 400 nodraw
+expect-not \[maxdt\] clamped a 400ms
+
+# Leg 3 -- ordinary frames are untouched (and they re-arm the edge for the next real hitch).
 mark
 step 6 nodraw
 step 1

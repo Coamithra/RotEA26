@@ -6,10 +6,10 @@
 #         simply gone. A boot pair because the flag parses once at boot.
 #
 # THE MEASUREMENT IS FLAG-INDEPENDENT (the ?netstaleguard rule: the flag changes the drag,
-# never the measurement): every over-threshold tick prints a [maxdt] line either way --
-# `clamped a Xms tick to Yms` when the clamp applied, `passed a Xms tick whole (clamp
-# overridden|net session)` when it did not. So this file asserts the PASSED spelling and the
-# absence of the CLAMPED one, which together say the 500 ms really reached the world.
+# never the measurement): the LEADING tick of an over-threshold run prints a [maxdt] line
+# either way -- `clamped a Xms tick to Yms` when the clamp applied, `passed a Xms tick whole
+# (clamp overridden|net session)` when it did not. So this file asserts the PASSED spelling
+# and the absence of the CLAMPED one, which together say the 500 ms really reached the world.
 #
 # WHY THE ACTIVE LINE IS ASSERTED: ?maxdt= is the `?netstaleguard=0` idiom -- a deliberate bug
 # reproduction that changes the shared run's physics under hitches, so an overridden boot must

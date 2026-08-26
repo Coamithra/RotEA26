@@ -42,14 +42,18 @@
 #                                 vacuous. Check OwnLevel's StarMineSpawner still runs at this
 #                                 tier -- it is Very_Hard-gated, which is why the flag is here.
 #
-# MUTATION-TESTED THREE WAYS, each reddening a different line:
-#   * deleting MineLog.NoteShipDeath from PlayerShip.Asplode -> `shipdied` gone AND every later
-#     line reads `deathspot=none`, so both assertions redden. (This is the one that shows the
-#     two are not independent in the write direction -- they are in the read direction.)
-#   * dropping NearestDeathSpot from MineLog.Line            -> `shipdied` still passes,
-#     `deathspot=slot0 d=` reddens alone.
-#   * calling MineLog.Reset() every tick                     -> `shipdied` still passes (it
-#     prints before the clear), `deathspot=` reads none, reddens alone.
+# MUTATION-TESTED FOUR WAYS. A script stops at its FIRST failed expect, so a mutant that breaks
+# the write half is reported on `shipdied` and never reaches the read half -- which is why the
+# two are not listed as independent there:
+#   * deleting MineLog.NoteShipDeath from PlayerShip.Asplode -> FAIL on `shipdied`. (The read
+#     half would fail too -- every later line reads `deathspot=none` -- but the run ends first.)
+#   * dropping NearestDeathSpot from the `[mine]` line       -> `shipdied` PASSES, FAIL on
+#     `deathspot=slot0 d=` alone. This is the pair that shows the two legs are not one leg.
+#   * calling MineLog.Reset() per mine life                  -> `shipdied` PASSES (it prints
+#     before the clear), FAIL on `deathspot=` alone.
+#   * MineLog.On hard-wired true                             -> this file still PASSES and its
+#     twin, starmine_minelog_absent.txt, is the one that reddens. That is the pair working as
+#     one probe: neither file can catch that mutant by itself.
 #
 # eahl: --flags "?level=OwnLevel&nowalls&aifriends=1&noattract&invuln&minelog&difficulty=Very_Hard&seed=11"
 

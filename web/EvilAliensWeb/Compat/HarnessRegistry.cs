@@ -92,8 +92,10 @@ namespace EvilAliensWeb.Compat
                 //
                 // Add &harnessrun (card d1ee8761) and the freeze lifts instead: the real owned
                 // countdown (countdown + countdowntimer, the mode with the documented wrap hazard)
-                // RUNS, pops, and drops its reward Blast. That is the ONLY offline rig that can
-                // hold a running owned summon -- the only level seating a second local ship is
+                // RUNS, pops, and drops its reward Blast. That is the only offline rig that can
+                // hold a running owned summon BY ITSELF (since card ed32efe1 `eval RespawnRaise`
+                // can raise one inside a real level, which is what a rig needs when the summon has
+                // to be CONFIGURED first) -- the only level seating a second local ship is
                 // TeamChallenge, and TeamChallenge is SHARED-FATE (UpdateNormal asplodes the
                 // partner and calls LoseLife the moment either ship dies), so GameScene.LoseLife
                 // purges the summon within a few frames of raising it. This used to be a second

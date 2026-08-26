@@ -972,7 +972,10 @@ public class PlayerShip : AlienDrawableGameComponent
 			+ " others=" + otherLiveShips);
 		// Online co-op: tell the peer, so it draws the same indicator and knows its buddy is
 		// coming back and where. No-op unless a session is up and this ship is ours.
-		EvilAliensWeb.Compat.Net.NetSession.OnLocalRespawnSummon(this, base.Position, playerShipSummon.DurationMs);
+		// The reward level comes off the SUMMON, not re-read here: it is the value that summon
+		// latched, so the announcement cannot describe a different bomb from the one we will drop.
+		EvilAliensWeb.Compat.Net.NetSession.OnLocalRespawnSummon(this, base.Position,
+			playerShipSummon.DurationMs, playerShipSummon.RewardBlastLevel);
 	}
 
 	// Player ships other than THIS one that have not themselves died. `Die()` only queues the

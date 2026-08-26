@@ -103,7 +103,11 @@ eval HostMenuLive
 # Card a66e190a raised it 88 -> 90: EvSlowmo's duration. The risk there is the WIDTH -- the
 # game sends 12000 ms, which a byte would silently truncate to 224, i.e. a fifth of a second of
 # slow motion on the peer, which reads as "it nearly works" rather than as a broken frame.
-expect \[netwire\] 118 passed, 0 failed
+# Card ed32efe1 raised it 118 -> 119: EvRespawn's rewardLevel byte (v26), whose leg is that an
+# out-of-range value CLAMPS rather than refusing -- the frame also carries the announcement, so
+# dropping it over one bad byte would cost the indicator and its position (the ClampKillerSlot
+# ruling). The round-trip leg beside it now drives four distinct values, not three.
+expect \[netwire\] 119 passed, 0 failed
 # the INetHost seam: the production mapping + the injected clock (card 25ad0659 step 2a). This one
 # is NOT pre-refactor state -- it is the refactor's own guard, and it is in this file so the same
 # exit code covers "the seam is wired right" and "no decision behind it moved".
@@ -211,7 +215,13 @@ expect \[netfx\] 24 passed, 0 failed
 # wire -- a different code path from the owned mode's integer-plus-repeating-timer pair, which
 # tools/headless/probes/respawn_digit.txt pins and which cannot reach this one. PeerRespawnMs is
 # deliberately 750, so the numeral has to CEIL to a whole 1 rather than truncate to 0.
-expect \[netrespawn\] 27 passed, 0 failed
+# Card ed32efe1 raised it 27 -> 32: the reward blast's LEVEL is the dying player's "2" (Linker)
+# powerup level now, and it rides EvRespawn (v26) rather than being re-derived on the far side.
+# Section 1 asserts the sent byte is the value the SUMMON latched and that it is the Linker level
+# we planted (deliberately 2 -- neither the 0 a lost read gives nor the 3 the pre-card constant
+# was); section 2 asserts the cosmetic copy takes it OFF THE WIRE, with a precondition that this
+# peer's own view of that slot's "2" is 0, so a build that re-derived it locally reads 0 and fails.
+expect \[netrespawn\] 32 passed, 0 failed
 # The teleport marker (card e79bb994), which REPLACED card 8dabe812's observed-velocity cap.
 # Two halves, each with the identical jump left UNMARKED beside it: section 1 runs a real HOST
 # session and reads the snapshot frames the peer RECEIVED (the wire is the only place the host's

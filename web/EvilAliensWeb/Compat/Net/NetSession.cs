@@ -154,7 +154,15 @@ namespace EvilAliensWeb.Compat.Net
         // right behind it would refuse anyway. So a bump here is BOOKKEEPING -- it names the wire
         // layout for the next reader; it is not a compatibility measure, and there is no
         // graceful-degradation path to reason about in either direction.
-        public const byte ProtocolVersion = 25;
+        // v26 (card ed32efe1): EvRespawn grows a [rewardLevel:1] byte. The respawn pop's reward
+        // Blast is not itself replicated, so the two peers' copies used to match by construction
+        // (both a constant); now that the level is the owner's "2" powerup level, an observer
+        // re-deriving it from its own ~10 Hz MsgHudState view could latch a stale one -- and the
+        // blast kills, so on a host observer that is a gameplay difference, not a cosmetic one.
+        // A WIDENED EXISTING EVENT, so unlike v14/v15/v17/v25 an unbumped peer really would
+        // misread it (the decoder's length check would refuse the short frame and drop the whole
+        // announcement); the note below still applies -- no such peer can exist.
+        public const byte ProtocolVersion = 26;
         public const float InterpDelayMs = 100f;
         // Card 6fb406bc (Stage 11.11): the cushion for a channel whose frames take the star's
         // SECOND hop (client -> host -> client, ShipFlagRelayed). The relay adds
@@ -1953,14 +1961,19 @@ namespace EvilAliensWeb.Compat.Net
         // Only the ANNOUNCEMENT crosses -- the far peer's copy is cosmetic and its ship still
         // arrives through the ordinary remoteAlive edge. So a lost or ignored frame costs the
         // indicator, never the ship.
-        public static void OnLocalRespawnSummon(PlayerShip ship, Vector2 pos, int durationMs)
+        //
+        // `rewardLevel` (card ed32efe1, v26) is the summon's own latched value, taken from the
+        // SUMMON rather than re-read here, so the announcement cannot describe a different bomb
+        // from the one this peer will drop. See NetProtocol.EncodeRespawnEvent for why it rides
+        // the wire instead of being re-derived on the far side.
+        public static void OnLocalRespawnSummon(PlayerShip ship, Vector2 pos, int durationMs, int rewardLevel)
         {
             if (!Active || !PeerUp || ship == null || !IsLocallyOwned(ship))
             {
                 return;
             }
             byte slot = (byte)ship.Owner;
-            SendEventToSessionPeers(seq => NetProtocol.EncodeRespawnEvent(seq, slot, pos, durationMs));
+            SendEventToSessionPeers(seq => NetProtocol.EncodeRespawnEvent(seq, slot, pos, durationMs, rewardLevel));
         }
 
         // ---- level-script beats + shared state machine (card 11.3) ---------------------------
@@ -4689,13 +4702,13 @@ namespace EvilAliensWeb.Compat.Net
             {
                 // Card 37f3a663: the peer's ship died and its respawn clock is running -- draw the
                 // same indicator here so this player can see their buddy coming back, and where.
-                if (!NetProtocol.TryDecodeRespawnEvent(data, out byte respawnSlot, out Vector2 respawnPos, out int respawnMs))
+                if (!NetProtocol.TryDecodeRespawnEvent(data, out byte respawnSlot, out Vector2 respawnPos, out int respawnMs, out int respawnReward))
                 {
                     return;
                 }
                 // Hub relay (card 87242257): the buddy-is-coming-back ring belongs on every
                 // screen, not just the host's.
-                RelayFromClient(p, seq => NetProtocol.EncodeRespawnEvent(seq, respawnSlot, respawnPos, respawnMs));
+                RelayFromClient(p, seq => NetProtocol.EncodeRespawnEvent(seq, respawnSlot, respawnPos, respawnMs, respawnReward));
                 if (NetScene.Current == null)
                 {
                     return;
@@ -4715,11 +4728,11 @@ namespace EvilAliensWeb.Compat.Net
                 PlayerShipSummon summon = FindCosmeticSummon(respawnSlot);
                 if (summon != null)
                 {
-                    summon.SetupRemote(respawnSlot, respawnPos, respawnMs);
+                    summon.SetupRemote(respawnSlot, respawnPos, respawnMs, respawnReward);
                     break;
                 }
                 summon = PlayerShipSummon.NewPlayerShipSummon(bin, game);
-                summon.SetupRemote(respawnSlot, respawnPos, respawnMs);
+                summon.SetupRemote(respawnSlot, respawnPos, respawnMs, respawnReward);
                 if (!bin.TryAdd((GameComponent)(object)summon))
                 {
                     // A standing Purge<PlayerShipSummon> is live this tick (NetApplyReset purges
@@ -4730,6 +4743,7 @@ namespace EvilAliensWeb.Compat.Net
                 if (NetHost.Current.NetLog)
                 {
                     Console.WriteLine("[net] rx respawn slot=" + respawnSlot + " ms=" + respawnMs
+                        + " reward=" + respawnReward
                         + " at=" + (int)respawnPos.X + "," + (int)respawnPos.Y);
                 }
                 break;

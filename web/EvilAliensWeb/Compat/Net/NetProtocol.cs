@@ -1360,32 +1360,53 @@ namespace EvilAliensWeb.Compat.Net
             return b;
         }
 
-        // EvRespawn: [slot:1][posX:4][posY:4][durationMs:2] -- card 37f3a663. Slot-tagged for the
-        // same reason EvBlast is: any LOCALLY OWNED ship can be the one respawning (the primary,
-        // a couch player, an AI friend), and the receiver must not paint an indicator over one of
-        // its own seats.
-        public static byte[] EncodeRespawnEvent(ushort eventSeq, byte slot, Vector2 pos, int durationMs)
+        // EvRespawn: [slot:1][posX:4][posY:4][durationMs:2][rewardLevel:1] -- card 37f3a663,
+        // rewardLevel added by card ed32efe1 (v26). Slot-tagged for the same reason EvBlast is:
+        // any LOCALLY OWNED ship can be the one respawning (the primary, a couch player, an AI
+        // friend), and the receiver must not paint an indicator over one of its own seats.
+        //
+        // WHY THE LEVEL IS ON THE WIRE AND NOT RE-DERIVED. The pop's reward Blast is deliberately
+        // NOT replicated (no EvBlast -- see PlayerShipSummon.SpawnRewardBlast), so before card
+        // ed32efe1 the two peers' copies matched BY CONSTRUCTION: both were the same constant.
+        // Once the level became the owner's "2" powerup level, an observer re-deriving it from its
+        // own `Score` could disagree -- its view of that slot arrives over the ~10 Hz MsgHudState,
+        // so a peer who takes their fourth "2" and dies inside the next packet's window latches
+        // the stale 3, and a join-in-progress peer that gets this event before its first HUD
+        // packet latches 0. That is not cosmetic: `Blast.Setup` makes the lifetime
+        // 1000ms * (level+1) and the blast KILLS, so wherever the observer is the host its copy
+        // is authoritative for what dies. One byte restores the by-construction identity.
+        public static byte[] EncodeRespawnEvent(ushort eventSeq, byte slot, Vector2 pos, int durationMs,
+            int rewardLevel)
         {
-            byte[] b = EventHeader(EvRespawn, eventSeq, 11);
+            byte[] b = EventHeader(EvRespawn, eventSeq, 12);
             b[4] = slot;
             WriteF32(b, 5, pos.X);
             WriteF32(b, 9, pos.Y);
             WriteU16(b, 13, (ushort)Math.Clamp(durationMs, 0, ushort.MaxValue));
+            // Clamped, not validated: a powerup level is 0..4 by construction and a stranger's
+            // byte reaching Blast.Setup only ever scales a cosmetic-plus-damage radius, so there
+            // is nothing here that a REFUSAL would protect -- and refusing would drop the whole
+            // announcement (the indicator AND the position) over one bad byte, the
+            // ClampKillerSlot ruling.
+            b[15] = (byte)Math.Clamp(rewardLevel, 0, 4);
             return b;
         }
 
-        internal static bool TryDecodeRespawnEvent(byte[] b, out byte slot, out Vector2 pos, out int durationMs)
+        internal static bool TryDecodeRespawnEvent(byte[] b, out byte slot, out Vector2 pos,
+            out int durationMs, out int rewardLevel)
         {
             slot = 0;
             pos = Vector2.Zero;
             durationMs = 0;
-            if (b.Length < 15)
+            rewardLevel = 0;
+            if (b.Length < 16)
             {
                 return false;
             }
             slot = b[4];
             pos = new Vector2(ReadF32(b, 5), ReadF32(b, 9));
             durationMs = ReadU16(b, 13);
+            rewardLevel = Math.Clamp((int)b[15], 0, 4);
             return true;
         }
 

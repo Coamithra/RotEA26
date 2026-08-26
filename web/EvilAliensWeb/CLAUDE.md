@@ -606,6 +606,12 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   37f3a663),
   `eaRespawn.park(phase)`/`.state()` (park the respawn clock ring for a screenshot; read its
   fill/pulse/pop as data -- the pulse moves, so a frame pair cannot verify it),
+  `eaRespawn.raise(slot)` (raise a real OWNED respawn summon now -- its production trigger is a
+  CO-OP death, which no offline rig can produce; **DESTRUCTIVE**, and it leaves the slot with TWO
+  ships because the pop spawns one over the live one -- card ed32efe1),
+  `eaPowerupLevel(slot, type, level)` (set one slot's powerup level through the wire's own
+  NetSetPowerupLevel -- nothing else can put a level on a slot without a live ship and a spawner
+  roll; note an Option climb it triggers is not undone by setting the level back down),
   `eaNetRespawn()` (the co-op respawn-indicator suite -- card 37f3a663: the real death path's
   announcement, a puppet death announcing nothing, the peer's cosmetic copy, and that it pops
   into a blast and NOT a second ship. Menu-only and leave-no-trace),
@@ -1550,7 +1556,8 @@ uses `Enabled=false`, not a pause layer -- so they still play here while a `shot
   respawn indicator was a
   `LazerGenerator` charge orb plus a DarkGoldenrod integer countdown; it is now a clock ring that
   fills clockwise from 12 o'clock, pulses as it nears full, and flares outward over its last 220 ms
-  as the ship arrives -- dropping a **free level-3 `Blast`** at the respawn point as the reward.
+  as the ship arrives -- dropping a **free `Blast` sized by the player's own "2" powerup** at the respawn point
+  as the reward (card ed32efe1; it was a fixed level 3).
   - **Card 045c5a92 restyled it to the owner's mock** (`new_assets_raw/respawndesign.png`): a
     near-black disc, a magenta rim swept by a thick round-capped pink arc, 12 radiating spikes, a
     **whole-second countdown numeral** and an italic "RESPAWNING!" label. The numeral is the 2008
@@ -1604,10 +1611,43 @@ uses `Enabled=false`, not a pause layer -- so they still play here while a `shot
     where the ms cross a whole second, which is exactly where this reads 0 elapsed. An edit that
     rounds the numeral differently silently decouples them, which is why `respawn_digit.txt`
     asserts the punch AT the boundary rather than near it.
-  - **The reward blast is NOT `doBlast()`**: no bomb is spent, the level is a fixed 3 rather than
-    the player's progression, and no `EvBlast` is sent -- in a session the far peer's own cosmetic
+  - **The reward blast is NOT `doBlast()`**: no bomb is spent, the BLAST powerup's own level is not
+    what is read, and no `EvBlast` is sent -- in a session the far peer's own cosmetic
     summon drops its copy off its own `EvRespawn`. Reusing `EvBlast` would have raced the puppet's
     arrival (its rx handler needs a live ship in that slot, and at a respawn there may not be one).
+  - **ITS LEVEL IS THE PLAYER'S OWN "2" POWERUP LEVEL (card ed32efe1), replacing the fixed 3.** The
+    "2" is `Powerup.PowerupType.Linker` (`Powerup.PowerUpString` renders it as `"2"`), and it is
+    already THE RESPAWN POWERUP -- `PlayerShip.PowerUp` spends its level on `respawntimebonus`,
+    i.e. on this very clock's duration (2/4/7/14 s off a 15 s countdown). So the pop's size now
+    scales with the same pickup that decides how long you waited for it. **Level 0 is a legal,
+    small blast** and is the honest answer for a player who never invested: this is a reward, not
+    a floor. It supersedes card 258afd66's constant, whose concern (a partner's death clearing the
+    whole screen) is served better here -- a 4 now costs four pickups.
+    - **IT IS LATCHED IN `Setup`, NOT READ AT THE POP, AND THAT ORDERING IS THE FIX.** `Update`'s
+      pop `Add`s the new `PlayerShip` two lines before it calls `SpawnRewardBlast`,
+      `ComponentBin.Add` runs `Initialize` synchronously, and `PlayerShip.Initialize` calls
+      `Score.ResetPowerup(player)` -- which zeroes every level on that slot. A build reading the
+      score at the pop measured **level 0 for a maxed "2" on every run**. `Setup` is called from
+      `PlayerShip_OnDeath`, inside `Die()`, while the dying ship's progression still stands -- the
+      same instant `respawntimebonus` is read off it.
+    - **The COSMETIC copy needs no protocol change**: `Linker` is enum index 4 and
+      `NetProtocol.HudLevelCount` is 5, so every peer's Linker level already rides `MsgHudState`
+      at ~10 Hz and has long settled by the time a 10-15 s countdown pops.
+    - **Rigs: `eaRespawn.raise(slot)` / `eval RespawnRaise <slot> <bonus>` and
+      `eaPowerupLevel(slot, type, level)` / `eval PowerupLevel <slot> <type> <level>`.** The
+      summon's production trigger is a CO-OP death (single player wipes the world and raises
+      none), and `?harness=respawn&harnessrun` raises one at BOOT -- too early to be given a level
+      first, which is exactly the ordering under test. `RespawnRaise` is **DESTRUCTIVE** (the pop
+      spawns a real ship) and refuses an unseated slot -- the summon's own `Update` reads
+      `oracle.Controller(slot)`, which THROWS on one. It also refuses a slot that already has a
+      live summon (two would pop into two bombs), but it deliberately does NOT refuse a slot with
+      a live SHIP: a real respawn follows a death, and killing the only ship offline makes
+      `GameScene.LoseLife` wipe the world and purge the summon. So the pop leaves that slot with
+      two bodies -- reported as `liveShipsOnSlot=` in the reply, and not a state to read any other
+      measurement off. Pinned by the pair
+      `tools/headless/probes/respawn_reward_level.txt` + `respawn_reward_level_zero.txt`; read
+      them as one probe, since the max-level file alone passes on a build that returns a fixed
+      maximum and the zero file alone passes on one that returns a fixed zero.
   - **SIDE-FIX: a death that WIPES the world raises no summon at all.** `PlayerShip_OnDeath` asks
     `PlayerShipSummon.ShouldSummon(otherLiveShips)` first -- and counts ships that are not
     `IsDead`, not list membership, because `Die()` only QUEUES the removal and a same-tick double
@@ -1634,7 +1674,9 @@ uses `Enabled=false`, not a pause layer -- so they still play here while a `shot
     `respawn_singleplayer.txt`, `respawn_digit.txt`, `respawn_reward_level.txt` and `logic_probe`'s
     `ProbeRespawnSummon`.
   - **`?harness=respawn&harnessrun` is the same summon with the freeze LIFTED**, and it exists
-    because NOTHING ELSE OFFLINE CAN RUN AN OWNED SUMMON TO ITS POP. The reward blast only fires in
+    because NOTHING ELSE OFFLINE CAN RUN AN OWNED SUMMON TO ITS POP *by itself*. (Since card
+    ed32efe1 `eval RespawnRaise` can raise one on demand inside a real level, which is what a rig
+    needs when the summon has to be CONFIGURED first -- see the reward-blast bullet above.) The reward blast only fires in
     co-op; the one level that seats a second local ship without a gamepad is TeamChallenge; and
     TeamChallenge is **shared-fate** (`UpdateNormal` asplodes the partner and calls `LoseLife` the
     moment either ship dies), so `GameScene.LoseLife` purges the summon within ~10 frames of it

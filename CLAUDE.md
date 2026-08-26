@@ -480,8 +480,13 @@ Parsed once at boot in `Compat/DebugFlags.cs`; no query = normal boot. Combine w
   fallback); `eaRipple.blast(x,y,power)` / `.blastMove(x,y)` are the wiring rig for that.
   Details: web CLAUDE.md.
 - **Respawn clock ring** (cards 37f3a663 / 045c5a92 / 258afd66): the respawn countdown is a clock
-  ring that fills, pulses near full and POPS into a free **level-3** bomb as the ship returns
-  (`Game/EvilAliens/PlayerShipSummon.cs`). Since card 045c5a92 it wears the owner's mock
+  ring that fills, pulses near full and POPS into a free bomb as the ship returns
+  (`Game/EvilAliens/PlayerShipSummon.cs`). **Since card ed32efe1 that bomb's level is the player's
+  own "2" (Linker) powerup level** -- the powerup that already shortens this very countdown --
+  LATCHED when the summon is raised, because the respawn's own ship spawn wipes the slot before the
+  pop builds the blast. Console `eaRespawn.raise(slot)` + `eaPowerupLevel(slot,type,level)`
+  (`eval RespawnRaise` / `eval PowerupLevel`) are the rig; **`RespawnRaise` is DESTRUCTIVE**.
+  Since card 045c5a92 the ring wears the owner's mock
   (`new_assets_raw/respawndesign.png`): near-black disc, magenta rim swept by a thick round-capped
   pink arc, 12 radiating spikes, a **whole-second countdown numeral** (no tenths -- ruled by the
   owner) that PUNCHES on every change, and an italic "RESPAWNING!" label. No new art -- `blank` +

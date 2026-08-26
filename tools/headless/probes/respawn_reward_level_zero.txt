@@ -1,0 +1,50 @@
+# PROBE: the ZERO half of respawn_reward_level.txt (card ed32efe1) -- a player who never picked a
+#        "2" up gets a level-0 reward bomb, not a floor.
+#
+# WHY A SECOND FILE: its sibling asks for a maxed "2" and requires 4. On its own that passes on a
+# build that hands back a fixed maximum, or that ignores the level and clamps upward. This one runs
+# the identical rig with the slot left at 0 and requires the ripple to read `/1.00`, which no such
+# build can produce. Read the two as ONE probe; a change to either belongs in both.
+#
+# It also pins the DELIBERATE DESIGN CHOICE that 0 is a legal answer. The reward is a gift for
+# sticking with a respawn, and the "2" is the powerup that shortens that very wait -- a player who
+# spent nothing on it waits the full 15 s and gets the small bomb. A future "floor it at 1" edit is
+# a product decision, and it should have to come here and delete this file rather than quietly
+# passing its sibling.
+#
+# The wipe leg is deliberately ABSENT (there is nothing to wipe at level 0); the latch is its
+# sibling's claim.
+#
+# MUTATION-TESTED: flooring the level at 1 in SpawnRewardBlast reddens the POP leg here
+# (`level=1`) while the sibling stays GREEN -- the asymmetry this file exists for. Reverting to the
+# pre-card fixed 3 reddens both files at their raise legs.
+#
+# eahl: --flags "?level=Level2&invuln&noattract&seed=1&difficulty=Medium"
+
+# `?difficulty=Medium` is PINNED rather than inherited: the raise leg asserts `ms=10000`, and the
+# countdown scales with difficulty (round((15 - bonus) * 0.66..0.9)). Without it a saved profile at
+# Hard would fail this file as "wrong reward" when the difficulty is what moved -- probes README
+# rule 5, a precondition folded into a subject assertion.
+step 400 nodraw
+mark
+
+# Slot 0 has no "2" -- asserted rather than assumed, so this cannot pass on a rig that never
+# reached the score at all.
+eval PowerupLevel 0 Linker 0
+expect \[poweruplevel\] slot=0 type=Linker level=0
+eval RespawnRaise 0 0
+expect \[respawn\] raise slot=0 bonus=0 ms=10000 reward=0
+
+mark
+step 640 nodraw
+expect \[respawn\] reward blast slot=0 level=0
+expect-not \[respawn\] reward blast slot=0 level=[1-4]
+
+mark
+# The independent witness again: 1000ms * (0+1).
+step 20
+eval RippleState
+expect e=[0-9.]+/1\.00
+expect-not e=[0-9.]+/[2-5]\.00
+
+quit

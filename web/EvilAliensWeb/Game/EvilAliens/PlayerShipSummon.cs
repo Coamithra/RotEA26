@@ -96,19 +96,39 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 	private const float PopMs = 220f;
 	private const float PopRadiusGrowth = 0.9f;
 
-	// The reward for sticking with it. A FIXED level, not the player's own bomb progression, and
-	// no bomb is spent for it -- it is a gift.
+	// The reward for sticking with it. No bomb is spent for it -- it is a gift.
 	//
-	// Card 258afd66 lowered it 4 -> 3: at 4 it cleared so much of the screen that a co-op partner's
-	// death read as a free win rather than as a helping hand. A Blast's reach AND its lifetime both
-	// scale with the level (Blast.Setup: lifetime = 1000ms * (level+1)), so the drop is visible in
-	// data as well as on screen -- see the reward line in SpawnRewardBlast.
+	// CARD ed32efe1 MADE IT THE PLAYER'S OWN "2" POWERUP LEVEL rather than a fixed constant. The
+	// "2" is `Powerup.PowerupType.Linker` (`PowerUpString` renders it as "2"), which is already
+	// THE RESPAWN POWERUP -- `PlayerShip.PowerUp` spends its level on `respawntimebonus`, i.e. on
+	// this very clock's duration (2/4/7/14 seconds off a 15 s countdown). So the pop's size now
+	// scales with the same pickup that decides how long you waited for it.
 	//
-	// IT ONLY EVER FIRES IN CO-OP, and that is deliberate rather than an oversight of the
-	// suppression above. Every single-player death is a WIPE, so no summon is built and the
-	// respawn goes through LoseLife -> the checkpoint reset instead -- where the world has just
-	// been purged and a bomb would hit nothing. Ruled that way when the card was planned.
-	private const int RewardBlastLevel = 3;
+	// A Blast's reach AND its lifetime both scale with the level (Blast.Setup: lifetime =
+	// 1000ms * (level+1)), so the choice is visible in data as well as on screen -- see the reward
+	// line in SpawnRewardBlast. Level 0 (never picked a "2" up) is a legal, small blast, and is the
+	// honest answer for a player who did not invest: this is a REWARD, not a floor.
+	//
+	// It supersedes the fixed 3 of card 258afd66, which lowered it from 4 because at 4 a co-op
+	// partner's death cleared so much of the screen that it read as a free win rather than as a
+	// helping hand. That concern is served better here than by a constant: a maxed "2" reaches 4
+	// only for a player who spent four pickups on it.
+	//
+	// READ THROUGH `Score` for an OWNED summon; the COSMETIC copy takes the owner's value off the
+	// wire instead (`SetupRemote`, EvRespawn's rewardLevel byte, protocol v26) rather than
+	// re-deriving it from this peer's ~10 Hz `MsgHudState` view of that slot. The reward Blast is
+	// not itself replicated, so a re-derived level is the one thing that could make the two peers'
+	// bombs differ -- and it differs in radius AND lifetime, on an object that kills.
+	//
+	// LATCHED AT SETUP, NOT READ AT THE POP -- "the level you HAD" is literally the ask, and the
+	// respawn is exactly what destroys it. `PlayerShip.Initialize` calls `Score.ResetPowerup(player)`,
+	// which wipes every level on that slot, and `ComponentBin.Add` runs `Initialize` SYNCHRONOUSLY
+	// -- so the ship the pop spawns two lines above `SpawnRewardBlast` has already zeroed the slot
+	// by the time the blast is built. Reading it there measured level 0 for a maxed "2" on every
+	// run. Setup is called from `PlayerShip_OnDeath`, which fires inside `Die()` while the dying
+	// ship's own progression is still standing -- the same instant `respawntimebonus` is read off
+	// it, and that value comes from this very powerup.
+	private int rewardBlastLevel;
 
 	// The mock's soft halos (spikes, the glow behind the disc, the glow behind the text) and the
 	// numeral/label. Both are preloaded by GameScene, so this is a dictionary hit -- see the header.
@@ -164,6 +184,14 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 
 	internal float DebugDigitPunch => DigitPunch;
 
+	// The reward blast's level, LATCHED at Setup (card ed32efe1). NOT debug-only: PlayerShip reads
+	// it to fill EvRespawn's rewardLevel byte, so the announcement carries the value this summon
+	// really latched rather than a second read that could disagree with it. It doubles as the rig
+	// readback -- the value is otherwise only observable in the `[respawn] reward blast` line
+	// ten-odd seconds later, by which time the respawn has wiped the slot it came from and
+	// "latched correctly" and "read at the pop" are indistinguishable.
+	internal int RewardBlastLevel => rewardBlastLevel;
+
 	// The roster slot this indicator belongs to -- the dying player's. Read by NetSession to
 	// re-point an announcement for a slot it is already showing rather than stacking a second one.
 	internal int Owner => player;
@@ -196,6 +224,7 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 		base.Position = position;
 		cosmetic = false;
 		wipeReported = false;
+		rewardBlastLevel = Score.GetPowerupLevel(Powerup.PowerupType.Linker, player);
 		countdown = (int)Math.Round((float)(15 - respawntimebonus) * Settings.GetInstance().CurrentDifficulty switch
 		{
 			Settings.DifficultyLevel.Easy => 0.66f,
@@ -213,14 +242,21 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 	}
 
 	// The peer's respawn, announced over NetProtocol.EvRespawn (card 37f3a663). `slot` is the
-	// peer's roster slot; nothing here reads the local roster, because that seat is not ours.
-	internal void SetupRemote(int slot, Vector2 position, int durationMs)
+	// peer's roster slot; nothing here reads the local roster, because that seat is not ours --
+	// and since card ed32efe1 that includes the reward level, which arrives on the wire (v26)
+	// rather than being re-derived from our ~10 Hz view of their powerups. See
+	// NetProtocol.EncodeRespawnEvent for why: the reward Blast is not itself replicated, so a
+	// re-derived level is the one thing that could make the two peers' bombs differ in radius
+	// AND lifetime -- and the blast kills.
+	internal void SetupRemote(int slot, Vector2 position, int durationMs, int rewardLevel)
 	{
 		spawndirection = 0f;
 		player = slot;
 		base.Position = position;
 		cosmetic = true;
 		wipeReported = false;
+		// The OWNER'S latched value, straight off the wire -- see the header above.
+		rewardBlastLevel = Math.Clamp(rewardLevel, 0, 4);
 		countdown = 0;
 		totalMs = Math.Max(1f, durationMs);
 		countdowntimer.Stop();
@@ -663,23 +699,27 @@ internal class PlayerShipSummon : AlienDrawableGameComponent
 		spriteBatch.EndPerspective();
 	}
 
-	// The pop itself: a free level-4 bomb at the respawn point. Deliberately NOT doBlast() -- no
-	// bomb is spent, the level is fixed rather than the player's own progression, and no EvBlast
-	// is sent. In a session the far peer's own cosmetic summon drops its copy off its own
+	// The pop itself: a free bomb at the respawn point, sized by the player's own "2" powerup
+	// (RewardBlastLevel). Deliberately NOT doBlast() -- no bomb is spent, the BLAST powerup's own
+	// level is not what is read, and no EvBlast is sent. In a session the far peer's own cosmetic summon drops its copy off its own
 	// EvRespawn announcement (the EvIntroVolley idiom), which keeps the two worlds symmetric
 	// without racing the puppet's arrival: EvBlast's receiver needs a live ship in that slot, and
 	// at a respawn the peer's puppet may not have been born yet.
 	private void SpawnRewardBlast()
 	{
+		// One field, read by both the Blast and the report, so the line cannot describe a
+		// different level from the one that was spent.
+		int level = rewardBlastLevel;
 		Blast rewardBlast = Blast.NewBlast(collection, base.Game);
-		rewardBlast.Setup(base.Position, RewardBlastLevel, player);
+		rewardBlast.Setup(base.Position, level, player);
 		collection.Add((GameComponent)(object)rewardBlast);
 		sound.PlayCue("blast");
 		// Reported from the call site with the value actually passed, so this witnesses the WIRING
-		// and not just the constant (card 258afd66). The blast's own lifetime is the independent
-		// second witness -- Blast.Setup makes it 1000ms * (level+1), which BombRipple resolves the
-		// ring's duration from, so `eval RippleState` reads 4.00 at level 3 and 5.00 at level 4.
-		Console.WriteLine("[respawn] reward blast slot=" + player + " level=" + RewardBlastLevel);
+		// and not just the resolved level (card 258afd66). The blast's own lifetime is the
+		// independent second witness -- Blast.Setup makes it 1000ms * (level+1), which BombRipple
+		// resolves the ring's duration from, so `eval RippleState` reads 1.00 at level 0 and
+		// 4.00 at level 3.
+		Console.WriteLine("[respawn] reward blast slot=" + player + " level=" + level);
 	}
 
 	public override void Update(GameTime gameTime)

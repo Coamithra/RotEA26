@@ -98,6 +98,11 @@ expect 5\. scaled-i16 motion rates
 # unknown id, self, closed target, right id in the wrong room -- is a SILENT drop with TxSent
 # moving and TxFanout not (the closed-DataChannel semantic INetTransport pins); and the
 # NetImpairment decorator passes both addressed lanes through verbatim (impairment is RX-only).
-expect \[netwire\] 118 passed, 0 failed
+# Card ed32efe1 raised it 118 -> 119: EvRespawn's rewardLevel byte (v26). Its own leg is that an
+# out-of-range value CLAMPS rather than refusing -- the frame also carries the announcement itself,
+# so dropping it over one bad byte would cost the indicator AND its position (the ClampKillerSlot
+# ruling); the round-trip leg beside it now drives four distinct values rather than three, so a
+# pair of swapped offsets still cannot pass.
+expect \[netwire\] 119 passed, 0 failed
 expect-not FAIL
 quit

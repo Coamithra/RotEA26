@@ -1669,6 +1669,120 @@ namespace EvilAliensWeb.Compat
 				+ BombRipple.DescribeRings());
 		}
 
+		// Set one slot's powerup LEVEL (`eaPowerupLevel(0, 'Linker', 3)` /
+		// `eval PowerupLevel 0 Linker 3`), card ed32efe1. The respawn reward blast is sized by the
+		// "2" (Linker) level now, and nothing offline can otherwise put a level on a slot: the
+		// sprite harness has no ship to pick a powerup up, and a real pickup needs a live level, a
+		// live ship and a spawner roll. Drives ScoreVisualiser's real NetSetPowerupLevel (the wire's
+		// own path), so it climbs through PowerupData rather than poking a field. Reports the value
+		// it READ BACK, not the one asked for, so a clamp or a refusal is visible instead of assumed.
+		[JSInvokable("debugPowerupLevel")]
+		public static string PowerupLevel(int slot = 0, string type = "Linker", int level = 4)
+		{
+			// Enum.TryParse ALSO accepts raw NUMERIC strings, and an undefined one would sail past
+			// this guard straight into ScoreVisualiser's powerupDatas dictionary and throw a
+			// KeyNotFoundException out of DotNet.invokeMethod (measured: `eval PowerupLevel 0 7 2`).
+			// IsDefined is what refuses it -- the same pairing this file already uses for the other
+			// enum-taking seams.
+			if (!System.Enum.TryParse<EvilAliens.Powerup.PowerupType>(type, ignoreCase: true,
+					out EvilAliens.Powerup.PowerupType parsed)
+				|| !System.Enum.IsDefined(typeof(EvilAliens.Powerup.PowerupType), parsed))
+			{
+				return "[poweruplevel] unknown type '" + type
+					+ "' (expected Blast|Option|FirePower|Range|Linker|OneUp) -- ignored";
+			}
+			EvilAliens.IScoreService svc = EvilAliens.ServiceHelper.Get<EvilAliens.IScoreService>();
+			EvilAliens.ScoreVisualiser score = svc?.Score;
+			if (score == null)
+			{
+				return "[poweruplevel] no score service";
+			}
+			if (!score.DebugSetPowerupLevel(slot, parsed, level))
+			{
+				return "[poweruplevel] slot " + slot + " out of range -- ignored";
+			}
+			return "[poweruplevel] slot=" + slot + " type=" + parsed
+				+ " level=" + score.GetPowerupLevel(parsed, slot);
+		}
+
+		// Raise a real OWNED respawn summon on `slot` (`eaRespawn.raise(0)` /
+		// `eval RespawnRaise 0 0` -- the eval bridge binds by EXACT arg count, so both arguments
+		// must be given), card ed32efe1. Its production trigger is a CO-OP death -- a
+		// single-player death is a world wipe and raises none (PlayerShipSummon.ShouldSummon), and
+		// the one level seating a second local ship offline is shared-fate, so no offline rig can
+		// produce one on demand. `?harness=respawn&harnessrun` runs a summon but raises it at BOOT,
+		// which is too early to be given a powerup level first -- and the level is LATCHED at Setup,
+		// so that is exactly the ordering under test.
+		//
+		// Drives the real `Setup` and the real ComponentBin add, so the countdown, the pop, the
+		// reward blast and the ship spawn are all production code. It does NOT go through
+		// ShouldSummon (that decision is pinned separately) -- this is the summon, not the verdict.
+		// DESTRUCTIVE: the pop spawns a real PlayerShip into the live world. Throwaway boots only.
+		[JSInvokable("debugRespawnRaise")]
+		public static string RespawnRaise(int slot = 0, int respawnTimeBonus = 0)
+		{
+			if (slot < 0 || slot >= EvilAliens.Oracle.MaxPlayers)
+			{
+				return "[respawn] raise: slot " + slot + " out of range -- ignored";
+			}
+			EvilAliens.ComponentBin bin =
+				EvilAliens.ServiceHelper.Get<EvilAliens.IComponentBinService>()?.ComponentBin;
+			if (bin == null)
+			{
+				return "[respawn] raise: no component bin";
+			}
+			// The summon's Update reads oracle.Controller(slot) for the rumble ladder, which THROWS
+			// ("Player N is not playing!") on an unseated slot -- so refuse here rather than let
+			// the raise take down the tick loop a second later, where the cause is no longer
+			// obvious. Measured while writing this seam.
+			EvilAliens.Oracle oracle = EvilAliens.ServiceHelper.Get<EvilAliens.IOracleService>()?.Oracle;
+			if (oracle == null || !oracle.IsSeated(slot))
+			{
+				return "[respawn] raise: slot " + slot + " is not seated -- ignored";
+			}
+			// One indicator per slot, the same rule NetSession's EvRespawn path enforces with
+			// FindCosmeticSummon: two summons on one slot pop into TWO reward blasts.
+			foreach (Microsoft.Xna.Framework.IGameComponent item
+				in (System.Collections.ObjectModel.Collection<Microsoft.Xna.Framework.IGameComponent>)(object)bin.Game.Components)
+			{
+				if (item is EvilAliens.PlayerShipSummon live && live.Owner == slot)
+				{
+					return "[respawn] raise: slot " + slot + " already has a live summon -- ignored";
+				}
+			}
+			// COUNTED, not refused: a real respawn follows a death, so the slot's ship is gone by
+			// the time its summon is raised. This seam cannot reproduce that offline (killing the
+			// only ship makes GameScene.LoseLife wipe the world and purge the summon), so it
+			// raises one over a LIVE ship and the pop then leaves that slot with TWO bodies -- a
+			// state the game itself never produces, and one that ScoreVisualiser.FindShip,
+			// NetSession.FindShipForSlot and the AI all assume cannot happen. Reported so no
+			// later measurement is read off a two-bodied slot by accident.
+			int liveShips = 0;
+			foreach (EvilAliens.PlayerShip s in oracle.GetShips())
+			{
+				if (s.Owner == slot && !s.IsDead)
+				{
+					liveShips++;
+				}
+			}
+			EvilAliens.PlayerShipSummon summon =
+				EvilAliens.PlayerShipSummon.NewPlayerShipSummon(bin, bin.Game);
+			// Configure BEFORE the Add -- KNI runs Initialize synchronously inside it (the
+			// ComponentBin instant-add contract; tools/audit_add_order.py lints for this shape).
+			summon.Setup(slot, 0f, new Microsoft.Xna.Framework.Vector2(400f, 300f), respawnTimeBonus);
+			// TryAdd, not Add: a standing Purge<PlayerShipSummon> diverts it silently, and a reply
+			// reporting a duration and a reward for a summon that never entered the world is
+			// exactly the kind of trustworthy-looking lie this seam exists to avoid.
+			if (!bin.TryAdd((Microsoft.Xna.Framework.GameComponent)(object)summon))
+			{
+				return "[respawn] raise: slot " + slot
+					+ " diverted by a standing purge -- nothing was added";
+			}
+			return "[respawn] raise slot=" + slot + " bonus=" + respawnTimeBonus
+				+ " ms=" + summon.DurationMs + " reward=" + summon.RewardBlastLevel
+				+ " liveShipsOnSlot=" + liveShips;
+		}
+
 		// Park/un-park the respawn clock ring (`eaRespawn.park(0.9)` / `eval RespawnPark 0.9`),
 		// card 37f3a663. Negative = live, the RipplePark convention above.
 		[JSInvokable("debugRespawnPark")]

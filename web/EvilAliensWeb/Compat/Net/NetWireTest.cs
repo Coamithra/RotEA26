@@ -877,14 +877,24 @@ namespace EvilAliensWeb.Compat.Net
             check("EvBlast envelope", blast != null
                 && blast[0] == NetProtocol.MsgEvent && blast[1] == NetProtocol.EvBlast && blast[2] == 18);
             // EvRespawn (card 37f3a663) DOES have a Try* decoder, so it is round-tripped by
-            // VALUE rather than by envelope. Slot, position and duration are driven to three
-            // distinct values so a pair of swapped offsets cannot pass.
-            byte[] respawn = Round(NetProtocol.EncodeRespawnEvent(21, 3, new Vector2(123f, 456f), 9500), reliable: true);
-            check("EvRespawn round-trips slot/pos/duration", respawn != null
+            // VALUE rather than by envelope. Slot, position, duration and -- since card ed32efe1
+            // (v26) -- the reward level are driven to four distinct values so a pair of swapped
+            // offsets cannot pass.
+            byte[] respawn = Round(NetProtocol.EncodeRespawnEvent(21, 3, new Vector2(123f, 456f), 9500, 2),
+                reliable: true);
+            check("EvRespawn round-trips slot/pos/duration/rewardLevel", respawn != null
                 && respawn[0] == NetProtocol.MsgEvent && respawn[1] == NetProtocol.EvRespawn
                 && NetProtocol.TryDecodeRespawnEvent(respawn, out byte rsSlot, out Vector2 rsPos,
-                    out int rsMs)
-                && rsSlot == 3 && rsPos.X == 123f && rsPos.Y == 456f && rsMs == 9500);
+                    out int rsMs, out int rsReward)
+                && rsSlot == 3 && rsPos.X == 123f && rsPos.Y == 456f && rsMs == 9500 && rsReward == 2);
+            // The reward level is CLAMPED at both ends rather than refused -- the frame also
+            // carries the announcement itself, and dropping the indicator and its position over
+            // one bad byte is the trade ClampKillerSlot already ruled on.
+            check("an out-of-range EvRespawn reward level clamps rather than refusing",
+                NetProtocol.TryDecodeRespawnEvent(
+                    Round(NetProtocol.EncodeRespawnEvent(22, 1, Vector2.Zero, 100, 99), reliable: true),
+                    out _, out _, out _, out int rsClamped)
+                && rsClamped == 4);
             byte[] pause = Round(NetProtocol.EncodeByteEvent(19, NetProtocol.EvPause, 1), reliable: true);
             check("a byte event envelope carries its value", pause != null
                 && pause.Length == 5 && pause[1] == NetProtocol.EvPause && pause[4] == 1);
@@ -910,7 +920,7 @@ namespace EvilAliensWeb.Compat.Net
             check("a truncated EvCosmeticSwarm is refused",
                 !NetProtocol.TryDecodeCosmeticSwarmEvent(Truncate(swarm), out _, out _, out _));
             check("a truncated EvRespawn is refused",
-                !NetProtocol.TryDecodeRespawnEvent(Truncate(respawn), out _, out _, out _));
+                !NetProtocol.TryDecodeRespawnEvent(Truncate(respawn), out _, out _, out _, out _));
             // TWICE, and that is not a typo: since the short flag was appended, dropping ONE byte
             // off a banner produces a legal older-peer frame (asserted three lines up), so a
             // single Truncate here would assert the OPPOSITE of the compatibility leg and fail.

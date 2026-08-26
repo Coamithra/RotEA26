@@ -448,6 +448,27 @@ namespace EvilAliensWeb.Compat
 		// negative control, which is why it ships rather than living inside the test suite.
 		public static bool NetSnapshotStaleGuard { get; private set; } = true;
 
+		// SAME-TICK SFX COALESCING (card 8732568e), ON by default -- `?sfxcoalesce=0` turns it OFF,
+		// restoring the pre-card behaviour where N deaths landing on one tick each start their own
+		// copy of the same sample and the copies sum COHERENTLY (+20*log10(N) dB). It is the A/B
+		// seam for a change nobody can screenshot, and the suite's negative control.
+		//
+		// DELIBERATELY OUT OF `Active`, unlike ?netstaleguard / ?netaimease / ?nethpraise, which are
+		// the same shape. Those are IN because turning them off restores a DESYNC and must never
+		// reach a public lobby. This one changes no gameplay state, no position, no score and no
+		// packet -- it decides whether a local mixer starts a second copy of a sound. That is the
+		// `?slowmotrail` / `?metalscore` / `?walltowers` class: a pure feel toggle that defaults true.
+		public static bool SfxCoalesce { get; private set; } = true;
+
+		// Flip it from a suite (Compat/Net/SfxBurstTest.cs) so the A/B arm can be measured without
+		// a reboot -- the `?netstaleguard=0` / `?netaimease=0` idiom, where the pre-card behaviour
+		// is the suite's own negative control. Nothing in production calls it; the suite restores
+		// the boot value in its teardown and asserts the restore took.
+		internal static void SetSfxCoalesceForTest(bool on)
+		{
+			SfxCoalesce = on;
+		}
+
 		// The UPWARD half of KillableAlien.NetApplyHp (card 87310afa), ON by default --
 		// `?nethpraise=0` turns it OFF, restoring the pre-card downward-only clamp where a client
 		// puppet's hp could never be corrected back up. Same shape and same reasons as
@@ -1873,6 +1894,29 @@ namespace EvilAliensWeb.Compat
 						Console.WriteLine("[debug] unknown ?" + key + "= value '" + val
 							+ "' (expected 0/off to disable) -- ignored, the snapshot staleness"
 							+ " guard stays " + (NetSnapshotStaleGuard ? "ON" : "OFF"));
+					}
+					break;
+				case "sfxcoalesce":
+					// Same asymmetry as ?netstaleguard above, for the same reason: an unrecognised
+					// value here would silently turn a shipped FIX off -- and an A/B arm that
+					// measured the SHIPPED build twice while being labelled as the control is the
+					// `[aiwallnav] steering:` trap. So only an explicit off spelling disables it.
+					if (IsExplicitlyOff(val))
+					{
+						SfxCoalesce = false;
+						// It announces itself, and that is not decoration. It is deliberately out
+						// of `Active`, so it does not appear in the `[debug] flags active:` dump
+						// -- and an A/B arm with no boot-time confirmation that the arm it thinks
+						// it is measuring is the one that ran is exactly the `[aiwallnav]
+						// steering:` trap. Same reasoning as ?seed's own line.
+						Console.WriteLine("[sfx] same-tick coalescing OFF (?sfxcoalesce=0) --"
+							+ " every request starts its own copy, the pre-card behaviour");
+					}
+					else if (!IsOn(val))
+					{
+						Console.WriteLine("[debug] unknown ?" + key + "= value '" + val
+							+ "' (expected 0/off to disable) -- ignored, same-tick SFX coalescing"
+							+ " stays " + (SfxCoalesce ? "ON" : "OFF"));
 					}
 					break;
 				case "nethpraise":

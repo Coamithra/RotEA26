@@ -3153,6 +3153,74 @@ work on files under `Compat/Net/`. Design doc: `plans/stage11-online-coop.md`.
   DESTRUCTIVE** (it moves the script position and the section) -- throwaway `?level=InsaneBossI`
   boot only. A playthrough cannot cover this: eight full AI soaks, up to 25 deaths each, hit
   `revert 33 -> 24` and never once died one index later.
+- **AT MOST ONE START OF ANY GIVEN CUE PER GAME TICK (card 8732568e).** Reported as *"multiplayer
+  games (on a joining peer side) seem to have a lot of loud explosion effect sounds. I suspect we
+  get a big packet with a bunch of dead enemies and play the sound a couple of times in the same
+  frame perhaps?"* -- right on both counts, and the second half is what makes it read as LOUD
+  rather than as busy: **N copies of the SAME sample started at the SAME instant are
+  phase-identical and sum COHERENTLY**, amplitude x N, i.e. **+20*log10(N) dB**. Ten simultaneous
+  `expl1` is one explosion twenty decibels louder, not ten explosions. (Two copies even a few ms
+  apart sum incoherently and read as two hits, which is why the window is one tick and not longer.)
+  **Exact at the ATTACK TRANSIENT, which is what "loud" means here; the tail is gentler.**
+  `Spawn`'s 5% humanize gives every `vary` cue a +-2.1% pitch, so two copies drift a half period
+  apart within ~12 ms at 1 kHz and the body decays toward +10*log10(N) plus comb filtering. The
+  onset is still coherent, and the onset is the bang.
+  - **A joining peer hits it harder but the defect is not net-specific.** `EvDeath` rides the
+    reliable ORDERED lane and a client applies a whole batch in ONE `DrainRx`, inside one tick --
+    so deaths the host spread over several of its own frames all fire their cue on the same client
+    tick. Offline the same shape exists (a bomb clearing the screen) and is fixed with it, which
+    is what makes the change verifiable with no second machine.
+  - **PER CUE, not a global "one sound at a time".** The ticket offered both. A global cap would
+    silence deliberate LAYERING -- `SpiderBoss.BeginDeathThroes` plays "spiderbossdeath" and
+    "head asplode" together, `CastDisplayer` stacks three -- and none of that is the problem,
+    because two DIFFERENT samples do not sum coherently.
+  - **IT APPLIES TO `PlayCue` AND NOTHING ELSE. The rule is the SURFACE, not the cue.** `Play`
+    RETURNS the instance and `PlayText` keeps it in `_speech`, and a caller that keeps a handle is
+    a caller a null can break. **`PlayText` is where that bites**: it stops the in-flight announcer
+    line and THEN assigns `Spawn`'s result, so coalescing it would stop the first line, return
+    null and leave the announcer SILENT -- worse than either the old or the intended behaviour.
+    An earlier cut of this said "looping cues are the only kept handles"; that is false
+    (`StarMine`'s `targetacquired` is another) and it is what the surface rule replaces.
+  - **Looping cues are exempt too, independently** (`lazershot`, `lazercharge`, `bees`). Nothing
+    in the game `PlayCue`s one today, so this is defence in depth: a sustained cue folded into an
+    earlier start would be an unstoppable loop, since `PlayCue` discards the handle and nothing
+    reaps a Playing instance. (`eaSfx.burst` refuses a looping cue for the same reason.)
+  - **ONE DELIBERATE OPT-OUT, `PlayCue(cue, allowSameTick: true)`.** `SpiderBoss.CollidesWith`
+    plays `bugdies` TWICE in a row -- verbatim 2008 (`src_decompiled` line 673-674), i.e. an
+    authored +6 dB emphasis on landing a beam on that boss, mirrored for the peer in `NetPlayFx`.
+    Coalescing it would quietly halve a set-piece's hit. **Keep it at one call site**; every other
+    same-tick repeat in this game is the pile-up. `BrainBoss`'s two `expl2` calls are NOT this --
+    they sit in separate random branches and their coincidence is exactly what is being fixed.
+  - **The window is `SoundManager.Update`'s own tick counter**, which `Game1.UpdateInner` pumps
+    unconditionally BEFORE `base.Update`, the collision sweep and the net rx drain -- so everything
+    one tick does falls under one number, and it keeps advancing under a pause (where the menus
+    still play cues). Not `WorldTime`, which freezes there and would coalesce a menu cue forever.
+  - **The decision is taken BEFORE the effect is loaded, deliberately.** On a machine with no audio
+    device `GetEffect` caches null and `Spawn` bails early, so a decision behind that load could
+    never be exercised headlessly -- which is where this is verified.
+  - **`admitted` is not `played`.** The decision is counted before the effect loads and before the
+    32-instance `Default` cap, which is what makes it readable on a box with no audio device;
+    `played` only counts a real `inst.Play()`, and the gap between them is the cap plus any load
+    failure. Read both in the browser, where the cap is live.
+  - **Verify as DATA: `eaSfx()` / `eval SfxState`** (requests / admitted / played / coalesced /
+    which cues),
+    `eaSfx.reset()`, `eaSfx.burst(cue, n)`, and the whole suite `eaSfxBurst()` /
+    `eval SfxBurstTest` (`Compat/Net/SfxBurstTest.cs`, menu-only and leave-no-trace). **A
+    screenshot cannot see any of this and headlessly neither can a microphone** -- eahl silences
+    the mixer and a container has no audio device at all. Its section 3 drives the REPORTED path:
+    eight real `UFO` puppets killed by eight `NetPuppets.OnRemoteDeath` calls in one tick, which
+    ask for eight `expl1` starts and get one. `?sfxcoalesce=0` is the A/B seam (a pure feel toggle,
+    so deliberately OUT of `DebugFlags.Active` unlike its `?netstaleguard=0` lookalikes -- it
+    changes no gameplay state, no position, no score and no packet). Pinned by the pair
+    `tools/headless/probes/sfx_coalesce.txt` + `sfx_coalesce_off.txt`; read them as one probe,
+    since the suite flips the property directly and cannot show the FLAG reaching it (`?sfxcoalesce=0`
+    prints its own boot line, the `?seed` convention, because it is out of `Active` and so absent
+    from the `[debug] flags active:` dump). Mutation-tested eight ways.
+  - **The suite's leave-no-trace takes real work, not just pruning.** Section 3 drives REAL UFO
+    deaths: they award score, spawn `Explosion`s into the live bin and add real screen TRAUMA
+    (measured 0.000 -> 0.930 after ONE run, i.e. a visibly rattling main menu). It restores all
+    three and ASSERTS each -- `Juice.SetTraumaForTest` exists for that. A menu-runnable suite that
+    drives a real death path must do the same.
 - **`Songs.LastSignal`** (`lastsignal.ogg`) is the end-of-level text-crawl theme in `CreditsScene`
   (played at rate 1.0). It replaced the bank's `sjaakslow` cue — both that cue and its ogg are
   gone; **don't reintroduce them.**

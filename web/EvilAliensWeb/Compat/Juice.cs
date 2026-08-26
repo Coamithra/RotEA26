@@ -149,6 +149,16 @@ namespace EvilAliensWeb.Compat
         // running, i.e. whether a zero peak means "damped" or "never fired".
         public static float TraumaNow => trauma;
 
+        // Put the trauma back where a suite found it. Menu-runnable suites that drive real death
+        // paths add REAL trauma (Explosion.Initialize does), and a suite that leaves the menu
+        // rattling is not leave-no-trace -- measured at 0.93 after one eaSfxBurst() run before
+        // this existed. Write-only test seam, in the TakePeaks/SetSfxCoalesceForTest spirit;
+        // nothing in production calls it.
+        internal static void SetTraumaForTest(float value)
+        {
+            trauma = MathHelper.Clamp(value, 0f, 1f);
+        }
+
         // The zoom the PRESENT BLIT actually drew with, reported by Game1 rather than recomputed
         // here (card 085ebddc). Recomputing `MaxBlitZoom * strength` in Update would be a second
         // copy of the blit's own expression, so the readback would restate the constant instead of

@@ -204,6 +204,38 @@
             catch (e) { console.warn('[debug] eaShake.state failed (game not booted yet?): ' + e.message); }
         };
 
+        // eaSfx() -- the same-tick SFX coalescer's readback (card 8732568e). At most one start
+        // of any given cue per game tick, because N copies of the SAME sample started at the SAME
+        // instant sum COHERENTLY (+20*log10(N) dB) -- "a lot of loud explosion effect sounds" on a
+        // joining peer, where a whole batch of EvDeaths lands in one rx drain. The decision has no
+        // pixels and, headlessly, no sound, so counters are the only honest observable.
+        //   eaSfx()                  -- requests / admitted / played / coalesced / which cues
+        //   eaSfx.reset()            -- zero them, to measure one window
+        //   eaSfx.burst('expl1', 12) -- ask for one cue 12 times with no tick in between
+        // It applies to `PlayCue` only: `Play` and `PlayText` hand their caller the instance, and
+        // `PlayText` stops the in-flight line before assigning it, so a coalesced one would leave
+        // the announcer silent. `eaSfx.burst` refuses a LOOPING cue -- PlayCue discards the handle,
+        // so each would be a loop nothing in the process can ever stop.
+        // A/B the shipped behaviour with the ?sfxcoalesce=0 URL flag.
+        window.eaSfx = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugSfxState')); }
+            catch (e) { console.warn('[debug] eaSfx failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaSfx.reset = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugSfxReset')); }
+            catch (e) { console.warn('[debug] eaSfx.reset failed (game not booted yet?): ' + e.message); }
+        };
+        window.eaSfx.burst = (cue, n) => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugSfxBurst', String(cue || ''), Number(n) || 0)); }
+            catch (e) { console.warn('[debug] eaSfx.burst failed (game not booted yet?): ' + e.message); }
+        };
+        // eaSfxBurst() -- the whole suite, incl. the REAL path (a batch of remote deaths applied
+        // in one tick). Menu-runnable and leave-no-trace; see Compat/Net/SfxBurstTest.cs.
+        window.eaSfxBurst = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugSfxBurstTest')); }
+            catch (e) { console.warn('[debug] eaSfxBurst failed (game not booted yet?): ' + e.message); }
+        };
+
         // QA/demo: freeze game time for N milliseconds of real time (the hit-stop juice
         // effect). Most visible in a level: eaHitstop() for 120ms, eaHitstop(500) for a
         // long dramatic freeze. Disable the shipped effect with ?hitstop=0.

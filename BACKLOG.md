@@ -190,9 +190,63 @@ _Further testing would be nice:_ verified over the in-process wire and the real 
 ledger's own 64-deep eviction cap has no leg (reaching it needs 64 concurrent deferred deaths) and
 degrades to the pre-card behaviour, which shipped.
 
-## 7. `8732568e` — multiplayer games (on a joining peer side) seem to have a lot of loud explosion effect sounds. I suspect we get a big packet with a bunch of dead enemies and play the sound a couple of times in the same frame perhaps? I propose either adding a function to our audio engine to limit the nr of sounds played at exactly the same time (to one) or create special case code just for the explosion sfx.
+## 7. `8732568e` — multiplayer games (on a joining peer side) seem to have a lot of loud explosion effect sounds. I suspect we get a big packet with a bunch of dead enemies and play the sound a couple of times in the same frame perhaps? I propose either adding a function to our audio engine to limit the nr of sounds played at exactly the same time (to one) or create special case code just for the explosion sfx. — **DONE**
 
 _No description or comments — the card title is the whole ticket._
+
+**Done** (PR pending link). The suspicion was right on both counts, and the second half is what
+makes it read as **loud** rather than busy: N copies of the *same* sample started at the *same*
+instant are phase-identical and sum **coherently** — amplitude × N, i.e. **+20·log10(N) dB**. Ten
+simultaneous `expl1` is one explosion twenty decibels louder, not ten explosions.
+
+The batching is real too: `EvDeath` rides the reliable *ordered* lane, so a client applies a whole
+batch in one `DrainRx`, inside one tick — deaths the host spread over several of its own frames all
+fire their cue on the same client tick. Offline the same shape exists (a bomb clearing the screen),
+which is what made this verifiable with no second machine.
+
+Took the ticket's first option — **the audio engine, not a special case for explosions**: at most
+one start of any given cue per game tick. Per **cue**, not a global one-sound cap: a global cap
+would silence deliberate layering (`SpiderBoss.BeginDeathThroes` plays two *different* cues
+together), and two different samples do not sum coherently anyway.
+
+**The exemption is the calling surface, not the cue** — `PlayCue` only. `Play` returns the instance
+and `PlayText` keeps it in `_speech`, and a caller that keeps a handle is one a null can break.
+`PlayText` is where it bites: it stops the in-flight announcer line and *then* assigns the result,
+so coalescing it would have left the announcer **silent**. (Review caught that; my first cut said
+"looping cues are the only kept handles", which is false.) Looping cues are exempt too,
+independently, and `eaSfx.burst` refuses one — `PlayCue` discards the handle, so a coalesced or
+burst loop would be unstoppable for the process's lifetime.
+
+**One deliberate opt-out.** `SpiderBoss.CollidesWith` plays `bugdies` twice in a row — verbatim
+2008 code, i.e. an authored +6 dB emphasis on landing a beam on that boss, mirrored for the peer in
+`NetPlayFx`. It opts out via `PlayCue(cue, allowSameTick: true)`; coalescing it would have quietly
+halved a set-piece's hit in single player *and* on both peers. `BrainBoss`'s two `expl2` calls are
+not this — they sit in separate random branches and their coincidence is exactly the pile-up.
+
+The decision is taken *before* the effect is loaded, deliberately: on a machine with no audio device
+`GetEffect` caches null and `Spawn` bails early, so a decision behind that load could never be
+exercised headlessly — which is the only place this can be verified. An SFX change has no pixels,
+and headlessly no sound either, so the observable is the decision read back as counters: `eaSfx()`
+/ `eval SfxState`, plus `eaSfx.burst(cue, n)` and the suite `eaSfxBurst()`. `admitted` and `played`
+are counted separately, because the first moves on a box with no audio device and the second only
+on a real `Play()`.
+
+Its section 3 drives the **reported path**: eight real `UFO` puppets killed by eight
+`NetPuppets.OnRemoteDeath` calls in one tick ask the audio layer for eight `expl1` starts and get
+one. `?sfxcoalesce=0` is the A/B seam and the suite's negative control. Pinned by
+`tools/headless/probes/sfx_coalesce.txt` + `sfx_coalesce_off.txt` (the second exists because the
+suite flips the property directly and cannot show the flag reaching it); mutation-tested **eight**
+ways, each reddening a different leg. `?sfxcoalesce=0` prints its own boot line, since it is out of
+`DebugFlags.Active` and so absent from the `[debug] flags active:` dump.
+
+Review also found the suite was **not** leave-no-trace: section 3's real UFO deaths awarded +80
+score per run and took screen trauma 0.000 → **0.930**, i.e. a visibly rattling main menu. It now
+restores the scores, sweeps the `Explosion`s and puts the trauma back, and asserts all three —
+dropping those restores is one of the eight mutations.
+
+_Further testing would be nice:_ the fix is verified as a **decision**, not as audio — nobody has
+listened to it, here or on a real pairing. Worth one pass with the sound on: a screen-clearing bomb
+offline, and a joining peer during a boss death.
 
 ## 8. `d44a49a4` — the respawning timer gfx need a bit of tweaking.
 

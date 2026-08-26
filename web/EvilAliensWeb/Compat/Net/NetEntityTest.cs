@@ -215,6 +215,26 @@ namespace EvilAliensWeb.Compat.Net
             Check("UFO keeps the replicated scale (caller-chosen per spawn)",
                 !((INetEntity)new UFO(game)).NetScaleLocal);
 
+            // NetBodyAnimLocal (card 5f506d11) is the fifth of the shape, same INVERTED polarity
+            // as NetScaleLocal and needing the pair for the same reason. It changes no pixel a
+            // peer can compare and no counter -- its one reader is NetJipDump's LocalSeams -- so
+            // a forward bound to the wrong member would be invisible everywhere else.
+            // The shipped opt-outs are the three types that animate an AnimatedSprite off their
+            // own accumulator; SpiderBoss is the control, and it is the interesting one -- it has
+            // the same animFrame state extra and legitimately KEEPS it, because its choreography
+            // both writes and reads that accumulator (Compat/Net/NetBodyAnim has the audit).
+            Check("a plain entity's NetBodyAnimLocal is the base false", !e.NetBodyAnimLocal);
+            Check("a NetBodyAnimLocal override reaches the seam (true)", variant.NetBodyAnimLocal);
+            Check("BattleSkull runs its own body loop",
+                ((INetEntity)new BattleSkull(game)).NetBodyAnimLocal);
+            Check("ClassicBoss runs its own body loop",
+                ((INetEntity)new ClassicBoss(game)).NetBodyAnimLocal);
+            Check("FakeBoss runs its own body loop",
+                ((INetEntity)new FakeBoss(game)).NetBodyAnimLocal);
+            Check("SpiderBoss KEEPS the replicated body frame (its choreography writes and"
+                + " reads that accumulator)",
+                !((INetEntity)new SpiderBoss(game)).NetBodyAnimLocal);
+
             // ... and then the REAL shipped case for the cosmetic half, which is what the
             // production opt-out actually looks like (card 9a3175d0): a belt-decoration
             // Asteroid, whose answer flips on SetBackground rather than on its type.
@@ -372,6 +392,9 @@ namespace EvilAliensWeb.Compat.Net
             // Same polarity as NetSpinPerMs/NetCosmeticOnly: NetScaleLocal DEFAULTS to false, so
             // an override answers true.
             internal override bool NetScaleLocal => true;
+
+            // ...and NetBodyAnimLocal likewise.
+            internal override bool NetBodyAnimLocal => true;
         }
 
         // A content-free KillableAlien, for the same reason ProbeEntity is a content-free

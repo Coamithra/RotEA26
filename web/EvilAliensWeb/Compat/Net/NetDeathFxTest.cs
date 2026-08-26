@@ -1219,7 +1219,6 @@ namespace EvilAliensWeb.Compat.Net
             Check(name + ": the animation ENDED on its own and the boss left the world (after "
                 + took + " of at most " + maxTicks + " ticks)",
                 !InWorld(game, (GameComponent)(object)boss));
-            CheckFitsReleaseWindow(Check, name, midTicks + took);
             Check(name + ": ...having spawned strictly more FX on the way out (+"
                 + (DeathFxCount(game) - midway) + ")", DeathFxCount(game) > midway);
             // The finale calls AwardScoreToAll, which under one writer per slot credits only
@@ -1229,29 +1228,16 @@ namespace EvilAliensWeb.Compat.Net
                 SameScores(score, before));
         }
 
-        // THE CONSTANT, CHECKED AGAINST THE REAL ANIMATION (card 444eb614).
-        //
-        // `NetPuppets.DyingReleaseWindowMs` is how long a RELEASED dying puppet's id stays
-        // suppressed from the snapshot self-heal, and it exists because the host keeps streaming
-        // that id for the whole animation. A death LONGER than the window ghosts -- which is the
-        // card's own defect, and it is what 15 s did to the BrainBoss's twenty-second asplode.
-        //
-        // So the number is not asserted against a census in a comment (a census drifts and cannot
-        // fail); it is asserted against the duration the choreography ACTUALLY ran for, measured
-        // by the leg that just ticked it. A future death that grows past the window fails HERE.
-        //
-        // Ticks -> ms at the suite's own fixed 60 Hz dt (`Tick`), and it is a FLOOR rather than
-        // the exact figure: `TickUntilGone` stops at the first tick past the end. Difficulty
-        // scales some of these (`SpiderBoss`), so what this pins is the run's own tier -- the
-        // tier RANGE lives in `releasedDying`'s census.
-        private static void CheckFitsReleaseWindow(Action<string, bool> Check, string name, int ticks)
-        {
-            float ms = ticks * (166667f / 10000f);
-            Check(name + ": the whole dying animation (" + (int)ms + " ms measured) fits inside"
-                + " NetPuppets.DyingReleaseWindowMs (" + (int)NetPuppets.DyingReleaseWindowMs
-                + " ms) -- longer than that and its id ghosts",
-                ms < NetPuppets.DyingReleaseWindowMs);
-        }
+        // (GONE, card 5f506d11: `CheckFitsReleaseWindow`. It asserted that each boss's measured
+        // dying animation fits inside `NetPuppets.DyingReleaseWindowMs`, which was a real guard
+        // while a death LONGER than that window ghosted -- 15 s did exactly that to the
+        // BrainBoss's twenty-second asplode. The released-dying ledger has no duration any more:
+        // it is held until the host's EvDeath, because a PAUSE freezes both worlds and no
+        // real-time window can outlast one. So there is no length that ghosts, and the
+        // assertion was vacuous rather than merely redundant. What still pins the suppression is
+        // `NetRulerTest` section 3, which drives a released id past the OLD window with the host
+        // still streaming it and asserts LeftDead. The animation DURATIONS the deleted leg
+        // measured are still printed by the legs that tick them.)
 
         // ---- 9. SpiderBoss -- the one that is NOT a KillableAlien ----------------------------
         //
@@ -1321,7 +1307,6 @@ namespace EvilAliensWeb.Compat.Net
             int fell = TickUntilGone((GameComponent)(object)boss, bin, game, 1200);
             Check("SpiderBoss: the fall ENDED on its own and the boss left the world (after "
                 + (120 + fell) + " ticks)", !InWorld(game, (GameComponent)(object)boss));
-            CheckFitsReleaseWindow(Check, "SpiderBoss", 120 + fell);
             Check("SpiderBoss: nothing was credited -- the host's EvDeath is the authority",
                 SameScores(score, before));
 

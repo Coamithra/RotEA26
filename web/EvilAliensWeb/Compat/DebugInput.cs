@@ -785,6 +785,17 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetDeathFxTest.Run();
 		}
 
+		// JS bridge for the level-3 alien-ruler suite (eaNetRuler in wwwroot/index.html, card
+		// 5f506d11). Three things a frame cannot see on a joining peer: the ruler's body
+		// animation cadence, whether its death animation runs through a PAUSE, and whether a
+		// released dying ruler can be self-healed back into an intact one. Menu-only and
+		// leave-no-trace.
+		[JSInvokable("debugNetRuler")]
+		public static string NetRuler()
+		{
+			return EvilAliensWeb.Compat.Net.NetRulerTest.Run();
+		}
+
 		// JS bridge for the step-4 scenario harness (eaNetScenarios in wwwroot/index.html, card
 		// 25ad0659). Five scenarios over ONE real session with a scripted wire peer: the three
 		// generous-claim shapes, the OneUp overlap, and the id-churn self-heal that carries the

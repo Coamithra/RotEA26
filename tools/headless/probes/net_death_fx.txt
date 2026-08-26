@@ -170,12 +170,13 @@
 #     206/1: leg C alone. The leg that stops the fix being "never self-heal a released id again".
 #   * the `releasedDying.Remove` in OnSpawn dropped -> **1**, 206/1: GHOST REUSE alone. That
 #     clear was defence-in-depth NOBODY TESTED until this leg existed (found in review).
-#   * the long window applied to EVERY removed id -> **3**, 204/3: the GHOST NEGATIVE control,
+#   * the suppression applied to EVERY removed id -> **3**, 204/3: the GHOST NEGATIVE control,
 #     GHOST REUSE and leg C. That control is the whole difference between this card and simply
 #     widening `RecentRemovalWindowMs`.
-#   * `DyingReleaseWindowMs` back to the card's FIRST cut, 15000 -> **1**, 206/1: the BrainBoss's
-#     fits-inside leg, naming its measured 20316 ms. That is the leg that would have caught the
-#     under-sized constant on its own; it was caught in review instead, which is why it exists.
+#   * (RETIRED with the constant, card 5f506d11: `DyingReleaseWindowMs` back to the card's FIRST
+#     cut, 15000 -> **1**, 206/1, the BrainBoss's fits-inside leg naming its measured 20316 ms.
+#     There is no window to under-size any more. Recorded rather than deleted so its absence
+#     reads as a decision.)
 #
 # eahl: --flags "?menu&noattract"
 #
@@ -248,19 +249,20 @@ expect GHOST: the host's EvDeath ENDS the suppression
 expect GHOST NEGATIVE: an ordinarily-removed id reports LeftDead at once
 expect GHOST NEGATIVE: \.\.\.and past 3 s it self-heals as before
 # The OTHER clear site: a reliable EvSpawn for a re-used id must take the suppression with it,
-# or a genuinely new enemy on that id would be refused a self-heal for the whole 30 s.
+# or a genuinely new enemy on that id would be refused a self-heal for the rest of the session
+# (card 5f506d11 took the 30 s backstop away, so this clear is the whole deadline now).
 expect GHOST REUSE: the reliable EvSpawn builds the re-used id anyway
 expect GHOST REUSE: \.\.\.and the spawn TOOK the suppression with it
 
-# THE CONSTANT IS CHECKED AGAINST THE REAL ANIMATIONS, not against a census in a comment -- a
-# census drifts and cannot fail. Each boss leg ticks its own choreography to completion and then
-# requires the MEASURED duration to fit inside NetPuppets.DyingReleaseWindowMs, so a death that
-# grows past the window fails here instead of quietly ghosting. This is not hypothetical: the
-# first cut of this card shipped 15000 ms, and the BrainBoss measures 20316.
-expect BrainBoss: the whole dying animation \([0-9]+ ms measured\) fits inside
-expect FakeBoss: the whole dying animation \([0-9]+ ms measured\) fits inside
-expect JunkBoss: the whole dying animation \([0-9]+ ms measured\) fits inside
-expect SpiderBoss: the whole dying animation \([0-9]+ ms measured\) fits inside
+# (GONE, card 5f506d11: the four "fits inside NetPuppets.DyingReleaseWindowMs" legs. They
+# required each boss's MEASURED animation to fit inside the suppression window, which was a real
+# guard while a longer death ghosted -- the first cut of card 444eb614 shipped 15000 ms and the
+# BrainBoss measures 20316. The ledger has no duration at all now: it is held until the host's
+# EvDeath, because a PAUSE freezes both worlds and no real-time window can outlast one. So there
+# is no length that ghosts, and the assertion was vacuous rather than merely redundant. The
+# suppression itself is pinned by tools/headless/probes/net_ruler.txt section 3, which drives a
+# released id 300 s past the old window with the host still streaming it. The durations those
+# legs measured are still PRINTED by the legs that tick them.)
 
 # Card 1878b321's SpiderHelperMothership legs -- the deferred death whose entity stays ALIVE on
 # the host (it finishes its charge/fire mission before crashing). Individually named because each
@@ -282,7 +284,7 @@ expect this peer's own killing blow FILED ITS CLAIM at death-began
 expect NEGATIVE an INSTANT kill claims nothing at death-began
 
 expect 10\. teardown
-expect \[netdeathfx\] 207 passed, 0 failed
+expect \[netdeathfx\] 203 passed, 0 failed
 
 # LEAVE-NO-TRACE: two more runs in the SAME process, which is what makes the teardown's own
 # claims mean something. A leaked Explosion, BloodExplosion or BrainAura, an unrestored score

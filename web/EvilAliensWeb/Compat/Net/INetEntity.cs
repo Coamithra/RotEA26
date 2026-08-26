@@ -10,7 +10,9 @@ namespace EvilAliensWeb.Compat.Net
     // union of everything NetPuppets / NetIdRegistry / NetSession read or write ON a replicated
     // component, which is what lets those three cores stop naming AlienDrawableGameComponent.
     //
-    // SEVENTEEN members, and the arithmetic against the card's census is worth stating because
+    // SEVENTEEN members as of card 25ad0659 (NetScaleLocal and NetBodyAnimLocal were added
+    // later, by cards 4392bd30 and 5f506d11), and the arithmetic against the card's census is
+    // worth stating because
     // the two figures do NOT match: that census measured 16 distinct members over 42 call sites.
     // One of its 16 is `GetType()` (the descriptor lookup), which comes free from object and is
     // not declared here; the other 15 are. The two discriminants below are the difference --
@@ -81,6 +83,12 @@ namespace EvilAliensWeb.Compat.Net
         float NetPointValue { get; }
         float NetSpinPerMs { get; }
         bool NetFrameLocal { get; }
+        // The same opt-out for a type whose loop is its own accumulator rather than `curframe`
+        // (card 5f506d11). Diagnostic-only on this seam -- NetJipDump's LocalSeams is its one
+        // reader, because a type that owns its loop does so in its own NetDriveExtras and the
+        // layer never has to ask. Declared rather than guessed from a type name: see
+        // AlienDrawableGameComponent.NetBodyAnimLocal.
+        bool NetBodyAnimLocal { get; }
         bool NetScaleLocal { get; }
         bool NetCosmeticOnly { get; }
 

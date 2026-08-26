@@ -165,6 +165,50 @@ public class ComponentBin : IComponentBinService
 		}
 	}
 
+	// Freeze a component INTO the live pause layer, so Pop is what starts it again. Answers
+	// false when no pause is up, which is the caller's cue to enable it itself.
+	//
+	// TWO CALLERS, and they reach the two halves. `Add` has always frozen a world object that
+	// arrives DURING a pause (this is that block, lifted out of it verbatim), which is the
+	// registering half. `NetPuppets.ReleaseDyingPuppet` is card 5f506d11's, and its own comment
+	// used to record the case as unfixable: "a release that lands while a ComponentBin.Push
+	// pause is up enables the entity OUTSIDE any pause layer (nothing can retro-register an
+	// existing component into one)". That is true of a component the pause never captured and
+	// false of one it did -- and a released puppet is always the latter, since it was in the
+	// collection when the Push walked it. The dying alien ruler was playing its whole 2.5s
+	// shrink-and-flicker (measured at ~40 explosions) on a screen where nothing else moved,
+	// which is not the harmless divergence that comment assumed: it is the ONLY thing moving,
+	// so it is the only thing you look at.
+	//
+	// So the `Contains` early-out is the RELEASE path's answer and the tail is `Add`'s. Disable
+	// unconditionally -- the postcondition is "frozen", and it costs nothing on a component Push
+	// already disabled -- but record only once: `watchers` mirrors the MULTISET collection +
+	// idleList + Σinactive, so a second Add of the same component would leave a count Pop's
+	// single WatcherRemove cannot take back out.
+	//
+	// The INNERMOST layer, i.e. the most recently pushed: a Push is what a component would have
+	// been caught by had it been there at the time. Pause layers do not nest today (a remote
+	// pause defers to a local one -- GameScene.NetSetRemotePaused), so there is only ever one.
+	internal bool PauseAdopt(GameComponent component)
+	{
+		if (component == null || inactive.Count == 0)
+		{
+			return false;
+		}
+		List<GameComponent> innermost = null;
+		foreach (List<GameComponent> layer in inactive)
+		{
+			innermost = layer;
+		}
+		component.Enabled = false;
+		if (!innermost.Contains(component))
+		{
+			innermost.Add(component);
+			WatcherAdd(component);
+		}
+		return true;
+	}
+
 	public void Pop()
 	{
 		foreach (GameComponent item in inactive.Dequeue())
@@ -418,17 +462,12 @@ public class ComponentBin : IComponentBinService
 		((Collection<IGameComponent>)(object)collection).Add((IGameComponent)(object)component);
 		// Pause-aware: a world object added while the world is pushed joins the freeze (and
 		// the newest pause layer, so Pop thaws it). Non-world components (pause menus,
-		// darkener, overlays) must keep running — they ARE the pause UI.
-		if (inactive.Count > 0 && component is AlienDrawableGameComponent)
+		// darkener, overlays) must keep running — they ARE the pause UI. The type gate stays
+		// HERE and not in PauseAdopt: it is this call site's policy about what the pause UI is,
+		// and the other caller (NetPuppets.ReleaseDyingPuppet) has an AlienDrawableGameComponent
+		// by construction.
+		if (component is AlienDrawableGameComponent && PauseAdopt(component))
 		{
-			component.Enabled = false;
-			List<GameComponent> newest = null;
-			foreach (List<GameComponent> layer in inactive)
-			{
-				newest = layer;
-			}
-			newest.Add(component);
-			WatcherAdd(component);
 			if (EvilAliensWeb.Compat.DebugFlags.BinLog)
 			{
 				Console.WriteLine("[bin] pause-froze " + ((object)component).GetType().Name);

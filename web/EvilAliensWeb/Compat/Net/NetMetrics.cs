@@ -104,9 +104,9 @@ namespace EvilAliensWeb.Compat.Net
                                         // settling -- benign, tracks the world's TOTAL removal rate
                                         // (host EvDeaths included, NOT just our own clTx claims).
                                         // RecentRemovalWindowMs for an ordinary removal; a puppet
-                                        // RELEASED to finish a deferred death holds the longer
-                                        // DyingReleaseWindowMs, so a boss death reads here for as
-                                        // long as the host streams it (card 444eb614)
+                                        // RELEASED to finish a deferred death holds until its own
+                                        // EvDeath, so a boss death reads here for as long as the
+                                        // host streams it (cards 444eb614 / 5f506d11)
         public long SnapBad;            // the rebuild was declined -- the one shape here that means
                                         // something is actually wrong. An unknown typeIdx (a
                                         // protocol/registry mismatch) re-counts on EVERY turn the

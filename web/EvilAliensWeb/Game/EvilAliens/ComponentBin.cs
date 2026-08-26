@@ -165,6 +165,49 @@ public class ComponentBin : IComponentBinService
 		}
 	}
 
+	// Put a component that is being (re-)enabled MID-PAUSE into the live pause layer instead,
+	// so it freezes with everything else and Pop starts it (card 5f506d11). Answers false when
+	// no pause is up, which is the caller's cue to enable it itself.
+	//
+	// THE CALLER IS NetPuppets.ReleaseDyingPuppet, and the defect is worth stating because its
+	// own comment used to record this as unfixable: "a release that lands while a
+	// ComponentBin.Push pause is up enables the entity OUTSIDE any pause layer (nothing can
+	// retro-register an existing component into one)". This is that registration. The dying
+	// alien ruler was playing its whole 2.5s shrink-and-flicker -- measured at ~40 explosions --
+	// on a screen where nothing else was moving, which is not the harmless divergence that
+	// comment assumed: it is the ONLY thing moving, so it is the only thing you look at.
+	//
+	// A component ALREADY in the layer (the ordinary case -- the pause captured it before the
+	// release) just stays there: this reports success and touches nothing, because Push already
+	// disabled it and already counted it into `watchers`. Disable + record otherwise, matching
+	// Push exactly (`watchers` mirrors the MULTISET collection + idleList + Σinactive, so a
+	// component in both the collection and a layer is counted twice, and Pop's WatcherRemove
+	// takes that second count back out).
+	//
+	// The INNERMOST layer, i.e. the most recently pushed: a Push is what a component would have
+	// been caught by had it been there at the time. Pause layers do not nest today (a remote
+	// pause defers to a local one -- GameScene.NetSetRemotePaused), so there is only ever one.
+	public bool PauseAdopt(GameComponent component)
+	{
+		if (component == null || inactive.Count == 0)
+		{
+			return false;
+		}
+		List<GameComponent> innermost = null;
+		foreach (List<GameComponent> layer in inactive)
+		{
+			innermost = layer;
+		}
+		if (innermost.Contains(component))
+		{
+			return true;
+		}
+		component.Enabled = false;
+		innermost.Add(component);
+		WatcherAdd(component);
+		return true;
+	}
+
 	public void Pop()
 	{
 		foreach (GameComponent item in inactive.Dequeue())

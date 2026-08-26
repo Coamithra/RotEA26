@@ -197,9 +197,12 @@ internal class ClassicBoss : KillableAlien
 
 	// ---- Online co-op replication seams (Compat/Net/Descriptors/DescriptorsBosses1) --------
 	// The body animation runs off `animationProgress` (its own 20fps clock, NOT the component
-	// curframe), advanced only in Update -- frozen on a puppet. The host replicates the current
-	// frame so the client's alienboss sprite still animates. (scale + color redden arrive in the
-	// base state: Scale, and Hp -> NetApplyHp.)
+	// curframe), advanced only in Update -- frozen on a puppet. (scale + color redden arrive in
+	// the base state: Scale, and Hp -> NetApplyHp.)
+	//
+	// The frame is STILL SENT and no longer APPLIED (card 5f506d11): a puppet runs the loop
+	// itself in NetDriveExtras below. Same seam, same audit, same reason as BattleSkull's --
+	// Compat/Net/NetBodyAnim.
 	internal int NetAnimFrame
 	{
 		get
@@ -210,5 +213,12 @@ internal class ClassicBoss : KillableAlien
 		{
 			animationProgress = value;
 		}
+	}
+
+	// The client half: advance the body loop on the driver's REAL dt, exactly as Update does.
+	internal override void NetDriveExtras(GameTime gameTime)
+	{
+		animationProgress = EvilAliensWeb.Compat.Net.NetBodyAnim.Advance(animationProgress,
+			(float)gameTime.ElapsedGameTime.TotalSeconds, 20f, (sprite != null) ? sprite.Frames : 0);
 	}
 }

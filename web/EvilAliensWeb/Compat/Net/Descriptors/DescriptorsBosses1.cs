@@ -191,7 +191,8 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     //     one frame -> replicated in a STATE EXTRA so the sprite keeps animating.
     // Spawn extras: none. State extras: [animFrame:1]  ((int)animationProgress; always < sprite.Frames
     //   on the host, and any byte is a valid index for the shared sprite, so the apply is bounds-safe).
-    // Best-effort: at snapshot cadence (~30Hz) the body animation steps rather than free-runs.
+    // The animFrame byte is SENT but NOT APPLIED since card 5f506d11 -- a puppet advances the
+    //   loop itself (ClassicBoss.NetDriveExtras); see Compat/Net/NetBodyAnim.
     internal sealed class ClassicBossDescriptor : NetTypeDescriptor<ClassicBoss>
     {
         public override AlienDrawableGameComponent CreatePuppet(ComponentBin bin, Game game, in NetBaseState state, byte[] buf, int off, int len)
@@ -201,19 +202,16 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             return cb;
         }
 
+        // ENCODED BUT NEVER APPLIED, and deliberately so (card 5f506d11): the puppet advances
+        // this loop itself in the type's own NetDriveExtras, because a copy that only changes on
+        // this entity's snapshot turn makes the animation staircase instead of run. The byte
+        // stays on the wire so the protocol is unchanged and an older peer keeps animating --
+        // there is no ApplyStateExtra override below, which is what that means. The audit saying
+        // this type may own its loop is on Compat/Net/NetBodyAnim.
         public override int EncodeStateExtra(AlienDrawableGameComponent c, byte[] buf, int off)
         {
             buf[off++] = (byte)C(c).NetAnimFrame;
             return off;
-        }
-
-        public override void ApplyStateExtra(AlienDrawableGameComponent c, byte[] buf, int off, int len)
-        {
-            if (len < 1)
-            {
-                return;
-            }
-            C(c).NetAnimFrame = buf[off];
         }
     }
 
@@ -227,8 +225,10 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     //     pin initial HP in spawn extras, and no seam for it. (Were it difficulty-scaled we would.)
     //   * `animationProgress` (own 20fps clock, Update-advanced) -> STATE EXTRA, same as ClassicBoss.
     // Spawn extras: none. State extras: [animFrame:1].
-    // Best-effort: the ~2.5s `dying` shrink/flicker sequence does not play on the puppet -- an
-    //   attributed remote death removes it right after the opening pop (NetPuppets.OnRemoteDeath).
+    // The animFrame byte is SENT but NOT APPLIED since card 5f506d11 -- a puppet advances the
+    //   loop itself (BattleSkull.NetDriveExtras); see Compat/Net/NetBodyAnim.
+    // (The ~2.5s `dying` shrink/flicker sequence DOES play on the puppet since card 13aa596c: the
+    //   puppet is released from the freeze to finish dying locally -- NetPuppets.ReleaseDyingPuppet.)
     internal sealed class BattleSkullDescriptor : NetTypeDescriptor<BattleSkull>
     {
         public override AlienDrawableGameComponent CreatePuppet(ComponentBin bin, Game game, in NetBaseState state, byte[] buf, int off, int len)
@@ -238,19 +238,16 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             return bs;
         }
 
+        // ENCODED BUT NEVER APPLIED, and deliberately so (card 5f506d11): the puppet advances
+        // this loop itself in the type's own NetDriveExtras, because a copy that only changes on
+        // this entity's snapshot turn makes the animation staircase instead of run. The byte
+        // stays on the wire so the protocol is unchanged and an older peer keeps animating --
+        // there is no ApplyStateExtra override below, which is what that means. The audit saying
+        // this type may own its loop is on Compat/Net/NetBodyAnim.
         public override int EncodeStateExtra(AlienDrawableGameComponent c, byte[] buf, int off)
         {
             buf[off++] = (byte)C(c).NetAnimFrame;
             return off;
-        }
-
-        public override void ApplyStateExtra(AlienDrawableGameComponent c, byte[] buf, int off, int len)
-        {
-            if (len < 1)
-            {
-                return;
-            }
-            C(c).NetAnimFrame = buf[off];
         }
     }
 }

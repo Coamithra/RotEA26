@@ -576,6 +576,14 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   leave-no-trace, but it plants real entities off-screen and really
   kills them, so it skips itself over a live session or level. Nothing it does is drawn, but it
   is not silent — the real death paths play their real cues),
+  `eaNetRuler()` (the level-3 alien ruler on a joining peer -- card 5f506d11: three defects, one
+  entity. Its body loop is the CLIENT'S to run (a per-type `animFrame` state extra is a
+  replicated frame by another name, and staircases for the same reasons `NetFrameLocal` exists);
+  a puppet released mid-death under a pause must join the pause layer, not animate through the
+  freeze; and a released dying id must never be self-healed back, however long the host keeps
+  streaming it. Measured, not argued -- 6 of 60 ticks in steps of 3 against the host's 20 in
+  steps of 1, ~40 explosions on a frozen screen, a `Rebuilt` ghost that dies a second time.
+  Menu-only and leave-no-trace; no frame can see any of the three),
   `eaNetCosmetic()` (the decorative-swarm replication self-test — card 9a3175d0; run it inside
   a level to cover the client apply leg),
   `eaNetLocalFx()` (which peer sees a presentation effect -- cards 7a8ec0d3 / a66e190a: a

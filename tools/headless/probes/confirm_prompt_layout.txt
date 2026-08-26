@@ -1,0 +1,73 @@
+# PROBE: a ConfirmationMenu's PROMPT must never run into its menu ROWS, and the rows must stay
+#        inside the layout band (card bec47239).
+#
+# PINS:   the composite layout in ConfirmationMenu.DrawMenu. The prompt block and the rows used to
+#         be placed from two INDEPENDENT fixed anchors (the prompt centred near y=240, the rows at
+#         y=300+75), so a prompt taller than the gap between them drew straight through -- the
+#         four-seat online lobby roster put "Start when your crew is aboard!" on top of Cancel.
+#
+# WHY THE SEAM (eval NetLobbyShow <mask>): the host lobby panel is the tallest prompt the game
+# ships (8 or 9 lines) and its real trigger is a WebRTC peer pairing, which is stubbed headlessly.
+# The seam supplies that precondition; the layout under test is the real DrawMenu.
+#
+# WHY A [confirm] LINE AND NOT A SCREENSHOT: "the prompt overlaps Cancel" and "the prompt sits
+# above it" are both just text on a screen -- a still frame needs a human to tell them apart, and
+# a pixel diff cannot say WHICH way it went.
+#
+# WHAT THE TWO NUMBERS ARE, AND WHY BOTH ARE OBSERVED RATHER THAN MODELLED:
+#   * `overlap=` is the prompt's drawn bottom against the FIRST ROW'S RECORDED HIT BOX
+#     (MenuSub1.TryGetFirstEntryTop), i.e. where the row really landed and where a click really
+#     lands. An earlier version of this line derived the row top from the same expression that
+#     had just positioned the rows; that made `overlap` algebraically constant, so a model which
+#     had stopped mirroring MenuSub1.DrawMenu reproduced the reported bug ON SCREEN while this
+#     probe stayed green. Do not "simplify" it back to a formula.
+#   * `bottom=` is the LAST ROW'S recorded bottom, and it is what says the band clamp bit. Break
+#     the clamp and the layout is still non-overlapping -- it just draws the rows lower, past
+#     BandBottom (524) and into the "back"/"select" button tips' band. Nothing else here would
+#     see that: [backtip] is a RECTANGLE test and a row centred on x=400 never meets the tip's
+#     x-range (40..146), so no purely vertical push can trip it.
+#
+# FAILURE MEANS: read which line went red.
+#   * overlap=<n>px            -> the prompt is drawn across the rows; the card's own bug.
+#   * bottom=525 or more       -> the rows were pushed past the band into the button tips.
+#   * `layout=relaid` missing  -> the collision test no longer fires for a tall prompt, so the
+#                                 overlap=none beside it would be vacuous -- asserted together.
+#   * no [confirm] line at all -> the panel did not mount, or drew no rows.
+#
+# MUTATION-TESTED, three ways, each isolated:
+#   * forcing DrawMenu down the pre-card `else` branch (the two independent anchors):
+#     `layout=default overlap=98px` on the 8-line panel, `overlap=120px` on the 9-line one.
+#   * EntriesTop's `ListOrigin.Y` -> 380f (the "the model stopped mirroring MenuSub1.DrawMenu"
+#     shape -- someone moves `origin`, changes the /3f divisor, or a subclass scrolls): the
+#     prompt is drawn over "Start Game" on screen and this reports `overlap=56px`. The
+#     model-derived version of this line reported `none` and PASSED.
+#   * dropping the `if (fits < scale)` band clamp: the 9-line panel keeps `overlap=none` and
+#     reports `bottom=545`, i.e. the last row drawn 21px past the band and into the tips'.
+#
+# eahl: --flags "?menu&noattract"
+
+# Settle: menu warm + the auto-pressed Start landing on the main menu.
+step 400 nodraw
+mark
+
+# Host + one guest: 8 lines ("Start when your crew is aboard!"), two rows.
+eval NetLobbyShow 3
+step 20
+expect \[confirm\] lines=8 entries=2 layout=relaid overlap=none bottom=
+expect-not \[confirm\] .* overlap=[0-9]
+expect-not \[confirm\] .* bottom=(52[5-9]|5[3-9][0-9]|[6-9][0-9][0-9])
+# The rows must not have been pushed onto the clickable "back" tip either. This one CANNOT fail
+# on a vertical push (see the header) -- it is here as the positive that the tip reporter is alive
+# at all, which is what makes menu_backtip.txt's invariant meaningful next door.
+expect \[backtip\] menu=NetLobbyMenu entries=2 .* overlap=none
+
+mark
+# Host alone: 9 lines ("Tell your friends! / Waiting for players to join..."), the tallest prompt
+# the game ships -- this is the one the band clamp exists for, and `bottom=` is what proves it.
+eval NetLobbyShow 1
+step 20
+expect \[confirm\] lines=9 entries=2 layout=relaid overlap=none bottom=
+expect-not \[confirm\] .* overlap=[0-9]
+expect-not \[confirm\] .* bottom=(52[5-9]|5[3-9][0-9]|[6-9][0-9][0-9])
+
+quit

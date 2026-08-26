@@ -1,0 +1,52 @@
+# PROBE: a hitch-sized tick is clamped to DefaultMaxWorldDtMs before the world sees it
+#
+# PINS:   card 430494a7. The browser loop is IsFixedTimeStep=false, and after a main-thread
+#         stall KNI's GameStrategy.Tick hands the game its whole real elapsed time as ONE dt,
+#         clamped only by MaxElapsedTime -- 500 ms, and its setter refuses anything lower. At
+#         the Level-3 pre-boss wall scroll (0.72 px/ms) that teleports every block 360 px in a
+#         single frame, which is the reported "brief stutter where a different set of walls is
+#         shown". Game1.UpdateCore now clamps the world dt to DefaultMaxWorldDtMs (100 ms).
+#
+# WHY stepdt: eahl's own loop steps a fixed 60 Hz dt and can never produce a hitch-sized tick,
+# which is exactly why the flash never reproduced headlessly. `stepdt <ms>` exists for this
+# probe pair (and for demonstrating the bug with `?maxdt=0`, the off-pair's boot).
+#
+# WHY THE LINE AND NOT THE WORLD CLOCK: WorldTime.Advance caps its own dt at 0.1 s (card
+# d79a2f48 gave cosmetic phases this same protection), so `eval WorldClock` reads 0.100 for a
+# 500 ms tick on the FIXED and the BROKEN build alike -- a clock leg here would be vacuous
+# (measured; an earlier cut of this probe had one). The [maxdt] line's delivered ms is instead
+# read back off the reassigned gameTime inside UpdateCore, so a mutant that prints but forgets
+# the assignment prints "clamped a 500ms tick to 500ms" and fails leg 1 -- and the position
+# arithmetic itself is pinned by logic_probe's ProbeMaxWorldDt against the real
+# Game1.ClampedWorldDtTicks.
+#
+# TWO LEGS:
+#   1. stepdt 500 -> `clamped a 500ms tick to 100ms`, exact  (engaged, applied, and said so)
+#   2. six ordinary 60 Hz frames print NO [maxdt] line at all (the clamp never touches normal
+#      play -- a ms->ticks unit slip would clamp every frame and fail here first)
+#
+# FAILURE MEANS:
+#   * leg 1 no match -> the clamp is gone from UpdateCore, was reworded (the line is an
+#                       interface), or prints without applying (the "to 500ms" mutant)
+#   * leg 2 matches  -> the clamp engages on ordinary frames; check the ticks math
+#
+# MUTATION-TESTED: booting the off-pair's `?maxdt=0` (the shipped pre-card behaviour) turns
+# leg 1 red (the line reads `passed ... whole`); DefaultMaxWorldDtMs=5 turns leg 2 red.
+#
+# eahl: --flags "?menu&noattract"
+
+step 200 nodraw
+
+# Leg 1 -- a 500 ms tick is clamped to 100 ms, and the line's second number is read off the
+# gameTime the world actually consumed.
+mark
+stepdt 500 nodraw
+expect \[maxdt\] clamped a 500ms tick to 100ms
+
+# Leg 2 -- ordinary frames are untouched.
+mark
+step 6 nodraw
+step 1
+expect-not \[maxdt\]
+
+quit

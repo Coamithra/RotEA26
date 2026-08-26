@@ -256,6 +256,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeMaxWorldDt(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         // LAST ON PURPOSE -- it is the only set that seeds RandomHelper, and it cannot unseed
         // afterwards (there is no un-seed API and adding one for a probe would be a production
         // change made for a test). Nothing above draws from RandomHelper, so the order costs
@@ -2006,6 +2012,7 @@ internal static class Program
             new { Flag = "blastactive", Prop = "BlastActiveAlpha", Good = "0.375", RejectsNeg = false },
             new { Flag = "blasthit", Prop = "BlastHitFactor", Good = "0.375", RejectsNeg = true },
             new { Flag = "reticlesize", Prop = "ReticleSize", Good = "0.375", RejectsNeg = true },
+            new { Flag = "maxdt", Prop = "MaxWorldDtMs", Good = "0.375", RejectsNeg = true },
             new { Flag = "blastloop", Prop = "BlastLoopSeconds", Good = "0.375", RejectsNeg = true },
             new { Flag = "lazerchargescale", Prop = "LazerChargeScale", Good = "0.375", RejectsNeg = true },
             new { Flag = "lazercapscale", Prop = "LazerCapScale", Good = "0.375", RejectsNeg = true },
@@ -3410,6 +3417,106 @@ internal static class Program
     // The angles are asserted against the VECTORS they have to produce rather than restated as
     // the same three literals: screen Y grows downward, so South must point UP the screen. A
     // transcription that swapped two arms would satisfy any literal-vs-literal comparison.
+    // ---------------------------------------------------------------------------------------
+    // The world-dt hitch clamp (card 430494a7): Game1.ClampedWorldDtTicks, the pure decision
+    // behind UpdateCore's clamp. The browser's variable timestep hands the game ONE dt of up
+    // to KNI's 500 ms MaxElapsedTime after a main-thread stall, which teleports every mover
+    // half a second of travel in a single frame -- the reported "different set of walls" on
+    // the Level-3 pre-boss run. The ARITHMETIC is pinned here because the probe pair
+    // (maxdt_clamp.txt / maxdt_clamp_off.txt) can only read the [maxdt] line: WorldTime caps
+    // its own dt at 0.1 s, so no headless clock observable can tell a clamped world from an
+    // unclamped one, and positions are not deterministic enough to pin as strings.
+    //
+    // The negative control is the identity itself: the pre-card build had no clamp, so every
+    // "unchanged" leg (net session, ?maxdt=0, an ordinary frame) IS the old policy over the
+    // same inputs -- and the clamping legs are what a build that lost the clamp fails.
+    private static int ProbeMaxWorldDt(Assembly asm)
+    {
+        Type game1 = asm.GetType("EvilAliens.Game1", true);
+        Type flags = asm.GetType("EvilAliensWeb.Compat.DebugFlags", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo clamp = game1.GetMethod("ClampedWorldDtTicks", anyStatic);
+        MethodInfo parse = flags.GetMethod("Parse", anyStatic);
+        PropertyInfo overrideProp = flags.GetProperty("MaxWorldDtMs", anyStatic);
+        FieldInfo defaultMs = game1.GetField("DefaultMaxWorldDtMs", anyStatic);
+        if (clamp == null || parse == null || overrideProp == null || defaultMs == null)
+        {
+            Console.WriteLine("FAIL: could not reflect the targets (ClampedWorldDtTicks="
+                + (clamp != null) + " Parse=" + (parse != null) + " MaxWorldDtMs=" + (overrideProp != null)
+                + " DefaultMaxWorldDtMs=" + (defaultMs != null) + ") -- renamed or moved?");
+            return 2;
+        }
+
+        Console.WriteLine("[logic_probe] Game1.ClampedWorldDtTicks (card 430494a7)");
+
+        Func<double, bool, long> run = (ms, net) =>
+            (long)clamp.Invoke(null, new object[] { TimeSpan.FromMilliseconds(ms).Ticks, net });
+        long ms100 = TimeSpan.FromMilliseconds(100).Ticks;
+        long ms250 = TimeSpan.FromMilliseconds(250).Ticks;
+
+        // The set reads and writes the override, so it must start from the shipped state --
+        // and say so, rather than quietly measuring whatever an earlier set left in force.
+        Check("pristine: no ?maxdt= override is in force before this set runs",
+            overrideProp.GetValue(null) == null, "MaxWorldDtMs=" + (overrideProp.GetValue(null) ?? "null"));
+        Check("the baked default is the 100 ms the card measured the fix at",
+            Math.Abs((float)defaultMs.GetValue(null) - 100f) < 0.001f, defaultMs.GetValue(null).ToString());
+
+        // Default policy.
+        Check("a 500 ms hitch tick is clamped to the 100 ms default",
+            run(500, false) == ms100, run(500, false).ToString());
+        Check("an ordinary 60 Hz frame (16.667 ms) passes unchanged",
+            run(16.667, false) == TimeSpan.FromMilliseconds(16.667).Ticks, run(16.667, false).ToString());
+        Check("exactly 100 ms is the boundary and passes unchanged",
+            run(100, false) == ms100, run(100, false).ToString());
+        Check("100 ms plus one tick is clamped back to the boundary",
+            clampOnePastBoundary(clamp, ms100), "");
+
+        // Net sessions are exempt: the dead reckoning wants real-time catch-up (a host that
+        // quietly loses time after its own hitch produces card 68f62e92's backward
+        // corrections), so in a session the 500 ms step goes through whole.
+        Check("the same 500 ms tick passes unchanged while a net session is active",
+            run(500, true) == TimeSpan.FromMilliseconds(500).Ticks, run(500, true).ToString());
+
+        // ?maxdt=250 moves the clamp; a tick under the new bound is untouched.
+        RunParse(parse, "?maxdt=250");
+        Check("?maxdt=250: a 500 ms tick clamps to 250 ms",
+            run(500, false) == ms250, run(500, false).ToString());
+        Check("?maxdt=250: a 200 ms tick passes unchanged",
+            run(200, false) == TimeSpan.FromMilliseconds(200).Ticks, run(200, false).ToString());
+
+        // ?maxdt=0 is the deliberate bug reproduction: no clamp at all.
+        RunParse(parse, "?maxdt=0");
+        Check("?maxdt=0: the 500 ms tick reaches the world whole (the pre-card behaviour)",
+            run(500, false) == TimeSpan.FromMilliseconds(500).Ticks, run(500, false).ToString());
+
+        // Hand the process back as it was found -- Parse can only ASSIGN, so the restore goes
+        // through the property's private setter, and is ASSERTED so a later set cannot
+        // silently inherit a disabled clamp. Then a NEUTRAL Parse recomputes `Active`: the
+        // ?maxdt= parses above set that static too, and it does not follow the property back --
+        // ProbeSeedFlag's "does not set Active" leg samples it at ITS start and fails on the
+        // stale bit (measured, which is why this is asserted rather than assumed).
+        overrideProp.SetValue(null, null);
+        // A no-op UNKNOWN key, not "" -- an empty query early-returns into Hint() before the
+        // recompute, and leaves `Active` exactly as stale as before (measured).
+        RunParse(parse, "?zzz");
+        PropertyInfo activeProp = flags.GetProperty("Active", anyStatic);
+        Check("restore: the override is null again for whatever runs next",
+            overrideProp.GetValue(null) == null, "MaxWorldDtMs=" + (overrideProp.GetValue(null) ?? "null"));
+        Check("restore: `Active` recomputed clean for whatever runs next",
+            activeProp != null && !(bool)activeProp.GetValue(null),
+            "Active=" + (activeProp != null ? activeProp.GetValue(null) : "(no property)"));
+
+        Console.WriteLine();
+        return 0;
+    }
+
+    // The one-past-the-boundary case wants tick precision a double-ms round trip cannot
+    // promise, so it is built directly in ticks.
+    private static bool clampOnePastBoundary(MethodInfo clamp, long boundaryTicks)
+    {
+        return (long)clamp.Invoke(null, new object[] { boundaryTicks + 1L, false }) == boundaryTicks;
+    }
+
     private static int ProbeSpawnDirection(Assembly asm)
     {
         Type scene = asm.GetType("EvilAliens.GameScene", true);

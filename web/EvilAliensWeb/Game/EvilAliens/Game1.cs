@@ -1115,8 +1115,74 @@ public class Game1 : Game
 		}
 	}
 
+	// The most game time one tick may advance the world, in ms (card 430494a7). The browser
+	// loop is IsFixedTimeStep=false, and after a main-thread stall (GC pause, cold decode, a
+	// snapshot RT allocation, compositor jank) KNI's GameStrategy.Tick hands the game its whole
+	// real elapsed time as ONE dt, clamped only by MaxElapsedTime -- 500 ms, and its setter
+	// refuses anything lower. The 2008 build was fixed-step and never saw a dt over ~17 ms; a
+	// 500 ms step teleports every mover by half a second of travel in a single frame, which on
+	// the pre-boss wall run (0.72 px/ms scroll) is 360 px -- more than a full block, and it
+	// reads as "a brief stutter where a different set of walls is shown". 100 = 6 sim-frames:
+	// ordinary 30-144 Hz play never reaches it, only a genuine hitch does, and the hitch then
+	// costs LOST GAME TIME (KNI zeroes its accumulator per tick, so the remainder is dropped)
+	// instead of a teleport, bounding the jump at ~72 px on the fastest scroll. `?maxdt=`
+	// overrides; 0 = off, the deliberate bug reproduction (rig: eahl `stepdt 500`).
+	internal const float DefaultMaxWorldDtMs = 100f;
+
+	// Pure, so logic_probe drives it with no rig (ProbeMaxWorldDt). Net sessions are exempt:
+	// the co-op dead reckoning assumes both worlds track real time, and a host that quietly
+	// loses time after its own hitch produces exactly the backward corrections card 68f62e92
+	// measured on a host stall -- so in a session a hitch keeps the one-step catch-up. Same
+	// condition (and the same reason) as the ?aiff fast-forward exclusion in UpdateCore.
+	internal static long ClampedWorldDtTicks(long elapsedTicks, bool netActive)
+	{
+		float maxMs = EvilAliensWeb.Compat.DebugFlags.MaxWorldDtMs ?? DefaultMaxWorldDtMs;
+		if (netActive || maxMs <= 0f)
+		{
+			return elapsedTicks;
+		}
+		long maxTicks = (long)(maxMs * (float)TimeSpan.TicksPerMillisecond);
+		return (elapsedTicks > maxTicks) ? maxTicks : elapsedTicks;
+	}
+
+	private static string WholeMs(long ticks)
+	{
+		return TimeSpan.FromTicks(ticks).TotalMilliseconds.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
+	}
+
 	private void UpdateCore(GameTime gameTime)
 	{
+		// The world-dt hitch clamp (DefaultMaxWorldDtMs above). FIRST, so every consumer --
+		// Juice's unscaled tick, the turbo/slowmo/hit-stop scale, WorldTime and the whole
+		// component update -- sees one consistent dt. TotalGameTime keeps KNI's raw advance
+		// (menus and the glint clock deliberately run on real time).
+		//
+		// EVERY over-threshold tick reports itself, clamped or not -- the ?netstaleguard rule
+		// (the flag changes the drag, never the measurement), and the [hitch] watchdog
+		// precedent: a hitch-sized tick is rare and otherwise invisible, so the line is its
+		// only observable and the probe pair's whole surface. The delivered ms is read back
+		// OFF the reassigned gameTime, never restated from clampedTicks -- a mutant that
+		// prints but forgets the assignment must print the raw number and fail the probe
+		// (the card d44a49a4 "off an argument that reached a draw call" rule).
+		//
+		// Do NOT reach for WorldTime/eval WorldClock to verify this: WorldTime.Advance caps
+		// its own dt at 0.1 s (cosmetic phases got this same protection in card d79a2f48), so
+		// the world CLOCK reads 0.100 for a 500 ms tick with or without the clamp -- it was
+		// only ever positions that teleported, which is what the frame captures show.
+		long rawTicks = gameTime.ElapsedGameTime.Ticks;
+		bool netActive = EvilAliensWeb.Compat.Net.NetSession.Active;
+		long clampedTicks = ClampedWorldDtTicks(rawTicks, netActive);
+		if (clampedTicks != rawTicks)
+		{
+			gameTime = new GameTime(gameTime.TotalGameTime, TimeSpan.FromTicks(clampedTicks));
+			Console.WriteLine("[maxdt] clamped a " + WholeMs(rawTicks) + "ms tick to "
+				+ WholeMs(gameTime.ElapsedGameTime.Ticks) + "ms");
+		}
+		else if (rawTicks > (long)(DefaultMaxWorldDtMs * (float)TimeSpan.TicksPerMillisecond))
+		{
+			Console.WriteLine("[maxdt] passed a " + WholeMs(rawTicks) + "ms tick whole ("
+				+ (netActive ? "net session" : "clamp overridden") + ")");
+		}
 		// AI bench fast-forward (?aiff=<n>, card f4d1721f): run the sim n times per rendered frame
 		// so an unattended AI soak covers a whole level in a fraction of the wall clock, WITHOUT
 		// changing the per-tick physics it is measuring (which Settings.Turbo, a dt scale, would).

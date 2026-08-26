@@ -223,6 +223,31 @@ namespace EvilAliensWeb.Headless
             }
         }
 
+        // One frame at a CALLER-CHOSEN dt, in ms -- the browser-hitch rig (card 430494a7).
+        // The browser runs IsFixedTimeStep=false, and after a main-thread stall KNI's
+        // GameStrategy.Tick hands the game its whole real elapsed time as ONE dt, clamped
+        // only by MaxElapsedTime (500 ms, and its setter refuses anything lower). The
+        // fixed-step loop above can never produce such a tick, so this is the only headless
+        // way to look at what one does to the world -- and the rig Game1's world-dt clamp
+        // is demonstrated and probed with.
+        internal void StepDt(double ms, bool draw)
+        {
+            HeadlessAudio.Pump();
+            var dt = TimeSpan.FromMilliseconds(ms);
+            if (_netClock != null)
+            {
+                _netClockCarry += dt.TotalMilliseconds;
+                long whole = (long)_netClockCarry;
+                _netClockCarry -= whole;
+                _netClock.Advance(whole);
+            }
+            _total += dt;
+            var gt = new GameTime(_total, dt);
+            _game.UpdateFrame(gt);
+            if (draw)
+                _game.DrawFrame(gt);
+        }
+
         // Draw one frame and write it to disk. Split from Step so a screenshot never
         // advances the simulation: the captured frame is the CURRENT state, which is what
         // makes "step to the interesting moment, then look" work.

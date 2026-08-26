@@ -994,11 +994,31 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	//     the frame is host-gated and a local loop would animate a pose the host is not in; or
 	//   * Update MUTATES fps (MarsBoss ramps 16 -> 32 with HitPointsNormalized), so a puppet --
 	//     whose Update never runs -- would free-run at the wrong RATE and drift.
-	// A type whose Draw does not read curframe at all (SpiderBoss / FakeBoss / BattleSkull animate
-	// an AnimatedSprite through their own replicated animFrame state extra; Wall, Lazer,
+	// A type whose Draw does not read curframe at all (SpiderBoss / FakeBoss / BattleSkull /
+	// ClassicBoss animate an AnimatedSprite through their own animFrame state extra; Wall, Lazer,
 	// StationaryBoss, BrainBoss and Powerup are single-frame) is unaffected either way and keeps
 	// the default. When in doubt, override to false: the cost is only the pre-existing behaviour.
+	//
+	// THOSE FOUR ARE NOT "UNAFFECTED", they just fail this seam by shape -- see NetBodyAnimLocal
+	// below, which is the same question for the accumulator they DO animate on (card 5f506d11).
 	internal virtual bool NetFrameLocal => true;
+
+	// The SAME OPT-OUT for a type that animates its own accumulator rather than curframe, and so
+	// could not take the seam above (card 5f506d11). A per-type animFrame state extra IS a
+	// replicated frame under another name -- it steps once per that entity's snapshot TURN, which
+	// is 60 ms in a small world and up to ~1.2 s in a big one against a 20 fps loop, so the
+	// animation staircases rather than slowing down (measured: 6 of 60 ticks in steps of 3
+	// against the host's 20 in steps of 1). True means the puppet advances the loop itself in
+	// NetDriveExtras and the descriptor's animFrame byte, though still SENT, is not applied.
+	//
+	// DEFAULT FALSE, i.e. the inversion of NetFrameLocal, because it describes a thing most types
+	// do not have at all. The audit a type must pass before overriding is NetFrameLocal's two
+	// questions, restated -- Compat/Net/NetBodyAnim carries it and the table of who passes.
+	//
+	// It changes no pixel a peer can compare and no counter, so its ONLY observable is the
+	// LocalSeams field of a NetJipDump line -- which is what it is declared for, rather than
+	// NetJipDump naming three types and re-stating an audit that lives elsewhere.
+	internal virtual bool NetBodyAnimLocal => false;
 
 	// Does this type DERIVE its own `scale` from data both peers already have? Default FALSE (the
 	// snapshot's Scale field wins, as it always has); a true answer opts the puppet out of
@@ -1173,6 +1193,8 @@ public abstract class AlienDrawableGameComponent : DrawableGameComponent, IColli
 	float EvilAliensWeb.Compat.Net.INetEntity.NetSpinPerMs => NetSpinPerMs;
 
 	bool EvilAliensWeb.Compat.Net.INetEntity.NetFrameLocal => NetFrameLocal;
+
+	bool EvilAliensWeb.Compat.Net.INetEntity.NetBodyAnimLocal => NetBodyAnimLocal;
 
 	bool EvilAliensWeb.Compat.Net.INetEntity.NetScaleLocal => NetScaleLocal;
 

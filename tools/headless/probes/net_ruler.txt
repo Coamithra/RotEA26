@@ -1,0 +1,102 @@
+# The level-3 "parade of alien rulers" on a joining peer -- card 5f506d11.
+#
+# The ruler is BattleSkull (the Cast screen calls it "Alien Ruler"), the level-3 mini-boss that
+# arrives in twos through the wall sections. The card reports three things about it as seen by a
+# JOIN peer, and they are THREE UNRELATED DEFECTS in the puppet layer -- one per symptom.
+#
+# The card's own guess for the third ("perhaps the client spawns them itself and then receives
+# them as well from the host") is wrong, and worth knowing: `Explosion` is not in
+# NetTypeRegistry's table, so no explosion has ever crossed the wire in either direction.
+#
+# ---- A. "quite jerky" -- the body loop was REPLICATED instead of run ------------------------
+#
+# BattleSkull draws its alienboss sheet from `animationProgress`, its own 20fps accumulator
+# advanced in Update -- and a puppet's Update never runs. So the host replicated the integer
+# frame in a state extra and the client assigned it, once per that entity's round-robin snapshot
+# TURN: 60 ms in a small world and up to ~1.2 s in a big one, against a 50 ms loop. The
+# animation does not slow down, it STAIRCASES. Measured over 60 driven ticks at a 150 ms turn:
+# the host advanced on 20 of them in steps of 1, the puppet on 6 in steps of 3.
+#
+# That is exactly what AlienDrawableGameComponent.NetFrameLocal already fixes for `curframe`,
+# one field over -- BattleSkull, ClassicBoss and FakeBoss simply do not animate through
+# `curframe` at all, so they needed the per-type NetAnimFrame extra and never got the seam.
+# All three now advance the loop locally in NetDriveExtras and their descriptors stop applying
+# the wire's copy (it is still SENT, so the protocol is unchanged). SpiderBoss keeps the
+# replicated frame and must: its choreography assigns that accumulator outright, its fps varies,
+# it swaps between four sheets, and its own Update READS it. The audit is on Compat/Net/NetBodyAnim.
+#
+# ---- B. "keeps playing repeatedly if I pause the game" -- part one -------------------------
+#
+# NetPuppets.ReleaseDyingPuppet hands a dying puppet back its own Update by setting Enabled, and
+# its own comment recorded the cost as a KNOWN, ACCEPTED DIVERGENCE: a release landing while a
+# ComponentBin.Push pause is up enables the entity OUTSIDE any pause layer, "so its dying
+# animation runs on through the freeze". Measured: ~40 explosions and a full 2.5 s
+# shrink-and-flicker on a screen where nothing else is moving. It is not the harmless divergence
+# that comment assumed -- it is the ONLY thing moving, so it is the only thing you look at.
+#
+# ComponentBin.PauseAdopt is that registration, and it is not new code: it is ComponentBin.Add's
+# own pause branch lifted out, which has always frozen a world object ARRIVING during a pause into
+# the innermost layer. So the comment was half right -- nothing can retro-register a component the
+# pause never walked, and a released puppet is never that, since it was in the collection when the
+# Push ran. Add is its other caller now, which is what keeps the two halves from drifting.
+#
+# ---- C. "keeps playing repeatedly" -- part two, and most of "far too many explosions" -------
+#
+# Card 444eb614 gave released ids their own suppression ledger so the world-snapshot self-heal
+# cannot rebuild an entity that is visibly dying here, with a 30 s real-time backstop for "an id
+# whose EvDeath never comes". A PAUSE is precisely the case that backstop cannot survive: both
+# worlds freeze, so the host's copy never finishes ITS animation, never emits EvDeath and keeps
+# streaming the id for as long as the pause lasts -- while the ledger's clock runs on regardless.
+# Past the window the entry reports Rebuilt, a fresh intact collidable ruler appears over the one
+# that already died here, its snapshot hp arrives as 0 and the client plays a SECOND death. Then
+# that one is released, the ledger is re-stamped, and it repeats one window later. Every repeat
+# is another ~40 explosions.
+#
+# The ledger has no duration now -- it is held until the host's EvDeath (or an EvSpawn for a
+# re-used id, or the session/level Reset) and bounded by its own 64-deep FIFO. No duration can be
+# right for a suppression whose end condition is another machine's world advancing.
+#
+# ---- WHY A PROBE AND NOT A SCREENSHOT ------------------------------------------------------
+#
+# None of the three is visible in a frame. A stepping animation and a running one are the same
+# still picture; the pause defect is about what happens over 2.5 s of a FROZEN screen; and a
+# ghost ruler drawn over a dead one looks exactly like an ordinary ruler. All three are on the
+# OTHER peer's screen besides, and a backgrounded joiner tab ticks at ~1 Hz. So the observable is
+# the WORLD: the drawn frame per tick, the live Explosion count, and how the snapshot layer
+# CLASSIFIES an id (SnapUnknownKind).
+#
+# Every positive has its negative beside it. Section 1 measures a real host BattleSkull ticked at
+# 60 Hz as the control, so "the puppet advanced 20 times" means something; section 3 ends with an
+# unknown LIVE id that must still be self-healed, or a suppression hard-wired to refuse
+# everything would pass every leg above it.
+#
+# MUTATION-TESTED FOUR WAYS, each failing DISJOINT legs:
+#   * the local advance removed AND the wire apply restored (the pre-card build): 3 legs --
+#     "puppet 6" of 60 ticks, "max step 3", and the wire frame moving the loop.
+#   * the local advance removed alone: 1 leg (puppet 0 -- worse than pre-card, the apply is gone).
+#   * ReleaseDyingPuppet's pre-card unconditional un-freeze: 1 leg, +42/+39/+45 explosions over
+#     three runs against +1 with the fix. (Read that number off a puppet ticked only while it is
+#     ENABLED *and still in the world*: a component keeps Enabled after its own Die(), and this
+#     type's dying branch fires its finale whenever DeathTimer.Finished -- which a non-repeating
+#     Timer reports forever -- so ticking past the removal reports ~150 where the game makes ~40.)
+#   * the 30 s real-time window reinstated on the released-dying ledger: 3 legs -- Rebuilt, a
+#     replacement ruler in the world, and the second death's opening pop.
+#
+# MENU-ONLY AND LEAVE-NO-TRACE, the eaNetDeathFx shape -- so `?menu&noattract` and no level.
+# `?noattract` matters: the 20 s attract demo is a live world, and the suite would SKIP over it.
+# It plants real entities and really kills them, so it is not silent (the real death paths play
+# their real cues); everything it plants sits far off-screen and is swept in a finally.
+#
+# eahl: --flags "?menu&noattract"
+
+step 200 nodraw
+mark
+
+eval NetRuler
+
+# The tally, not `expect-not FAIL`: an absence assertion passes on a run where the eval never
+# happened, and this suite reports a SKIP (which is not a pass) whenever a session, level or
+# attract demo is up. Raise the count when legs are added.
+expect \[netruler\] 18 passed, 0 failed
+expect-not SKIP
+quit

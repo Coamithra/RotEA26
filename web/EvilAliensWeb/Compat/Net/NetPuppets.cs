@@ -15,9 +15,10 @@ namespace EvilAliensWeb.Compat.Net
         Rebuilt,    // never-seen id, self-heal built it from the snapshot (stream outran the
                     // reliable EvSpawn, or a local purge dropped a world the host's still has)
         LeftDead,   // removed here recently enough that a death is still settling:
-                    // RecentRemovalWindowMs for an ordinary removal, the longer
-                    // DyingReleaseWindowMs for a puppet RELEASED to finish a deferred death
-                    // (card 444eb614 -- the host streams a dying id for the whole animation)
+                    // RecentRemovalWindowMs for an ordinary removal; a puppet RELEASED to finish
+                    // a deferred death is suppressed until its EvDeath instead of on a clock at
+                    // all (cards 444eb614 / 5f506d11 -- the host streams a dying id for the whole
+                    // animation, and a PAUSE makes that "for as long as the pause lasts")
         Refused,    // the rebuild was declined. Three causes, which tick at very different
                     // rates: no descriptor for the typeIdx (a registry/protocol mismatch)
                     // re-counts on EVERY turn, while a descriptor declining -- no live
@@ -179,8 +180,10 @@ namespace EvilAliensWeb.Compat.Net
         //   * ...but the HOST keeps streaming the id for the WHOLE deferred death, because the
         //     entity is still in its world and so still in `NetIdRegistry.Live`. "The host stops
         //     streaming the id within a turn or two" was simply wrong for a deferred death.
-        //   * And most of those OUTLIVE 3000 ms. THE CENSUS -- every type that reaches
-        //     ReleaseDyingPuppet, with the duration its own dying state runs for:
+        //   * And most of those OUTLIVE the flat 3000 ms. THE CENSUS -- every type that reaches
+        //     ReleaseDyingPuppet, with the duration its own dying state runs for (kept for the
+        //     shape of the problem; card 5f506d11 then removed the duration from this ledger
+        //     entirely, so no row of it is a deadline any more):
         //
         //       Parachute                 100 ms                      under
         //       BattleSkull               2500 ms                     under
@@ -201,16 +204,30 @@ namespace EvilAliensWeb.Compat.Net
         //     the ghost lasts `fall - 3 s`, and on a fully-ramped save the fall's floor is 2941 ms,
         //     i.e. just under the flat window.
         //
-        // THE HONEST DEADLINE IS AN EVENT, NOT A DURATION: the host stops streaming the id when
-        // its own copy leaves the world, and it says so with `EvDeath` on the RELIABLE lane. So
-        // this ledger is cleared there (and by a successful `OnSpawn`, for an id the host has
-        // re-used), and the window below is only the backstop for an id whose EvDeath never comes.
-        // 30 s is 1.5x the longest row above rather than a tuned value; nothing is drawn or
-        // spawned while it stands, so erring long costs only a refused self-heal -- and while the
-        // entity is still dying the host IS still streaming it, so there is nothing to rebuild
-        // anyway. `NetDeathFxTest` measures each boss's real animation against this constant, so a
-        // future longer death fails there instead of quietly ghosting.
-        internal const float DyingReleaseWindowMs = 30000f;
+        // THE HONEST DEADLINE IS AN EVENT, NOT A DURATION -- and since card 5f506d11 that is all
+        // it is. The host stops streaming the id when its own copy leaves the world, and it says
+        // so with `EvDeath` on the RELIABLE lane; this ledger is cleared there, and by a
+        // successful `OnSpawn` for an id the host has re-used, and by the session/level `Reset`.
+        //
+        // IT USED TO ALSO LAPSE after 30 s of REAL time, as a backstop for "an id whose EvDeath
+        // never comes", and A PAUSE IS EXACTLY THAT CASE -- which is why the backstop had to go
+        // rather than be lengthened. Pause a co-op game while a ruler is dying and BOTH worlds
+        // freeze: the host's copy never finishes its animation, so it never emits EvDeath and
+        // keeps streaming the id for as long as the pause lasts, while a real-time window runs on
+        // regardless. Measured (NetRulerTest section 3): past the window the entry reports
+        // `Rebuilt`, the self-heal builds a fresh intact collidable ruler over the one that
+        // already died here, its snapshot hp arrives as 0 and the client plays a SECOND death --
+        // then releases it, re-stamps the ledger, and does the whole thing again one window
+        // later. That is the card's repeat, and most of its "far too many explosions". No
+        // duration can be right for a suppression whose end condition is another machine's world
+        // advancing.
+        //
+        // WHAT BOUNDS IT NOW is the 64-deep FIFO below, and that is enough: the entries that
+        // linger are exactly the ones whose EvDeath genuinely never came, nothing is drawn or
+        // spawned while one stands, and an id the host re-uses is announced by a RELIABLE
+        // EvSpawn that clears it (netIds are allocated monotonically and wrap at 65535, so reuse
+        // is 65k spawns away in any case). Eviction degrades to the pre-444eb614 behaviour for
+        // the oldest entry, which is the same graceful failure that cap always had.
 
         // ITS OWN LEDGER, not a flag beside `recentlyRemoved`, and that is a correctness point
         // rather than tidiness. Read off that dictionary's timestamp it would also have to be
@@ -220,7 +237,7 @@ namespace EvilAliensWeb.Compat.Net
         // slot would be pushed out by the churn of its own opening frame. This ledger only ever
         // takes a deferred death, of which a handful can be in flight at once.
         private const int DyingLedgerCap = 64;
-        private static readonly Dictionary<ushort, long> releasedDying = new Dictionary<ushort, long>();
+        private static readonly HashSet<ushort> releasedDying = new HashSet<ushort>();
         private static readonly Queue<ushort> releasedDyingOrder = new Queue<ushort>();
 
         private static Game game;
@@ -840,9 +857,9 @@ namespace EvilAliensWeb.Compat.Net
         {
             long now = NetHost.Current.NowMs;
             // The released-dying ledger is consulted FIRST and independently -- see its header for
-            // why it is not a flag on `recentlyRemoved`.
-            if (releasedDying.TryGetValue(netId, out long released)
-                && now - released < DyingReleaseWindowMs)
+            // why it is not a flag on `recentlyRemoved`, and why membership alone is the answer
+            // (there is no window left to compare against).
+            if (releasedDying.Contains(netId))
             {
                 return true;
             }
@@ -852,7 +869,7 @@ namespace EvilAliensWeb.Compat.Net
 
         private static void MarkReleasedDying(ushort netId)
         {
-            if (!releasedDying.ContainsKey(netId))
+            if (releasedDying.Add(netId))
             {
                 releasedDyingOrder.Enqueue(netId);
                 while (releasedDyingOrder.Count > DyingLedgerCap)
@@ -860,7 +877,6 @@ namespace EvilAliensWeb.Compat.Net
                     releasedDying.Remove(releasedDyingOrder.Dequeue());
                 }
             }
-            releasedDying[netId] = NetHost.Current.NowMs;
         }
 
         private static void MarkRemoved(ushort netId)
@@ -1057,12 +1073,14 @@ namespace EvilAliensWeb.Compat.Net
             // we just released -- a fresh, intact, collidable puppet standing where one is
             // visibly dying.
             //
-            // AND IT NEEDS THE LONGER WINDOW (card 444eb614). This comment used to end "the host
-            // stops streaming the id within a turn or two, so the window is short" -- and that is
-            // false for exactly the deaths that reach this line. The host keeps the dying entity
-            // in `NetIdRegistry.Live` for the WHOLE animation and keeps streaming it, and MOST of
-            // those outlive `RecentRemovalWindowMs` -- FakeBoss, MarsBoss, SpiderBoss and, at 20 s,
-            // BrainBoss. So the ghost was not rare at all. The census is on `releasedDying`.
+            // AND IT NEEDS ITS OWN, EVENT-ENDED SUPPRESSION (cards 444eb614 / 5f506d11). This
+            // comment used to end "the host stops streaming the id within a turn or two, so the
+            // window is short" -- and that is false for exactly the deaths that reach this line.
+            // The host keeps the dying entity in `NetIdRegistry.Live` for the WHOLE animation and
+            // keeps streaming it, and MOST of those outlive `RecentRemovalWindowMs` -- FakeBoss,
+            // MarsBoss, SpiderBoss and, at 20 s, BrainBoss. So the ghost was not rare at all, and
+            // no DURATION is right for it either: pause a co-op game and the host's copy never
+            // finishes at all. The census, and why the window went, are on `releasedDying`.
             MarkRemoved(netId);
             MarkReleasedDying(netId);
             // It is dying, so it must not still be able to kill the local player -- both shipped
@@ -1071,12 +1089,22 @@ namespace EvilAliensWeb.Compat.Net
             // every entry in the type registry is an AlienDrawableGameComponent.
             var adc = (AlienDrawableGameComponent)comp;
             adc.Collides = false;
-            // The freeze is the thing that was stopping the death animation. KNOWN, ACCEPTED
-            // DIVERGENCE: a release that lands while a ComponentBin.Push pause is up enables the
-            // entity OUTSIDE any pause layer (nothing can retro-register an existing component
-            // into one), so its dying animation runs on through the freeze. It is cosmetic, it is
-            // an enemy that is already dead, and it removes itself when it finishes.
-            comp.Enabled = true;
+            // The freeze is the thing that was stopping the death animation.
+            //
+            // ...but NOT out through a PAUSE (card 5f506d11). This used to be an unconditional
+            // `comp.Enabled = true`, recorded as a known divergence on the grounds that nothing
+            // can retro-register an existing component into a pause layer and that a dead enemy
+            // finishing its animation over a frozen screen is cosmetic. ComponentBin.PauseAdopt
+            // is that registration, and the divergence was not cosmetic: measured at ~40
+            // explosions and a full shrink-and-flicker on a screen where nothing else moves, it
+            // is the only thing moving, so it is the only thing you look at -- the card's "the
+            // death animation keeps playing repeatedly if I pause the game". Adopted, it freezes
+            // with the rest of the world and Pop starts it (Pop asks IsFrozenPuppet, and this one
+            // has just stopped being a puppet, so it comes back enabled).
+            if (!bin.PauseAdopt(gc))
+            {
+                comp.Enabled = true;
+            }
             if (NetHost.Current.NetLog)
             {
                 Console.WriteLine("[net] released dying puppet id=" + netId + " type=" + comp.GetType().Name);
@@ -1097,7 +1125,7 @@ namespace EvilAliensWeb.Compat.Net
                 return;
             }
             // THE AUTHORITATIVE END of a released dying puppet's suppression (card 444eb614), and
-            // the reason `DyingReleaseWindowMs` is a backstop rather than the mechanism: this beat
+            // since card 5f506d11 the ONLY end it has: this beat
             // says the host's copy has left ITS world, so it has stopped streaming the id and
             // there is nothing left for the self-heal to rebuild. Before the branches below rather
             // than inside one of them, because the case it is for is the one that matches NO

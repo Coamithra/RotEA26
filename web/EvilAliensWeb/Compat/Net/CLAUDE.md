@@ -85,10 +85,11 @@ inputs; the other peer's ship is an interpolated puppet.
 - **The respawn indicator crosses the wire** (`37f3a663`, v17): a dead player's clock ring is
   drawn on BOTH screens, so you can see your buddy coming back and where -- see the
   respawn-indicator bullet at the end of "Claims, score & per-slot HUD".
-- **A lobby pairing survives a finished level** (`3b6c12e7`, no protocol change): both peers walk
-  back to the lobby with the session up and the host picks the next mission, instead of the match
-  ending -- and the remote ship now flies off in the level's own spawn direction rather than
-  always upward (`b4a9fe60`). Two bullets at the end of "Signaling, menu lobby & handshake".
+- **A lobby pairing survives a level that PLAYED ITSELF OUT** (`3b6c12e7` for a win, `c600c55a`
+  for a Mission Failed; no protocol change either time): both peers walk back to the lobby with
+  the session up and the host picks the next mission, instead of the match ending -- and the
+  remote ship now flies off in the level's own spawn direction rather than always upward
+  (`b4a9fe60`). Three bullets at the end of "Signaling, menu lobby & handshake".
 - **Level 1's intro cinematic plays on BOTH peers** (`8a7772d6`): the host's scripted no-ship
   phase is replicated as a `MsgShipState` flag bit, so neither ship is on screen until the
   cutscene ends and then both fly in together -- and the hail of bullets, which cannot replicate
@@ -101,6 +102,12 @@ inputs; the other peer's ship is an interpolated puppet.
   12-wide grid, 402px of divergence down it) stops being applied; the collision grid takes its tile
   size from the wall, closing the joiner-local hit-before-you-touch-it gap; and the scroll is
   anchored. No protocol change -- see the LEVEL-3 WALLS section.
+- **The level-3 alien ruler stops staircasing, and stops dying twice under a pause**
+  (`5f506d11`, no protocol change): a free-running BODY loop is the client's to run
+  (`BattleSkull`/`ClassicBoss`/`FakeBoss` -- the `NetFrameLocal` rule, for the types that animate
+  an `AnimatedSprite` rather than `curframe`); a puppet released mid-death under a pause joins
+  the pause layer instead of animating through the freeze; and the released-dying suppression
+  loses its real-time window, which no pause could survive. See BODY LOOPS below.
 - **The snapshot lane stops dragging puppets backwards** (`f5cf7a5c`, v19): `MsgWorldSnapshot`
   carries a monotone per-PACKET seq and an entry older than the one already applied to that netId
   is refused -- the guard `NetFrameLocal` gave animation frames, which positions never had. Same
@@ -627,8 +634,9 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   `EvLeave`/notice, `NetSession.Stop()` tears down (registries disabled, state reset,
   restartable), `GameScene.NetApplyPeerLeft` force-exits a running level (except in
   Victory/GameOver, which finish locally), and the menus surface `TakeMenuNotice()`.
-  **A level FINISHED is the one exception since card 3b6c12e7 -- see the level-end bullet
-  below; it used to be in that list, and "one match per lobby" is no longer true.**
+  **A level that PLAYED ITSELF OUT is the one exception -- won since card 3b6c12e7, LOST since
+  card c600c55a. See the level-end bullets below; the game-over wind-down used to be in that
+  list, and "one match per lobby" is no longer true either way.**
   **AND SINCE CARD 87242257 (Stage 11.9) THE "ends it for both" HALF IS SUPERSEDED TOO: only
   the HOST leaving ends the match; a CLIENT leaving frees its seats and everyone else plays
   on** -- the N-PEER SESSION section below owns the policy, N=2 included (a menu-session host
@@ -695,7 +703,9 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   The host then picks the next mission and the pair keeps playing. Before it, `UpdateSceneEdges`'
   scene-down branch was the single teardown trigger for EVERY normal level end -- `EvLeave` +
   `Stop("match ended")` -- so a finished level dropped both players to the main menu and a second
-  level meant re-signalling from scratch.
+  level meant re-signalling from scratch. **Since card c600c55a the same is true of a level you
+  LOSE -- see the bullet after this one, which is where the latch's real name and its timing
+  rule live.**
   - **NO PROTOCOL CHANGE AND NO NEW WIRE MESSAGE, which is the design's whole shape.** Both peers
     already reach the end through the existing host-broadcast `EvVictory`, so each one
     independently keeps its own session and walks to its own lobby. Nothing has to be negotiated,
@@ -765,6 +775,58 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     **`ProbeSpawnDirection`** sweeps the whole `PlayerSpawnType` enum against the VECTORS each arm
     must produce. NORTH has no end-to-end route at all (it ships on `ClassicAliens`, a challenge
     level whose victory a rig cannot reach), so the pure sweep is the only thing covering it.
+- **LOSING A LEVEL DOES THE SAME (card c600c55a), AND IT TOOK TWO CHANGES, NOT ONE.** The card:
+  *"mission failed in multiplayer dumps everyone back to the menu :) -- should be the same as when
+  you beat a level, the host can select a new level (or the same) to try."* Before it, the
+  Mission Failed wind-down fell through to the ordinary match-end road and both players landed on
+  the main menu, the client with a session-ended notice.
+  - **THE LATCH IS THE EASY HALF.** `GameScene.Terminate` now latches on `FinishedMode.lostlevel`
+    as well as `finishedlevel`, and the latch is renamed to say what it actually means:
+    `NetSession.OnLevelEndedCleanly()` / `levelEndedCleanly`, i.e. *this level ended on its own
+    terms on both peers*, not *this level was won*. It is sound to read `lostlevel` that way
+    because it has exactly ONE producer -- `Defeat()`, reached only from
+    `defeatmessage_OnFinished` -- so every other way out of a level (the pause menu's Exit,
+    `NetApplyPeerLeft`'s force-exit, a demo ending) is `FinishedMode.exit` and still ends the
+    match. No protocol change, exactly as in 3b6c12e7 and for the same reason: a game over is
+    already host-authoritative and broadcast (`LoseLife` -> `OnHostReset(ResetModeGameOver)` ->
+    the client's `NetApplyReset`), so each peer reaches its own `Terminate` off a beat both
+    already ran.
+  - **THE HALF THAT IS ACTUALLY INTERESTING: THE EDGE WAS ONE FRAME LATE.** `UpdateSceneEdges`
+    fires on the next `NetSession.Update()`, but `Game1.gameScene_OnFinished` adds `MenuScene`
+    SYNCHRONOUSLY for any ending that does not route through `CreditsScene` -- and
+    `MenuScene.Initialize` polls the take-once `TakeLobbyReturn()` as its very last act. So with
+    the latch alone the session survived and the host still sat on the MAIN MENU with a live
+    pairing behind it, unable to pick the next mission. `NetSession.OnLevelEndSceneDown()`, called
+    from `Terminate` below the purges and above `OnFinished`, raises that edge there instead. It
+    is a no-op unless the latch is set, so a quit / drop / force-exit keeps its old timing (and
+    its `Stop()` + menu notice still land on the following `Update`); `UpdateSceneEdges` is
+    edge-guarded by `sceneWasUp`, so that `Update` sees no change.
+  - **CARD 3b6c12e7 HAD THE SAME HOLE AND GOT AWAY WITH IT.** The three story levels return
+    through `CreditsScene`, which puts seconds between the scene going down and the menus coming
+    up, so the late edge never showed. A won CHALLENGE level takes `gameScene_OnFinished`'s
+    `default:` arm straight to `MenuScene` and did not -- that pre-existing case is fixed here
+    too, by the same call.
+  - **Verify with `tools/headless/probes/net_level_lost.txt` (the SESSION, client side) and
+    `net_level_lost_lobby.txt` (the MENUS, host side)**; console `eaNetLevelEnd.armLost()` /
+    `.checkLost()` and `.armLostHost()` (whose phase 2 is `.menu()`, reused from the victory
+    half -- what a lobby return has to look like does not depend on how the level ended). Both
+    DESTRUCTIVE. The two probes catch DIFFERENT halves: dropping `lostlevel` from the latch fails
+    session legs on both, while dropping only `OnLevelEndSceneDown()` leaves every session leg
+    green and is caught solely by the menu assertions. The shared legs live in
+    `NetLevelEndTest.CheckLevelEndSurvival` so the win and loss halves cannot drift.
+  - **There is no `?lose` to pair with `?win`, deliberately.** A host's game over comes out of the
+    level (`UpdateNormal` -> `AllShipsDead` -> `LoseLife` -> the lives-exhausted branch), so
+    `ArmDefeatHost` puts the level in the state a Hard+ run reaches on its last life -- `Lives` 0,
+    no `InfiniteLives`, no `DirectRespawn` (Easy's respawn-in-place arm returns from `LoseLife`
+    BEFORE the game over) -- and asplodes every locally-owned ship through the real
+    `Asplode()`->`Die()` path. Note the consequence for hand testing: on Easy/Medium a story
+    level runs at `score.Lives = -1` and **cannot reach a game over at all**; only Hard+ sets
+    `Lives = 7` (`ApplyDifficultyPolicy`).
+  - **A RIG ARTIFACT TO KNOW ABOUT ON THE CLIENT SIDE.** `NetSession.StartForTest` never goes
+    through `NetLobby`, so `NetLobby.Phase` is `Idle` and `MenuScene.NetUpdate`'s `Idle` arm
+    swaps the client's waiting panel for the Host/Join menu the moment `EnterNetLobby` shows it.
+    That is a property of the rig's session, not of the card, which is why `net_level_lost.txt`
+    asserts `netMode`/`noticeUp` off `eaMenuNetState()` and claims no menu census on that side.
 
 ## N-PEER SESSION (card 87242257, Stage 11.9, protocol v24)
 
@@ -789,8 +851,9 @@ tabs, LocalSocketNet `--net-peers`) remain how it is exercised headlessly.
   `0257f8ba` -- before 11.10 a peerless lobby was a dead end and Stopped with the notice; the
   Stop survives only for the non-lobby shapes, e.g. a scenario session).
   **Consequence at N=2, deliberate:** a menu-session host whose partner drops now keeps playing
-  solo instead of being thrown to the menu. A clean level FINISH still keeps every pairing
-  alive (card 3b6c12e7; `ResetPerMatchState` loops the channels).
+  solo instead of being thrown to the menu. A level that plays itself out still keeps every
+  pairing alive, won or lost (cards 3b6c12e7 / c600c55a; `ResetPerMatchState` loops the
+  channels).
 - **EVERY SLOT DECISION KEYS OFF `p.PrimarySlot`, never a `ControlDevice.Remote` scan** --
   `GetPlayerIndex(Remote)` / `DeviceIsPlaying(Remote)` / `ReleasePlayer(Remote)` are ambiguous
   with two remote peers, and every one of them was load-bearing in the 2-peer code
@@ -895,8 +958,8 @@ per-peer kick. Design: `plans/4p-online-coop.md` section G.
   it; entries Start Game / Cancel; text `NetLobby.HostLobbyText` = room code + per-seat roster
   + the start hint, re-texted every tick). Start is GATED on a peer being up, and backs the
   level pick out to the panel rather than tearing the session down (`netPick_CancelSelected`).
-  The post-level lobby return (card 3b6c12e7) still lands the host on `netPickMenu` -- the
-  crew is already aboard -- and Cancel from there now reaches the roster panel.
+  The post-level lobby return (cards 3b6c12e7 / c600c55a) still lands the host on `netPickMenu`
+  -- the crew is already aboard -- and Cancel from there now reaches the roster panel.
 - **THE JOIN SIDE SEES THE ROOM: `EvLobbyRoster` (event 28, host -> clients, reliable,
   `[slotMask:1]`).** A waiting client cannot see its fellow joiners any other way (grants are
   host-side, no ships exist to relay, the menu oracle is local bookkeeping). Edge-triggered on
@@ -1781,29 +1844,33 @@ Four pieces, none changing what replicates -- only how well the star holds up at
       rebuild is worse than cosmetic: hp arrives as 0, so `ApplyHostKilledFromSnapshot` re-runs
       `BeginDeferredDeath` and the client plays a SECOND death.)
       - `NetPuppets.releasedDying` flags the ids `ReleaseDyingPuppet` marked, and
-        `IsRecentlyRemoved` gives those `DyingReleaseWindowMs` (**30 s**, 1.5x the BrainBoss's
-        20 s) instead. **The honest deadline is an EVENT, not a duration**: the host stops
-        streaming when its own copy leaves
-        its world and says so with `EvDeath` on the reliable lane, so the flag is CLEARED there
-        (and on a successful `OnSpawn`, for an id the host re-used) and the 30 s is only the
-        backstop for an `EvDeath` that never comes. Erring long costs only a refused self-heal,
-        and while the entity is still dying the host IS still streaming it, so there is nothing to
-        rebuild anyway. **`NetDeathFxTest` measures each boss's real animation against the
-        constant**, so a future longer death fails there instead of quietly ghosting.
+        `IsRecentlyRemoved` refuses a self-heal for any id in it. **The honest deadline is an
+        EVENT, not a duration**: the host stops streaming when its own copy leaves its world and
+        says so with `EvDeath` on the reliable lane, so the flag is CLEARED there (and on a
+        successful `OnSpawn`, for an id the host re-used, and by the session/level `Reset`).
+        **THERE IS NO WINDOW ANY MORE -- card 5f506d11 deleted `DyingReleaseWindowMs`**, which
+        was 30 s of REAL time as the backstop for "an `EvDeath` that never comes". A PAUSE is
+        exactly that case and no duration survives it; see BODY LOOPS below for the measurement.
+        What bounds the ledger now is its own 64-deep FIFO, and that is enough: the entries that
+        linger are the ones whose `EvDeath` genuinely never came, nothing is drawn or spawned
+        while one stands, and a re-used id is announced by a RELIABLE `EvSpawn` that clears it.
+        (`NetDeathFxTest` used to measure each boss's animation against that constant; with no
+        duration there is no length that ghosts, so the leg was vacuous and is gone.)
       - **It is its OWN ledger, not a flag beside `recentlyRemoved`, and that is correctness.**
         Read off that dictionary's timestamp it would have to be evicted with it -- and
         `MarkRemoved` fires on EVERY local puppet removal against a 512-deep FIFO, while
         `BrainBoss.KilledBy` purges bullets, braineroids, skulls, mines, UFOs, lazers and plasma
         balls on its way into that twenty-second death. The boss's own slot would be pushed out by
         the churn of its own opening frame.
-      - **The long window is for RELEASED deaths ONLY** -- widening `RecentRemovalWindowMs`
-        itself would leave a genuinely-missed spawn missing for thirty seconds. That is a
-        separate leg in the suite, not an argument.
+      - **The suppression is for RELEASED deaths ONLY** -- widening `RecentRemovalWindowMs`
+        itself would leave a genuinely-missed spawn missing for the rest of the session. That is
+        a separate leg in the suite, not an argument.
       - Pinned by `NetDeathFxTest` section 9's GHOST legs: the same call at three clock readings
         (inside the flat window, past it, and after the host's `EvDeath`) plus an
-        ordinarily-removed id as the control, plus the OnSpawn clear on its own leg -- and
-        `NetDeathFxTest`'s per-boss legs additionally require each MEASURED animation to fit the
-        window. Mutation-tested four ways; reverting the fix reproduces the report in numbers
+        ordinarily-removed id as the control, plus the OnSpawn clear on its own leg. (Its
+        per-boss "fits the window" legs went with the window itself -- card 5f506d11; the
+        suppression's own pin is now `NetRulerTest` section 3.)
+        Mutation-tested four ways; reverting the fix reproduces the report in numbers
         (`4 vs 3` SpiderBosses in the world). The ledger's own eviction cap is the one part with
         no leg: reaching it needs 64 concurrent deferred deaths, and it degrades to the
         pre-card behaviour, which shipped.
@@ -2768,7 +2835,8 @@ Four pieces, none changing what replicates -- only how well the star holds up at
     continuously spawning fight it never stops climbing, which is not a fault.
   - `snapDead` = an id removed HERE recently enough to still be settling, deliberately left
     dead -- the 3 s `RecentRemovalWindowMs` for an ordinary removal, and the longer
-    `DyingReleaseWindowMs` for a puppet RELEASED to finish a deferred death (card 444eb614), so a
+    held-until-`EvDeath` for a puppet RELEASED to finish a deferred death (cards 444eb614 /
+    5f506d11), so a
     boss death reads here for as long as the host keeps streaming it. **Benign, and it tracks the world's TOTAL removal rate.** The old note here tied this
     to `clTx`, which was WRONG and cost card 48ab9b2f's JIP pass its verdict: `MarkRemoved`
     fires on every local removal, host-authoritative `EvDeath`s included, so an IDLE joiner
@@ -3090,9 +3158,16 @@ reads a contented 0 throughout. The instrument is
     MarsBoss's twin (4x4 sheet, A/B half flipped on the wrap) and it DOES qualify, because its
     `fps` is a constant 16 set once in `Initialize`. It is card c92f3817's subject.
   - Types whose Draw ignores `curframe` are unaffected either way and keep the default:
-    `SpiderBoss` / `FakeBoss` / `BattleSkull` animate an `AnimatedSprite` through their own
-    replicated `animFrame` state extra, and `Wall` / `Lazer` / `StationaryBoss` / `BrainBoss` /
+    `SpiderBoss` / `FakeBoss` / `BattleSkull` / `ClassicBoss` animate an `AnimatedSprite` through
+    their own `animFrame` state extra, and `Wall` / `Lazer` / `StationaryBoss` / `BrainBoss` /
     `Powerup` are single-frame.
+    **THOSE FOUR ARE NOT "UNAFFECTED" -- they had the identical defect one field over, and card
+    5f506d11 fixed three of them.** A per-type `animFrame` extra is a REPLICATED frame by another
+    name, so it staircases for exactly the reasons this bullet gives, worse the bigger the world.
+    `BattleSkull` / `ClassicBoss` / `FakeBoss` advance their own loop in `NetDriveExtras` now and
+    their descriptors stop applying the wire's copy; `SpiderBoss` fails the audit's second half
+    and keeps it. See BODY LOOPS below -- and read this bullet's two questions as the general
+    rule, not as a rule about `curframe`.
   - Covered by `eaNetEntity()` (47 checks now, up from 43 -- the four added are `NetScaleLocal`'s,
     whose polarity is the OPPOSITE inversion; see LEVEL-3 WALLS) -- the base answer, an override, and the
     two real opt-outs with a UFO beside them as the control, since a predicate hard-wired to
@@ -3474,6 +3549,131 @@ velocities the layer already had are wrong for it -- and the fix is neither of t
     sweep" on another. An early cut of this suite reported five spurious failures exactly that way.
   - Mutation-tested five ways, each failing a different leg; the matrix is in the probe's header.
     The pre-card build (the override answering false) fails 12.
+
+## BODY LOOPS, A PAUSE AND A GHOST -- the level-3 alien ruler (card 5f506d11)
+
+Three reports about ONE entity, and they are three unrelated defects. The ruler is
+`BattleSkull` (the Cast screen calls it "Alien Ruler"), the level-3 mini-boss that arrives in
+twos through the wall sections -- card 13aa596c's "congaline of big rulers". **No protocol
+change; still v26.** All three were reproduced with numbers before any code moved.
+
+**The card's guess for the third symptom is worth refuting first, because it is the intuitive
+one**: "perhaps the client spawns them itself and then receives them as well from the host".
+`Explosion` is not in `NetTypeRegistry`'s table -- cosmetics have never crossed the wire in
+either direction -- and a client's own `BattleSkullEvent` is suppressed by `SuppressLevelScript`.
+Nothing is doubled. The count is defect C multiplying the authored series.
+
+- **A. THE BODY LOOP WAS REPLICATED INSTEAD OF RUN -- "the alien ruler animation is quite jerky
+  on a joining client. We can use the same client-side logic to smooth that out that we do for
+  other ufos etc." The card names its own fix, and it is `NetFrameLocal`, one field over.**
+  `BattleSkull` draws its `alienboss` sheet from `animationProgress`, a 20 fps accumulator
+  advanced in `Update` -- which a puppet never runs -- so the host replicated the integer frame
+  in a state extra and the client ASSIGNED it, once per that entity's round-robin snapshot TURN.
+  A turn is 60 ms in a small world and up to ~1.2 s in a big one, against a 50 ms loop: the
+  animation does not slow down, it STAIRCASES. **Measured over 60 driven ticks at a 150 ms turn:
+  the host advanced on 20 of them in steps of 1, the puppet on 6 in steps of 3.**
+  - **THE OPT-OUT IS DECLARED, NOT INFERRED: `AlienDrawableGameComponent.NetBodyAnimLocal`**,
+    default FALSE (the `NetScaleLocal` polarity -- it describes a thing most types do not have).
+    True means the puppet advances the loop itself and the descriptor's byte, though still sent,
+    is not applied. **The layer never asks it**: a type that owns its loop does so in its own
+    `NetDriveExtras`, so the seam exists for the one reader that has no other way to know --
+    `NetJipDump`'s `LocalSeams`, which prints `bodyanim` beside `frame`/`rot`/`scale`/`path`.
+    Without it the two ends' `state` extras legitimately drift on that byte with nothing on the
+    line saying why, which is the exact confusion that field exists to prevent (the diff compares
+    extras by LENGTH, so nothing fails either way). Declared rather than a type list in the dump,
+    per this file's own rule that a skip is the GAME's statement and never a type name in a tool.
+    Pinned by `eaNetEntity` (53 checks now, up from 47), which is where its polarity trap lives:
+    it sits directly below `NetFrameLocal` in every one of these files and defaults the other way.
+  - **THREE TYPES TOOK THE FIX AND ONE DID NOT, and the audit is the whole risk.** It is
+    `NetFrameLocal`'s two questions, restated for an accumulator that is not `curframe`: (i)
+    nothing but `Draw` reads it, so a local phase that differs by a frame changes a pixel and
+    never a decision; (ii) it really is a free-running loop at a CONSTANT fps that no state
+    machine writes, so a puppet cannot drift away from what the host is doing. `BattleSkull`,
+    `ClassicBoss` and `FakeBoss` are `+= dt * 20f`, unconditional, read only by `Draw` -> LOCAL.
+    **`SpiderBoss` fails both halves and keeps the replicated frame**: its rear-up/launch/land
+    choreography assigns the accumulator outright in four places, `animFps` varies,
+    `currentAnimation` swaps between four sheets, and `Update`/`DoMove` READ it
+    (`animationProgress > 30f` gates the walk). The rule and the table live on
+    `Compat/Net/NetBodyAnim`, which is also where a future type's audit goes.
+  - **THE HOST STILL ENCODES THE BYTE.** Nothing left the wire, so the protocol is unchanged and
+    an older peer keeps animating exactly as it did -- the `NetFrameLocal` precedent again, where
+    `NetBaseState.CurFrame` still ships for everyone and the types that own their frame ignore
+    it. Each descriptor says so at its `EncodeStateExtra` and has no `ApplyStateExtra` override,
+    which is what that means in code.
+  - **IN STEADY STATE THE APPLY WAS A NO-OP, so dropping it is about the DISTURBANCES** -- the
+    same argument `NetFrameLocal`'s header makes. Both peers run the same 20 fps loop and agree;
+    what the apply adds is a re-snap once per turn against a host clock that is GAME time where
+    the driver's is REAL time. They drift, and the snap is a kick. That is section 1b of the
+    suite, and it is the leg that discriminates the apply's removal at all.
+
+- **B. A RELEASE UNDER A PAUSE RAN THE DEATH ANIMATION THROUGH THE FREEZE.**
+  `NetPuppets.ReleaseDyingPuppet` hands a dying puppet back its own `Update` by setting
+  `Enabled`, and its own comment recorded the cost as a KNOWN, ACCEPTED DIVERGENCE: a release
+  landing while a `ComponentBin.Push` pause is up enables the entity OUTSIDE any pause layer,
+  "so its dying animation runs on through the freeze", on the grounds that a dead enemy
+  finishing its animation over a frozen screen is cosmetic. **Measured at ~40 explosions and a
+  full 2.5 s shrink-and-flicker** (42 / 39 / 45 over three runs) -- and it is the ONLY thing
+  moving, so it is the only thing you look at.
+  - **`ComponentBin.PauseAdopt(component)` is that registration -- and it is not new code, it is
+    `ComponentBin.Add`'s own pause branch lifted out.** `Add` has always frozen a world object
+    that ARRIVES during a pause into the innermost layer; what did not exist was a way to ask the
+    same of a component the pause had already captured. So the comment was half right: nothing can
+    retro-register a component the pause never walked, and a released puppet is never that -- it
+    was in the collection when the `Push` ran. `Add` is now `PauseAdopt`'s other caller (the type
+    gate stays at that call site, since what counts as the pause UI is its policy), which is what
+    keeps the two halves from drifting and gives the registering half its coverage in `eaBinTest`.
+  - **`Pop` starts it, correctly and for free**: it asks `IsFrozenPuppet`, and a released puppet
+    has just stopped being one.
+  - **Disable unconditionally, record ONCE.** The postcondition is "frozen", and re-disabling a
+    component `Push` already disabled costs nothing -- but `watchers` mirrors the MULTISET
+    collection + idleList + Σinactive, so a second `Add` of the same component would leave a count
+    `Pop`'s single `WatcherRemove` cannot take back out.
+  - Pause layers do not nest today (a remote pause defers to a local one --
+    `GameScene.NetSetRemotePaused`), so there is only ever one; the innermost is what a component
+    would have been caught by had it been there at the time.
+
+- **C. A LONG PAUSE RESURRECTED THE DEAD RULER, AND IT DIED AGAIN -- "the death animation keeps
+  playing repeatedly if I pause the game", and most of "far too many explosions".**
+  Card 444eb614 gave released ids their own suppression ledger so the world-snapshot self-heal
+  cannot rebuild an entity that is visibly dying here, with a 30 s REAL-TIME backstop for "an id
+  whose EvDeath never comes". **A pause is precisely that case**: both worlds freeze, so the
+  host's copy never finishes ITS animation, never emits `EvDeath` and keeps streaming the id for
+  as long as the pause lasts, while the ledger's clock runs on regardless. Past the window the
+  entry reports `Rebuilt`, the self-heal builds a fresh intact COLLIDABLE ruler over the one that
+  already died here, its snapshot hp arrives as 0 and the client plays a SECOND death -- then
+  releases it, re-stamps the ledger, and repeats one window later. Each repeat is another ~40
+  explosions.
+  - **THE FIX IS TO DELETE THE DURATION, not to lengthen it.** `DyingReleaseWindowMs` is gone and
+    `releasedDying` is a membership set; the deadline is the `EvDeath` / `EvSpawn` / `Reset`
+    event it always claimed to be, bounded by the ledger's own 64-deep FIFO. No duration can be
+    right for a suppression whose end condition is another machine's world advancing. Full
+    reasoning at the constant's old site in `NetPuppets`.
+  - **It predates the pause too, and that is why the report ties the two together.** Before card
+    444eb614 the window was the flat 3 s `RecentRemovalWindowMs` and `BattleSkull`'s dying state
+    is 2.5 s, so in ordinary play it just fit -- pausing was the only way to push it over.
+  - **`NetDeathFxTest.CheckFitsReleaseWindow` went with the constant.** It asserted each boss's
+    measured animation fits inside the window, which was a real guard while a longer death
+    ghosted; with no duration there is no length that ghosts, so it was vacuous rather than
+    merely redundant. What pins the suppression now is `NetRulerTest` section 3, which drives a
+    released id 300 s past the old window with the host still streaming it.
+
+- **VERIFY with `eaNetRuler()` / `eval NetRuler`** (`Compat/Net/NetRulerTest.cs`, 16 assertions;
+  `tools/headless/probes/net_ruler.txt`). MENU-only and leave-no-trace, the `eaNetDeathFx` shape.
+  **No frame can see any of the three** -- a stepping loop and a running one are the same still
+  picture, defect B is about 2.5 s of a FROZEN screen, and a ghost ruler drawn over a dead one
+  looks like an ordinary ruler; all three are on the other peer's screen besides. So the
+  observable is the WORLD: the drawn frame per tick against a real host `BattleSkull` ticked at
+  60 Hz as the CONTROL, the live `Explosion` count, and how the snapshot layer CLASSIFIES an id.
+  Section 3 ends with an unknown LIVE id that must still be self-healed, or a suppression
+  hard-wired to refuse everything would pass every leg above it.
+  Mutation-tested four ways, each failing DISJOINT legs; the matrix is in the probe's header.
+  **Deliberately absent from `net_selftests.txt`** -- it has its own probe, which carries the
+  write-up and the mutation matrix, the `eaNetDeathFx` precedent.
+  - **A RIG NOTE worth carrying: tick a released puppet only while it is ENABLED *and still in
+    the world*.** A component keeps `Enabled` after its own `Die()`, and `BattleSkull`'s dying
+    branch fires its finale whenever `DeathTimer.Finished` -- which a non-repeating `Timer`
+    reports forever. Ticking past the removal spends the rest of the budget on that finale and
+    reports ~150 explosions where the game produces ~40.
 
 ## ROTATION FIDELITY -- two reports, two unrelated causes (cards d6645119 / 566474ae)
 

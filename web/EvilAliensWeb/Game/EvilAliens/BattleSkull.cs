@@ -195,19 +195,31 @@ internal class BattleSkull : KillableAlien
 
 	// ---- Online co-op replication seams (Compat/Net/Descriptors/DescriptorsBosses1) --------
 	// The body animation runs off `animationProgress` (its own 20fps clock, NOT the component
-	// curframe), advanced only in Update -- frozen on a puppet. The host replicates the current
-	// frame so the client's alienboss sprite still animates. The HP-driven hue (Draw's colorize
+	// curframe), advanced only in Update -- frozen on a puppet. The HP-driven hue (Draw's colorize
 	// RangeTarget) needs no seam: initial HP is a fixed 25 (scaleWithDifficulty:false), so the
 	// replicated absolute Hp reproduces HitPointsNormalized exactly on both peers.
-	internal int NetAnimFrame
+	//
+	// The frame is STILL SENT and no longer APPLIED (card 5f506d11): a puppet runs the loop
+	// itself in NetDriveExtras below, because a replicated copy only changes on this entity's own
+	// snapshot turn and the animation staircases -- the whole argument, and the audit that says
+	// this type may own its loop, is on Compat/Net/NetBodyAnim.
+	// GET-ONLY since card 5f506d11: EncodeStateExtra is the last reader and nothing writes it
+	// any more. A writable seam with no legitimate writer is a trap -- the next use of it would
+	// fight the local loop below, which is the defect that card fixed.
+	internal int NetAnimFrame => (int)animationProgress;
+
+	// The loop's length. 0 before LoadContent has run, which is the "no sheet yet" answer
+	// NetBodyAnim.Advance acts on -- and what a rig reasoning about the wrap reads (NetRulerTest).
+	internal int NetAnimFrameCount => (sprite != null) ? sprite.Frames : 0;
+
+	// This loop is the CLIENT'S to run: see NetBodyAnimLocal, and Compat/Net/NetBodyAnim for the
+	// audit that says this type may.
+	internal override bool NetBodyAnimLocal => true;
+
+	// The client half: advance the body loop on the driver's REAL dt, exactly as Update does.
+	internal override void NetDriveExtras(GameTime gameTime)
 	{
-		get
-		{
-			return (int)animationProgress;
-		}
-		set
-		{
-			animationProgress = value;
-		}
+		animationProgress = EvilAliensWeb.Compat.Net.NetBodyAnim.Advance(animationProgress,
+			(float)gameTime.ElapsedGameTime.TotalSeconds, 20f, NetAnimFrameCount);
 	}
 }

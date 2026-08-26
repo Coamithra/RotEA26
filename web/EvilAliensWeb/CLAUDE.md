@@ -583,6 +583,14 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   hard-coded South the puppets used to assume. Boot
   `?level=Level2&invuln&netallowdebug&noattract` (`&win` for the host half); pinned by
   `tools/headless/probes/net_level_end.txt` + `net_level_end_lobby.txt`),
+  `eaNetLevelEnd.armLost()`/`.checkLost()` and `.armLostHost()`/`.menu()` (the same claim for a
+  level you LOSE -- card c600c55a: a Mission Failed must end a co-op level the way a victory
+  does, so the host can pick another. Same shape and the same boot, minus the `&win`; the wait
+  is the ~14.5 s defeat choreography rather than the 7 s victory one, and the host half needs no
+  script flag because its arm sets the level to its last life and asplodes the ships. Also
+  **DESTRUCTIVE**. The lobby half reuses `.menu()` -- what a lobby return looks like does not
+  depend on how the level ended. Pinned by `tools/headless/probes/net_level_lost.txt` +
+  `net_level_lost_lobby.txt`; net CLAUDE.md has the two-changes-not-one story),
   `eaNetIntroGate()` (Level 1's intro cinematic in co-op — card 8a7772d6: the replicated
   player-spawn hold and the cosmetic intro bullet volley, driven over the in-process wire against
   the REAL Level 1 script. **DESTRUCTIVE and LEVEL-1-ONLY** — it pairs real sessions onto the live
@@ -607,6 +615,14 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   leave-no-trace, but it plants real entities off-screen and really
   kills them, so it skips itself over a live session or level. Nothing it does is drawn, but it
   is not silent — the real death paths play their real cues),
+  `eaNetRuler()` (the level-3 alien ruler on a joining peer -- card 5f506d11: three defects, one
+  entity. Its body loop is the CLIENT'S to run (a per-type `animFrame` state extra is a
+  replicated frame by another name, and staircases for the same reasons `NetFrameLocal` exists);
+  a puppet released mid-death under a pause must join the pause layer, not animate through the
+  freeze; and a released dying id must never be self-healed back, however long the host keeps
+  streaming it. Measured, not argued -- 6 of 60 ticks in steps of 3 against the host's 20 in
+  steps of 1, ~40 explosions on a frozen screen, a `Rebuilt` ghost that dies a second time.
+  Menu-only and leave-no-trace; no frame can see any of the three),
   `eaNetCosmetic()` (the decorative-swarm replication self-test — card 9a3175d0; run it inside
   a level to cover the client apply leg),
   `eaNetLocalFx()` (which peer sees a presentation effect -- cards 7a8ec0d3 / a66e190a: a
@@ -923,6 +939,11 @@ site now lives under:
   added under a pause goes in `Enabled=false` and registers in the newest pause layer, so
   `Pop()` thaws it. Non-world components (pause menus, darkener, overlays) stay live — they ARE
   the pause UI. A spawn that races the pause appears parked and resumes on unpause, by design.
+  **That block is `ComponentBin.PauseAdopt` since card 5f506d11, and it has a second caller**:
+  `NetPuppets.ReleaseDyingPuppet` freezes a puppet it is (re-)enabling mid-pause the same way,
+  instead of stepping outside the pause layer and animating a death over a stopped screen (net
+  CLAUDE.md -> BODY LOOPS). The type gate stays at the `Add` site -- what counts as the pause UI
+  is that call site's policy, not the helper's.
 - **A pass that walks a live collection must FREEZE its count first.** Instant births mean any
   callback that spawns (a kill's asteroid split / powerup drop, a wall-hit explosion) grows
   `Game.Components` — and every mirror list fed by `ComponentAdded` — *while* the pass is

@@ -121,7 +121,7 @@ expect \[nethost\] 37 passed, 0 failed
 # directions), so the seam's raise leg asserts the value LANDS where it used to assert refusal,
 # and the floor at 1 -- which simply had no leg of its own before -- is pinned separately, so the
 # direction change cannot quietly take it along.
-expect \[netentity\] PASS \(47 passed, 0 failed\)
+expect \[netentity\] PASS \(53 passed, 0 failed\)
 # primary-slot negotiation + the v8 handshake codec (cards c0229c57 / ee96ea61)
 expect \[slottest\] PASS \(82/82 checks\)
 # the kick/block predicate + the v6 peer-identity codec (card 0b8a300b)

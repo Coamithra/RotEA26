@@ -90,7 +90,9 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
     //   matches exactly). animationProgress is the one Draw ingredient a frozen puppet can't reach ->
     //   STATE EXTRA so the body keeps animating. Setup() takes no args. The Update-spawned
     //   bullets/UFOs replicate as their own types.
-    // Spawn extras: none. State extras: [animFrame:1].
+    // Spawn extras: none. State extras: [animFrame:1] -- SENT but NOT APPLIED since card
+    //   5f506d11; a puppet advances the loop itself (FakeBoss.NetDriveExtras), see
+    //   Compat/Net/NetBodyAnim.
     internal sealed class FakeBossDescriptor : NetTypeDescriptor<FakeBoss>
     {
         public override AlienDrawableGameComponent CreatePuppet(ComponentBin bin, Game game, in NetBaseState state, byte[] buf, int off, int len)
@@ -100,19 +102,16 @@ namespace EvilAliensWeb.Compat.Net.Descriptors
             return f;
         }
 
+        // ENCODED BUT NEVER APPLIED, and deliberately so (card 5f506d11): the puppet advances
+        // this loop itself in the type's own NetDriveExtras, because a copy that only changes on
+        // this entity's snapshot turn makes the animation staircase instead of run. The byte
+        // stays on the wire so the protocol is unchanged and an older peer keeps animating --
+        // there is no ApplyStateExtra override below, which is what that means. The audit saying
+        // this type may own its loop is on Compat/Net/NetBodyAnim.
         public override int EncodeStateExtra(AlienDrawableGameComponent c, byte[] buf, int off)
         {
             buf[off++] = (byte)C(c).NetAnimFrame;
             return off;
-        }
-
-        public override void ApplyStateExtra(AlienDrawableGameComponent c, byte[] buf, int off, int len)
-        {
-            if (len < 1)
-            {
-                return;
-            }
-            C(c).NetAnimFrame = buf[off];
         }
     }
 

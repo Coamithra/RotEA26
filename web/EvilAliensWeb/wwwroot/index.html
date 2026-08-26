@@ -795,6 +795,18 @@
             catch (e) { console.warn('[debug] eaNetDeathFx failed (game not booted yet?): ' + e.message); }
         };
 
+        // Debug: the level-3 alien ruler (BattleSkull) on a joining peer — card 5f506d11.
+        // Three things no frame can see: whether the ruler's body loop runs on the client or
+        // steps once per snapshot turn, whether its death animation plays through a PAUSE, and
+        // whether a released dying ruler can be self-healed back into an intact one and die a
+        // second time. Prints PASS/FAIL. Run from the MAIN MENU — it plants real entities and
+        // really kills them, so it skips itself over a live session or level; off-screen, so
+        // nothing is drawn, but the real death paths play their real cues.
+        window.eaNetRuler = () => {
+            try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetRuler')); }
+            catch (e) { console.warn('[debug] eaNetRuler failed (game not booted yet?): ' + e.message); }
+        };
+
         // Debug: the co-op scenario harness (card 25ad0659 step 4) — the generous-claim
         // contract driven end to end over an in-process wire, plus the id-churn self-heal and
         // its pupPops probe. Prints PASS/FAIL. Run from the MAIN MENU: it starts and stops real
@@ -886,6 +898,23 @@
             menu: () => {
                 try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetLevelEndMenu')); }
                 catch (e) { console.warn('[debug] eaNetLevelEnd.menu failed (game not booted yet?): ' + e.message); }
+            },
+            // Card c600c55a: the LOSING half. .armLost() applies a real EvReset(GameOver) and
+            // .checkLost() reads the result about 15 s later (UpdateGameOver's 4 s wait plus the
+            // Mission Failed message's own 1.5/6/3 s states). .armLostHost() drives the host's
+            // own lives-exhausted death instead and hands its phase 2 to .menu() above, since a
+            // lobby return looks the same whether the level was won or lost.
+            armLost: () => {
+                try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetLevelLostArm')); }
+                catch (e) { console.warn('[debug] eaNetLevelEnd.armLost failed (game not booted yet?): ' + e.message); }
+            },
+            checkLost: () => {
+                try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetLevelLostCheck')); }
+                catch (e) { console.warn('[debug] eaNetLevelEnd.checkLost failed (game not booted yet?): ' + e.message); }
+            },
+            armLostHost: () => {
+                try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetLevelLostArmHost')); }
+                catch (e) { console.warn('[debug] eaNetLevelEnd.armLostHost failed (game not booted yet?): ' + e.message); }
             },
         };
 

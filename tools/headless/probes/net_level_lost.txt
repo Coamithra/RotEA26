@@ -1,0 +1,81 @@
+# PROBE: LOSING an online co-op level keeps the pairing ALIVE, exactly as winning one does
+# (card c600c55a). This is the CLIENT half -- the session -- and net_level_lost_lobby.txt is
+# the HOST half -- the menus. Siblings of net_level_end.txt / net_level_end_lobby.txt, which
+# pin the same two claims for a VICTORY (card 3b6c12e7).
+#
+# PINS two things a frame cannot show and no counter moves for:
+#   - GameScene.Terminate's latch now covers FinishedMode.lostlevel, not just finishedlevel.
+#     Without it the scene-down edge takes the ordinary match-end road -- EvLeave +
+#     Stop("match ended") -- so a Mission Failed drops both players to the MAIN MENU with a
+#     session-ended notice, and playing again means re-signalling from scratch.
+#   - NetSession.OnLevelEndSceneDown raises that edge INSIDE Terminate rather than on the next
+#     NetSession.Update(). A defeat has no CreditsScene: Game1's OnFinished handler adds
+#     MenuScene synchronously, so an edge one frame late means MenuScene.Initialize polls
+#     TakeLobbyReturn() before anything has set it.
+#
+# WHY A CLIENT: only a client applies a host's end-of-level broadcast off the wire. A game over
+# is host-authoritative (GameScene.LoseLife returns early on IsClient and the host broadcasts
+# EvReset(ResetModeGameOver)), so an injected EvReset is exactly what the far end of a real
+# co-op Mission Failed receives.
+#
+# WHY ?netallowdebug: the subject is MENU-session match-end semantics, so the suite starts a real
+# menu session -- and HandleHello refuses one while DebugFlags.Active, which ?level= sets. The
+# suite asserts its own pairing, so a missing flag reads as a FAIL rather than a vacuous pass.
+#
+# WHY LEVEL 2: no direction leg here (a defeat purges every ship instead of flying it off), so
+# the level is not load-bearing the way it is in net_level_end.txt -- it is the same boot purely
+# so the two probes differ in one thing, the ending.
+#
+# WHY TWO EVALS WITH A STEP BETWEEN: the subject is the level's OWN Mission Failed choreography
+# -- UpdateGameOver waits 4 s before raising the message, and AnimatedMessage.defeat then runs
+# 1.5 s enter + 6 s show + 3 s leave before OnFinished reaches Defeat() -> Terminate. The 900
+# frames (~15 s at the fixed 60 Hz dt) are that choreography actually running. Calling Terminate
+# by hand would assert about the rig, not about the path.
+#
+# THE MenuNetState LINE IS THE MENUS' POSITIVE CONTROL, and it lives here rather than in the C#
+# because by check time the take-once TakeLobbyReturn() latch has already been SPENT -- that is
+# the whole point of the second bullet above, so asserting it is still pending would be exactly
+# backwards. netMode alone does not discriminate (the pre-card notice branch sets it too), which
+# is why noticeUp is asserted beside it: a session-ended notice raises that, a lobby return does
+# not. statusShown is NOT asserted -- StartForTest never goes through NetLobby, so NetLobby.Phase
+# is Idle and NetUpdate's Idle arm swaps the client's waiting panel for the Host/Join menu. That
+# is a property of the rig's session, not of the card, so no menu census is claimed on this side.
+#
+# WHY IT IS NOT IN net_selftests.txt: it needs a live level and it is DESTRUCTIVE -- it drives
+# the level to its END, so the run finishes at the menus. Same answer as net_level_end.txt.
+#
+# FAILURE MEANS one of: a lost level tore the pairing down again (both players dropped to the
+# main menu, unable to start another level together); an EvLeave went out, so even a surviving
+# local session is ended from the peer's side; or the per-match state carried over, so the next
+# level's puppet would start from the last level's final position.
+#
+# MUTATION-TESTED both halves of the fix, and they are caught by DIFFERENT lines here:
+#   - dropping `|| mode == FinishedMode.lostlevel` from GameScene.Terminate fails 3 legs
+#     (Active, PeerUp, and the EvLeave discriminator -- which then reads [17], the EvLeave) and
+#     drops the MenuNetState line to netMode=False. The puppet-dropped leg still PASSES: Stop()
+#     drops the puppets too, so it is a per-match-state leg, never a survival one.
+#   - dropping only the NetSession.OnLevelEndSceneDown() call leaves all 11 C# legs green -- the
+#     session really does survive -- and is caught SOLELY by the MenuNetState line
+#     (netMode=False), which is why that line is not decoration here.
+#
+# THE COUNT IS ASSERTED, not `expect-not FAIL`: both phases SKIP themselves with no level up,
+# and an absence assertion passes on a run that never got there.
+#
+# eahl: --flags "?level=Level2&invuln&netallowdebug&noattract&seed=1234"
+
+step 200 nodraw
+mark
+
+eval NetLevelLostArm
+
+# The real ~14.5 s defeat choreography (UpdateGameOver's 4 s, then 1.5/6/3 s of message).
+step 900 nodraw
+
+eval MenuNetState
+expect \[menunetstate\] netMode=True noticeUp=False
+
+eval NetLevelLostCheck
+
+expect \[netlevellost\] 11 passed, 0 failed
+expect-not FAIL
+quit

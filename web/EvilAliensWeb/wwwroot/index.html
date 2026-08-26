@@ -887,6 +887,23 @@
                 try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetLevelEndMenu')); }
                 catch (e) { console.warn('[debug] eaNetLevelEnd.menu failed (game not booted yet?): ' + e.message); }
             },
+            // Card c600c55a: the LOSING half. .armLost() applies a real EvReset(GameOver) and
+            // .checkLost() reads the result about 15 s later (UpdateGameOver's 4 s wait plus the
+            // Mission Failed message's own 1.5/6/3 s states). .armLostHost() drives the host's
+            // own lives-exhausted death instead and hands its phase 2 to .menu() above, since a
+            // lobby return looks the same whether the level was won or lost.
+            armLost: () => {
+                try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetLevelLostArm')); }
+                catch (e) { console.warn('[debug] eaNetLevelEnd.armLost failed (game not booted yet?): ' + e.message); }
+            },
+            checkLost: () => {
+                try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetLevelLostCheck')); }
+                catch (e) { console.warn('[debug] eaNetLevelEnd.checkLost failed (game not booted yet?): ' + e.message); }
+            },
+            armLostHost: () => {
+                try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetLevelLostArmHost')); }
+                catch (e) { console.warn('[debug] eaNetLevelEnd.armLostHost failed (game not booted yet?): ' + e.message); }
+            },
         };
 
         // Debug (card 72143c11): the match-end notice seams. eaNetNotice(text) parks a

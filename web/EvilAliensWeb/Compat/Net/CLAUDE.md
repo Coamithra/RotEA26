@@ -85,10 +85,11 @@ inputs; the other peer's ship is an interpolated puppet.
 - **The respawn indicator crosses the wire** (`37f3a663`, v17): a dead player's clock ring is
   drawn on BOTH screens, so you can see your buddy coming back and where -- see the
   respawn-indicator bullet at the end of "Claims, score & per-slot HUD".
-- **A lobby pairing survives a finished level** (`3b6c12e7`, no protocol change): both peers walk
-  back to the lobby with the session up and the host picks the next mission, instead of the match
-  ending -- and the remote ship now flies off in the level's own spawn direction rather than
-  always upward (`b4a9fe60`). Two bullets at the end of "Signaling, menu lobby & handshake".
+- **A lobby pairing survives a level that PLAYED ITSELF OUT** (`3b6c12e7` for a win, `c600c55a`
+  for a Mission Failed; no protocol change either time): both peers walk back to the lobby with
+  the session up and the host picks the next mission, instead of the match ending -- and the
+  remote ship now flies off in the level's own spawn direction rather than always upward
+  (`b4a9fe60`). Three bullets at the end of "Signaling, menu lobby & handshake".
 - **Level 1's intro cinematic plays on BOTH peers** (`8a7772d6`): the host's scripted no-ship
   phase is replicated as a `MsgShipState` flag bit, so neither ship is on screen until the
   cutscene ends and then both fly in together -- and the hail of bullets, which cannot replicate
@@ -627,8 +628,9 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   `EvLeave`/notice, `NetSession.Stop()` tears down (registries disabled, state reset,
   restartable), `GameScene.NetApplyPeerLeft` force-exits a running level (except in
   Victory/GameOver, which finish locally), and the menus surface `TakeMenuNotice()`.
-  **A level FINISHED is the one exception since card 3b6c12e7 -- see the level-end bullet
-  below; it used to be in that list, and "one match per lobby" is no longer true.**
+  **A level that PLAYED ITSELF OUT is the one exception -- won since card 3b6c12e7, LOST since
+  card c600c55a. See the level-end bullets below; the game-over wind-down used to be in that
+  list, and "one match per lobby" is no longer true either way.**
   **AND SINCE CARD 87242257 (Stage 11.9) THE "ends it for both" HALF IS SUPERSEDED TOO: only
   the HOST leaving ends the match; a CLIENT leaving frees its seats and everyone else plays
   on** -- the N-PEER SESSION section below owns the policy, N=2 included (a menu-session host
@@ -695,7 +697,9 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
   The host then picks the next mission and the pair keeps playing. Before it, `UpdateSceneEdges`'
   scene-down branch was the single teardown trigger for EVERY normal level end -- `EvLeave` +
   `Stop("match ended")` -- so a finished level dropped both players to the main menu and a second
-  level meant re-signalling from scratch.
+  level meant re-signalling from scratch. **Since card c600c55a the same is true of a level you
+  LOSE -- see the bullet after this one, which is where the latch's real name and its timing
+  rule live.**
   - **NO PROTOCOL CHANGE AND NO NEW WIRE MESSAGE, which is the design's whole shape.** Both peers
     already reach the end through the existing host-broadcast `EvVictory`, so each one
     independently keeps its own session and walks to its own lobby. Nothing has to be negotiated,
@@ -765,6 +769,58 @@ shipped its UI half as the host pause menu's Online Play row; see the kick secti
     **`ProbeSpawnDirection`** sweeps the whole `PlayerSpawnType` enum against the VECTORS each arm
     must produce. NORTH has no end-to-end route at all (it ships on `ClassicAliens`, a challenge
     level whose victory a rig cannot reach), so the pure sweep is the only thing covering it.
+- **LOSING A LEVEL DOES THE SAME (card c600c55a), AND IT TOOK TWO CHANGES, NOT ONE.** The card:
+  *"mission failed in multiplayer dumps everyone back to the menu :) -- should be the same as when
+  you beat a level, the host can select a new level (or the same) to try."* Before it, the
+  Mission Failed wind-down fell through to the ordinary match-end road and both players landed on
+  the main menu, the client with a session-ended notice.
+  - **THE LATCH IS THE EASY HALF.** `GameScene.Terminate` now latches on `FinishedMode.lostlevel`
+    as well as `finishedlevel`, and the latch is renamed to say what it actually means:
+    `NetSession.OnLevelEndedCleanly()` / `levelEndedCleanly`, i.e. *this level ended on its own
+    terms on both peers*, not *this level was won*. It is sound to read `lostlevel` that way
+    because it has exactly ONE producer -- `Defeat()`, reached only from
+    `defeatmessage_OnFinished` -- so every other way out of a level (the pause menu's Exit,
+    `NetApplyPeerLeft`'s force-exit, a demo ending) is `FinishedMode.exit` and still ends the
+    match. No protocol change, exactly as in 3b6c12e7 and for the same reason: a game over is
+    already host-authoritative and broadcast (`LoseLife` -> `OnHostReset(ResetModeGameOver)` ->
+    the client's `NetApplyReset`), so each peer reaches its own `Terminate` off a beat both
+    already ran.
+  - **THE HALF THAT IS ACTUALLY INTERESTING: THE EDGE WAS ONE FRAME LATE.** `UpdateSceneEdges`
+    fires on the next `NetSession.Update()`, but `Game1.gameScene_OnFinished` adds `MenuScene`
+    SYNCHRONOUSLY for any ending that does not route through `CreditsScene` -- and
+    `MenuScene.Initialize` polls the take-once `TakeLobbyReturn()` as its very last act. So with
+    the latch alone the session survived and the host still sat on the MAIN MENU with a live
+    pairing behind it, unable to pick the next mission. `NetSession.OnLevelEndSceneDown()`, called
+    from `Terminate` below the purges and above `OnFinished`, raises that edge there instead. It
+    is a no-op unless the latch is set, so a quit / drop / force-exit keeps its old timing (and
+    its `Stop()` + menu notice still land on the following `Update`); `UpdateSceneEdges` is
+    edge-guarded by `sceneWasUp`, so that `Update` sees no change.
+  - **CARD 3b6c12e7 HAD THE SAME HOLE AND GOT AWAY WITH IT.** The three story levels return
+    through `CreditsScene`, which puts seconds between the scene going down and the menus coming
+    up, so the late edge never showed. A won CHALLENGE level takes `gameScene_OnFinished`'s
+    `default:` arm straight to `MenuScene` and did not -- that pre-existing case is fixed here
+    too, by the same call.
+  - **Verify with `tools/headless/probes/net_level_lost.txt` (the SESSION, client side) and
+    `net_level_lost_lobby.txt` (the MENUS, host side)**; console `eaNetLevelEnd.armLost()` /
+    `.checkLost()` and `.armLostHost()` (whose phase 2 is `.menu()`, reused from the victory
+    half -- what a lobby return has to look like does not depend on how the level ended). Both
+    DESTRUCTIVE. The two probes catch DIFFERENT halves: dropping `lostlevel` from the latch fails
+    session legs on both, while dropping only `OnLevelEndSceneDown()` leaves every session leg
+    green and is caught solely by the menu assertions. The shared legs live in
+    `NetLevelEndTest.CheckLevelEndSurvival` so the win and loss halves cannot drift.
+  - **There is no `?lose` to pair with `?win`, deliberately.** A host's game over comes out of the
+    level (`UpdateNormal` -> `AllShipsDead` -> `LoseLife` -> the lives-exhausted branch), so
+    `ArmDefeatHost` puts the level in the state a Hard+ run reaches on its last life -- `Lives` 0,
+    no `InfiniteLives`, no `DirectRespawn` (Easy's respawn-in-place arm returns from `LoseLife`
+    BEFORE the game over) -- and asplodes every locally-owned ship through the real
+    `Asplode()`->`Die()` path. Note the consequence for hand testing: on Easy/Medium a story
+    level runs at `score.Lives = -1` and **cannot reach a game over at all**; only Hard+ sets
+    `Lives = 7` (`ApplyDifficultyPolicy`).
+  - **A RIG ARTIFACT TO KNOW ABOUT ON THE CLIENT SIDE.** `NetSession.StartForTest` never goes
+    through `NetLobby`, so `NetLobby.Phase` is `Idle` and `MenuScene.NetUpdate`'s `Idle` arm
+    swaps the client's waiting panel for the Host/Join menu the moment `EnterNetLobby` shows it.
+    That is a property of the rig's session, not of the card, which is why `net_level_lost.txt`
+    asserts `netMode`/`noticeUp` off `eaMenuNetState()` and claims no menu census on that side.
 
 ## N-PEER SESSION (card 87242257, Stage 11.9, protocol v24)
 
@@ -789,8 +845,9 @@ tabs, LocalSocketNet `--net-peers`) remain how it is exercised headlessly.
   `0257f8ba` -- before 11.10 a peerless lobby was a dead end and Stopped with the notice; the
   Stop survives only for the non-lobby shapes, e.g. a scenario session).
   **Consequence at N=2, deliberate:** a menu-session host whose partner drops now keeps playing
-  solo instead of being thrown to the menu. A clean level FINISH still keeps every pairing
-  alive (card 3b6c12e7; `ResetPerMatchState` loops the channels).
+  solo instead of being thrown to the menu. A level that plays itself out still keeps every
+  pairing alive, won or lost (cards 3b6c12e7 / c600c55a; `ResetPerMatchState` loops the
+  channels).
 - **EVERY SLOT DECISION KEYS OFF `p.PrimarySlot`, never a `ControlDevice.Remote` scan** --
   `GetPlayerIndex(Remote)` / `DeviceIsPlaying(Remote)` / `ReleasePlayer(Remote)` are ambiguous
   with two remote peers, and every one of them was load-bearing in the 2-peer code
@@ -895,8 +952,8 @@ per-peer kick. Design: `plans/4p-online-coop.md` section G.
   it; entries Start Game / Cancel; text `NetLobby.HostLobbyText` = room code + per-seat roster
   + the start hint, re-texted every tick). Start is GATED on a peer being up, and backs the
   level pick out to the panel rather than tearing the session down (`netPick_CancelSelected`).
-  The post-level lobby return (card 3b6c12e7) still lands the host on `netPickMenu` -- the
-  crew is already aboard -- and Cancel from there now reaches the roster panel.
+  The post-level lobby return (cards 3b6c12e7 / c600c55a) still lands the host on `netPickMenu`
+  -- the crew is already aboard -- and Cancel from there now reaches the roster panel.
 - **THE JOIN SIDE SEES THE ROOM: `EvLobbyRoster` (event 28, host -> clients, reliable,
   `[slotMask:1]`).** A waiting client cannot see its fellow joiners any other way (grants are
   host-side, no ships exist to relay, the menu oracle is local bookkeeping). Edge-triggered on

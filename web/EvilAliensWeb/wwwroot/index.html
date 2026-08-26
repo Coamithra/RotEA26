@@ -899,6 +899,15 @@
                 try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetLevelEndMenu')); }
                 catch (e) { console.warn('[debug] eaNetLevelEnd.menu failed (game not booted yet?): ' + e.message); }
             },
+            // Card 51566427: the JOIN-IN-PROGRESS half. A stranger who found our LISTED game in
+            // the browser and joined it mid-level used to be ejected the moment we finished that
+            // level together. .armListed() is .armHost()'s twin on a listed session and hands its
+            // phase 2 to .menu() above. Boot ?level=Level2&invuln&noattract&win — no
+            // ?netallowdebug, which a listed session genuinely does not need.
+            armListed: () => {
+                try { console.log(DotNet.invokeMethod('EvilAliensWeb', 'debugNetLevelEndArmListed')); }
+                catch (e) { console.warn('[debug] eaNetLevelEnd.armListed failed (game not booted yet?): ' + e.message); }
+            },
             // Card c600c55a: the LOSING half. .armLost() applies a real EvReset(GameOver) and
             // .checkLost() reads the result about 15 s later (UpdateGameOver's 4 s wait plus the
             // Mission Failed message's own 1.5/6/3 s states). .armLostHost() drives the host's

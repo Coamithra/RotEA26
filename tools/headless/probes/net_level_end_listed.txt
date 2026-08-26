@@ -1,0 +1,68 @@
+# PROBE: finishing a level does NOT end a JOIN-IN-PROGRESS match (card 51566427) -- the stranger
+# who joined our LISTED game mid-level stays, and the host comes back to its LOBBY to pick the
+# next mission, exactly as a menu-lobby pairing already did (cards 3b6c12e7 / c600c55a).
+#
+# THE SHAPE THE SIBLING PROBES DO NOT COVER. net_level_end.txt and net_level_end_lobby.txt both
+# drive MENU sessions; NetSession.UpdateSceneEdges guarded its survival branch with
+# `endedCleanly && menuSession`, so a listedSession -- a stranger off a public listing, card
+# 2001fbd8 -- fell through to EvLeave + Stop("match ended") instead. Host lists a game, stranger
+# joins mid-level, they finish it together, and the stranger is ejected to their main menu with
+# the host still sitting right there. That exclusion was deliberate once ("a join-in-progress
+# host has no lobby to return to") and expired with card 0257f8ba.
+#
+# WHY A HOST ARM: listedSession only ever exists host-side (StartListedSession never builds a
+# client), and a host victory comes from the level's own ?win script, never from a beat a rig can
+# inject. Hence ?win, which is Level-2-only.
+#
+# WHY NO ?netallowdebug, unlike every menu-session probe here: HandleHello's debug refusal is
+# menuSession-only, and that asymmetry is production's own -- a debug-flagged game is stopped
+# from being LISTED by NetListing's eligibility predicate, not from pairing once it has been. The
+# arm asserts the session KIND it actually got (`listed=yes menu=no`), so a StartForTest that
+# quietly dropped the opt-in reads as a FAIL rather than as a menu-session re-run under this
+# card's name.
+#
+# WHY THE LONG STEP: ~4600 frames (~77 s of game time) covers the ?win script reaching Victory,
+# GameScene.UpdateWin's 7 s choreography, and Level 2's whole post-level text crawl -- story
+# levels return through CreditsScene, so the menus are seconds behind the scene going down.
+#
+# WHY --nettime game: the wire's cadences have to track the stepped world rather than the wall
+# clock, or the 77 s of game time pass in a couple of real seconds and nothing on the session
+# side keeps up.
+#
+# THE EvLeave LEG IS THE DISCRIMINATOR. "The session survived" also passes on a build that merely
+# forgot to Stop() -- the joiner would still be ejected from its own side by the EvLeave. Its
+# positive control sits beside it (a listed host's PeerConnected sends the joiner an EvLaunch, so
+# the wire has demonstrably carried addressed traffic).
+#
+# THE CONVERSION LEG has no other observable at all: every downstream reader tests
+# `menuSession || listedSession`, so nothing separates a converted session from an unconverted
+# one until a peer departs at the MENUS -- one step past what this probe can drive. It is what
+# keeps ReleaseDepartedPeer's tail from throwing this host to the main menu with "The other
+# player left / Match ended" the moment the joiner disconnects from the lobby.
+#
+# DESTRUCTIVE: it drives the live level to its end. Boot it throwaway.
+#
+# MUTATION-TESTED: reverting the guard to `endedCleanly && menuSession` fails 6 of the 13 legs --
+# the session, the peer, the EvLeave discriminator, the conversion and both menu-census legs --
+# and drops `eval MenuNetState` to netMode=False. The two positive controls and the teardown legs
+# stay green on that build, which is what makes the failures mean something.
+#
+# eahl: --flags "?level=Level2&invuln&noattract&win&seed=1234" --nettime game
+
+step 200 nodraw
+mark
+
+eval NetLevelEndArmListed
+expect listed=yes menu=no
+
+# The ?win script's victory, UpdateWin's 7 s, then the credits crawl.
+step 4600 nodraw
+
+eval MenuNetState
+expect \[menunetstate\] netMode=True
+
+eval NetLevelEndMenu
+
+expect \[netlevelendmenu\] 13 passed, 0 failed
+expect-not FAIL
+quit

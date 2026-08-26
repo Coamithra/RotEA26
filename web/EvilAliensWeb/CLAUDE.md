@@ -560,6 +560,13 @@ net layer, split out of this file so it loads only when you work under `Compat/N
   **DESTRUCTIVE**. The lobby half reuses `.menu()` -- what a lobby return looks like does not
   depend on how the level ended. Pinned by `tools/headless/probes/net_level_lost.txt` +
   `net_level_lost_lobby.txt`; net CLAUDE.md has the two-changes-not-one story),
+  `eaNetLevelEnd.armListed()`/`.menu()` (the same claim for the JOIN-IN-PROGRESS shape the first
+  two left out -- card 51566427: a stranger who found our LISTED game in the browser and joined it
+  mid-level used to be ejected the moment we finished that level together, with the host still
+  sitting right there. `.armHost()`'s twin on a listed session, and it hands phase 2 to `.menu()`
+  for the same reason the defeat half does. Also **DESTRUCTIVE**, same `&win` boot -- but with NO
+  `?netallowdebug`, which a listed session genuinely does not need, since `HandleHello`'s debug
+  refusal is menu-session-only. Pinned by `tools/headless/probes/net_level_end_listed.txt`),
   `eaNetIntroGate()` (Level 1's intro cinematic in co-op — card 8a7772d6: the replicated
   player-spawn hold and the cosmetic intro bullet volley, driven over the in-process wire against
   the REAL Level 1 script. **DESTRUCTIVE and LEVEL-1-ONLY** — it pairs real sessions onto the live

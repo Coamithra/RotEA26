@@ -928,6 +928,20 @@ namespace EvilAliensWeb.Compat
 			return EvilAliensWeb.Compat.Net.NetLevelEndTest.MenuCheck();
 		}
 
+		// The JOIN-IN-PROGRESS half (card 51566427): a stranger who joined our LISTED game
+		// mid-level used to be ejected the moment we finished that level together. Same two-call
+		// shape as the host arm above and it reuses NetLevelEndMenu for phase 2 -- the menu facts
+		// are the same whichever session kind reached the lobby -- so it has an arm and no check
+		// of its own. `eval NetLevelEndArmListed`, step past the victory AND the credits crawl,
+		// `eval NetLevelEndMenu`. DESTRUCTIVE. Boot ?level=Level2&invuln&noattract&win -- and
+		// note the missing ?netallowdebug, which a LISTED session genuinely does not need
+		// (HandleHello's debug refusal is menuSession-only).
+		[JSInvokable("debugNetLevelEndArmListed")]
+		public static string NetLevelEndArmListed()
+		{
+			return EvilAliensWeb.Compat.Net.NetLevelEndTest.ArmListed();
+		}
+
 		// The LOSING half of the same lobby-return claim (card c600c55a): a Mission Failed has to
 		// end a co-op level the way a victory does. Same two-call shape, but the wait is the
 		// ~14.5 s defeat choreography (UpdateGameOver's 4 s, then AnimatedMessage's 1.5/6/3 s):

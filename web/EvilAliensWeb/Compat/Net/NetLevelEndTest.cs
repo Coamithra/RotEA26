@@ -64,6 +64,12 @@ namespace EvilAliensWeb.Compat.Net
         // so without this a Check() after an ArmDefeat() would report FAILs about a fly-off that
         // was never sampled.
         private static bool armedDefeat;
+        // WHICH host arm ran (card 51566427). The listed arm reuses MenuCheck -- the menu facts a
+        // lobby return has to satisfy are the same whichever session kind reached it -- but it
+        // adds legs no menu-session arm needs: that no EvLeave went out, and that the session
+        // CONVERTED to a menu-lobby one. Without this flag those would either be missing from the
+        // listed run or asserted about menu-session arms that never claimed them.
+        private static bool armedListed;
         private static bool armedPaired;
         private static bool armedSceneUp;
         private static float armedLocalDir;
@@ -211,6 +217,90 @@ namespace EvilAliensWeb.Compat.Net
                 sb.Append("  paired=").Append(armedPaired ? "yes" : "NO")
                   .Append(" -- now let the level's own ?win script reach Victory, then step past"
                       + " the credits crawl and run the menu check\n");
+            }
+            catch (Exception ex)
+            {
+                sb.Append("  FAIL the arm phase ran (").Append(Describe(ex)).Append(")\n");
+                sb.Append(Frames(ex));
+            }
+            return sb.ToString();
+        }
+
+        // PHASE 1'''', THE JOIN-IN-PROGRESS HALF (card 51566427). ArmHost()'s twin with ONE flag
+        // changed, and that flag is the whole card: a LISTED session -- a stranger who found our
+        // single-player game in the browser and joined it mid-level -- used to be excluded from
+        // the survival branch, so finishing the level together tore the match down and ejected
+        // them while the host was still sitting right there.
+        //
+        // A HOST arm because `listedSession` only ever exists host-side (StartListedSession never
+        // builds a client), and so, like ArmHost, its victory has to come from the level's own
+        // ?win script rather than an injected beat.
+        //
+        // NO ?netallowdebug NEEDED, unlike every menu-session arm here: HandleHello's debug
+        // refusal is menuSession-only. That asymmetry is production's own -- a debug-flagged game
+        // is stopped from being LISTED by NetListing's eligibility predicate, not from pairing
+        // once it has been -- so the arm pairs under a bare ?level= exactly as the real thing
+        // would. The pairing is still asserted, so a build that changed that reads as a FAIL.
+        public static string ArmListed()
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.Append("[netlevelendjip] phase 1 -- arm (listed / join-in-progress host)"
+                + " (card 51566427)\n");
+
+            if (armed)
+            {
+                sb.Append("  SKIP (already armed)\n");
+                return sb.ToString();
+            }
+            if (GameScene.NetActiveScene == null)
+            {
+                sb.Append("  SKIP (needs a live level -- boot"
+                    + " ?level=Level2&invuln&noattract&win and run it there)\n");
+                return sb.ToString();
+            }
+            if (NetSession.Active)
+            {
+                sb.Append("  SKIP (a co-op session is already up)\n");
+                return sb.ToString();
+            }
+
+            ComponentBin bin = ServiceHelper.Get<IComponentBinService>().ComponentBin;
+            Game game = bin.Game;
+
+            hostBefore = NetHost.Current;
+            NetHost.Current = new PinnedNetHost();
+            armed = true;
+            armedHost = true;
+            armedListed = true;
+            armedDefeat = false;
+            try
+            {
+                wire = new NetWire(2);
+                InMemoryTransport ours = wire[0];
+                peer = wire[1];
+
+                NetSession.StartForTest(game, host: true, ours, Room,
+                    asMenuSession: false, asListedSession: true);
+                peer.Open(Room);
+                peer.SendReliable(NetProtocol.EncodeHello(NetSession.ProtocolVersion, false,
+                    NetSession.LocalBuildHash, 0, NetProtocol.SlotNone, PeerToken, 0));
+                wire.Pump();
+                NetSession.Update();
+                armedPaired = NetSession.IsHost && NetSession.PeerUp;
+                // THE KIND IS ASSERTED AT BOTH ENDS OF THE RUN: here, so a StartForTest that
+                // quietly dropped the opt-in cannot turn the whole probe into a menu-session
+                // re-run wearing this card's name; and in MenuCheck, so the conversion the fix
+                // performs is seen to happen rather than inferred.
+                sb.Append("  paired=").Append(armedPaired ? "yes" : "NO")
+                  .Append(" listed=").Append(NetSession.IsListedSession ? "yes" : "NO")
+                  .Append(" menu=").Append(NetSession.IsMenuSession ? "yes" : "no")
+                  .Append(" -- now let the level's own ?win script reach Victory, then step past"
+                      + " the credits crawl and run the menu check\n");
+                if (!NetSession.IsListedSession || NetSession.IsMenuSession)
+                {
+                    sb.Append("  FAIL this session is not a LISTED one, so the arm proves"
+                        + " nothing about the card\n");
+                }
             }
             catch (Exception ex)
             {
@@ -418,7 +508,7 @@ namespace EvilAliensWeb.Compat.Net
             }
 
             sb.Append("[netlevelendmenu] phase 2' -- the host is in its lobby"
-                + " (cards 3b6c12e7 / c600c55a)\n");
+                + (armedListed ? " (card 51566427)" : " (cards 3b6c12e7 / c600c55a)") + "\n");
             if (!armed || !armedHost)
             {
                 sb.Append(armed
@@ -435,6 +525,33 @@ namespace EvilAliensWeb.Compat.Net
                     + (NetScene.Current == null ? "null" : "still up") + ")", NetScene.Current == null);
                 Check1("the session outlived the level", NetSession.Active);
                 Check1("... and the peer is still up", NetSession.PeerUp);
+
+                if (armedListed)
+                {
+                    // THE DISCRIMINATOR FOR CARD 51566427, and the reason the two legs above are
+                    // not enough on their own: pre-card the scene-down edge sent an EvLeave and
+                    // THEN stopped, so a build that merely forgot the Stop would still eject the
+                    // joiner from its own side while both legs above passed. Same shape as
+                    // CheckLevelEndSurvival's -- drained straight off the peer's queue, since
+                    // dispatch is inline on the send and wire.Pump() would deliver into nothing.
+                    List<byte> types = DrainEventTypes(peer);
+                    Check1("NO EvLeave was sent to the joiner (event types seen: ["
+                        + string.Join(",", types) + "])", !types.Contains(NetProtocol.EvLeave));
+                    // ...and that absence means something. A listed host's PeerConnected sends
+                    // the joiner an EvLaunch into its running level, so this wire has carried
+                    // real addressed traffic -- an assertion that nothing arrived would otherwise
+                    // pass just as well on a wire that was never connected at all.
+                    Check1("... on a wire that was genuinely carrying our traffic (joiner"
+                        + " received " + peer.RxDelivered + " packets)", peer.RxDelivered > 0);
+                    // The conversion itself. It has no behavioural observable until a peer
+                    // departs at the MENUS -- one step past what this probe can drive -- and it
+                    // is what keeps ReleaseDepartedPeer's tail from throwing this host to the
+                    // main menu with a notice the moment the joiner disconnects from the lobby.
+                    Check1("the listed session became a menu-LOBBY one (menu="
+                        + (NetSession.IsMenuSession ? "yes" : "NO") + " listed="
+                        + (NetSession.IsListedSession ? "STILL" : "no") + ")",
+                        NetSession.IsMenuSession && !NetSession.IsListedSession);
+                }
 
                 List<MenuSub1> live = ServiceHelper.Get<IComponentBinService>()
                     .ComponentBin.InCollection<MenuSub1>();
@@ -486,6 +603,7 @@ namespace EvilAliensWeb.Compat.Net
                 peer = null;
                 armed = false;
                 armedDefeat = false;
+                armedListed = false;
             }
 
             sb.Append(Tally2(pass, fail));

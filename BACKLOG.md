@@ -2,9 +2,18 @@
 
 13 cards, in board order.
 
-## 1. `bec47239` — in the host room menu, the cancel button is overlapped by "start when your crew is aboard!"
+## 1. `bec47239` — in the host room menu, the cancel button is overlapped by "start when your crew is aboard!" — **DONE**
 
 _No description or comments — the card title is the whole ticket._
+
+**Done** ([#353](https://github.com/Coamithra/RotEA26/pull/353)). `ConfirmationMenu.DrawMenu` placed the
+prompt and the rows from two independent fixed anchors, so a prompt taller than the gap between them
+drew through them (measured 98px of overlap on the 8-line lobby panel, 120px on the 9-line one). It now
+lays the two out as one composite — but only when the default layout would collide, so every short
+prompt is pixel-identical. Pinned by `tools/headless/probes/confirm_prompt_layout.txt`.
+
+_Further testing would be nice:_ the final foreground-Chrome smoke check was not possible here (no
+browser/dev server in this environment); verified headlessly via `eahl` instead.
 
 ## 2. `ed32efe1` — let's make the explosion that is created when you respawn have its size level be equal to the level you had the "2" powerup at
 

@@ -42,6 +42,7 @@ internal class ShipConnector : AlienDrawableGameComponent
 	                                             // old art's ~60px orbs (owner: "like 3x", then "10% less")
 	private const float BeamGlowScale = 2.6f;    // beam glow-layer width vs core (Quad.GlowWidthScale)
 	private const float BeamCapLen = 1.0f;       // capsule dome length vs half-width (Quad.DefaultCapScale)
+	private const float MinStretch = 0.5f;       // StretchFactor's floor: the beam never thins past half
 
 	private const int ArcLevels = 4;             // midpoint-displacement subdivisions per bolt
 	private const float BoltAmpFactor = 0.1f;    // main-bolt zig-zag amplitude as a fraction of the ship gap
@@ -65,9 +66,9 @@ internal class ShipConnector : AlienDrawableGameComponent
 	private static readonly Color BoltGlow = new Color(60, 130, 245);   // electric-blue bolt glow
 	// Ship-glow "energy well" stack colours (== the laser chargeup well / Quad beam layers): a blue
 	// halo over a cyan-white body over a white-hot core, additively saturating each centre to white.
-	private static readonly Color OrbHalo = new Color(35, 110, 235);   // blue outer halo
-	private static readonly Color OrbBody = new Color(150, 215, 255);  // cyan-white body
-	private static readonly Color OrbCore = new Color(210, 235, 255);  // white-hot core
+	private static readonly Color GlowHalo = new Color(35, 110, 235);   // blue outer halo
+	private static readonly Color GlowBody = new Color(150, 215, 255);  // cyan-white body
+	private static readonly Color GlowCore = new Color(210, 235, 255);  // white-hot core
 	// Thick beam layers: the old art's bar was a saturated blue body with a near-white centre line.
 	private static readonly Color BeamGlow = new Color(40, 110, 245);  // wide blue glow layer
 	private static readonly Color BeamCore = new Color(170, 225, 255); // cyan-white core
@@ -282,11 +283,12 @@ internal class ShipConnector : AlienDrawableGameComponent
 
 	public override void Initialize()
 	{
-		color = new Color(new Vector4(1f, 1f, 1f, 0.65f));
 		base.Initialize();
-		// lazermiddle (thin strip) + lazerglow (radial bloom) drive the live lightning. Both are
-		// already loaded by GameScene.LoadContent / the TeamChallenge preload; content.Load caches,
-		// so this is a hit, and loading here guarantees availability for any multiplayer scene.
+		// lazermiddle (thin strip) draws the bolt segments, lazerglow (radial bloom) the ship glows,
+		// lazerbeam (cone-profile capsule) the thick beam. lazerglow and lazerbeam are in
+		// GameScene.PreloadGraphicalContent, so those two loads are cache hits; lazermiddle is NOT
+		// (pre-existing -- Quad.LoadContent decodes it at the first laser), so a level where the
+		// first dock precedes the first laser pays that one small decode here.
 		lineTex = content.Load<Texture2D>("GFX/Sprites/lazermiddle");
 		glowTex = content.Load<Texture2D>("GFX/Sprites/lazerglow");
 		beamTex = content.Load<Texture2D>("GFX/Sprites/lazerbeam");
@@ -350,7 +352,7 @@ internal class ShipConnector : AlienDrawableGameComponent
 		float thick = BeamThick;
 		if (thick > 0f)
 		{
-			DrawThickBeam(pA, pB, axis, thick);
+			DrawThickBeam(pA, pB, axis, gap, thick);
 		}
 
 		// Ship glows: each ship gets a churning "energy well" built like the laser chargeup's
@@ -544,19 +546,24 @@ internal class ShipConnector : AlienDrawableGameComponent
 	// at half strength (square root of the rest/gap ratio). Only the online soft tether
 	// (NetPullOwnShip) can open the gap, so offline docking is untouched: a pair at rest draws at
 	// full thickness, the ~170px drag equilibrium at ~0.68, the 220px hard cap at ~0.6.
-	private void DrawThickBeam(Vector2 pA, Vector2 pB, Vector2 axis, float coreThick)
+	// The one separation beyond that is the online TeamChallenge SPAWN: the tether forms with the
+	// ships 567-696px apart (see NetMaxHardPullPxPerMs) and reels them in over ~883ms, during which
+	// the curve sits on its MinStretch floor -- a half-thickness beam across most of the screen
+	// joining two glows, i.e. the link visibly hauling the pair together. Seen and accepted
+	// (`?harness=connector&connectorgap=348` renders it); the floor is what keeps it a beam rather
+	// than a hairline there.
+	private void DrawThickBeam(Vector2 pA, Vector2 pB, Vector2 axis, float gap, float coreThick)
 	{
 		float breathe = 1f + 0.10f * (float)Math.Sin(fxTime * PulseHz * (float)Math.PI * 2f + fxPhase + 1.3f);
 		float bright = 0.80f + 0.20f * (float)Math.Sin(fxTime * PulseHz * (float)Math.PI * 2f + fxPhase + 2.9f);
 		// texture +Y runs along the beam, +X across it (Quad's convention)
 		float rotation = (float)Math.Atan2(axis.X, 0f - axis.Y);
 		Vector2 center = (pA + pB) * 0.5f;
-		float bodyLen = Vector2.Distance(pA, pB);
-		float stretch = StretchFactor(bodyLen);
+		float stretch = StretchFactor(gap);
 		bright *= 0.55f + 0.45f * stretch;
 		float core = coreThick * breathe * stretch;
-		DrawCapsule(center, pA, pB, rotation, core * BeamGlowScale, bodyLen, BeamGlow * bright);
-		DrawCapsule(center, pA, pB, rotation, core, bodyLen, BeamCore * bright);
+		DrawCapsule(center, pA, pB, rotation, core * BeamGlowScale, gap, BeamGlow * bright);
+		DrawCapsule(center, pA, pB, rotation, core, gap, BeamCore * bright);
 	}
 
 	// The beam's thickness multiplier at a given ship separation: 1 up to the docking rest length,
@@ -572,7 +579,6 @@ internal class ShipConnector : AlienDrawableGameComponent
 		}
 		return Math.Max(MinStretch, (float)Math.Sqrt(NetRestPx / gapPx));
 	}
-	private const float MinStretch = 0.5f;
 
 	// One capsule layer of the beam texture (mirrors Quad.DrawCapsuleBeam): its 2px centre band
 	// stretched to the body length plus its top half as a dome on each end, pivoted so the dome's
@@ -605,9 +611,9 @@ internal class ShipConnector : AlienDrawableGameComponent
 		float wCore = Wobble(0.05f, 1.2f, phase * 2.3f);
 		// the core glares in time with the breathe so the whole glow reads as one pulse
 		float glare = 0.70f + 0.30f * (float)Math.Sin(fxTime * PulseHz * (float)Math.PI * 2f + phase);
-		DrawGlow(center, baseD * 1.00f * breathe * wHalo, OrbHalo * (0.95f * glow));
-		DrawGlow(center, baseD * 0.62f * breathe * wBody, OrbBody * (0.65f * glow));
-		DrawGlow(center, baseD * 0.32f * breathe * wCore, OrbCore * (0.75f * glow * glare));
+		DrawGlow(center, baseD * 1.00f * breathe * wHalo, GlowHalo * (0.95f * glow));
+		DrawGlow(center, baseD * 0.62f * breathe * wBody, GlowBody * (0.65f * glow));
+		DrawGlow(center, baseD * 0.32f * breathe * wCore, GlowCore * (0.75f * glow * glare));
 	}
 
 	// A gentle +/-amp size shimmer: two low, incommensurate sines -> a smooth organic wander (not a

@@ -660,17 +660,28 @@ namespace EvilAliensWeb.Compat
 
 		public static float? ConnectorGlow { get; private set; }
 
+		// Programmatic docking look (card "docked ships visual"): the static twin-orb sprite is
+		// gone; the connector now draws a pulsating glow around EACH ship plus a thick capsule beam
+		// between them, so it follows the ships however far online lag stretches the tether.
+		//   ?connectorbeam=<px>   core thickness of that beam in design px (0 = no beam, bolts only).
+		//   ?connectorgap=<px>    HARNESS ONLY (?harness=connector): half the ship separation, so the
+		//                         stretched online case (up to ~110) can be screenshot with no peer.
+		public static float? ConnectorBeam { get; private set; }
+
+		public static float? ConnectorGap { get; private set; }
+
 		// Runtime setter for the live connector-tuner slider panel (Compat/DebugInput.SetConnector ->
 		// eaConnector() in index.html, shown on ?level=TeamChallenge / a bare ?connectortune). Lets the
-		// five knobs be dragged in real time; ShipConnector reads them every Draw. Same effect as the
+		// six knobs be dragged in real time; ShipConnector reads them every Draw. Same effect as the
 		// ?connector* URL flags, live.
-		internal static void SetConnectorOverride(int? boltCount, float? arcRate, float? jitter, float? pulse, float? glow)
+		internal static void SetConnectorOverride(int? boltCount, float? arcRate, float? jitter, float? pulse, float? glow, float? beam)
 		{
 			ConnectorBoltCount = boltCount;
 			ConnectorArcRate = arcRate;
 			ConnectorJitter = jitter;
 			ConnectorPulse = pulse;
 			ConnectorGlow = glow;
+			ConnectorBeam = beam;
 		}
 
 		// Runtime setter for the live laser-tuner slider panel (Compat/DebugInput.SetLazer ->
@@ -2385,6 +2396,28 @@ namespace EvilAliensWeb.Compat
 					{
 						RejectFlagValue(key, val, "a number >= 0",
 							InForce(ConnectorGlow));
+					}
+					break;
+				case "connectorbeam":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var cbeam) && cbeam >= 0f)
+					{
+						ConnectorBeam = cbeam;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number >= 0",
+							InForce(ConnectorBeam));
+					}
+					break;
+				case "connectorgap":
+					if (float.TryParse(val, NumberStyles.Float, CultureInfo.InvariantCulture, out var cgap) && cgap > 0f)
+					{
+						ConnectorGap = cgap;
+					}
+					else
+					{
+						RejectFlagValue(key, val, "a number > 0",
+							InForce(ConnectorGap));
 					}
 					break;
 				case "walltowers":

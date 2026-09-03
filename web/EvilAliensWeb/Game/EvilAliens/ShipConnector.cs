@@ -11,20 +11,38 @@ internal class ShipConnector : AlienDrawableGameComponent
 
 	public PlayerShip B;
 
-	// --- Live lightning FX (Trello "ship connector too static") -------------------------
+	// --- Fully programmatic docking look ---------------------------------------------------
 	// The connector used to be ONE frozen GFX/Sprites/connector sprite (two orbs + baked
-	// crackle) stretched between the ships -- dead-still, especially when two ships stay
-	// docked. It now breathes (a brightness pulse on the base sprite) and, over the gap
-	// between the ships, draws live fractal lightning: a few continuously-writhing main
-	// bolts plus stochastic short crackle tendrils, both additive. Same midpoint-displacement
-	// + time-driven Wiggle technique the Quad laser uses (Quad.cs), kept self-contained here
-	// (own FX RNG, own scratch) so the connector doesn't drag in the whole beam pipeline. All
-	// tunables have baked defaults overridable live via the ?connector* flags / eaConnector panel.
+	// crackle) centred on the midpoint at a fixed size. Offline that was merely dead-still;
+	// online it was WRONG: the soft tether lets lag stretch the two ships to ~170-220px apart
+	// (see the Net* block below) while the sprite's orbs stayed ~97px apart, so the glows sat
+	// in empty space beside the ships and the painted beam stopped short of both. Nothing of
+	// the sprite is drawn any more (it is still loaded -- CollisionType derives the hitbox from
+	// its bounds). Instead, every frame, from the two ships' LIVE positions:
+	//   * a pulsating blue energy glow AROUND each ship (DrawDockGlow -- the laser chargeup's
+	//     stacked-lazerglow "energy well" recipe, sized to the ship like singleconnectorglow);
+	//   * a THICK capsule beam between them (DrawThickBeam -- Quad's lazerbeam capsule, a wide
+	//     blue glow layer under a cyan-white core, both breathing), so the link reads like the
+	//     old art's fat bright bar whatever the separation;
+	//   * on top, the live fractal lightning: a few continuously-writhing main bolts plus
+	//     stochastic short crackle tendrils. Same midpoint-displacement + time-driven Wiggle
+	//     technique the Quad laser uses (Quad.cs), kept self-contained here (own FX RNG, own
+	//     scratch) so the connector doesn't drag in the whole beam pipeline.
+	// All additive; all tunables have baked defaults overridable live via the ?connector* flags /
+	// eaConnector panel.
 	private const int DefaultBoltCount = 2;      // continuously-writhing main bolts spanning the two ships
 	private const float DefaultArcRate = 6f;     // average short crackle tendrils spawned per second
 	private const float DefaultJitter = 1f;      // multiplies the bolt zig-zag amplitude
-	private const float DefaultPulse = 2.5f;     // breathe frequency (Hz) of the base sprite + orb blooms
-	private const float DefaultGlow = 1f;        // orb-bloom intensity/size vs baseline (0 = off)
+	private const float DefaultPulse = 2.5f;     // breathe frequency (Hz) of the ship glows + beam
+	private const float DefaultGlow = 1f;        // ship-glow intensity/size vs baseline (0 = off)
+	private const float DefaultBeamThick = 24f;  // thick beam CORE thickness (design px); glow layer is x BeamGlowScale
+
+	private const float DockGlowDiameter = 350f; // baseline ship-glow halo diameter (design px), x ConnectorGlow --
+	                                             // lazerglow is gaussian, so the visible disc is ~half this: ~2.7x the
+	                                             // old art's ~60px orbs (owner: "like 3x", then "10% less")
+	private const float BeamGlowScale = 2.6f;    // beam glow-layer width vs core (Quad.GlowWidthScale)
+	private const float BeamCapLen = 1.0f;       // capsule dome length vs half-width (Quad.DefaultCapScale)
+	private const float MinStretch = 0.5f;       // StretchFactor's floor: the beam never thins past half
 
 	private const int ArcLevels = 4;             // midpoint-displacement subdivisions per bolt
 	private const float BoltAmpFactor = 0.1f;    // main-bolt zig-zag amplitude as a fraction of the ship gap
@@ -36,21 +54,24 @@ internal class ShipConnector : AlienDrawableGameComponent
 	private const float ArcLifeMax = 0.30f;
 	private const float ArcReachMin = 8f;        // how far a tendril whips out perpendicular (design px)
 	private const float ArcReachMax = 20f;
-	private const float OrbBloomDiameter = 40f;  // baseline orb-bloom diameter (design px), x ConnectorGlow
 
 	private static int BoltCount => DebugFlags.ConnectorBoltCount ?? DefaultBoltCount;
 	private static float ArcRate => DebugFlags.ConnectorArcRate ?? DefaultArcRate;
 	private static float Jitter => DebugFlags.ConnectorJitter ?? DefaultJitter;
 	private static float PulseHz => DebugFlags.ConnectorPulse ?? DefaultPulse;
 	private static float GlowAmt => DebugFlags.ConnectorGlow ?? DefaultGlow;
+	private static float BeamThick => DebugFlags.ConnectorBeam ?? DefaultBeamThick;
 
 	private static readonly Color BoltCore = new Color(215, 240, 255);  // white-hot bolt core
 	private static readonly Color BoltGlow = new Color(60, 130, 245);   // electric-blue bolt glow
-	// Orb "energy well" stack colours (== the laser chargeup well / Quad beam layers): a blue halo
-	// over a cyan-white body over a white-hot core, additively saturating each orb centre to white.
-	private static readonly Color OrbHalo = new Color(35, 110, 235);   // blue outer halo
-	private static readonly Color OrbBody = new Color(150, 215, 255);  // cyan-white body
-	private static readonly Color OrbCore = new Color(210, 235, 255);  // white-hot core
+	// Ship-glow "energy well" stack colours (== the laser chargeup well / Quad beam layers): a blue
+	// halo over a cyan-white body over a white-hot core, additively saturating each centre to white.
+	private static readonly Color GlowHalo = new Color(35, 110, 235);   // blue outer halo
+	private static readonly Color GlowBody = new Color(150, 215, 255);  // cyan-white body
+	private static readonly Color GlowCore = new Color(210, 235, 255);  // white-hot core
+	// Thick beam layers: the old art's bar was a saturated blue body with a near-white centre line.
+	private static readonly Color BeamGlow = new Color(40, 110, 245);  // wide blue glow layer
+	private static readonly Color BeamCore = new Color(170, 225, 255); // cyan-white core
 
 	// FX-only RNG, kept off the gameplay RandomHelper so render-time jitter can't desync a
 	// future lockstep co-op session (Stage 11), exactly like Quad's fxr.
@@ -79,7 +100,8 @@ internal class ShipConnector : AlienDrawableGameComponent
 	private float lastArcTime = float.NaN;
 
 	private Texture2D lineTex;  // GFX/Sprites/lazermiddle -- the thin glowing strip for bolt segments
-	private Texture2D glowTex;  // GFX/Sprites/lazerglow  -- the radial bloom for the orbs
+	private Texture2D glowTex;  // GFX/Sprites/lazerglow  -- the radial bloom for the ship glows
+	private Texture2D beamTex;  // GFX/Sprites/lazerbeam  -- the cone-profile capsule texture for the thick beam
 
 	// --- Online co-op tether (card 11.3) -------------------------------------------------
 	// Offline the connector RIGIDLY pins both ships at midpoint +/-39px (SetPosition in
@@ -188,7 +210,9 @@ internal class ShipConnector : AlienDrawableGameComponent
 	// Enabled=false rather than a pause layer, so the world clock it now reads keeps running.
 	// Off in normal play (byte-identical).
 	internal bool HarnessMode;
-	private const float HarnessHalfGap = 39f;  // matches the live ±39px docking separation
+	private const float DefaultHarnessHalfGap = 39f;  // matches the live ±39px docking separation
+	// ?connectorgap= overrides it so the lag-stretched online separation can be screenshot.
+	private static float HarnessHalfGap => DebugFlags.ConnectorGap ?? DefaultHarnessHalfGap;
 
 	public override ICollisionType CollisionType
 	{
@@ -259,13 +283,15 @@ internal class ShipConnector : AlienDrawableGameComponent
 
 	public override void Initialize()
 	{
-		color = new Color(new Vector4(1f, 1f, 1f, 0.65f));
 		base.Initialize();
-		// lazermiddle (thin strip) + lazerglow (radial bloom) drive the live lightning. Both are
-		// already loaded by GameScene.LoadContent / the TeamChallenge preload; content.Load caches,
-		// so this is a hit, and loading here guarantees availability for any multiplayer scene.
+		// lazermiddle (thin strip) draws the bolt segments, lazerglow (radial bloom) the ship glows,
+		// lazerbeam (cone-profile capsule) the thick beam. lazerglow and lazerbeam are in
+		// GameScene.PreloadGraphicalContent, so those two loads are cache hits; lazermiddle is NOT
+		// (pre-existing -- Quad.LoadContent decodes it at the first laser), so a level where the
+		// first dock precedes the first laser pays that one small decode here.
 		lineTex = content.Load<Texture2D>("GFX/Sprites/lazermiddle");
 		glowTex = content.Load<Texture2D>("GFX/Sprites/lazerglow");
+		beamTex = content.Load<Texture2D>("GFX/Sprites/lazerbeam");
 	}
 
 	public override void Draw(GameTime gameTime)
@@ -283,12 +309,8 @@ internal class ShipConnector : AlienDrawableGameComponent
 		if (dt < 0f) dt = 0f; else if (dt > 0.1f) dt = 0.1f;
 		fxTime += dt;
 
-		// Base sprite: keep its straight-alpha look but breathe its brightness so even the baked
-		// art shimmers instead of sitting dead-still.
-		float pulse = 0.85f + 0.15f * (float)Math.Sin(fxTime * PulseHz * (float)Math.PI * 2f + fxPhase);
-		color = new Color(new Vector4(pulse, pulse, pulse, 0.65f));
-		base.Draw(gameTime);
-
+		// No base.Draw: the static sprite is not drawn (see the header comment). Everything below
+		// is derived from the two ships' live positions.
 		Vector2 pA;
 		Vector2 pB;
 		if (HarnessMode)
@@ -326,16 +348,23 @@ internal class ShipConnector : AlienDrawableGameComponent
 		SpriteBlendMode oldMode = spriteBatch.BlendMode;
 		spriteBatch.BlendMode = SpriteBlendMode.Additive;
 
-		// Orb "energy wells": each ship gets a churning glow built like the laser chargeup's well
+		// The thick beam goes down first so the ship glows and the lightning sit on top of it.
+		float thick = BeamThick;
+		if (thick > 0f)
+		{
+			DrawThickBeam(pA, pB, axis, gap, thick);
+		}
+
+		// Ship glows: each ship gets a churning "energy well" built like the laser chargeup's
 		// (LazerGenerator.DrawWell) -- a STACK of additive glows (blue halo -> cyan-white body ->
-		// white-hot core) whose layers each shimmer on their own incommensurate sines, so the orbs
-		// roil with gathering energy instead of sitting as a flat disc. The two orbs carry
-		// decorrelated phases so they don't pulse in lockstep.
+		// white-hot core) whose layers each shimmer on their own incommensurate sines, so the glow
+		// roils with gathering energy instead of sitting as a flat disc, under a shared slow
+		// breathe. The two carry decorrelated phases so they don't pulse in lockstep.
 		float glow = GlowAmt;
 		if (glow > 0f)
 		{
-			DrawEnergyOrb(pA, glow, fxPhase);
-			DrawEnergyOrb(pB, glow, fxPhase + 41.7f);
+			DrawDockGlow(pA, glow, fxPhase);
+			DrawDockGlow(pB, glow, fxPhase + 41.7f);
 		}
 
 		// Main bolts: a handful of persistent fractal arcs spanning the gap, each writhing
@@ -505,23 +534,86 @@ internal class ShipConnector : AlienDrawableGameComponent
 		spriteBatch.Draw(lineTex, (p0 + p1) * 0.5f, rot, scale, center: true, color);
 	}
 
-	// One orb drawn as a layered, shimmering "energy well" (mirrors LazerGenerator.DrawWell): a wide
-	// blue halo, a cyan-white body and a white-hot core, each additive and each wobbling on its own
-	// incommensurate sines (outer halo wobbles most/fastest, core smoothest) so the orb roils rather
-	// than sitting flat. A shared slow breathe (tied to the ?connectorpulse knob) + a core glare give
-	// the overall pump. `phase` decorrelates the two orbs.
-	private void DrawEnergyOrb(Vector2 center, float glow, float phase)
+	// The thick connector beam between the two ships: Quad's capsule recipe (DrawCapsuleBeam) on
+	// the lazerbeam cone texture -- a wide blue glow layer under a cyan-white core, each ONE
+	// continuous capsule (centre band stretched along the gap + dome ends) so there is no segment
+	// seam and the ends dissolve radially under the ship glows instead of stopping flat. Both
+	// layers breathe in width and brightness on the shared pulse so the link visibly carries
+	// energy rather than sitting as a painted bar.
+	// STRETCH: past the 78px docking rest length the beam THINS and DIMS with the gap, like a
+	// bar of energy being pulled -- the owner approved the look from a mockup where it appeared
+	// only by contrast with the ship glows, then asked for "a bit of" it, so it is made real here
+	// at half strength (square root of the rest/gap ratio). Only the online soft tether
+	// (NetPullOwnShip) can open the gap, so offline docking is untouched: a pair at rest draws at
+	// full thickness, the ~170px drag equilibrium at ~0.68, the 220px hard cap at ~0.6.
+	// The one separation beyond that is the online TeamChallenge SPAWN: the tether forms with the
+	// ships 567-696px apart (see NetMaxHardPullPxPerMs) and reels them in over ~883ms, during which
+	// the curve sits on its MinStretch floor -- a half-thickness beam across most of the screen
+	// joining two glows, i.e. the link visibly hauling the pair together. Seen and accepted
+	// (`?harness=connector&connectorgap=348` renders it); the floor is what keeps it a beam rather
+	// than a hairline there.
+	private void DrawThickBeam(Vector2 pA, Vector2 pB, Vector2 axis, float gap, float coreThick)
 	{
-		float baseD = OrbBloomDiameter * glow;
-		float breathe = 1f + 0.16f * (float)Math.Sin(fxTime * PulseHz * (float)Math.PI * 2f + phase);
-		float wHalo = Wobble(0.22f, 2.3f, phase);
-		float wBody = Wobble(0.14f, 1.7f, phase * 1.7f);
-		float wCore = Wobble(0.08f, 1.2f, phase * 2.3f);
-		// core glares hard so the orb visibly throbs hot (dominates the sprite's static painted core)
-		float glare = 0.55f + 0.45f * (float)Math.Sin(fxTime * 3.1f + phase * 1.3f);
-		DrawGlow(center, baseD * 1.35f * breathe * wHalo, OrbHalo * (0.55f * glow));
-		DrawGlow(center, baseD * 0.85f * breathe * wBody, OrbBody * (0.50f * glow));
-		DrawGlow(center, baseD * 0.45f * breathe * wCore, OrbCore * (0.62f * glow * glare));
+		float breathe = 1f + 0.10f * (float)Math.Sin(fxTime * PulseHz * (float)Math.PI * 2f + fxPhase + 1.3f);
+		float bright = 0.80f + 0.20f * (float)Math.Sin(fxTime * PulseHz * (float)Math.PI * 2f + fxPhase + 2.9f);
+		// texture +Y runs along the beam, +X across it (Quad's convention)
+		float rotation = (float)Math.Atan2(axis.X, 0f - axis.Y);
+		Vector2 center = (pA + pB) * 0.5f;
+		float stretch = StretchFactor(gap);
+		bright *= 0.55f + 0.45f * stretch;
+		float core = coreThick * breathe * stretch;
+		DrawCapsule(center, pA, pB, rotation, core * BeamGlowScale, gap, BeamGlow * bright);
+		DrawCapsule(center, pA, pB, rotation, core, gap, BeamCore * bright);
+	}
+
+	// The beam's thickness multiplier at a given ship separation: 1 up to the docking rest length,
+	// then the square root of rest-over-gap (half the taper a fixed amount of energy drawn out to
+	// constant cross-section-times-length would give), floored so the beam never thins past half
+	// under the hard cap. Pure and static so the headless logic oracle can call the real curve
+	// (ProbeConnectorStretch).
+	internal static float StretchFactor(float gapPx)
+	{
+		if (gapPx <= NetRestPx)
+		{
+			return 1f;
+		}
+		return Math.Max(MinStretch, (float)Math.Sqrt(NetRestPx / gapPx));
+	}
+
+	// One capsule layer of the beam texture (mirrors Quad.DrawCapsuleBeam): its 2px centre band
+	// stretched to the body length plus its top half as a dome on each end, pivoted so the dome's
+	// innermost row IS the centre band at the same across scale -- continuous by construction.
+	private void DrawCapsule(Vector2 center, Vector2 endA, Vector2 endB, float rotation, float acrossPx, float alongPx, Color color)
+	{
+		int texW = beamTex.LogicalWidth();
+		int texH = beamTex.LogicalHeight();
+		float sx = acrossPx / (float)texW;
+		spriteBatch.Draw(beamTex, new Rectangle(0, texH / 2 - 1, texW, 2), center, rotation, new Vector2(sx, alongPx / 2f), new Vector2(texW / 2f, 1f), color);
+		Rectangle half = new Rectangle(0, 0, texW, texH / 2);
+		Vector2 pivot = new Vector2(texW / 2f, texH / 2f);
+		Vector2 domeScale = new Vector2(sx, sx * BeamCapLen);
+		// endB is the beam's +axis end (local -Y maps outward); endA's dome is spun half a turn.
+		spriteBatch.Draw(beamTex, half, endB, rotation, domeScale, pivot, color);
+		spriteBatch.Draw(beamTex, half, endA, rotation + (float)Math.PI, domeScale, pivot, color);
+	}
+
+	// One ship's docking glow, drawn as a layered, shimmering "energy well" (mirrors
+	// LazerGenerator.DrawWell): a wide blue halo, a cyan-white body and a white-hot core, each
+	// additive and each wobbling on its own incommensurate sines (outer halo wobbles most/fastest,
+	// core smoothest) so the glow roils rather than sitting flat. A shared slow breathe (tied to
+	// the ?connectorpulse knob) + a core glare give the overall pump. `phase` decorrelates the two.
+	private void DrawDockGlow(Vector2 center, float glow, float phase)
+	{
+		float baseD = DockGlowDiameter * glow;
+		float breathe = 1f + 0.10f * (float)Math.Sin(fxTime * PulseHz * (float)Math.PI * 2f + phase);
+		float wHalo = Wobble(0.10f, 2.3f, phase);
+		float wBody = Wobble(0.07f, 1.7f, phase * 1.7f);
+		float wCore = Wobble(0.05f, 1.2f, phase * 2.3f);
+		// the core glares in time with the breathe so the whole glow reads as one pulse
+		float glare = 0.70f + 0.30f * (float)Math.Sin(fxTime * PulseHz * (float)Math.PI * 2f + phase);
+		DrawGlow(center, baseD * 1.00f * breathe * wHalo, GlowHalo * (0.95f * glow));
+		DrawGlow(center, baseD * 0.62f * breathe * wBody, GlowBody * (0.65f * glow));
+		DrawGlow(center, baseD * 0.32f * breathe * wCore, GlowCore * (0.75f * glow * glare));
 	}
 
 	// A gentle +/-amp size shimmer: two low, incommensurate sines -> a smooth organic wander (not a

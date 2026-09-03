@@ -250,6 +250,12 @@ internal static class Program
             return rc;
         }
 
+        rc = ProbeConnectorStretch(asm);
+        if (rc != 0)
+        {
+            return rc;
+        }
+
         rc = ProbeRespawnRingHue(asm);
         if (rc != 0)
         {
@@ -2024,6 +2030,8 @@ internal static class Program
             new { Flag = "connectorjitter", Prop = "ConnectorJitter", Good = "0.375", RejectsNeg = true },
             new { Flag = "connectorpulse", Prop = "ConnectorPulse", Good = "0.375", RejectsNeg = true },
             new { Flag = "connectorglow", Prop = "ConnectorGlow", Good = "0.375", RejectsNeg = true },
+            new { Flag = "connectorbeam", Prop = "ConnectorBeam", Good = "0.375", RejectsNeg = true },
+            new { Flag = "connectorgap", Prop = "ConnectorGap", Good = "0.375", RejectsNeg = true },
             new { Flag = "wall3dbands", Prop = "Wall3DBands", Good = "9", RejectsNeg = true },
             new { Flag = "walldepth", Prop = "WallDepth", Good = "0.375", RejectsNeg = true },
             new { Flag = "wallfog", Prop = "WallFog", Good = "0.375", RejectsNeg = true },
@@ -4149,6 +4157,67 @@ internal static class Program
         wallProp.GetSetMethod(nonPublic: true).Invoke(null, new object[] { true });
         Check("teardown: the cap is back ON for whatever runs next",
             (bool)wallProp.GetValue(null), null);
+        return 0;
+    }
+
+    // --- The docked-ships beam STRETCH curve (card: programmatic docked look) -------------------
+    // ShipConnector.StretchFactor(gap) scales the thick connector beam's thickness (and part of its
+    // brightness) by the ship separation: 1 up to the 78px docking rest length, then the square
+    // root of rest/gap, floored at MinStretch. It is a pure static, so the real curve is called
+    // here rather than mirrored. The properties, not the numbers: offline docking (any gap at or
+    // below rest) is UNTOUCHED, past rest it only ever thins, it never reaches zero (a beam that
+    // vanished under the 220px hard cap would read as a broken tether), and the anchors are read
+    // off the real consts so a retune of the rest length cannot silently un-pin the claim.
+    private static int ProbeConnectorStretch(Assembly asm)
+    {
+        Type conn = asm.GetType("EvilAliens.ShipConnector", true);
+        const BindingFlags anyStatic = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo law = conn.GetMethod("StretchFactor", anyStatic);
+        FieldInfo restF = conn.GetField("NetRestPx", anyStatic);
+        FieldInfo minF = conn.GetField("MinStretch", anyStatic);
+        FieldInfo hardF = conn.GetField("NetHardPx", anyStatic);
+        if (law == null || restF == null || minF == null || hardF == null)
+        {
+            Console.WriteLine("FAIL: could not reflect the targets (StretchFactor=" + (law != null)
+                + " NetRestPx=" + (restF != null) + " MinStretch=" + (minF != null)
+                + " NetHardPx=" + (hardF != null) + ") -- renamed or moved?");
+            return 2;
+        }
+        float rest = (float)restF.GetRawConstantValue();
+        float floor = (float)minF.GetRawConstantValue();
+        float hardPx = (float)hardF.GetRawConstantValue();
+        Func<float, float> f = d => (float)law.Invoke(null, new object[] { d });
+
+        Console.WriteLine("[logic_probe] docked-ships beam stretch curve");
+        bool restUntouched = true;
+        for (float d = 1f; d <= rest; d += 1f)
+        {
+            if (f(d) != 1f)
+            {
+                restUntouched = false;
+                break;
+            }
+        }
+        Check("at or below the " + rest.ToString("0", Inv) + "px rest length the beam is at full thickness (offline docking untouched)",
+            restUntouched, null);
+        bool thins = true, monotone = true, bounded = true;
+        float prev = f(rest);
+        for (float d = rest + 1f; d <= 1000f; d += 1f)
+        {
+            float v = f(d);
+            if (v >= 1f) thins = false;
+            if (v > prev + 1e-6f) monotone = false;
+            if (v < floor || v <= 0f) bounded = false;
+            prev = v;
+        }
+        Check("past rest it is strictly below 1", thins, null);
+        Check("... and never thickens again as the gap grows (monotone)", monotone, null);
+        Check("... and never drops below the " + floor.ToString("0.##", Inv) + " floor (no vanishing beam)", bounded, null);
+        float atHard = f(hardPx);
+        Check("at the " + hardPx.ToString("0", Inv) + "px hard-cap knee it has visibly thinned but is still most of a beam",
+            atHard < 0.8f && atHard >= floor, atHard.ToString("0.###", Inv));
+        Check("the floor is well above zero (a stretched tether must still read as a tether)",
+            floor >= 0.25f, floor.ToString("0.##", Inv));
         return 0;
     }
 }

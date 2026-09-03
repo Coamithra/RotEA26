@@ -1625,7 +1625,8 @@ with `?respawnphase=<0..1>`, and **`&harnessrun` makes that same summon RUN** (i
 ticks, so the owned countdown reaches its pop and drops the reward blast -- the only offline rig
 that can, see the respawn bullet below);
 `?harness=spiderjump` loops the spider crawl→jump→land cycle; `?harness=connector` animates the
-ship connector with no ships; `?harness=battleskull` shows the colorize tuner; `?harness=brainboss`
+ship connector with no ships (`&connectorgap=<halfpx>` stretches the pair to the online lag
+case); `?harness=battleskull` shows the colorize tuner; `?harness=brainboss`
 plays the boss overlays (they advance on `WorldTime`, which the harness does not freeze -- it
 uses `Enabled=false`, not a pause layer -- so they still play here while a `shot` pair with no
 `step` is identical); `?bulletshot` is another frozen showcase (bullets).
@@ -2076,16 +2077,35 @@ uses `Enabled=false`, not a pause layer -- so they still play here while a `shot
   (`Compat/LazerShowcaseScene.cs` + the `eaLazer` panel); flags `?lazerchargescale= ?lazercapscale=
   ?lazerarcs= ?lazertendrilspeed= ?lazerarclife=`. Straight-alpha additive tints — do NOT
   premultiply.
-- **Ship-connector docking lightning (`ShipConnector.cs`):** breathing base sprite + fractal
-  lightning bolts + crackle tendrils + a churning energy-well orb per ship (decorrelated phases).
-  Self-contained reimplementation of the Quad techniques (own FX RNG, static scratch buffers). FX
-  advance in `Draw` (`fxTime += dt`), but on `Compat/WorldTime`'s delta rather than raw Draw time
-  since card d79a2f48 — nothing in `Update`, so a pause would otherwise leave the connector
-  crackling between two motionless ships. It therefore no longer crackles through a hit-stop
-  either; `?harness=connector` is unaffected (the harness freezes with `Enabled=false`, not a
-  pause layer). Flags `?connectorbolts= ?connectorarcs= ?connectorjitter= ?connectorpulse=
-  ?connectorglow=`; `eaConnector` panel; **verify with `?harness=connector`** (TeamChallenge
-  auto-pauses on focus loss, a moving target the harness sidesteps).
+- **Ship-connector docking look (`ShipConnector.cs`) is FULLY PROGRAMMATIC -- the
+  `GFX/Sprites/connector` sprite is loaded for its hitbox and never drawn** (card ebc43330). It
+  was one static twin-orb sprite centred on the midpoint at a fixed size, which online is wrong
+  rather than merely dull: the soft tether lets lag stretch the pair to ~170-220px while the
+  sprite's orbs stayed ~97px apart, so the glows floated beside the ships and the beam stopped
+  short of both. Every frame, from the two ships' LIVE positions: a pulsating blue energy glow
+  around each ship (`DrawDockGlow`, the laser chargeup's stacked-`lazerglow` well, 350px halo --
+  the owner sized it from mockups, "like 3x" the old orbs then "10% less"), a THICK capsule beam
+  between them (`DrawThickBeam`, Quad's `lazerbeam` capsule recipe, 24px core under a x2.6 blue
+  glow layer, both breathing), and on top the pre-existing fractal bolts + crackle tendrils
+  (self-contained reimplementation of the Quad techniques: own FX RNG, static scratch buffers).
+  **The beam STRETCHES**: past the 78px rest length its thickness and part of its brightness scale
+  by `StretchFactor(gap)` = sqrt(rest/gap), floored at 0.5 -- a deliberate "bar of energy being
+  pulled" the owner approved, at half strength ("a bit of the stretch effect"). Only the online
+  tether can open the gap, so offline docking draws at full thickness; pinned by `logic_probe`'s
+  `ProbeConnectorStretch` (calls the real static). FX advance in `Draw` (`fxTime += dt`) on
+  `Compat/WorldTime`'s delta rather than raw Draw time (card d79a2f48) -- nothing in `Update`, so
+  a pause would otherwise leave the connector crackling between two motionless ships; it does not
+  crackle through a hit-stop either, and `?harness=connector` is unaffected (the harness freezes
+  with `Enabled=false`, not a pause layer). Flags `?connectorbolts= ?connectorarcs=
+  ?connectorjitter= ?connectorpulse= ?connectorglow= ?connectorbeam=` (beam core px, 0 = bolts
+  only) plus **`?connectorgap=<halfpx>`, HARNESS-ONLY**: it overrides the harness's fixed 39px
+  half-gap so the lag-stretched online case can be screenshot with no peer
+  (`?harness=connector&connectorgap=85` is the ~170px drag equilibrium). `eaConnector` panel (six
+  sliders, beam included); **verify with `?harness=connector`** under `eahl` (TeamChallenge
+  auto-pauses on focus loss, a moving target the harness sidesteps), then a seeded
+  `?level=TeamChallenge&invuln&aiplayer&noattract&seed=3` frame at step ~365 for the with-ships
+  look -- in play the ships (~40px, 78px apart) cover most of each glow and the beam is the ~38px
+  bar between them, so judge the glow size on the harness and the composition on the level frame.
 - **BattleSkull colorize tuner (`Compat/HarnessColorize.cs`):** `BattleSkull.Draw` hue-remaps the
   alienboss sprite via `colorizeEffect.RangeTarget = (-10, 10, HitPointsNormalized*100)`; the
   harness overrides band+target from `?huestart= ?hueend= ?huetarget= ?huecycle ?hueloop=` (only

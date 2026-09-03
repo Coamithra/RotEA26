@@ -1403,19 +1403,20 @@
             catch (e) { console.warn('[debug] eaCast failed (game not booted yet?): ' + e.message); }
         };
 
-        // Debug: live-set the ship-connector lightning knobs (the ?level=TeamChallenge tuner). Drives
+        // Debug: live-set the ship-connector docking-FX knobs (the ?level=TeamChallenge tuner). Drives
         // Compat/DebugInput.SetConnector so the slider panel below (and the console) can retune the
-        // docking-link FX without a page reload. Console: eaConnector(2, 6, 1, 2.5, 1) — main bolt
-        // count, crackle rate/sec, bolt jitter, pulse Hz, orb-glow amount. Same effect as the
-        // ?connector* URL flags, live.
-        window.eaConnector = (boltCount, arcRate, jitter, pulse, glow) => {
+        // docking-link FX without a page reload. Console: eaConnector(2, 6, 1, 2.5, 1, 24) — main bolt
+        // count, crackle rate/sec, bolt jitter, pulse Hz, ship-glow amount, beam core thickness (design
+        // px). Same effect as the ?connector* URL flags, live.
+        window.eaConnector = (boltCount, arcRate, jitter, pulse, glow, beam) => {
             try {
                 DotNet.invokeMethod('EvilAliensWeb', 'debugSetConnector',
                     boltCount === undefined ? 2 : Number(boltCount) || 0,
                     arcRate === undefined ? 6 : Number(arcRate) || 0,
                     jitter === undefined ? 1 : Number(jitter) || 0,
                     pulse === undefined ? 2.5 : Number(pulse) || 0,
-                    glow === undefined ? 1 : Number(glow) || 0);
+                    glow === undefined ? 1 : Number(glow) || 0,
+                    beam === undefined ? 24 : Number(beam) || 0);
             }
             catch (e) { console.warn('[debug] eaConnector failed (game not booted yet?): ' + e.message); }
         };
@@ -2784,10 +2785,11 @@
         })();
     </script>
 
-    <!-- Live tuner slider panel for the ship-connector lightning (Trello "connector too static").
-         The five connector knobs were URL-flag only, so every nudge meant a full page reload. This
-         overlay drives Compat/DebugInput.SetConnector (via eaConnector) so bolt count / crackle rate /
-         jitter / pulse / orb-glow can be DRAGGED in real time. Built outside #app so it survives
+    <!-- Live tuner slider panel for the ship-connector docking FX (Trello "connector too static";
+         the beam knob came with the programmatic docked look). The connector knobs were URL-flag only,
+         so every nudge meant a full page reload. This overlay drives Compat/DebugInput.SetConnector
+         (via eaConnector) so bolt count / crackle rate / jitter / pulse / ship-glow / beam thickness
+         can be DRAGGED in real time. Built outside #app so it survives
          Blazor's mount, and only created on ?level=TeamChallenge (two ships dock immediately) or a bare
          ?connectortune — a normal boot gets no extra DOM. Positioned top-right (score is top-left). -->
     <script>
@@ -2797,7 +2799,7 @@
             if (!/[?&]connectortune\b/i.test(q) && !/level=TeamChallenge\b/i.test(q) && !/harness=connector\b/i.test(q)) { return; }
 
             // Seed the sliders from any ?connector* flags already on the URL, else the in-game baked
-            // defaults (bolts 2 / crackle 6 per sec / jitter 1 / pulse 2.5 Hz / orb-glow 1).
+            // defaults (bolts 2 / crackle 6 per sec / jitter 1 / pulse 2.5 Hz / ship-glow 1 / beam 24px).
             function num(name, def)
             {
                 var m = new RegExp("[?&]" + name + "=(-?[0-9.]+)", "i").exec(q);
@@ -2808,7 +2810,8 @@
                 rate: num("connectorarcs", 6),
                 jitter: num("connectorjitter", 1),
                 pulse: num("connectorpulse", 2.5),
-                glow: num("connectorglow", 1)
+                glow: num("connectorglow", 1),
+                beam: num("connectorbeam", 24)
             };
 
             function push()
@@ -2816,7 +2819,7 @@
                 try
                 {
                     DotNet.invokeMethod('EvilAliensWeb', 'debugSetConnector',
-                        st.bolts, st.rate, st.jitter, st.pulse, st.glow);
+                        st.bolts, st.rate, st.jitter, st.pulse, st.glow, st.beam);
                     return true;
                 }
                 catch (e) { return false; }
@@ -2853,8 +2856,10 @@
                 "<input type='range' id='ec-jit' min='0' max='3' step='0.05' autocomplete='off'></div>" +
                 "<div class='row'><label>Pulse (Hz)<span class='v' id='ec-vp'></span></label>" +
                 "<input type='range' id='ec-pulse' min='0' max='8' step='0.1' autocomplete='off'></div>" +
-                "<div class='row'><label>Orb glow<span class='v' id='ec-vg'></span></label>" +
+                "<div class='row'><label>Ship glow<span class='v' id='ec-vg'></span></label>" +
                 "<input type='range' id='ec-glow' min='0' max='3' step='0.05' autocomplete='off'></div>" +
+                "<div class='row'><label>Beam thickness (px)<span class='v' id='ec-vbeam'></span></label>" +
+                "<input type='range' id='ec-beam' min='0' max='80' step='1' autocomplete='off'></div>" +
                 "<div class='out' id='ec-out' title='Click to copy'></div>" +
                 "<div class='hint'>Drag to retune live. Click the orange line to copy the values, " +
                 "then paste them to Claude to bake in.</div>";
@@ -2862,7 +2867,8 @@
 
             var elBolts = el.querySelector("#ec-bolts"), elRate = el.querySelector("#ec-rate"),
                 elJit = el.querySelector("#ec-jit"), elPulse = el.querySelector("#ec-pulse"),
-                elGlow = el.querySelector("#ec-glow"), elOut = el.querySelector("#ec-out"),
+                elGlow = el.querySelector("#ec-glow"), elBeam = el.querySelector("#ec-beam"),
+                elOut = el.querySelector("#ec-out"), vbeam = el.querySelector("#ec-vbeam"),
                 vb = el.querySelector("#ec-vb"), vr = el.querySelector("#ec-vr"),
                 vj = el.querySelector("#ec-vj"), vp = el.querySelector("#ec-vp"),
                 vg = el.querySelector("#ec-vg");
@@ -2870,12 +2876,12 @@
             function render()
             {
                 elBolts.value = st.bolts; elRate.value = st.rate; elJit.value = st.jitter;
-                elPulse.value = st.pulse; elGlow.value = st.glow;
+                elPulse.value = st.pulse; elGlow.value = st.glow; elBeam.value = st.beam;
                 vb.textContent = st.bolts; vr.textContent = st.rate; vj.textContent = st.jitter;
-                vp.textContent = st.pulse; vg.textContent = st.glow;
+                vp.textContent = st.pulse; vg.textContent = st.glow; vbeam.textContent = st.beam;
                 elOut.textContent = "connectorbolts=" + st.bolts + " connectorarcs=" + st.rate +
                     " connectorjitter=" + st.jitter + " connectorpulse=" + st.pulse +
-                    " connectorglow=" + st.glow;
+                    " connectorglow=" + st.glow + " connectorbeam=" + st.beam;
             }
 
             function changed() { render(); push(); }
@@ -2885,6 +2891,7 @@
             elJit.addEventListener("input", function () { st.jitter = +elJit.value; changed(); });
             elPulse.addEventListener("input", function () { st.pulse = +elPulse.value; changed(); });
             elGlow.addEventListener("input", function () { st.glow = +elGlow.value; changed(); });
+            elBeam.addEventListener("input", function () { st.beam = +elBeam.value; changed(); });
             elOut.addEventListener("click", function ()
             {
                 var t = elOut.textContent;
